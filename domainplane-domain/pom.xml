@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.zzkingcc</groupId>
+        <artifactId>DomainPlane</artifactId>
+        <version>v1.0-beta.1</version>
+    </parent>
+
+    <artifactId>domainplane-domain</artifactId>
+    <name>domainplane-domain</name>
+    <description>DomainPlane 领域层：业务能力 + RAG 检索编排 + 记忆策略（不含技术实现，不依赖 Agent 框架）</description>
+
+    <dependencies>
+        <!-- 公共支撑：记忆容量估算等工具与本层共用一份实现（CjkWidth），
+             避免领域层与编排层各写一份 CJK 宽度判断 —— 那正是 D-03 漏判假名的根因 -->
+        <dependency>
+            <groupId>com.zzkingcc</groupId>
+            <artifactId>domainplane-common</artifactId>
+        </dependency>
+
+        <!-- LangChain4j -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-core</artifactId>
+        </dependency>
+
+        <!-- Spring 基础注解 -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+    </dependencies>
+</project>

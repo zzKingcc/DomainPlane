@@ -1,4 +1,4 @@
-# Stringer SDK 使用手册（示例）
+# DomainPlane SDK 使用手册（示例）
 
 > 面向接入方（业务应用）与工具提供方。
 > 契约定义见 [`SDK-CONTRACT.md`](SDK-CONTRACT.md)，HTTP 端点与 SSE 事件见 [`API.md`](API.md)，工具实例接入实操见 [`INSTANCE.md`](INSTANCE.md)。
@@ -13,19 +13,19 @@
 
 | 坐标 | 什么时候引 | 主入口 |
 | --- | --- | --- |
-| `stringer-chat-client` | 要问 AI | `StringerAgentFactory`（`forDomain(...)` → `StringerAgent`：`ask` / `stream` / `events` / `resume` / `stop`） |
-| `stringer-kb-client` | 要往知识库里传文档 | `KnowledgeBaseClient`（`upload` / `list` / `delete`） |
-| `stringer-tool-provider` | 要把本进程的方法交给 AI 调 | `@Tool` / `@ToolParam` / `@ToolDomains` / `@ToolAdvanced` |
+| `domainplane-chat-client` | 要问 AI | `DomainPlaneAgentFactory`（`forDomain(...)` → `DomainPlaneAgent`：`ask` / `stream` / `events` / `resume` / `stop`） |
+| `domainplane-kb-client` | 要往知识库里传文档 | `KnowledgeBaseClient`（`upload` / `list` / `delete`） |
+| `domainplane-tool-provider` | 要把本进程的方法交给 AI 调 | `@Tool` / `@ToolParam` / `@ToolDomains` / `@ToolAdvanced` |
 
-- **配置**：`stringer.*`（服务端地址与账号，三个坐标共用同一份）。
-- **对话主入口**：`StringerAgentFactory`，由 starter 自动装配，直接注入即可。
-- **工具注解**：`com.zzkingcc.stringer.api.annotation` 包下的 `@Tool` / `@ToolParam` / `@ToolDomains` / `@ToolAdvanced`。
+- **配置**：`domainplane.*`（服务端地址与账号，三个坐标共用同一份）。
+- **对话主入口**：`DomainPlaneAgentFactory`，由 starter 自动装配，直接注入即可。
+- **工具注解**：`com.zzkingcc.domainplane.api.annotation` 包下的 `@Tool` / `@ToolParam` / `@ToolDomains` / `@ToolAdvanced`。
 
 ```yaml
-stringer:
+domainplane:
   server: http://localhost:9527
-  username: stringer
-  password: stringer
+  username: domainplane
+  password: domainplane
 ```
 
 ---
@@ -158,9 +158,9 @@ public OrderVO query(String orderNo, String status, String idCard) { ... }
 
 ---
 
-## 2 对话 SDK 使用方式（`StringerAgent`）
+## 2 对话 SDK 使用方式（`DomainPlaneAgent`）
 
-SDK 只提供**一个入口**：`StringerAgentFactory.forDomain(...)` 拿到已绑定域的 `StringerAgent`。
+SDK 只提供**一个入口**：`DomainPlaneAgentFactory.forDomain(...)` 拿到已绑定域的 `DomainPlaneAgent`。
 方法按使用频度分三层 —— `ask`（只要答案）／`stream`（逐字）／`events`（完整事件），再加 `resume` 与 `stop`。
 **域在取门面时就已确定**，所以下面所有方法签名里都没有域参数。
 
@@ -169,9 +169,9 @@ SDK 只提供**一个入口**：`StringerAgentFactory.forDomain(...)` 拿到已�
 ```java
 @Service
 public class MyService {
-    private final StringerAgent agent;                // 已绑定域，可缓存复用（线程安全）
+    private final DomainPlaneAgent agent;                // 已绑定域，可缓存复用（线程安全）
 
-    public MyService(StringerAgentFactory factory) {   // starter 自动装配，无需任何注解
+    public MyService(DomainPlaneAgentFactory factory) {   // starter 自动装配，无需任何注解
         this.agent = factory.forDomain("default.customer");  // null / 空白 → 根域 default
     }
 
@@ -194,7 +194,7 @@ public class MyService {
 
 | 方法 | 返回 | 说明 |
 | --- | --- | --- |
-| `ask(sessionId, question)` | `String` | 内部消费完整条事件流并把 `TOKEN` 拼成整段文本；**阻塞**（受 `stringer.client.read-timeout` 约束） |
+| `ask(sessionId, question)` | `String` | 内部消费完整条事件流并把 `TOKEN` 拼成整段文本；**阻塞**（受 `domainplane.client.read-timeout` 约束） |
 | `stream(sessionId, question)` | `Flux<String>` | 只出模型文本增量 |
 | `events(sessionId, question)` | `Flux<AgentEvent>` | 原样事件流，冷流（订阅后执行），自行控制超时与背压 |
 | `resume(sessionId, approved)` | `Flux<AgentEvent>` | 审批恢复；域由门面自动带上 |
@@ -205,7 +205,7 @@ public class MyService {
 - `forDomain(null)` / `forDomain("  ")` → 根域 `default`；**同一域永远拿到同一个门面**（归一化后按域缓存，首尾空白不会造出第二个）。
 - `sessionId` 由调用方生成并保持稳定 —— 同一会话复用同一个，它是记忆与检查点的唯一键。
   它在**域内唯一**：服务端状态按 `(域, sessionId)` 隔离，不同域可以用同一个 `sessionId` 而互不影响；不得含 `|`。
-- 域在服务端不存在 → `StringerException`（`10004`）；域存在但**不是可调用单元**（父域只做装配）→ `10010`。
+- 域在服务端不存在 → `DomainPlaneException`（`10004`）；域存在但**不是可调用单元**（父域只做装配）→ `10010`。
   **不需要**在启动期预先校验域：写错了第一次调用就会带着明确的码报出来。
 
 ### 2.2 只要答案：`ask`
@@ -219,7 +219,7 @@ String answer = agent.ask("s-001", "我的订单 FR2024001 到哪了");
 | 情况 | 行为 |
 | --- | --- |
 | 命中人工审批（`INTERRUPT`） | 抛 `ApprovalRequiredException`（见 §2.5） |
-| 服务端返回 `ERROR` 事件 | 抛 `StringerException`，携带 `ErrorCode` 与 `traceId` |
+| 服务端返回 `ERROR` 事件 | 抛 `DomainPlaneException`，携带 `ErrorCode` 与 `traceId` |
 | 被 `stop` 主动停止 | **返回已产出的部分文本**（不是错误） |
 
 ### 2.3 逐字输出：`stream`
@@ -230,7 +230,7 @@ agent.stream("s-001", "讲讲退款政策")
      .blockLast();
 ```
 
-命中审批或错误时，流以对应的异常终止（`ApprovalRequiredException` / `StringerException`）。
+命中审批或错误时，流以对应的异常终止（`ApprovalRequiredException` / `DomainPlaneException`）。
 
 ### 2.4 完整事件：`events`
 
@@ -292,7 +292,7 @@ boolean triggered = agent.stop(sessionId);
 
 ```java
 // 域从当前登录角色推导，不要信任前端字符串
-StringerAgent agent = factory.forDomain(deriveProfileFromRole(user));
+DomainPlaneAgent agent = factory.forDomain(deriveProfileFromRole(user));
 
 agent.ask(sessionId, question, tenantId, user.getId());
 agent.events(sessionId, question, tenantId, user.getId());
@@ -310,7 +310,7 @@ agent.events(sessionId, question, tenantId, user.getId());
 ```bash
 curl -N -X POST http://localhost:9527/api/agent/chat \
   -H "Content-Type: application/json" \
-  -H "X-Stringer-Credential: <凭证>" \
+  -H "X-DomainPlane-Credential: <凭证>" \
   -d '{"sessionId":"s-001","message":"我的订单 FR2024001 到哪了","profile":"customer"}'
 ```
 
@@ -320,7 +320,7 @@ curl -N -X POST http://localhost:9527/api/agent/chat \
 const resp = await fetch('/api/agent/chat', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json',
-             'X-Stringer-Credential': credential },
+             'X-DomainPlane-Credential': credential },
   body: JSON.stringify({ sessionId, message, profile })
 });
 const reader = resp.body.getReader();
@@ -349,7 +349,7 @@ while (true) {
 ```bash
 curl -N -X POST "http://localhost:9527/api/agent/resume?sessionId=s-001&approved=true" \
   -H "Content-Type: application/json" \
-  -H "X-Stringer-Credential: <凭证>" \
+  -H "X-DomainPlane-Credential: <凭证>" \
   -d '{"profile":"customer"}'
 ```
 
@@ -359,7 +359,7 @@ curl -N -X POST "http://localhost:9527/api/agent/resume?sessionId=s-001&approved
 
 ## 3 知识库 SDK 使用方式（`KnowledgeBaseClient`）
 
-引 `stringer-kb-client` 即可，与对话 SDK 完全独立 —— 服务端地址与账号读同一份 `stringer.*`。
+引 `domainplane-kb-client` 即可，与对话 SDK 完全独立 —— 服务端地址与账号读同一份 `domainplane.*`。
 
 ### 3.1 注入
 
@@ -415,7 +415,7 @@ kb.delete(r.docId());
 - **审批没回复就当拒绝**：收到 `INTERRUPT` 事件后如果不调 `resume`，而是**直接发起新的 `chat`**，服务端视为"用户拒绝了那次审批"——新对话正常处理，那个待授权动作**永久作废**（断点被删）。所以：**收到 `INTERRUPT` 必须处理**（批准或拒绝），否则会被当成拒绝。
 - **只处理 `TOKEN`**：忽略 `TOOL_CALL` / `TOOL_RESULT` 会看不到工具行为；走 `events` 时忽略 `ERROR` 事件则故障被静默吞掉（HTTP 200）。用 `ask` / `stream` 则错误会以异常形式抛出。
 - **`resume` / `stop` 域不一致**：都必须与 `chat` 时相同。断点与停止标志都存在 `(域, sessionId)` 下，换了域就找不到（`resume` 报 `30001`、`stop` 静默无效）。门面已绑定域，正常路径下不会发生。
-- **`ask` 是阻塞的**：它内部会消费完整条流，受 `stringer.client.read-timeout` 约束；长任务请用 `events`（冷流，可自行超时/背压）。
+- **`ask` 是阻塞的**：它内部会消费完整条流，受 `domainplane.client.read-timeout` 约束；长任务请用 `events`（冷流，可自行超时/背压）。
 - **`blockLast()` vs `subscribe()`**：阻塞式入口可用 `blockLast()`；WebFlux / 异步入口用 `subscribe()`，不要混用。
 - **工具重名**：同名工具全局只能有一个；多副本请走工具实例注册（同名多实例），见 [`INSTANCE.md`](INSTANCE.md)。
 - **知识库检索不到**：检索工具没声明到该域 → 模型根本不会调用它；文档上传到了别的域 → 该域查不到（一域一索引，检索只查「该域 + 祖先域」链上的索引）。这是两层约束，排查时都要看（见 `INSTANCE.md` §2.6）。

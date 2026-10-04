@@ -8,8 +8,8 @@
 ## 一、发布前（构建与产物）
 
 - [ ] `mvn -o clean test` 通过（当前 25 个用例；`-o` 离线可跑）
-- [ ] `mvn -o -pl stringer-server -am -DskipTests package` 产出
-      `stringer-server/target/stringer-v1.0-beta.1.jar`，**体积约 58MB**
+- [ ] `mvn -o -pl domainplane-server -am -DskipTests package` 产出
+      `domainplane-server/target/domainplane-v1.0-beta.1.jar`，**体积约 58MB**
       （若明显变大，先看是不是又把 `langchain4j-easy-rag` 或 lombok 带进来了：
       前者会经 Tika / onnxruntime 多出约 190MB，后者约 2MB）
 - [ ] 版本号已更新且**三处一致**：根 `pom.xml`、各模块 `<parent>` 版本、`CHANGELOG.md`
@@ -30,7 +30,7 @@
 ### 2 鉴权（2 分钟）
 
 - [ ] 未登录访问 `/admin/settings` → 401 且响应体 `code=10002`
-- [ ] 管控台登录（默认 `stringer / stringer`）成功；**从服务端地址打开**
+- [ ] 管控台登录（默认 `domainplane / domainplane`）成功；**从服务端地址打开**
 - [ ] 侧栏「账号」页改密码 → 提示重新登录 → 用新密码登录成功
 - [ ] 用旧凭证调 `/api/agent/health` → 401（改密码应使全部旧凭证失效）
 
@@ -69,7 +69,7 @@
 ### 5 知识库（3 分钟）
 
 - [ ] 上传一篇 `.md`（用 `一、二、三、` 章节标题），**归属域**选一个子域 → 返回 `docId` 与切片数
-- [ ] ES 里出现该域的索引 `stringer_kb_<域>_<哈希>`；列表的「归属域」列显示正确
+- [ ] ES 里出现该域的索引 `domainplane_kb_<域>_<哈希>`；列表的「归属域」列显示正确
 - [ ] 同名再传（同一域）→ 被拒（`60005`）；带 `replace=true` → 覆盖成功
 - [ ] 提问一个只在文档里有的问题（用该域对话）→ 回答引用了来源
 - [ ] 换**兄弟域**提问同一个问题 → 查不到（一域一索引，互不可见）
@@ -87,7 +87,7 @@
 ### 7 运行时行为（1 分钟）
 
 - [ ] `docker logs` / journalctl 里能看到审计行（`action=… operator=… result=… ip=…`）
-- [ ] `systemctl restart stringer`（或滚动重启）：在途 SSE **不被硬切**（优雅停机生效）
+- [ ] `systemctl restart domainplane`（或滚动重启）：在途 SSE **不被硬切**（优雅停机生效）
 - [ ] 审计与环境一致性：改一次模型设置，审计里出现对应 `POST /admin/settings`
 
 ## 三、已知不覆盖项（本次发布明确不做）

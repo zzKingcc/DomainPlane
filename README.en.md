@@ -1,5 +1,5 @@
 
-<h3 align="center">Stringer</h3>
+<h3 align="center">DomainPlane</h3>
 
 <p align="center">
   <strong>Java agent runtime middleware. Orchestration, tool governance, knowledge base and the ops console run in one standalone server process —<br>while the tools stay in your own code.<br>One server + three opt-in SDKs: <code>forDomain(domain)</code> gets the chat entry, and every turn assembles tools / prompts / model / knowledge for that domain; <code>@Tool(domains=…)</code> lets the agent call your business methods inside your own process; the knowledge base SDK uploads documents into per-domain indexes.<br>Permission violations fail loudly instead of degrading silently; tool changes take effect on the next turn; approval checkpoints survive a server restart.</strong>
@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <a href="#why-choose-stringer">Why choose us</a>
+  <a href="#why-choose-domainplane">Why choose us</a>
   &nbsp;·&nbsp;
   <a href="#how-it-compares">Comparison</a>
   &nbsp;·&nbsp;
@@ -35,7 +35,7 @@
 
 ---
 
-## Why choose stringer?
+## Why choose domainplane?
 
 Building an agent inside an enterprise, the hard part is not hooking up a model — it is **making sure every end user, in this turn, sees exactly what they are supposed to see**. Platforms pin tools to an application at publish time and change them by shipping a new release; we do **per-request assembly** — the same service trims tools, prompts, model and knowledge for the domain passed on each turn, and **refuses out loud** when something is out of bounds.
 
@@ -61,7 +61,7 @@ Building an agent inside an enterprise, the hard part is not hooking up a model 
 
 Only dimensions that **differ** are listed; common ground (chat, streaming, multi-model access) is not repeated.
 
-| Capability | Rolling your own on LangChain4j / Spring AI | Using a platform (Dify / FastGPT) | Stringer |
+| Capability | Rolling your own on LangChain4j / Spring AI | Using a platform (Dify / FastGPT) | DomainPlane |
 | --- | --- | --- | --- |
 | Where tools come from | Write registration code, define the parameter schema yourself | Platform side: import OpenAPI / install a plugin / connect MCP | **Annotate a method with `@Tool`**; the parameter schema is derived from the method signature |
 | Where tools run | Your process | Your service, or a bundled platform plugin | **Your process** (SDK registration + reverse callback) **or the server process** (local Bean, called in-process) |
@@ -73,8 +73,8 @@ Only dimensions that **differ** are listed; common ground (chat, streaming, mult
 | Console and operations | None, build your own | The platform ships a UI | An 8-page console (domain space / fuse tool calls / knowledge base / prompts …) + a runtime metrics snapshot |
 | Stack | Java (library, inside your business process) | A standalone platform (mostly Python) | Java 21 / Spring Boot, same stack as your business code |
 
-- **New projects**: use Stringer as the foundation — orchestration, approval, the tool registry, the knowledge base and the console are there on day one, so you do not build that layer first.
-- **Existing projects**: add the dependency, inject `StringerAgent`, and annotate an existing `@Service` method with `@Tool`; there is no need to restructure existing code for AI.
+- **New projects**: use DomainPlane as the foundation — orchestration, approval, the tool registry, the knowledge base and the console are there on day one, so you do not build that layer first.
+- **Existing projects**: add the dependency, inject `DomainPlaneAgent`, and annotate an existing `@Service` method with `@Tool`; there is no need to restructure existing code for AI.
 
 > The two competitor columns describe the mainstream shape at the time of writing, to help you locate the differences quickly; consult their current documentation for specifics.
 
@@ -100,14 +100,14 @@ Only dimensions that **differ** are listed; common ground (chat, streaming, mult
 ```mermaid
 flowchart TB
     subgraph host["Your business system (Spring Boot)"]
-        BA["Business code<br/>injects StringerAgent"]
+        BA["Business code<br/>injects DomainPlaneAgent"]
     end
 
     subgraph inst["Tool instance (optional, separate process)"]
-        IT["Business methods + @Tool<br/>stringer-tool-provider"]
+        IT["Business methods + @Tool<br/>domainplane-tool-provider"]
     end
 
-    subgraph srv["stringer-server (deployed standalone)"]
+    subgraph srv["domainplane-server (deployed standalone)"]
         API["/api/agent/**<br/>chat · SSE · tool registry"]
         CORE["Orchestration core<br/>LangGraph state machine"]
         ADMIN["Console<br/>/admin.html"]
@@ -122,7 +122,7 @@ flowchart TB
     IT -->|"register + heartbeat"| API
     API --> CORE
     CORE --> LOCAL
-    CORE -->|"reverse callback /stringer/invoke"| IT
+    CORE -->|"reverse callback /domainplane/invoke"| IT
     CORE --> REDIS
     CORE --> ES
     CORE --> LLM
@@ -131,13 +131,13 @@ flowchart TB
 
 Each of the three roles has its place:
 
-- **Business system** pulls in only `stringer-chat-client` (add `stringer-kb-client` if it uploads documents) and calls through `StringerAgent`, with no HTTP to assemble by hand.
-- **Tools can live either place**: stay in the business process (add `stringer-tool-provider`, register on a heartbeat), or go straight into the server process (the server scans local `@Tool` beans). **The same annotated code moves between the two shapes without changing a character.**
+- **Business system** pulls in only `domainplane-chat-client` (add `domainplane-kb-client` if it uploads documents) and calls through `DomainPlaneAgent`, with no HTTP to assemble by hand.
+- **Tools can live either place**: stay in the business process (add `domainplane-tool-provider`, register on a heartbeat), or go straight into the server process (the server scans local `@Tool` beans). **The same annotated code moves between the two shapes without changing a character.**
 - **The server** is the only stateful party: orchestration, checkpoints, the tool registry, knowledge base indices and the console all live there.
 
 ## Core design: domains and assembly
 
-This is the most essential difference between Stringer and "calling a model API directly", and the place where getting it wrong costs the most.
+This is the most essential difference between DomainPlane and "calling a model API directly", and the place where getting it wrong costs the most.
 
 **A domain is the scenario of one conversation**, and it decides four things at once: which tools the model can see, which system prompt is used, which knowledge can be retrieved, and which model is called.
 
@@ -262,7 +262,7 @@ SSE event types: `TOKEN` / `TOOL_CALL` / `TOOL_RESULT` / `INTERRUPT` / `STOPPED`
 - Redis 6+
 - An OpenAI-compatible model service (a chat model and an embedding model)
 
-> ES / Redis **can be shared with your business system**: data is separated by private namespaces (Redis keys use the `stringer:` prefix, ES indices the `stringer_` prefix) and each side opens its own connection, so neither disturbs the other.
+> ES / Redis **can be shared with your business system**: data is separated by private namespaces (Redis keys use the `domainplane:` prefix, ES indices the `domainplane_` prefix) and each side opens its own connection, so neither disturbs the other.
 
 Any **OpenAI-compatible endpoint** will do — a public cloud and a local deployment are treated the same, and **a local Ollama works directly**:
 
@@ -283,18 +283,18 @@ Two things to keep in mind:
 
 ```bash
 # Option 1: run it directly (for development)
-mvn -pl stringer-server -am install
-mvn -pl stringer-server spring-boot:run          # port 9527 by default
+mvn -pl domainplane-server -am install
+mvn -pl domainplane-server spring-boot:run          # port 9527 by default
 
 # Option 2: package a fat JAR and run that (for deployment; a platform-neutral single file)
 mvn -DskipTests package
-java -jar stringer-server/target/stringer-v1.0-beta.1.jar
+java -jar domainplane-server/target/domainplane-v1.0-beta.1.jar
 ```
 
 **No configuration file needs to be prepared up front.** The server starts even with nothing configured (it only skips actions that need a dependency, it does not refuse to boot). Then open the console and fill things in:
 
 ```
-http://localhost:9527/admin.html      # default account stringer / stringer
+http://localhost:9527/admin.html      # default account domainplane / domainplane
 ```
 
 Add the chat model and the embedding model under "Models" (an embedding model becomes *the* embedding model by being selected in the "Embedding model" section's dropdown), and the ES / Redis connections under "Storage" — both pages have a "test connection" button so you can verify on the spot.
@@ -307,25 +307,25 @@ Add the chat model and the embedding model under "Models" (an embedding model be
 <!-- Chat: add this when you just need to ask the agent -->
 <dependency>
     <groupId>com.zzkingcc</groupId>
-    <artifactId>stringer-chat-client</artifactId>
+    <artifactId>domainplane-chat-client</artifactId>
     <version>v1.0-beta.1</version>
 </dependency>
 
 <!-- Knowledge base: add this when you need to upload documents (independent of chat) -->
 <dependency>
     <groupId>com.zzkingcc</groupId>
-    <artifactId>stringer-kb-client</artifactId>
+    <artifactId>domainplane-kb-client</artifactId>
     <version>v1.0-beta.1</version>
 </dependency>
 ```
 
-> **Three coordinates, pick what you need.** `stringer-chat-client` does chat only (`StringerAgent`, obtained via `StringerAgentFactory.forDomain(...)`); `stringer-kb-client` does the knowledge base only (upload / list / delete); `stringer-tool-provider` does tool registration only (handing your own process's methods to the agent as tools — set `stringer.tools=true` to turn it on). The WebClient, credential and startup probe are a shared base: pulling in several of them still wires that base once. No web container is included — your existing Spring MVC or WebFlux stack simply stays as it is. See [instance doc §1.1](docs/INSTANCE.md#11-按需要引几个依赖).
+> **Three coordinates, pick what you need.** `domainplane-chat-client` does chat only (`DomainPlaneAgent`, obtained via `DomainPlaneAgentFactory.forDomain(...)`); `domainplane-kb-client` does the knowledge base only (upload / list / delete); `domainplane-tool-provider` does tool registration only (handing your own process's methods to the agent as tools — set `domainplane.tools=true` to turn it on). The WebClient, credential and startup probe are a shared base: pulling in several of them still wires that base once. No web container is included — your existing Spring MVC or WebFlux stack simply stays as it is. See [instance doc §1.1](docs/INSTANCE.md#11-按需要引几个依赖).
 
 ```yaml
-stringer:
+domainplane:
   server: http://localhost:9527   # one address, shared by chat SDK / KB SDK / tool instance
-  username: stringer              # keep in sync if the server password changes
-  password: stringer
+  username: domainplane              # keep in sync if the server password changes
+  password: domainplane
 ```
 
 > **The server must start first** (same habit as integrating Redis or Nacos). Before startup completes, an app that uses the starter exchanges a signed credential and probes the server health; if it cannot connect, or the credentials are wrong, **startup is aborted** with troubleshooting hints — there is no switch to turn this off: letting an app start before the middleware means serving in a state that is guaranteed to be broken.
@@ -334,14 +334,14 @@ stringer:
 
 ### Step 3: Inject a bean, ask a question
 
-The SDK exposes exactly one entry point, `StringerAgent`: bind a domain first, then call.
+The SDK exposes exactly one entry point, `DomainPlaneAgent`: bind a domain first, then call.
 
 ```java
 @Service
 public class MyService {
-    private final StringerAgent agent;                // bound to a domain; cache and reuse, thread-safe
+    private final DomainPlaneAgent agent;                // bound to a domain; cache and reuse, thread-safe
 
-    public MyService(StringerAgentFactory factory) {  // auto-configured by the starter; no annotation needed
+    public MyService(DomainPlaneAgentFactory factory) {  // auto-configured by the starter; no annotation needed
         this.agent = factory.forDomain("default.customer");   // must be the full path of a leaf domain; null / blank normalizes to the root
     }
 
@@ -368,7 +368,7 @@ None of the three method signatures **has a domain parameter**, so "forgetting t
 
 ### Step 4: Annotate a method, turn it into a tool
 
-Add `stringer-tool-provider` and set `stringer.tools=true`, then declare on any Spring bean method:
+Add `domainplane-tool-provider` and set `domainplane.tools=true`, then declare on any Spring bean method:
 
 ```java
 // Read-only: visible in the customer domain; the parameter schema is derived from the signature
@@ -400,10 +400,10 @@ When the tool list has to be assembled dynamically at startup, register programm
 The server is a **platform-neutral single-file fat JAR**: one build artifact runs with `java -jar` on Linux, Windows and macOS (and other Unix-like systems) with no per-target rebuild.
 
 - **OS detection at startup**: `RuntimeEnvironment` reads `System.getProperty("os.name")` before Spring wires up, picks the config / log / chunk-export directories for the detected OS family, and creates them up front.
-  - Linux / other Unix: `/var/lib/stringer/config`, `/var/log/stringer`, `/var/lib/stringer/chunks`
-  - Windows: `%ProgramData%\Stringer\config`, `%ProgramData%\Stringer\logs`, `%ProgramData%\Stringer\chunks`
-  - macOS: `/Library/Application Support/Stringer/config`, `/Library/Logs/Stringer`, `/Library/Application Support/Stringer/chunks`
-- **Override precedence**: CLI `--key` ＞ JVM system property `-Dkey` ＞ env var `STRINGER_SETTINGS_PATH` / `STRINGER_LOG_PATH` / `STRINGER_EXPORT_PATH` ＞ platform default.
+  - Linux / other Unix: `/var/lib/domainplane/config`, `/var/log/domainplane`, `/var/lib/domainplane/chunks`
+  - Windows: `%ProgramData%\DomainPlane\config`, `%ProgramData%\DomainPlane\logs`, `%ProgramData%\DomainPlane\chunks`
+  - macOS: `/Library/Application Support/DomainPlane/config`, `/Library/Logs/DomainPlane`, `/Library/Application Support/DomainPlane/chunks`
+- **Override precedence**: CLI `--key` ＞ JVM system property `-Dkey` ＞ env var `DOMAINPLANE_SETTINGS_PATH` / `DOMAINPLANE_LOG_PATH` / `DOMAINPLANE_EXPORT_PATH` ＞ platform default.
 - **Containers**: for Docker / K8s just swap the base image (e.g. `eclipse-temurin:21-jre`); the JAR stays the same. The container runtime (kubernetes / docker / podman) is shown on the startup banner for easier troubleshooting.
 
 > ⚠️ **Only single-instance deployment is supported today.** The session-occupancy gate, the stop flag and the stream registry all live in process memory, so several instances sharing one Redis produce wrong results **without any error** (the same session loses updates, `stop` cannot stop the task that is really running). At startup the server takes a lease in Redis and **refuses to start** if it cannot; scaling up (more CPU / memory / a bigger thread pool) is the only supported form of scaling. See [deployment manual §6](docs/DEPLOYMENT.md).
@@ -412,21 +412,21 @@ The server is a **platform-neutral single-file fat JAR**: one build artifact run
 
 | Module | Description |
 | --- | --- |
-| `stringer-api` | Contracts: `StringerAgent` / annotations / events / tool descriptors / error codes |
-| `stringer-common` | Common support: exception hierarchy / input security |
-| `stringer-domain` | Domain capabilities: knowledge retrieval / hybrid search and fusion ranking / memory policy |
-| `stringer-infrastructure` | Infrastructure: ES retrieval and index management / document ingestion and splitting / Redis / embedding |
-| `stringer-runtime` | Agent runtime core: graph orchestration / tool registry and routing / instance registry / streaming context / prompt resolution / cancellation / model resolution / domain registry |
-| `stringer-server` | **Server**: standalone deployable, hosts all heavy logic and the console |
-| `stringer-sdk-core` | SDK common layer: contracts + shared exceptions + server connection properties (transitive, never depended on directly) |
-| `stringer-client-core` | SDK client base: WebClient / credential exchange / error translation / startup probe, shared by the chat and KB SDKs |
-| `stringer-chat-client` | **Chat SDK**: `StringerAgent` (`forDomain` → `ask`/`stream`/`events`/`resume`/`stop`) |
-| `stringer-kb-client` | **Knowledge base SDK**: document upload / list / delete, filed into the index of the given domain |
-| `stringer-tool-provider` | **Tool SDK**: registration and heartbeat keep-alive plus the invocation endpoint; depends only on the contract layer, no internal implementation |
+| `domainplane-api` | Contracts: `DomainPlaneAgent` / annotations / events / tool descriptors / error codes |
+| `domainplane-common` | Common support: exception hierarchy / input security |
+| `domainplane-domain` | Domain capabilities: knowledge retrieval / hybrid search and fusion ranking / memory policy |
+| `domainplane-infrastructure` | Infrastructure: ES retrieval and index management / document ingestion and splitting / Redis / embedding |
+| `domainplane-runtime` | Agent runtime core: graph orchestration / tool registry and routing / instance registry / streaming context / prompt resolution / cancellation / model resolution / domain registry |
+| `domainplane-server` | **Server**: standalone deployable, hosts all heavy logic and the console |
+| `domainplane-sdk-core` | SDK common layer: contracts + shared exceptions + server connection properties (transitive, never depended on directly) |
+| `domainplane-client-core` | SDK client base: WebClient / credential exchange / error translation / startup probe, shared by the chat and KB SDKs |
+| `domainplane-chat-client` | **Chat SDK**: `DomainPlaneAgent` (`forDomain` → `ask`/`stream`/`events`/`resume`/`stop`) |
+| `domainplane-kb-client` | **Knowledge base SDK**: document upload / list / delete, filed into the index of the given domain |
+| `domainplane-tool-provider` | **Tool SDK**: registration and heartbeat keep-alive plus the invocation endpoint; depends only on the contract layer, no internal implementation |
 
 ## API
 
-Business systems call through `StringerAgent` and never hand-write HTTP; when you do need raw HTTP, these are the ones that matter:
+Business systems call through `DomainPlaneAgent` and never hand-write HTTP; when you do need raw HTTP, these are the ones that matter:
 
 | Method | Path | Description |
 | --- | --- | --- |

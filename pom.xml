@@ -12,24 +12,24 @@
     </parent>
 
     <groupId>com.zzkingcc</groupId>
-    <artifactId>Stringer</artifactId>
+    <artifactId>DomainPlane</artifactId>
     <version>v1.0-beta.1</version>
     <packaging>pom</packaging>
-    <name>Stringer</name>
+    <name>DomainPlane</name>
     <description>Java-based AI Workflow Orchestration Starter - 多模块聚合工程</description>
 
     <modules>
-        <module>stringer-api</module>
-        <module>stringer-common</module>
-        <module>stringer-domain</module>
-        <module>stringer-infrastructure</module>
-        <module>stringer-runtime</module>
-        <module>stringer-sdk-core</module>
-        <module>stringer-client-core</module>
-        <module>stringer-chat-client</module>
-        <module>stringer-kb-client</module>
-        <module>stringer-tool-provider</module>
-        <module>stringer-server</module>
+        <module>domainplane-api</module>
+        <module>domainplane-common</module>
+        <module>domainplane-domain</module>
+        <module>domainplane-infrastructure</module>
+        <module>domainplane-runtime</module>
+        <module>domainplane-sdk-core</module>
+        <module>domainplane-client-core</module>
+        <module>domainplane-chat-client</module>
+        <module>domainplane-kb-client</module>
+        <module>domainplane-tool-provider</module>
+        <module>domainplane-server</module>
     </modules>
 
     <properties>
@@ -37,7 +37,7 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <stringer.version>v1.0-beta.1</stringer.version>
+        <domainplane.version>v1.0-beta.1</domainplane.version>
         <langchain4j.version>1.18.1</langchain4j.version>
         <langchain4j.beta.version>1.18.1-beta28</langchain4j.beta.version>
         <langgraph4j.version>1.8.17</langgraph4j.version>
@@ -117,53 +117,53 @@
             <!-- ===== 内部模块版本管理 ===== -->
             <dependency>
                 <groupId>com.zzkingcc</groupId>
-                <artifactId>stringer-api</artifactId>
-                <version>${stringer.version}</version>
+                <artifactId>domainplane-api</artifactId>
+                <version>${domainplane.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.zzkingcc</groupId>
-                <artifactId>stringer-common</artifactId>
-                <version>${stringer.version}</version>
+                <artifactId>domainplane-common</artifactId>
+                <version>${domainplane.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.zzkingcc</groupId>
-                <artifactId>stringer-domain</artifactId>
-                <version>${stringer.version}</version>
+                <artifactId>domainplane-domain</artifactId>
+                <version>${domainplane.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.zzkingcc</groupId>
-                <artifactId>stringer-infrastructure</artifactId>
-                <version>${stringer.version}</version>
+                <artifactId>domainplane-infrastructure</artifactId>
+                <version>${domainplane.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.zzkingcc</groupId>
-                <artifactId>stringer-runtime</artifactId>
-                <version>${stringer.version}</version>
+                <artifactId>domainplane-runtime</artifactId>
+                <version>${domainplane.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.zzkingcc</groupId>
-                <artifactId>stringer-sdk-core</artifactId>
-                <version>${stringer.version}</version>
+                <artifactId>domainplane-sdk-core</artifactId>
+                <version>${domainplane.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.zzkingcc</groupId>
-                <artifactId>stringer-client-core</artifactId>
-                <version>${stringer.version}</version>
+                <artifactId>domainplane-client-core</artifactId>
+                <version>${domainplane.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.zzkingcc</groupId>
-                <artifactId>stringer-chat-client</artifactId>
-                <version>${stringer.version}</version>
+                <artifactId>domainplane-chat-client</artifactId>
+                <version>${domainplane.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.zzkingcc</groupId>
-                <artifactId>stringer-kb-client</artifactId>
-                <version>${stringer.version}</version>
+                <artifactId>domainplane-kb-client</artifactId>
+                <version>${domainplane.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.zzkingcc</groupId>
-                <artifactId>stringer-tool-provider</artifactId>
-                <version>${stringer.version}</version>
+                <artifactId>domainplane-tool-provider</artifactId>
+                <version>${domainplane.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.junit</groupId>

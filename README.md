@@ -1,5 +1,5 @@
 
-<h3 align="center">Stringer</h3>
+<h3 align="center">DomainPlane</h3>
 
 <p align="center">
   <strong>Java 生态的 AI Agent 运行时中间件。编排、工具治理、知识库、管控台在一个独立服务进程里，<br>而工具留在你自己的代码里。<br>一个服务端 + 三个按需引入的 SDK：<code>forDomain(域)</code> 取得对话入口，每轮按该域实时装配工具 / 提示词 / 模型 / 知识；<code>@Tool(domains=…)</code> 让 AI 在你自己的进程里调业务方法；知识库 SDK 传文档，按域落索引。<br>越权显式拒绝而不静默降级，工具增删下一轮生效，审批断点重启可恢复。</strong>
@@ -61,7 +61,7 @@
 
 只列**有差异**的维度；共性能力（对话、流式、多模型接入）不再赘述。
 
-| 能力 | 用 LangChain4j / Spring AI 自己搭 | 用平台（Dify / FastGPT） | Stringer |
+| 能力 | 用 LangChain4j / Spring AI 自己搭 | 用平台（Dify / FastGPT） | DomainPlane |
 | --- | --- | --- | --- |
 | 工具怎么来 | 写代码注册，参数 schema 自己定义 | 平台侧：导入 OpenAPI / 装插件 / 连 MCP | **给方法加 `@Tool`**，参数 schema 由方法签名推导 |
 | 工具跑在哪 | 你的进程 | 你的服务，或平台自带插件 | **你的进程**（SDK 注册 + 反向回调）**或服务端进程**（本地 Bean，进程内直调） |
@@ -73,8 +73,8 @@
 | 管控与运维 | 无，自己写 | 平台自带界面 | 8 页管控台（域空间 / 熔断工具调用 / 知识库 / 提示词…）+ 运行指标快照 |
 | 技术栈 | Java（库，随业务进程） | 独立平台（Python 为主） | Java 21 / Spring Boot，与业务同栈 |
 
-- **新项目**：直接用 Stringer 当底座——编排、审批、工具注册中心、知识库、管控台第一天就有，不用先造一层。
-- **已有项目**：加依赖、注入 `StringerAgent`、给现成的 `@Service` 方法加个 `@Tool` 注解即可，不必为 AI 重构现有代码。
+- **新项目**：直接用 DomainPlane 当底座——编排、审批、工具注册中心、知识库、管控台第一天就有，不用先造一层。
+- **已有项目**：加依赖、注入 `DomainPlaneAgent`、给现成的 `@Service` 方法加个 `@Tool` 注解即可，不必为 AI 重构现有代码。
 
 > 竞品两列描述的是撰写时的主流形态，用于快速定位差异；具体能力以其当前文档为准。
 
@@ -100,14 +100,14 @@
 ```mermaid
 flowchart TB
     subgraph host["你的业务系统（Spring Boot）"]
-        BA["业务代码<br/>注入 StringerAgent"]
+        BA["业务代码<br/>注入 DomainPlaneAgent"]
     end
 
     subgraph inst["工具实例（可选，独立进程）"]
-        IT["业务方法 + @Tool<br/>stringer-tool-provider"]
+        IT["业务方法 + @Tool<br/>domainplane-tool-provider"]
     end
 
-    subgraph srv["stringer-server（独立部署）"]
+    subgraph srv["domainplane-server（独立部署）"]
         API["/api/agent/**<br/>对话 · SSE · 工具注册"]
         CORE["编排内核<br/>LangGraph 状态机"]
         ADMIN["管控台<br/>/admin.html"]
@@ -122,7 +122,7 @@ flowchart TB
     IT -->|"注册 + 心跳"| API
     API --> CORE
     CORE --> LOCAL
-    CORE -->|"反向回调 /stringer/invoke"| IT
+    CORE -->|"反向回调 /domainplane/invoke"| IT
     CORE --> REDIS
     CORE --> ES
     CORE --> LLM
@@ -131,13 +131,13 @@ flowchart TB
 
 三种角色各就各位：
 
-- **业务系统**只引 `stringer-chat-client`（要传文档再加 `stringer-kb-client`），通过 `StringerAgent` 调用，不用拼 HTTP。
-- **工具放哪都行**：留在业务进程里（引 `stringer-tool-provider`，心跳注册），或者直接放进服务端进程（本服务端扫描本地 `@Tool` Bean）。**同一段注解代码在两种形态间搬迁不用改一个字。**
+- **业务系统**只引 `domainplane-chat-client`（要传文档再加 `domainplane-kb-client`），通过 `DomainPlaneAgent` 调用，不用拼 HTTP。
+- **工具放哪都行**：留在业务进程里（引 `domainplane-tool-provider`，心跳注册），或者直接放进服务端进程（本服务端扫描本地 `@Tool` Bean）。**同一段注解代码在两种形态间搬迁不用改一个字。**
 - **服务端**是唯一有状态的一方：编排、检查点、工具注册表、知识库索引、管控台都在它这儿。
 
 ## 核心设计：域与装配
 
-这是 Stringer 与"直接调模型 API"最本质的差别，也是用错代价最大的地方。
+这是 DomainPlane 与"直接调模型 API"最本质的差别，也是用错代价最大的地方。
 
 **域（domain）＝一次对话的场景**，它同时决定四件事：模型能看到哪些工具、用哪份系统提示词、能检索到哪些知识、走哪个模型。
 
@@ -262,7 +262,7 @@ SSE 事件类型：`TOKEN` / `TOOL_CALL` / `TOOL_RESULT` / `INTERRUPT` / `STOPPE
 - Redis 6+
 - 一个 OpenAI 兼容的模型服务（对话模型 + 向量模型）
 
-> ES / Redis **可与业务系统共用同一套实例**：数据层通过私有命名空间隔离（Redis key 统一 `stringer:` 前缀、ES 索引统一 `stringer_` 前缀），双方各自建立独立连接，互不影响。
+> ES / Redis **可与业务系统共用同一套实例**：数据层通过私有命名空间隔离（Redis key 统一 `domainplane:` 前缀、ES 索引统一 `domainplane_` 前缀），双方各自建立独立连接，互不影响。
 
 模型服务只要是 **OpenAI 兼容端点**就行，公有云与本地部署没有区别——**本机 Ollama 直接可用**：
 
@@ -284,18 +284,18 @@ SSE 事件类型：`TOKEN` / `TOOL_CALL` / `TOOL_RESULT` / `INTERRUPT` / `STOPPE
 
 ```bash
 # 方式一：直接跑（开发时用）
-mvn -pl stringer-server -am install
-mvn -pl stringer-server spring-boot:run          # 默认端口 9527
+mvn -pl domainplane-server -am install
+mvn -pl domainplane-server spring-boot:run          # 默认端口 9527
 
 # 方式二：打成 fat jar 跑（部署时用；平台无关的单文件产物）
 mvn -DskipTests package
-java -jar stringer-server/target/stringer-v1.0-beta.1.jar
+java -jar domainplane-server/target/domainplane-v1.0-beta.1.jar
 ```
 
 **不需要预先准备配置文件。** 服务端在未配置状态下即可启动（只跳过需要依赖的动作，不阻断启动），启动后打开管控台填写：
 
 ```
-http://localhost:9527/admin.html      # 默认账号 stringer / stringer
+http://localhost:9527/admin.html      # 默认账号 domainplane / domainplane
 ```
 
 依次在「模型设置」添加对话模型与向量模型（向量模型从已添加的向量档案里选一个）、「存储配置」填 ES 与 Redis（每页都有"测试连接"，填完可当场验证）。
@@ -308,25 +308,25 @@ http://localhost:9527/admin.html      # 默认账号 stringer / stringer
 <!-- 对话：只要"能问 AI"就引这个 -->
 <dependency>
     <groupId>com.zzkingcc</groupId>
-    <artifactId>stringer-chat-client</artifactId>
+    <artifactId>domainplane-chat-client</artifactId>
     <version>v1.0-beta.1</version>
 </dependency>
 
 <!-- 知识库：要把文档传进去就再引这个（与对话相互独立） -->
 <dependency>
     <groupId>com.zzkingcc</groupId>
-    <artifactId>stringer-kb-client</artifactId>
+    <artifactId>domainplane-kb-client</artifactId>
     <version>v1.0-beta.1</version>
 </dependency>
 ```
 
-> **三个坐标，按需引入。** `stringer-chat-client` 只做对话（`StringerAgent`，用 `StringerAgentFactory.forDomain(...)` 取）；`stringer-kb-client` 只做知识库（上传 / 列表 / 删除）；`stringer-tool-provider` 只做工具注册（把本进程的方法作为工具交给 Agent，需显式打开 `stringer.tools=true`）。WebClient / 凭证 / 启动探测是三者共用的底座，同时引入也只装配一份；Web 容器不在其中——宿主原有的 Spring MVC / WebFlux 栈保持不变即可。详见[实例文档 §1.1](docs/INSTANCE.md#11-按需要引几个依赖)。
+> **三个坐标，按需引入。** `domainplane-chat-client` 只做对话（`DomainPlaneAgent`，用 `DomainPlaneAgentFactory.forDomain(...)` 取）；`domainplane-kb-client` 只做知识库（上传 / 列表 / 删除）；`domainplane-tool-provider` 只做工具注册（把本进程的方法作为工具交给 Agent，需显式打开 `domainplane.tools=true`）。WebClient / 凭证 / 启动探测是三者共用的底座，同时引入也只装配一份；Web 容器不在其中——宿主原有的 Spring MVC / WebFlux 栈保持不变即可。详见[实例文档 §1.1](docs/INSTANCE.md#11-按需要引几个依赖)。
 
 ```yaml
-stringer:
+domainplane:
   server: http://localhost:9527   # 对话 SDK / 知识库 SDK / 工具实例共用这一份
-  username: stringer              # 服务端改过密码后需同步
-  password: stringer
+  username: domainplane              # 服务端改过密码后需同步
+  password: domainplane
 ```
 
 > **服务端必须先启动**（与 Redis / Nacos 的接入习惯一致）。引入 starter 的应用在启动完成前会换取签名凭证并探测服务端健康状态，连不上或账号密码错误会**直接中断启动**并给出排查提示——不提供关闭开关：允许应用先于中间件启动，等于让它在必然不可用的状态下对外服务。
@@ -335,14 +335,14 @@ stringer:
 
 ### 第三步：注入一个 Bean，问一句话
 
-SDK 只提供一个入口 `StringerAgent`：**先绑域，再调用**。
+SDK 只提供一个入口 `DomainPlaneAgent`：**先绑域，再调用**。
 
 ```java
 @Service
 public class MyService {
-    private final StringerAgent agent;                 // 已绑定域，可缓存复用、线程安全
+    private final DomainPlaneAgent agent;                 // 已绑定域，可缓存复用、线程安全
 
-    public MyService(StringerAgentFactory factory) {   // starter 自动装配，不需要任何注解
+    public MyService(DomainPlaneAgentFactory factory) {   // starter 自动装配，不需要任何注解
         this.agent = factory.forDomain("default.customer");   // 必须是叶子域的完整路径；null / 空白会归一化到根域
     }
 
@@ -369,7 +369,7 @@ public class MyService {
 
 ### 第四步：方法上加个注解，把业务方法变成工具
 
-引入 `stringer-tool-provider` 并打开 `stringer.tools=true`，然后在任意 Spring Bean 的方法上声明：
+引入 `domainplane-tool-provider` 并打开 `domainplane.tools=true`，然后在任意 Spring Bean 的方法上声明：
 
 ```java
 // 只读工具：客服域可见，参数 schema 由方法签名推导
@@ -401,10 +401,10 @@ public String refundOrder(@ToolParam("订单号") String orderNo,
 服务端是**平台无关的单文件 fat jar**：一份构建产物，在 Linux、Windows、macOS（含其他 Unix 类）上直接 `java -jar` 即可运行，无需为目标系统重新构建。
 
 - **启动期自动探测运行系统**：`RuntimeEnvironment` 在 Spring 装配前用 `System.getProperty("os.name")` 判定 OS 族，自动选定配置 / 日志 / 切片导出目录并提前建好。
-  - Linux / 其他 Unix：`/var/lib/stringer/config`、`/var/log/stringer`、`/var/lib/stringer/chunks`
-  - Windows：`%ProgramData%\Stringer\config`、`%ProgramData%\Stringer\logs`、`%ProgramData%\Stringer\chunks`
-  - macOS：`/Library/Application Support/Stringer/config`、`/Library/Logs/Stringer`、`/Library/Application Support/Stringer/chunks`
-- **覆盖优先级**：命令行 `--key` ＞ JVM 系统属性 `-Dkey` ＞ 环境变量 `STRINGER_SETTINGS_PATH` / `STRINGER_LOG_PATH` / `STRINGER_EXPORT_PATH` ＞ 平台默认。
+  - Linux / 其他 Unix：`/var/lib/domainplane/config`、`/var/log/domainplane`、`/var/lib/domainplane/chunks`
+  - Windows：`%ProgramData%\DomainPlane\config`、`%ProgramData%\DomainPlane\logs`、`%ProgramData%\DomainPlane\chunks`
+  - macOS：`/Library/Application Support/DomainPlane/config`、`/Library/Logs/DomainPlane`、`/Library/Application Support/DomainPlane/chunks`
+- **覆盖优先级**：命令行 `--key` ＞ JVM 系统属性 `-Dkey` ＞ 环境变量 `DOMAINPLANE_SETTINGS_PATH` / `DOMAINPLANE_LOG_PATH` / `DOMAINPLANE_EXPORT_PATH` ＞ 平台默认。
 - **容器部署**：Docker / K8s 只需换对应基底镜像（如 `eclipse-temurin:21-jre`），jar 不变；容器运行时（kubernetes / docker / podman）会在启动横幅中显示，便于排障。
 
 > ⚠️ **当前只支持单实例部署。** 会话占用闸门、停止标志、流注册表都在进程内存里，多实例共用同一个 Redis 会**不报错地**产生错误结果（同一会话丢更新、`stop` 停不掉真正在跑的任务）。服务端启动时会在 Redis 上抢一个运行权租约，抢不到就**拒绝启动**；纵向扩容（加 CPU / 内存 / 提高线程池）是当前唯一受支持的扩容方式。详见[部署手册 §6](docs/DEPLOYMENT.md)。
@@ -413,21 +413,21 @@ public String refundOrder(@ToolParam("订单号") String orderNo,
 
 | 模块 | 说明 |
 | --- | --- |
-| `stringer-api` | 对外契约：`StringerAgent` / 注解 / 事件 / 工具描述符 / 错误码 |
-| `stringer-common` | 公共支撑：异常体系 / 输入安全 |
-| `stringer-domain` | 领域能力：知识检索 / 混合检索与融合排序 / 记忆策略 |
-| `stringer-infrastructure` | 基础设施：ES 检索与索引管理 / 文档摄取切片 / Redis / 向量化 |
-| `stringer-runtime` | Agent 运行时内核：图编排 / 工具注册表与路由 / 实例注册表 / 流式上下文 / 提示词解析 / 取消 / 模型解析 / 域注册表 |
-| `stringer-server` | **服务端**：可独立部署，承载全部重逻辑与管控台 |
-| `stringer-sdk-core` | SDK 公共层：对外契约 + 公共异常 + 服务端连接配置（随 SDK 传递，接入方不直接引） |
-| `stringer-client-core` | SDK 客户端底座：WebClient / 凭证换取 / 错误翻译 / 启动期探测，被对话与知识库两个 SDK 共用 |
-| `stringer-chat-client` | **对话 SDK**：`StringerAgent`（`forDomain` → `ask`/`stream`/`events`/`resume`/`stop`） |
-| `stringer-kb-client` | **知识库 SDK**：文档上传 / 列表 / 删除，按域落到对应索引 |
-| `stringer-tool-provider` | **工具 SDK**：注册与心跳保活 + 工具调用端点，只依赖契约层，不含内部实现 |
+| `domainplane-api` | 对外契约：`DomainPlaneAgent` / 注解 / 事件 / 工具描述符 / 错误码 |
+| `domainplane-common` | 公共支撑：异常体系 / 输入安全 |
+| `domainplane-domain` | 领域能力：知识检索 / 混合检索与融合排序 / 记忆策略 |
+| `domainplane-infrastructure` | 基础设施：ES 检索与索引管理 / 文档摄取切片 / Redis / 向量化 |
+| `domainplane-runtime` | Agent 运行时内核：图编排 / 工具注册表与路由 / 实例注册表 / 流式上下文 / 提示词解析 / 取消 / 模型解析 / 域注册表 |
+| `domainplane-server` | **服务端**：可独立部署，承载全部重逻辑与管控台 |
+| `domainplane-sdk-core` | SDK 公共层：对外契约 + 公共异常 + 服务端连接配置（随 SDK 传递，接入方不直接引） |
+| `domainplane-client-core` | SDK 客户端底座：WebClient / 凭证换取 / 错误翻译 / 启动期探测，被对话与知识库两个 SDK 共用 |
+| `domainplane-chat-client` | **对话 SDK**：`DomainPlaneAgent`（`forDomain` → `ask`/`stream`/`events`/`resume`/`stop`） |
+| `domainplane-kb-client` | **知识库 SDK**：文档上传 / 列表 / 删除，按域落到对应索引 |
+| `domainplane-tool-provider` | **工具 SDK**：注册与心跳保活 + 工具调用端点，只依赖契约层，不含内部实现 |
 
 ## 接口
 
-业务系统通过 `StringerAgent` 调用，无需拼 HTTP；需要裸 HTTP 时看这几个：
+业务系统通过 `DomainPlaneAgent` 调用，无需拼 HTTP；需要裸 HTTP 时看这几个：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |

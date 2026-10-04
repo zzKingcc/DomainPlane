@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>概览 · DomainPlane 管控台</title>
+    <link rel="stylesheet" href="assets/console.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <main class="main">
+        <div class="page-head">
+            <h2>概览</h2>
+            <p>
+                服务端运行状态一览。已注册工具与各域注册内容的具体清单已移至
+                <a href="domains.html">域空间</a>。
+            </p>
+        </div>
+
+        <div class="stats">
+            <div class="stat">
+                <div class="k">对话模型</div>
+                <div class="v" id="statChat">—</div>
+                <div class="note" id="statChatNote"></div>
+            </div>
+            <div class="stat">
+                <div class="k">向量模型</div>
+                <div class="v" id="statEmb">—</div>
+                <div class="note" id="statEmbNote"></div>
+            </div>
+            <div class="stat">
+                <div class="k">已注册工具</div>
+                <div class="v" id="statTools">—</div>
+                <div class="note" id="statToolsNote"></div>
+            </div>
+            <div class="stat">
+                <div class="k">域数量</div>
+                <div class="v" id="statDomains">—</div>
+                <div class="note" id="statDomainsNote"></div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script src="assets/console.js"></script>
+<script>
+    /* 工具数与域数都取自 /admin/domains（与「域空间」页同一口径）。
+       刻意不在前端自己按 tools[].profiles 去重统计 —— 那样就多了一个"可见性判据"副本，
+       一旦与 ToolRegistry 的过滤条件不一致，概览与域空间会各说各话。
+
+       「0」要读成"未注册"而不是"出错了"：这两件事的处置完全不同（前者去写工具注解，
+       后者查扫描），所以 0 一律配 warn 态与一句明确的未注册说明，不留光秃秃的 0。 */
+    function loadRegistryStats() {
+        var tools = document.getElementById('statTools');
+        var domains = document.getElementById('statDomains');
+        Console.request('/admin/domains').then(function (r) {
+            var s = (r && r.stats) || {};
+            var toolCount = s.toolCount || 0;
+            var domainCount = s.domainCount || 0;
+
+            tools.textContent = toolCount;
+            tools.className = 'v' + (toolCount ? ' ok' : ' warn');
+            document.getElementById('statToolsNote').textContent = toolCount
+                ? ('其中 ' + (s.globalToolCount || 0) + ' 个挂在根域（全域可见）')
+                : '未注册：没有扫描到任何工具提供者';
+
+            domains.textContent = domainCount;
+            domains.className = 'v' + (domainCount ? ' ok' : ' warn');
+            document.getElementById('statDomainsNote').textContent = domainCount
+                ? ('根域 ' + (s.builtinCount || 0) + ' · 人工 ' + (s.manualCount || 0)
+                   + ' · 派生 ' + (s.derivedCount || 0))
+                : '未注册：没有任何域';
+        }).catch(function (e) {
+            tools.textContent = '—';
+            tools.className = 'v err';
+            document.getElementById('statToolsNote').textContent = '读取失败';
+            domains.textContent = '—';
+            domains.className = 'v err';
+            document.getElementById('statDomainsNote').textContent = e.message;
+        });
+    }
+
+    function loadModelStats() {
+        var chat = document.getElementById('statChat');
+        var emb = document.getElementById('statEmb');
+        Console.refreshModelsWarn().then(function (s) {
+            chat.textContent = s.chatConfigured ? '已就绪' : '未配置';
+            chat.className = 'v ' + (s.chatConfigured ? 'ok' : 'warn');
+            document.getElementById('statChatNote').textContent =
+                s.chatConfigured ? (s.chatModelName || '') : '请到「模型设置」填写';
+
+            emb.textContent = s.embeddingConfigured ? '已就绪' : '未配置';
+            emb.className = 'v ' + (s.embeddingConfigured ? 'ok' : 'warn');
+            document.getElementById('statEmbNote').textContent =
+                s.embeddingConfigured ? (s.embeddingModelName || '') : '知识库检索与灌库不可用';
+        }).catch(function (e) {
+            chat.textContent = '读取失败';
+            chat.className = 'v err';
+            emb.textContent = '读取失败';
+            emb.className = 'v err';
+            document.getElementById('statChatNote').textContent = e.message;
+        });
+    }
+
+    Console.renderSidebar('overview');
+    /* 数据加载走 Console.ready：先确认登录态，未登录直接跳登录页，
+       不会先打一轮受保护接口留下 401 日志（见 console.js ready 的注释） */
+    Console.ready(function () {
+        loadModelStats();
+        loadRegistryStats();
+    });
+</script>
+</body>
+</html>

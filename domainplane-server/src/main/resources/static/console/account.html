@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>账号 · DomainPlane 管控台</title>
+    <link rel="stylesheet" href="assets/console.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <main class="main">
+        <div class="page-head">
+            <h2>账号</h2>
+            <p>服务端只有一个账号：它回答"谁能进这个管控台 / 谁能调这个服务端"。这里只做改密码与查看信息。</p>
+        </div>
+
+        <div class="card model-card">
+            <div class="card-head">
+                <span class="model-dot"></span>
+                <h2>账号信息</h2>
+            </div>
+            <div class="probe">
+                <div class="facts">
+                    <div class="fact">账号 <b id="acName">—</b></div>
+                    <div class="fact">最后登录 <b id="acLastAt">—</b></div>
+                    <div class="fact">来源 <b id="acLastFrom">—</b></div>
+                    <div class="fact">密码状态 <b id="acPwd">—</b></div>
+                </div>
+                <div class="note">
+                    密码以 <b>BCrypt 单向哈希</b>存储，不存明文，因此<b>无法手工编辑文件改密码</b>——
+                    改密码只能走下面这个入口。本产品不提供密码找回入口，忘记密码请联系部署方处理。
+                </div>
+            </div>
+        </div>
+
+        <div class="card model-card">
+            <div class="card-head">
+                <span class="model-dot"></span>
+                <h2>修改密码</h2>
+                <span class="spacer"></span>
+                <span class="card-note">成功后所有旧登录态立即失效</span>
+            </div>
+
+            <div class="field">
+                <label for="oldPassword">当前密码</label>
+                <input id="oldPassword" type="password" autocomplete="current-password">
+            </div>
+            <div class="row">
+                <div class="field">
+                    <label for="newPassword">新密码</label>
+                    <input id="newPassword" type="password" autocomplete="new-password">
+                    <div class="help">不超过 72 字节（UTF-8 下中文约 24 个字符）——BCrypt 的硬上限，超出会被拒。</div>
+                </div>
+                <div class="field">
+                    <label for="newPassword2">确认新密码</label>
+                    <input id="newPassword2" type="password" autocomplete="new-password">
+                </div>
+            </div>
+
+            <div class="result" id="pwdResult"></div>
+            <div class="btn-row">
+                <button class="btn-primary" id="savePwdBtn">保存并生效</button>
+                <button class="ghost" id="clearPwdBtn">清空表单</button>
+            </div>
+            <details class="disclose">
+                <summary>为什么改完会被踢下线？</summary>
+                <div class="disclose-body">
+                    凭证是<b>签名式（HMAC）</b>：实际签名密钥由【主密钥 + 密码哈希】派生，所以改密码不需要"通知"任何人，
+                    全部旧凭证的签名会立刻对不上。<br>
+                    <b>因此本次登录也会被踢掉</b>——这不是缺陷，而是"改密码即踢人"的直接体现；保存后请重新登录。
+                </div>
+            </details>
+        </div>
+    </main>
+</div>
+
+<script src="assets/console.js"></script>
+<script>
+    var esc = Console.escapeHtml;
+
+    function loadSession() {
+        Console.request('/admin/session').then(function (s) {
+            document.getElementById('acName').textContent = s.username || '—';
+            document.getElementById('acLastAt').textContent = s.lastLoginAt || '—';
+            document.getElementById('acLastFrom').textContent = s.lastLoginFrom || '—';
+            document.getElementById('acPwd').textContent =
+                s.defaultCredential ? '仍是初始密码' : '已修改';
+        }).catch(function (e) {
+            var el = document.getElementById('pwdResult');
+            el.textContent = e.message;
+            el.className = 'result show err';
+        });
+    }
+
+    document.getElementById('clearPwdBtn').addEventListener('click', function () {
+        ['oldPassword', 'newPassword', 'newPassword2'].forEach(function (id) {
+            document.getElementById(id).value = '';
+        });
+        var el = document.getElementById('pwdResult');
+        el.className = 'result';
+        el.textContent = '';
+    });
+
+    document.getElementById('savePwdBtn').addEventListener('click', function () {
+        var oldPassword = document.getElementById('oldPassword').value;
+        var newPassword = document.getElementById('newPassword').value;
+        var again = document.getElementById('newPassword2').value;
+        var el = document.getElementById('pwdResult');
+
+        if (!oldPassword) { el.textContent = '请填写当前密码'; el.className = 'result show err'; return; }
+        if (!newPassword) { el.textContent = '请填写新密码'; el.className = 'result show err'; return; }
+        if (newPassword !== again) { el.textContent = '两次输入的新密码不一致'; el.className = 'result show err'; return; }
+
+        el.textContent = '正在保存…';
+        el.className = 'result show ok';
+
+        Console.jsonRequest('/admin/password', 'POST', {
+            oldPassword: oldPassword,
+            newPassword: newPassword
+        }).then(function (r) {
+            el.textContent = (r && r.message) || '密码已修改，请重新登录';
+            el.className = 'result show ok';
+            setTimeout(function () { location.replace('login.html'); }, 1600);
+        }).catch(function (e) {
+            el.textContent = e.message;
+            el.className = 'result show err';
+        });
+    });
+
+    Console.renderSidebar('account');
+    Console.ready(loadSession);
+</script>
+</body>
+</html>

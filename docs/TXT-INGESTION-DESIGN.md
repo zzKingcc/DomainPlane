@@ -147,20 +147,20 @@ ES mapping 要跟着补：`metadata` 加 `dynamic: false`，上面这些字段**
 
 | 配置 | 默认 | 说明 |
 |---|---|---|
-| `stringer.rag.chunking.max-chars` | 400 | 单切片**长度上限**（不是固定长度）。400 个中文字约合 400 token，对上限 512 token 的向量模型也安全 |
-| `stringer.rag.chunking.overlap-sentences` | 1 | 相邻切片重叠几句 |
-| `stringer.rag.chunking.min-chars` | 60 | 尾片短于该值就并进前一片 |
+| `domainplane.rag.chunking.max-chars` | 400 | 单切片**长度上限**（不是固定长度）。400 个中文字约合 400 token，对上限 512 token 的向量模型也安全 |
+| `domainplane.rag.chunking.overlap-sentences` | 1 | 相邻切片重叠几句 |
+| `domainplane.rag.chunking.min-chars` | 60 | 尾片短于该值就并进前一片 |
 
 写死的常量：页码正则与白名单、跨页重复阈值（≥ 页数一半 / ≥ 3 次）、页眉页脚候选行长 < 40、标题行长 ≤ 40、标题层级两级、空行压缩阈值。
 
-导出目录是**存储位置**（`stringer.export.path`），与配置 / 日志目录同级，不算切片参数 —— 见「怎么验证」。
+导出目录是**存储位置**（`domainplane.export.path`），与配置 / 日志目录同级，不算切片参数 —— 见「怎么验证」。
 
 ## 怎么验证
 
 1. **上传返回值**：`chunks`（切片数）、`sections`（标题数）、`dropped`（删了几行）、`encoding`（实际识别的编码）。删行明细进日志。
 2. **切片预览 = 导出一个 txt 文件**（不做在线查看、不做抽屉）：
    - 上传完成后，把该文档的全部切片写成 `<原文件名>.<docId 前 8 位>.chunks.txt`，内容 = 头部信息（文件名 / docId / 域 / 切片数 / 导出时间）+ 逐片「序号 + `section_path` + 正文」，**UTF-8** 编码。
-   - 目录是**固定位置**，与配置 / 日志目录同级：Windows `%ProgramData%\Stringer\chunks`、Linux `/var/lib/stringer/chunks`，可用 `STRINGER_EXPORT_PATH` 覆盖。
+   - 目录是**固定位置**，与配置 / 日志目录同级：Windows `%ProgramData%\DomainPlane\chunks`、Linux `/var/lib/domainplane/chunks`，可用 `DOMAINPLANE_EXPORT_PATH` 覆盖。
    - **导出的是索引里真正入库的切片**（按 `chunk_seq` 排序），不是重切一遍 —— 所见即所存。
    - 覆盖重传或删除文档时，同步删掉旧的导出文件。
    - 管控台文档列表**只显示这个文件路径**（可复制），点不点得开由用户自己决定。
@@ -193,14 +193,14 @@ ES mapping 要跟着补：`metadata` 加 `dynamic: false`，上面这些字段**
 
 | 位置 | 内容 |
 |---|---|
-| `stringer-infrastructure/.../ingestion/txt/` | `TxtSplitter` + `TxtNormalizer` / `TxtCleaner` / `OutlineReader` / `Chunker` |
-| `stringer-server/.../knowledge/ChunkExporter.java` | 按 `docId` 从索引读回切片 → 写 txt；随上传自动执行，删除文档时清文件 |
+| `domainplane-infrastructure/.../ingestion/txt/` | `TxtSplitter` + `TxtNormalizer` / `TxtCleaner` / `OutlineReader` / `Chunker` |
+| `domainplane-server/.../knowledge/ChunkExporter.java` | 按 `docId` 从索引读回切片 → 写 txt；随上传自动执行，删除文档时清文件 |
 | `TextDocumentProcessStrategy` | 扩展名收窄为 `txt` |
 | `RagProperties` | 切片三项 |
 | `KnowledgeBaseService` | 返回 `chunks` / `sections` / `dropped` / `encoding`；上传后触发导出，删除时清文件 |
 | `AdminController` | 文档列表出参加 `exportPath` |
 | `EsIndexManager` | mapping：`metadata` 全显式声明 + `doc_id` 改 `keyword` |
-| `StorageLocations` / `RuntimeEnvironment` / `application.yaml` | 第三个根目录「导出」（`stringer.export.path` / `STRINGER_EXPORT_PATH`，默认 `%ProgramData%\Stringer\chunks`） |
+| `StorageLocations` / `RuntimeEnvironment` / `application.yaml` | 第三个根目录「导出」（`domainplane.export.path` / `DOMAINPLANE_EXPORT_PATH`，默认 `%ProgramData%\DomainPlane\chunks`） |
 | `ingestion/splitter/ChineseArticleDocumentSplitter` | 已被 `TxtSplitter` 取代，删除 |
 | `DocumentProcessStrategyFactory` 与 `Pdf` / `Unknown` 策略 | 保留 —— 后续格式的扩展点 |
 | `knowledge.html` | 文档列表加「切片文件」列，只显示路径（可复制） |

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.zzkingcc</groupId>
+        <artifactId>DomainPlane</artifactId>
+        <version>v1.0-beta.1</version>
+    </parent>
+
+    <artifactId>domainplane-client-core</artifactId>
+    <name>domainplane-client-core</name>
+    <description>DomainPlane SDK 客户端基础设施：WebClient 装配 + 凭证换取与缓存 + 传输层错误翻译 + 启动期连通性探测。
+        被对话 SDK 与知识库 SDK 共同依赖，本身不提供任何业务能力 —— 引哪个 SDK 由接入方按需要决定。</description>
+
+    <dependencies>
+        <!-- ===== 公共契约层：契约 + 公共异常 + 服务端连接配置 ===== -->
+        <dependency>
+            <groupId>com.zzkingcc</groupId>
+            <artifactId>domainplane-sdk-core</artifactId>
+        </dependency>
+
+        <!-- ===== Spring Boot 装配 ===== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+        <!-- 响应式 WebClient：对话走 SSE 长连接，知识库走 multipart，同一条通道 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+        <!-- Jackson：把服务端的错误报文 {code,...} 还原成带码异常，属直接使用 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- Lombok 只在编译期生成代码，provided 不进交付物 -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+    </dependencies>
+</project>

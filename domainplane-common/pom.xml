@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.zzkingcc</groupId>
+        <artifactId>DomainPlane</artifactId>
+        <version>v1.0-beta.1</version>
+    </parent>
+
+    <artifactId>domainplane-common</artifactId>
+    <name>domainplane-common</name>
+    <description>DomainPlane 公共支撑：异常体系 + 通用工具（仅依赖 api 契约层）</description>
+
+    <dependencies>
+        <!-- 错误码契约：异常体系需要引用 ErrorCode，故依赖最底层的 api -->
+        <dependency>
+            <groupId>com.zzkingcc</groupId>
+            <artifactId>domainplane-api</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+    </dependencies>
+</project>

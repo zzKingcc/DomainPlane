@@ -1,6 +1,6 @@
 # SDK 契约表（注解与门面的完整参数）
 
-> 用途：`@Tool` 注解体系与 `StringerAgent` 门面的完整契约。**§1~§6 即当前实现的全部形态**。
+> 用途：`@Tool` 注解体系与 `DomainPlaneAgent` 门面的完整契约。**§1~§6 即当前实现的全部形态**。
 > 来源：`DESIGN-1.0.md` §4（工具体系）与 §5（消费侧 SDK）。
 > 记法：**必填**列里标「是」的只有一个字段 —— 工具声明只有一个必填项。
 
@@ -72,12 +72,12 @@
 
 | 元素 | 签名 | 说明 |
 | --- | --- | --- |
-| `StringerAgentFactory` | `StringerAgent forDomain(String domainId)` | 唯一的域绑定入口。`domainId` 为 `null`/空白 → 根域 `default`；返回的实例**可缓存复用**（线程安全） |
+| `DomainPlaneAgentFactory` | `DomainPlaneAgent forDomain(String domainId)` | 唯一的域绑定入口。`domainId` 为 `null`/空白 → 根域 `default`；返回的实例**可缓存复用**（线程安全） |
 
-> 实现：坐标 `stringer-chat-client`；`StringerAgentFactory.forDomain(domainId)` → `StringerAgent`
-> （`DefaultStringerAgentFactory` / `DefaultStringerAgent`，按归一化域名缓存；`ChatAutoConfiguration` 暴露 `StringerAgentFactory` Bean）。
+> 实现：坐标 `domainplane-chat-client`；`DomainPlaneAgentFactory.forDomain(domainId)` → `DomainPlaneAgent`
+> （`DefaultDomainPlaneAgentFactory` / `DefaultDomainPlaneAgent`，按归一化域名缓存；`ChatAutoConfiguration` 暴露 `DomainPlaneAgentFactory` Bean）。
 
-### 5.2 `StringerAgent` 方法
+### 5.2 `DomainPlaneAgent` 方法
 
 | 方法 | 参数 | 返回 | 说明 | 使用占比预估 |
 | --- | --- | --- | --- | --- |
@@ -123,10 +123,10 @@
 
 | 键 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `stringer.server` | `String`（URL） | `http://localhost:9527` | 服务端地址，单个 URL（协议、主机、端口写在一起）；对话 / 知识库 / 工具实例共用 |
-| `stringer.username` / `password` | `String` | `stringer` | 接入账号 |
-| `stringer.tools` | `boolean` | `false` | 是否把本进程的 `@Tool` 方法注册给服务端 |
-| `stringer.client.*` | — | — | 调用行为（`health-check-timeout` / `connect-timeout` / `read-timeout`），两个 SDK 共用 |
+| `domainplane.server` | `String`（URL） | `http://localhost:9527` | 服务端地址，单个 URL（协议、主机、端口写在一起）；对话 / 知识库 / 工具实例共用 |
+| `domainplane.username` / `password` | `String` | `domainplane` | 接入账号 |
+| `domainplane.tools` | `boolean` | `false` | 是否把本进程的 `@Tool` 方法注册给服务端 |
+| `domainplane.client.*` | — | — | 调用行为（`health-check-timeout` / `connect-timeout` / `read-timeout`），两个 SDK 共用 |
 
 **不要求填的（有默认值，只在需要时改）**：健康检查/连接/读取超时、实例 id（自动生成）、端点（自动推导）、心跳周期、退避上限、请求超时。
 

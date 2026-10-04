@@ -3,16 +3,16 @@
   <component name="Encoding">
     <file url="file://$PROJECT_DIR$/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/resources" charset="UTF-8" />
-    <file url="file://$PROJECT_DIR$/stringer-api/src/main/java" charset="UTF-8" />
-    <file url="file://$PROJECT_DIR$/stringer-chat-client/src/main/java" charset="UTF-8" />
-    <file url="file://$PROJECT_DIR$/stringer-client-core/src/main/java" charset="UTF-8" />
-    <file url="file://$PROJECT_DIR$/stringer-common/src/main/java" charset="UTF-8" />
-    <file url="file://$PROJECT_DIR$/stringer-domain/src/main/java" charset="UTF-8" />
-    <file url="file://$PROJECT_DIR$/stringer-infrastructure/src/main/java" charset="UTF-8" />
-    <file url="file://$PROJECT_DIR$/stringer-kb-client/src/main/java" charset="UTF-8" />
-    <file url="file://$PROJECT_DIR$/stringer-runtime/src/main/java" charset="UTF-8" />
-    <file url="file://$PROJECT_DIR$/stringer-sdk-core/src/main/java" charset="UTF-8" />
-    <file url="file://$PROJECT_DIR$/stringer-server/src/main/java" charset="UTF-8" />
-    <file url="file://$PROJECT_DIR$/stringer-tool-provider/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/domainplane-api/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/domainplane-chat-client/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/domainplane-client-core/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/domainplane-common/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/domainplane-domain/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/domainplane-infrastructure/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/domainplane-kb-client/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/domainplane-runtime/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/domainplane-sdk-core/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/domainplane-server/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/domainplane-tool-provider/src/main/java" charset="UTF-8" />
   </component>
 </project>

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.zzkingcc</groupId>
+        <artifactId>DomainPlane</artifactId>
+        <version>v1.0-beta.1</version>
+    </parent>
+
+    <artifactId>domainplane-sdk-core</artifactId>
+    <name>domainplane-sdk-core</name>
+    <description>DomainPlane SDK 公共契约层：对外契约（api）+ 公共异常 / 输入安全（common）+ 服务端连接配置，
+        被对话 / 知识库 / 工具三个 SDK 共同依赖，本身不含任何可独立运行的能力</description>
+
+    <dependencies>
+        <!-- ===== 对外契约层：DomainPlaneAgent / 事件 / DTO / 错误码 / 工具注解 ===== -->
+        <dependency>
+            <groupId>com.zzkingcc</groupId>
+            <artifactId>domainplane-api</artifactId>
+        </dependency>
+        <!-- 公共异常体系与输入安全：接入方做统一错误码响应、入参校验时直接可用 -->
+        <dependency>
+            <groupId>com.zzkingcc</groupId>
+            <artifactId>domainplane-common</artifactId>
+        </dependency>
+
+        <!-- 只取 @ConfigurationProperties 注解模型，让共享配置类能在两个 SDK 里被装配 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+    </dependencies>
+</project>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.zzkingcc</groupId>
+        <artifactId>DomainPlane</artifactId>
+        <version>v1.0-beta.1</version>
+    </parent>
+
+    <artifactId>domainplane-kb-client</artifactId>
+    <name>domainplane-kb-client</name>
+    <description>DomainPlane 知识库 SDK：文档上传 / 列表 / 删除（按域落到对应索引）。
+        与对话 SDK 相互独立 —— 只要知识库能力就只引这个，不必带上 Agent 门面。</description>
+
+    <dependencies>
+        <!-- ===== 客户端基础设施：WebClient + 凭证 + 错误翻译 + 启动探测 ===== -->
+        <dependency>
+            <groupId>com.zzkingcc</groupId>
+            <artifactId>domainplane-client-core</artifactId>
+        </dependency>
+
+        <!-- ===== Spring Boot 装配 ===== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+        <!-- 响应式 WebClient：multipart 上传（MultipartBodyBuilder / BodyInserters）属直接使用，
+             显式声明而不依赖从 client-core 传过来的传递依赖 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+    </dependencies>
+</project>

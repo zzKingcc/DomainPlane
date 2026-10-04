@@ -1,6 +1,6 @@
-# Stringer 设计总览（历史版本）
+# DomainPlane 设计总览（历史版本）
 
-> ⚠️ **历史文档，已被取代**：本文是 Stringer 设计总览的**历史版本**（1.0 时代），已被 [`DESIGN.md`](DESIGN.md) 取代 —— 后者的 §1~§18 覆盖本文全部主题，仅作决策留档。当前实现以 `DESIGN.md` 与源码为准。
+> ⚠️ **历史文档，已被取代**：本文是 DomainPlane 设计总览的**历史版本**（1.0 时代），已被 [`DESIGN.md`](DESIGN.md) 取代 —— 后者的 §1~§18 覆盖本文全部主题，仅作决策留档。当前实现以 `DESIGN.md` 与源码为准。
 >
 > 对应关系：本文 §1 → `DESIGN.md` §1/§2；§2 → `DESIGN.md` §4；§3 → `DESIGN.md` §3；§4 → `DESIGN.md` §5；§5 → `DESIGN.md` §5、`API.md` 与 `SDK-USAGE.md`。
 
@@ -8,16 +8,16 @@
 
 ## 1 定位与结构
 
-Stringer 是 **Java 生态的 AI Agent 运行时中间件**：服务端承载全部重逻辑与治理，业务应用通过薄 SDK 调用，工具可以住在业务进程里。
+DomainPlane 是 **Java 生态的 AI Agent 运行时中间件**：服务端承载全部重逻辑与治理，业务应用通过薄 SDK 调用，工具可以住在业务进程里。
 
 ```
                     ┌──────────────────────────────────────────┐
-   业务应用          │  stringer-server（服务端，可独立部署）      │
+   业务应用          │  domainplane-server（服务端，可独立部署）      │
    ┌────────────┐   │                                          │
    │ @Tool 方法 │──┼──▶ 工具注册 / 心跳 / 副本 ◀── 工具实例上报   │
    └────────────┘   │                                          │
    ┌────────────┐   │  ┌────────────────────────────────────┐  │
-   │StringerAgent│──┼─▶│ 域（Domain）：工具集 + 提示词 + 知识 │  │
+   │DomainPlaneAgent│──┼─▶│ 域（Domain）：工具集 + 提示词 + 知识 │  │
    └────────────┘   │  └───────────────┬────────────────────┘  │
     (forDomain)     │                  ▼                        │
                     │   图编排 agent → 条件边 → tools → agent    │
@@ -32,16 +32,16 @@ Stringer 是 **Java 生态的 AI Agent 运行时中间件**：服务端承载全
 
 | 坐标 | 作用 |
 | --- | --- |
-| `stringer-chat-client` | **对话 SDK**：`StringerAgent` 门面（`forDomain` → `ask` / `stream` / `events` / `resume` / `stop`） |
-| `stringer-kb-client` | **知识库 SDK**：`KnowledgeBaseClient`（文档上传 / 列表 / 删除，按域落到对应索引） |
-| `stringer-tool-provider` | **工具 SDK**：把本进程的 `@Tool` 方法注册给服务端（`stringer.tools=true` 才装配） |
-| `stringer-client-core` | 客户端底座（传递）：WebClient / 凭证换取 / 错误翻译 / 启动期探测，被对话与知识库 SDK 共用 |
-| `stringer-sdk-core` | 契约 + 公共异常 + 连接配置（传递，接入方不直接引） |
-| `stringer-server` | 服务端，承载编排、注册表、管控台 |
-| `stringer-api` | 契约层（注解、事件、错误码）——只依赖 `jackson-annotations`，随 `sdk-core` 传递 |
+| `domainplane-chat-client` | **对话 SDK**：`DomainPlaneAgent` 门面（`forDomain` → `ask` / `stream` / `events` / `resume` / `stop`） |
+| `domainplane-kb-client` | **知识库 SDK**：`KnowledgeBaseClient`（文档上传 / 列表 / 删除，按域落到对应索引） |
+| `domainplane-tool-provider` | **工具 SDK**：把本进程的 `@Tool` 方法注册给服务端（`domainplane.tools=true` 才装配） |
+| `domainplane-client-core` | 客户端底座（传递）：WebClient / 凭证换取 / 错误翻译 / 启动期探测，被对话与知识库 SDK 共用 |
+| `domainplane-sdk-core` | 契约 + 公共异常 + 连接配置（传递，接入方不直接引） |
+| `domainplane-server` | 服务端，承载编排、注册表、管控台 |
+| `domainplane-api` | 契约层（注解、事件、错误码）——只依赖 `jackson-annotations`，随 `sdk-core` 传递 |
 | 其余（`common` / `domain` / `infrastructure` / `runtime`） | 内部实现，不单独交付 |
 
-三个 SDK 读**同一份** `stringer.*` 配置（服务端只有一个账号、工具注册表也只有一份），
+三个 SDK 读**同一份** `domainplane.*` 配置（服务端只有一个账号、工具注册表也只有一份），
 且都只用 `spring-web` 的注解模型与出站 `WebClient`：**Web 容器始终归宿主**，引 SDK 不会改变宿主的 Web 栈判定。
 
 ---
@@ -119,7 +119,7 @@ public class OrderTools {
 业务代码
   │  factory.forDomain("customer-service").ask(sessionId, question, tenantId, userId)
   ▼
-StringerAgent ──HTTP SSE──▶ ServerAgentController ──▶ AgentOrchestrationService
+DomainPlaneAgent ──HTTP SSE──▶ ServerAgentController ──▶ AgentOrchestrationService
                                                             │
         ┌───────────────────────────────────────────────────┘
         ▼
@@ -158,7 +158,7 @@ StringerAgent ──HTTP SSE──▶ ServerAgentController ──▶ AgentOrche
 
 ### 4.2 参数 schema：两端同一棵树
 
-`ParamSchemaResolver`（在 `stringer-api`）是**唯一真相**：方法签名 + 注解 → `ToolDescriptor.Param` 树。
+`ParamSchemaResolver`（在 `domainplane-api`）是**唯一真相**：方法签名 + 注解 → `ToolDescriptor.Param` 树。
 服务端本地扫描、远端工具实例上报、上报 JSON 渲染**共用这一棵树**，所以"同一段工具代码搬到服务端进程"参数结构不变。
 
 | 类型 | 展开 |
@@ -193,10 +193,10 @@ public OrderVO query(OrderQuery args) { ... }
 
 ## 5 消费侧 SDK
 
-### 5.1 唯一入口：`StringerAgent`
+### 5.1 唯一入口：`DomainPlaneAgent`
 
 ```java
-StringerAgent agent = factory.forDomain("customer-service"); // 绑定一次，可复用（线程安全）
+DomainPlaneAgent agent = factory.forDomain("customer-service"); // 绑定一次，可复用（线程安全）
 
 String answer       = agent.ask(sessionId, question, tenantId, userId);    // ① 只要答案
 Flux<String> tokens = agent.stream(sessionId, question, tenantId, userId); // ② 逐字输出
@@ -207,29 +207,29 @@ boolean stopped = agent.stop(sessionId);
 ```
 
 `forDomain(...)` 在**取得实例时**绑定域，门面上的方法签名里没有 profile 参数——写不出"忘记传域"的代码。
-`ask` / `stream` 遇审批抛 `ApprovalRequiredException`，遇错误抛携带 `ErrorCode` 的 `StringerException`。
+`ask` / `stream` 遇审批抛 `ApprovalRequiredException`，遇错误抛携带 `ErrorCode` 的 `DomainPlaneException`。
 
 ### 5.2 配置
 
 ```yaml
-stringer:
+domainplane:
   server: http://localhost:9527   # 服务端地址（含协议与端口）
-  username: stringer              # 接入账号（默认即为 stringer，常可不写）
-  password: stringer              # 接入密码（同上）
+  username: domainplane              # 接入账号（默认即为 domainplane，常可不写）
+  password: domainplane              # 接入密码（同上）
   tools: true                     # 把本进程的 @Tool 注册给服务端（默认 false）
 ```
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `stringer.server` | `http://localhost:9527` | 服务端 URL；未写端口时按协议取默认（http 80 / https 443） |
-| `stringer.username` / `stringer.password` | `stringer` | 接入账号 |
-| `stringer.tools` | `false` | 启用工具实例（会在本进程起心跳线程并暴露回调端点） |
-| `stringer.client.*` | 见 `DESIGN.md` | 调用超时（高级，几乎不改） |
-| `stringer.tool-instance.*` | 见 `DESIGN.md` | 实例 id / 回调地址 / 心跳（跨机部署才动） |
+| `domainplane.server` | `http://localhost:9527` | 服务端 URL；未写端口时按协议取默认（http 80 / https 443） |
+| `domainplane.username` / `domainplane.password` | `domainplane` | 接入账号 |
+| `domainplane.tools` | `false` | 启用工具实例（会在本进程起心跳线程并暴露回调端点） |
+| `domainplane.client.*` | 见 `DESIGN.md` | 调用超时（高级，几乎不改） |
+| `domainplane.tool-instance.*` | 见 `DESIGN.md` | 实例 id / 回调地址 / 心跳（跨机部署才动） |
 
 ### 5.3 知识库 SDK：`KnowledgeBaseClient`
 
-引 `stringer-kb-client` 即自动装配，与对话 SDK 相互独立（地址与账号读同一份 `stringer.*`）：
+引 `domainplane-kb-client` 即自动装配，与对话 SDK 相互独立（地址与账号读同一份 `domainplane.*`）：
 
 ```java
 KnowledgeBaseClient.UploadResult r = kb.upload(bytes, "员工手册.pdf", false);      // 落到根域 default
@@ -245,7 +245,7 @@ kb.delete(r.docId());                                                           
 ### 5.4 裸 HTTP
 
 `POST /api/agent/chat`（SSE），请求体为 `AgentRequest`：`sessionId` / `message` / `profile`（即域）/ `tenantId` / `userId`。
-`AgentService` 是内核契约，SDK 内部持有其远程实现；消费侧入口只有 `StringerAgent`。
+`AgentService` 是内核契约，SDK 内部持有其远程实现；消费侧入口只有 `DomainPlaneAgent`。
 
 ---
 
@@ -259,5 +259,5 @@ kb.delete(r.docId());                                                           
 | **T3 扩展点** | 检索 / 记忆 / 检查点 SPI（`FusionStrategy` 已可插拔） | 部分可插拔（`DESIGN.md` §8.3） |
 | **T8 契约演进** | 错误码接口化、事件加 usage/node、HTTP 版本化、幂等键 | 未实施 |
 | **T1 / T2 / T5 / T6 / T7 / T9** | 状态外置、租户数据面、检索深化、编排升级、MCP、可观测 | 未实施 |
-| **重写 example** | 接入示例重新编写 | `stringer-example` 已移除（`DESIGN.md` §2） |
+| **重写 example** | 接入示例重新编写 | `domainplane-example` 已移除（`DESIGN.md` §2） |
 | **skill 系统** | 能力包形态待 1.0 后定（暂缓） | 未实施 |

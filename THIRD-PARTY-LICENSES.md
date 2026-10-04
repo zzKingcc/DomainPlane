@@ -32,7 +32,7 @@ mvn org.codehaus.mojo:license-maven-plugin:2.4.0:aggregate-add-third-party
 | Micrometer (observation / commons) | 随 Boot | Apache-2.0 | 仅作观测 API 传递依赖，未启用指标后端 |
 | Apache POI（poi / poi-ooxml / poi-scratchpad / xmlbeans） | 5.4.1 | Apache-2.0 | docx 解析：段落样式（Heading N）与大纲级别取标题层级、表格转 markdown；excel（.xls / .xlsx）解析：工作表转 markdown 表格（`WorkbookFactory` + `DataFormatter`）；旧版 doc 解析：HWPF 取大纲级别与表格（`poi-scratchpad` 是本轮唯一新增的构件） |
 | Apache PDFBox（pdfbox / pdfbox-io / fontbox） | 3.0.8 | Apache-2.0 | pdf 解析：抽行（文本 + 字号 + 坐标 + 页码）、页眉页脚清洗、跨页段落拼接 |
-| Apache POI 官方测试样例（3 个 `.doc`，**仅测试资源，不进交付物**） | 取自 `apache/poi` 的 `test-data/document/` | Apache-2.0 | `stringer-infrastructure/src/test/resources/ingestion/doc/`：`simple-table.doc` / `Lists.doc` / `Word6.doc`。旧版 `.doc` 无法用代码现造，必须有真实二进制文件才能回归（来源与 SHA-256 见该目录 README） |
+| Apache POI 官方测试样例（3 个 `.doc`，**仅测试资源，不进交付物**） | 取自 `apache/poi` 的 `test-data/document/` | Apache-2.0 | `domainplane-infrastructure/src/test/resources/ingestion/doc/`：`simple-table.doc` / `Lists.doc` / `Word6.doc`。旧版 `.doc` 无法用代码现造，必须有真实二进制文件才能回归（来源与 SHA-256 见该目录 README） |
 | Lombok | 随 Boot | MIT | 编译期代码生成（**不进入运行时**，编译期可选依赖） |
 
 ## 刻意未引入的组件（评审时请勿按"漏列"处理）
@@ -47,10 +47,10 @@ mvn org.codehaus.mojo:license-maven-plugin:2.4.0:aggregate-add-third-party
 1. **Logback 是双许可（EPL-1.0 / LGPL-2.1）**：分发整包时按 EPL-1.0 履行即可，
    但若贵司政策排斥 LGPL 系许可，请在清单里明确选择 EPL-1.0 并保留其许可文本。
 2. **Lombok 是 `provided` 作用域且已被显式排除**：它只参与编译，不进入 fat jar
-   （`stringer-server` 的 spring-boot-maven-plugin 配了 `<excludes>`，因为 provided 作用域仍会被 Boot 打包），
+   （`domainplane-server` 的 spring-boot-maven-plugin 配了 `<excludes>`，因为 provided 作用域仍会被 Boot 打包），
    通常无需列入分发许可，但源码分发场景下仍需保留其 MIT 许可声明。
 
 ## 本项目的许可
 
-Stringer 本体以 **Apache-2.0** 分发（见根目录 `LICENSE`）。
+DomainPlane 本体以 **Apache-2.0** 分发（见根目录 `LICENSE`）。
 分发时需随附该文件，并在显著位置保留版权与许可声明。

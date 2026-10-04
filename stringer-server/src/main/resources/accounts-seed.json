@@ -1,6 +1,0 @@
-{
-  "_comment": "默认账号种子。首次启动时若 config/accounts.json 不存在，会据此落盘（密码写入时做 BCrypt 哈希，明文只存在于本文件与内存）。改密码请走管控台「账号」页，不要改这里——改了也不会生效（文件已存在时种子不再参与）。",
-  "_recovery": "忘记密码的唯一出口：删除 config/accounts.json，重启后即回落到本种子。",
-  "username": "stringer",
-  "password": "stringer"
-}

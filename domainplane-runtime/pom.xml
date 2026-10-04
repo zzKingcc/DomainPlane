@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.zzkingcc</groupId>
+        <artifactId>DomainPlane</artifactId>
+        <version>v1.0-beta.1</version>
+    </parent>
+
+    <artifactId>domainplane-runtime</artifactId>
+    <name>domainplane-runtime</name>
+    <description>DomainPlane Agent 运行时内核：图编排 / 工具体系 / 流式输出 / 任务取消 / 用量统计（零 Web 依赖）</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.zzkingcc</groupId>
+            <artifactId>domainplane-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.zzkingcc</groupId>
+            <artifactId>domainplane-domain</artifactId>
+        </dependency>
+        <!-- 异常体系（仅 api + slf4j，无 Web 依赖）。编排层需要按类型识别
+             NotConfiguredException，以便把"依赖未配置"从通用执行失败里区分出来 -->
+        <dependency>
+            <groupId>com.zzkingcc</groupId>
+            <artifactId>domainplane-common</artifactId>
+        </dependency>
+
+        <!-- LangChain4j 核心（消息、工具、模型接口） -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-core</artifactId>
+        </dependency>
+        <!-- LangChain4j 主模块（ChatMemoryProvider / DefaultToolExecutor 位于此） -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+        </dependency>
+
+        <!-- LangGraph4j 图编排 -->
+        <dependency>
+            <groupId>org.bsc.langgraph4j</groupId>
+            <artifactId>langgraph4j-core</artifactId>
+        </dependency>
+
+        <!-- Reactor 流式输出 -->
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-core</artifactId>
+        </dependency>
+
+        <!-- Jackson：中断事件的 ToolCallPayload 序列化（Spring Boot 应用必然引入，此处显式声明） -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- Spring 基础注解（@Component），不引入 Web 容器 -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+
+        <!-- Lombok 只在编译期生成代码，provided 不进交付物 -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+    </dependencies>
+</project>

@@ -1,4 +1,4 @@
-# Stringer API 文档
+# DomainPlane API 文档
 
 适用对象：接入方（业务应用）、工具实例提供方、运维（管控台接口）。
 设计背景与内部结构见 `DESIGN.md`。
@@ -15,8 +15,8 @@
 
 | 接口组 | 载具 | 说明 |
 | --- | --- | --- |
-| `/api/agent/**` | 请求头 `X-Stringer-Credential` | 凭证由 `POST /api/agent/login` 获取 |
-| `/admin/**` | Cookie `stringer_admin` | 无 Cookie 时回退读 `X-Stringer-Credential` 请求头，供程序化调用 |
+| `/api/agent/**` | 请求头 `X-DomainPlane-Credential` | 凭证由 `POST /api/agent/login` 获取 |
+| `/admin/**` | Cookie `domainplane_admin` | 无 Cookie 时回退读 `X-DomainPlane-Credential` 请求头，供程序化调用 |
 
 免鉴权路径：`/api/agent/login`、`/admin/login`、`/admin/init`、`/admin/session`、登录页与静态资源（`/admin.html`、`/login.html`、`/console/**`）、`/error`、`/favicon.ico`。`OPTIONS` 请求一律放行。
 
@@ -63,7 +63,7 @@
 | 项 | 值 |
 | --- | --- |
 | 用途 | 容器编排与负载均衡的存活探针（K8s `httpGet`、Docker `HEALTHCHECK`、compose `healthcheck`） |
-| 响应 | `{"code":0, "status":"UP", "service":"stringer-server", "version":"v1.0-beta.1"}` |
+| 响应 | `{"code":0, "status":"UP", "service":"domainplane-server", "version":"v1.0-beta.1"}` |
 | 语义 | **只表示进程能对外服务**，不检查 ES / Redis / 模型服务 |
 
 进程存活与"依赖是否可用"是两件事：把依赖写进探针，会让刚部署、还没填配置的实例被判为不健康而反复重启；而已配置但依赖抖动时，重启进程也修不好依赖。依赖状态见启动横幅与管控台「存储配置」页。
@@ -92,7 +92,7 @@
 | --- | --- | --- | --- |
 | `sessionId` | String | 是 | 会话唯一键（**域内唯一**：不同域可以用同一个 sessionId，服务端状态按 `(域, sessionId)` 隔离；不得含 `\|`） |
 | `message` | String | 是 | 用户消息 |
-| `profile` | String | 否 | 域（**完整路径**，如 `default.sales`）；为空时归一化为根域 `default`。走 SDK 则用 `StringerAgentFactory.forDomain(...)` 在绑定时确定域，根本传不出空值；该域不存在（`10004`）或**不是可调用单元**（`10010`）都会被拒绝 |
+| `profile` | String | 否 | 域（**完整路径**，如 `default.sales`）；为空时归一化为根域 `default`。走 SDK 则用 `DomainPlaneAgentFactory.forDomain(...)` 在绑定时确定域，根本传不出空值；该域不存在（`10004`）或**不是可调用单元**（`10010`）都会被拒绝 |
 | `tenantId` | String | 否 | 审计字段，写入日志；不承担隔离职责 |
 | `userId` | String | 否 | 同上 |
 | `attributes` | Map | 否 | 附加属性 |
@@ -164,7 +164,7 @@
 | 顶层字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `instanceId` | 是 | 实例标识，缺失报 400 |
-| `endpoint` | 是 | 工具调用回流地址（`POST /stringer/invoke` 的完整 URL） |
+| `endpoint` | 是 | 工具调用回流地址（`POST /domainplane/invoke` 的完整 URL） |
 | `manifest` | 是 | **必须是数组**，承载本次声明的全量工具；不是数组直接报 400 |
 
 `manifest[]` 单项被服务端读取的字段（`ToolManifest:102-149`）：
@@ -379,9 +379,9 @@
 
 约定：上传为同步（切片与向量化完成后才返回）；**同一域内**同名不区分大小写，默认拒绝，`replace=true` 先删后写；`rebuild` 会清空全部知识库索引，之后需重新上传文档。
 
-上传只接受 `stringer.rag.allowed-extensions` 白名单内的类型，当前是 `txt` / `md` / `markdown` / `docx` / `doc` / `pdf` / `xls` / `xlsx`。**文本类**（`txt` / `md` / `markdown`）按入口探测的编码（BOM → 严格 UTF-8 → GB18030）**统一转成 UTF-8** 后再入库，两种编码都判不出会直接拒绝该文件；**二进制类**（`docx` / `doc` / `pdf` / `xls` / `xlsx`）不做编码探测，原始字节直接交给对应的解析器 —— 猜错编码会把乱码静默灌进知识库，比直接报错更糟。
+上传只接受 `domainplane.rag.allowed-extensions` 白名单内的类型，当前是 `txt` / `md` / `markdown` / `docx` / `doc` / `pdf` / `xls` / `xlsx`。**文本类**（`txt` / `md` / `markdown`）按入口探测的编码（BOM → 严格 UTF-8 → GB18030）**统一转成 UTF-8** 后再入库，两种编码都判不出会直接拒绝该文件；**二进制类**（`docx` / `doc` / `pdf` / `xls` / `xlsx`）不做编码探测，原始字节直接交给对应的解析器 —— 猜错编码会把乱码静默灌进知识库，比直接报错更糟。
 
-`sections`（识别到的标题数）、`droppedLines`（清洗删掉的行数）、`encoding`（实际识别的源编码）是切片质量诊断值 —— 批量上传时靠这几个数就能发现"这批文件切坏了"。`exportPath` 是切片预览 txt 的落盘路径（上传后自动导出到 `stringer.export.path`，默认 `%ProgramData%\Stringer\chunks`），管控台只展示这个路径。
+`sections`（识别到的标题数）、`droppedLines`（清洗删掉的行数）、`encoding`（实际识别的源编码）是切片质量诊断值 —— 批量上传时靠这几个数就能发现"这批文件切坏了"。`exportPath` 是切片预览 txt 的落盘路径（上传后自动导出到 `domainplane.export.path`，默认 `%ProgramData%\DomainPlane\chunks`），管控台只展示这个路径。
 
 ### 4.6 存储配置
 
@@ -454,7 +454,7 @@
 | 80003 | `TOOL_EXECUTION_FAILED` | 工具执行失败 | 是 | 500 |
 | 90000 | `LLM_TIMEOUT` | 大模型接口响应超时 | 是 | 504 |
 | 90001 | `EXTERNAL_SERVICE_TIMEOUT` | 外部服务调用超时 | 是 | 504 |
-| 90002 | `SERVER_UNREACHABLE` | 无法连接 Stringer 服务端 | 是 | 503 |
+| 90002 | `SERVER_UNREACHABLE` | 无法连接 DomainPlane 服务端 | 是 | 503 |
 | 90003 | `LLM_UNAVAILABLE` | AI 服务暂时不可用 | 是 | 503 |
 | 90004 | `STORAGE_UNAVAILABLE` | 存储服务不可用 | 是 | 503 |
 | 90005 | `DEPENDENCY_NOT_CONFIGURED` | 服务依赖尚未配置 | 否 | 503 |
@@ -469,24 +469,24 @@
 
 | 坐标 | 能力 | 该坐标暴露的 Bean |
 | --- | --- | --- |
-| `stringer-chat-client` | 对话（`ask` / `stream` / `events` / `resume` / `stop`） | `stringerAgentFactory` |
-| `stringer-kb-client` | 知识库（上传 / 列表 / 删除） | `stringerKnowledgeBaseClient` |
-| `stringer-tool-provider` | 工具注册（需显式打开 `stringer.tools=true`） | `ToolInstanceClient` |
+| `domainplane-chat-client` | 对话（`ask` / `stream` / `events` / `resume` / `stop`） | `domainplaneAgentFactory` |
+| `domainplane-kb-client` | 知识库（上传 / 列表 / 删除） | `domainplaneKnowledgeBaseClient` |
+| `domainplane-tool-provider` | 工具注册（需显式打开 `domainplane.tools=true`） | `ToolInstanceClient` |
 
-> `stringer-client-core`（WebClient / 凭证 / 错误翻译 / 启动探测）与 `stringer-sdk-core`（契约 + 连接配置）是**传递依赖**，接入方不直接引。
+> `domainplane-client-core`（WebClient / 凭证 / 错误翻译 / 启动探测）与 `domainplane-sdk-core`（契约 + 连接配置）是**传递依赖**，接入方不直接引。
 
 ### 6.1 配置
 
-前缀 `stringer.*`（地址与账号，对话 / 知识库 / 工具实例共用同一份）：
+前缀 `domainplane.*`（地址与账号，对话 / 知识库 / 工具实例共用同一份）：
 
 | 键 | 默认值 |
 | --- | --- |
 | `server` | `http://localhost:9527` |
-| `username` | `stringer` |
-| `password` | `stringer` |
+| `username` | `domainplane` |
+| `password` | `domainplane` |
 | `tools` | `false` |
 
-前缀 `stringer.client`（调用行为，两个 SDK 共用）：
+前缀 `domainplane.client`（调用行为，两个 SDK 共用）：
 
 | 键 | 默认值 |
 | --- | --- |
@@ -498,18 +498,18 @@
 
 | 自动配置类（所在坐标） | 注册的 Bean |
 | --- | --- |
-| `StringerClientAutoConfiguration`<br>（`stringer-client-core`） | `stringerWebClient`（`WebClient`，baseUrl 指向服务端）；`stringerClientCredential`（`ClientCredential`，凭证缓存与登录）；`stringerConnectivityCheck`（`SmartInitializingSingleton`，启动期探测，失败即中断启动） |
-| `ChatAutoConfiguration`<br>（`stringer-chat-client`） | `stringerAgentFactory`（`StringerAgentFactory`）：**对话唯一入口**，`forDomain(...)` → `StringerAgent`（`ask`/`stream`/`events`/`resume`/`stop`） |
-| `KnowledgeBaseAutoConfiguration`<br>（`stringer-kb-client`） | `stringerKnowledgeBaseClient`（`KnowledgeBaseClient`）：知识库管理 |
+| `DomainPlaneClientAutoConfiguration`<br>（`domainplane-client-core`） | `domainplaneWebClient`（`WebClient`，baseUrl 指向服务端）；`domainplaneClientCredential`（`ClientCredential`，凭证缓存与登录）；`domainplaneConnectivityCheck`（`SmartInitializingSingleton`，启动期探测，失败即中断启动） |
+| `ChatAutoConfiguration`<br>（`domainplane-chat-client`） | `domainplaneAgentFactory`（`DomainPlaneAgentFactory`）：**对话唯一入口**，`forDomain(...)` → `DomainPlaneAgent`（`ask`/`stream`/`events`/`resume`/`stop`） |
+| `KnowledgeBaseAutoConfiguration`<br>（`domainplane-kb-client`） | `domainplaneKnowledgeBaseClient`（`KnowledgeBaseClient`）：知识库管理 |
 
-> 底层的 `AgentService` / `AgentServiceClient` 是 SDK 内部通道，**不作为 Bean 暴露** —— 对外只有 `StringerAgent` 一个入口。
+> 底层的 `AgentService` / `AgentServiceClient` 是 SDK 内部通道，**不作为 Bean 暴露** —— 对外只有 `DomainPlaneAgent` 一个入口。
 
 ### 6.3 方法签名
 
 | 类 | 方法 |
 | --- | --- |
-| `StringerAgentFactory` | `forDomain(String domainId)` → `StringerAgent`（`null`/空白 → 根域 `default`；同域返回同一实例） |
-| `StringerAgent` | `ask(sessionId, question[, tenantId, userId])` → `String`（遇审批抛 `ApprovalRequiredException`） |
+| `DomainPlaneAgentFactory` | `forDomain(String domainId)` → `DomainPlaneAgent`（`null`/空白 → 根域 `default`；同域返回同一实例） |
+| `DomainPlaneAgent` | `ask(sessionId, question[, tenantId, userId])` → `String`（遇审批抛 `ApprovalRequiredException`） |
 | | `stream(...)` → `Flux<String>`；`events(...)` → `Flux<AgentEvent>` |
 | | `resume(sessionId, approved)` → `Flux<AgentEvent>`；`stop(sessionId)` → `boolean`；`domainId()` → `String` |
 | `ClientCredential` | `get()`、`invalidate()`、`login()`、`extractHttpStatus(Throwable)` |
@@ -518,14 +518,14 @@
 | | `list()` → `List<DocumentItem(docId, fileName, chunks)>` |
 | | `delete(String docId)` |
 
-客户端异常统一为 `StringerException`（携带 `ErrorCode`）；启动探测失败抛 `StringerStartupException`；
+客户端异常统一为 `DomainPlaneException`（携带 `ErrorCode`）；启动探测失败抛 `DomainPlaneStartupException`；
 `ask` / `stream` 命中人工审批时抛 `ApprovalRequiredException`（带 `sessionId` / `domainId` / `tools` / `traceId`）。
 
 ---
 
 ## 7 工具实例（SDK）
 
-> 坐标 `stringer-tool-provider`，与对话 / 知识库 SDK 相互独立（见 §6）；开启开关是 `stringer.tools=true`（不在本组前缀下）。
+> 坐标 `domainplane-tool-provider`，与对话 / 知识库 SDK 相互独立（见 §6）；开启开关是 `domainplane.tools=true`（不在本组前缀下）。
 
 ### 7.1 注解
 
@@ -535,23 +535,23 @@
 
 两种生效场景：
 
-- **工具实例侧（本 SDK）**：方法所在类注册为 Spring Bean 即可，由 `AnnotatedToolScanner` 在装配期扫描注册；参数 schema 由方法签名推导，`@ToolParam` 补语义，`@Tool(approval=...)` 定审批。
-- **服务端进程内**：任意 Spring Bean 即可（见 `INSTANCE.md` §5）。`StringerToolProvider` 为可选标记，实现了照样被扫到。
+- **工具实例侧（本 SDK）**：方法所在类注册为 Spring Bean 即可，由 `ToolProviderScanner` 在装配期扫描注册；参数 schema 由方法签名推导，`@ToolParam` 补语义，`@Tool(approval=...)` 定审批。
+- **服务端进程内**：任意 Spring Bean 即可（见 `INSTANCE.md` §5）。`DomainPlaneToolProvider` 为可选标记，实现了照样被扫到。
 
-开关 `stringer.tool-instance.scan-annotated`（默认 `true`）。
+开关 `domainplane.tool-instance.scan-annotated`（默认 `true`）。
 
 ### 7.2 配置
 
-服务端地址与账号读 `stringer.server`（单个 URL，默认 `http://localhost:9527`）与 `stringer.username` / `password`（默认 `stringer` / `stringer`），与对话 / 知识库 SDK 共用同一份。
+服务端地址与账号读 `domainplane.server`（单个 URL，默认 `http://localhost:9527`）与 `domainplane.username` / `password`（默认 `domainplane` / `domainplane`），与对话 / 知识库 SDK 共用同一份。
 
-前缀 `stringer.tool-instance`：
+前缀 `domainplane.tool-instance`：
 
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `stringer.tools` | `false` | **开启开关不在本组**：必须显式写 `stringer.tools=true`，否则整组配置不生效 |
+| `domainplane.tools` | `false` | **开启开关不在本组**：必须显式写 `domainplane.tools=true`，否则整组配置不生效 |
 | `scan-annotated` | true | 是否扫描 `@Tool` 注解方法并自动注册；关闭后只认 `ToolInstanceContributor` 编程式注册 |
 | `instance-id` | — | 实例标识 |
-| `endpoint` | 推导 | 本实例对外可达地址，服务端反向调用用；留空按 `http://localhost:{本进程端口}/stringer/invoke` 推导，跨机部署必须显式填写 |
+| `endpoint` | 推导 | 本实例对外可达地址，服务端反向调用用；留空按 `http://localhost:{本进程端口}/domainplane/invoke` 推导，跨机部署必须显式填写 |
 | `heartbeat-interval-seconds` | 5 | 心跳周期 |
 | `max-backoff-seconds` | 20 | 连续失败退避上限 |
 | `request-timeout-millis` | 10000 | 出站请求超时 |
@@ -565,11 +565,11 @@
 | `ToolSpec` | 工具声明（序列化为注册报文的 `manifest` 项） |
 | `ToolInstanceConfig` | 实例身份配置 |
 | `ToolRegistrar` | 注册扩展点 |
-| `AnnotatedToolScanner` | 扫描 Spring 容器里带 `@Tool` 的方法，转成 `ToolSpec` + 反射执行体并注册 |
+| `ToolProviderScanner` | 扫描 Spring 容器里带 `@Tool` 的方法，转成 `ToolSpec` + 反射执行体并注册 |
 
 ### 7.4 反向调用协议（服务端 → 实例）
 
-实例侧端点：`POST /stringer/invoke`
+实例侧端点：`POST /domainplane/invoke`
 
 请求体：
 

@@ -188,10 +188,10 @@ OpenAiChatModel / OpenAiStreamingChatModel 实例
 
 ### 5.1 接口
 
-内核与「模型档案」之间的唯一接口放在**内核侧**（不是 `stringer-api`）—— `api` 没引 langchain4j，把模型类型塞进对外契约会污染 SDK 依赖：
+内核与「模型档案」之间的唯一接口放在**内核侧**（不是 `domainplane-api`）—— `api` 没引 langchain4j，把模型类型塞进对外契约会污染 SDK 依赖：
 
 ```java
-// stringer-runtime：com.zzkingcc.stringer.runtime.model
+// domainplane-runtime：com.zzkingcc.domainplane.runtime.model
 public interface ModelResolver {
     StreamingChatModel streamingChat(String domain);   // domain 为完整路径，空按根域
 }
@@ -230,7 +230,7 @@ embedding 维度 → ES 索引的 dense_vector dims（建索引时定死，改�
 | 谁能引用 embedding 档案 | **只有知识空间**，不是"域直接绑 embedding" |
 | 一个知识空间的约束 | 一个知识空间 = 一个 embedding 档案 + 一个维度 + 一个索引 |
 | 同时生效的 embedding | 同一时刻**只能有一个**：向量模型只有 `llm-settings.json` 里那**一套**，全局共用 |
-| 索引粒度 | **一域一索引**（`stringer_kb_<域路径哈希>`，索引跟着域走） |
+| 索引粒度 | **一域一索引**（`domainplane_kb_<域路径哈希>`，索引跟着域走） |
 | 切换 embedding | 等价于换维度 → **必须重建全部知识库索引**（四态预检 `NEEDS_REBUILD` / `DECLARED_MISMATCH` 等） |
 | 当前做到哪 | **注册多个 embedding 档案（可切换），但同一时刻仍只有一个生效** —— 与现状一致，不引入维度冲突 |
 
@@ -280,9 +280,9 @@ embedding 维度 → ES 索引的 dense_vector dims（建索引时定死，改�
 
 | 位置 | 内容 |
 | --- | --- |
-| `stringer-runtime` `runtime/model/` | `ModelResolver` 接口；内核可选 resolver + `resolveModel()` |
-| `stringer-server` `model/` | `ModelProfile`（3 维 schema：`endpoints` / `input` / `output` + `capabilities` + `dimensions`；`isChat()`＝`endpoints` 含 `chat`；含 `fingerprint()` / `supportsTools()` / `capabilityHint()`）、`ModelProfileSettings`（落盘结构 + `resolveAlong`）、`ModelProfileStore`（`config/models.json`）、`ModelProfileRegistry`（唯一真相，含后设覆盖与级联清绑定）、`ModelClientFactory`（按指纹缓存，每个别名只留当前指纹）、`DefaultModelResolver`（只认自建档案，未绑定 / 不可用抛 `NotConfiguredException`，无内置默认旁路）、`ModelCatalog`（只读提供商元数据判定类型 / 模态 / 能力，读不到留空不猜） |
-| `stringer-server` | `config/ModelProfileConfiguration`；`AdminModelProfileController`（`/admin/model-profiles*`、`/admin/model-bindings/{domain}`） |
+| `domainplane-runtime` `runtime/model/` | `ModelResolver` 接口；内核可选 resolver + `resolveModel()` |
+| `domainplane-server` `model/` | `ModelProfile`（3 维 schema：`endpoints` / `input` / `output` + `capabilities` + `dimensions`；`isChat()`＝`endpoints` 含 `chat`；含 `fingerprint()` / `supportsTools()` / `capabilityHint()`）、`ModelProfileSettings`（落盘结构 + `resolveAlong`）、`ModelProfileStore`（`config/models.json`）、`ModelProfileRegistry`（唯一真相，含后设覆盖与级联清绑定）、`ModelClientFactory`（按指纹缓存，每个别名只留当前指纹）、`DefaultModelResolver`（只认自建档案，未绑定 / 不可用抛 `NotConfiguredException`，无内置默认旁路）、`ModelCatalog`（只读提供商元数据判定类型 / 模态 / 能力，读不到留空不猜） |
+| `domainplane-server` | `config/ModelProfileConfiguration`；`AdminModelProfileController`（`/admin/model-profiles*`、`/admin/model-bindings/{domain}`） |
 | 管控台 | `console/models.html`：「模型档案」卡（列表 + 编辑 + 测试 + 删除）与「域 → 模型绑定」卡（域清单 × 当前绑定 × 下拉设置），规则文案写进页面 |
 
 **没有内置 `default` 模型别名**：对话模型只来自自建档案，域未绑定即明确失败。`LlmModelHolder`（`llm-settings.json`）的对话模型仅作"解析器缺失"时的兜底与 `chatConfigured` 指示来源。

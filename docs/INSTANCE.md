@@ -1,4 +1,4 @@
-# Stringer 实例文档：配置与接入
+# DomainPlane 实例文档：配置与接入
 
 面向**部署方 / 接入方**的实操指南。讲清三件事：服务端怎么配、接入方怎么在代码里用、每个参数什么作用。
 所有配置项与 API 都来自本仓库实现，可直接照抄。
@@ -7,33 +7,33 @@
 
 ## 1. 总览：一个服务端 + 三个按需引入的 SDK
 
-Stringer 采用「中间件形态」：把重逻辑全部收在服务端，对外只给薄薄的 SDK。
+DomainPlane 采用「中间件形态」：把重逻辑全部收在服务端，对外只给薄薄的 SDK。
 
 | 交付物 | 模块 | 角色 | 你做什么 |
 |---|---|---|---|
-| 服务端 jar | `stringer-server` | 承载编排 / 工具注册表 / 知识库 / ES·Redis·LLM 连接，暴露 HTTP+SSE | 自部署，通过管控台配置 |
-| 对话 SDK | `stringer-chat-client` | 极薄，只把调用转发到服务端 | 注入 `StringerAgent`（用 `StringerAgentFactory.forDomain(...)` 取） |
-| 知识库 SDK | `stringer-kb-client` | 文档上传 / 列表 / 删除 | 注入 `KnowledgeBaseClient` |
-| 工具 SDK | `stringer-tool-provider` | 把你进程里的工具注册给服务端，接收回调执行 | 方法上写 `@Tool`（或实现 `ToolInstanceContributor` 编程式声明） |
+| 服务端 jar | `domainplane-server` | 承载编排 / 工具注册表 / 知识库 / ES·Redis·LLM 连接，暴露 HTTP+SSE | 自部署，通过管控台配置 |
+| 对话 SDK | `domainplane-chat-client` | 极薄，只把调用转发到服务端 | 注入 `DomainPlaneAgent`（用 `DomainPlaneAgentFactory.forDomain(...)` 取） |
+| 知识库 SDK | `domainplane-kb-client` | 文档上传 / 列表 / 删除 | 注入 `KnowledgeBaseClient` |
+| 工具 SDK | `domainplane-tool-provider` | 把你进程里的工具注册给服务端，接收回调执行 | 方法上写 `@Tool`（或实现 `ToolInstanceContributor` 编程式声明） |
 
-三个 SDK **相互独立、按需引入**，同时引多个也不冲突 —— 公共底座（`stringer-client-core` 的 WebClient / 凭证 / 错误翻译 / 启动探测，`stringer-sdk-core` 的契约与连接配置）是传递依赖，只装配一份。
+三个 SDK **相互独立、按需引入**，同时引多个也不冲突 —— 公共底座（`domainplane-client-core` 的 WebClient / 凭证 / 错误翻译 / 启动探测，`domainplane-sdk-core` 的契约与连接配置）是传递依赖，只装配一份。
 
-> 环境要求：Java 21、Spring Boot 3.x。坐标均为 `com.zzkingcc`，版本 `v1.0-beta.1`（随 `stringer.version`）。
+> 环境要求：Java 21、Spring Boot 3.x。坐标均为 `com.zzkingcc`，版本 `v1.0-beta.1`（随 `domainplane.version`）。
 
 ### 1.1 按需要引几个依赖
 
 | 你要做的事 | 引哪个坐标 | 拿到什么 |
 |---|---|---|
-| 调 AI：发起对话、拿答案 / 事件流 | `stringer-chat-client` | 注入 `StringerAgentFactory`，`forDomain(...)` 取门面后用 `ask`/`stream`/`events`（见 §3） |
-| 把文档传进知识库 | `stringer-kb-client` | 注入 `KnowledgeBaseClient`，用 `upload` / `list` / `delete`（用法见 [SDK 使用手册 §3](SDK-USAGE.md)） |
-| 把本进程的方法交给 Agent 调用 | `stringer-tool-provider` | 方法上写 `@Tool`，打开 `stringer.tools`（见 §4） |
+| 调 AI：发起对话、拿答案 / 事件流 | `domainplane-chat-client` | 注入 `DomainPlaneAgentFactory`，`forDomain(...)` 取门面后用 `ask`/`stream`/`events`（见 §3） |
+| 把文档传进知识库 | `domainplane-kb-client` | 注入 `KnowledgeBaseClient`，用 `upload` / `list` / `delete`（用法见 [SDK 使用手册 §3](SDK-USAGE.md)） |
+| 把本进程的方法交给 Agent 调用 | `domainplane-tool-provider` | 方法上写 `@Tool`，打开 `domainplane.tools`（见 §4） |
 
-- **工具能力默认关闭**：`stringer.tools` 默认 `false`。未打开时不注册回调端点、不启动心跳、不建任何工具实例 Bean。
-- **服务端连接只配一份**：`stringer.server`（单个 URL）+ `stringer.username` / `password`，三个 SDK 共用同一份（见 §3.2）。
+- **工具能力默认关闭**：`domainplane.tools` 默认 `false`。未打开时不注册回调端点、不启动心跳、不建任何工具实例 Bean。
+- **服务端连接只配一份**：`domainplane.server`（单个 URL）+ `domainplane.username` / `password`，三个 SDK 共用同一份（见 §3.2）。
 - **公共异常与输入安全**随任一 SDK 传递，可直接复用 `ErrorCode` / `BaseException` / `InputSanitizer`。
 - **Web 容器自备**：SDK 只用 Spring Web 的注解模型（`@RestController` / `@RequestBody`）与出站 `WebClient`，**不含任何容器**——自带 `spring-boot-starter-webflux` 仅服务于 SSE 出站调用。宿主原有的 Web 栈保持不变；要让服务端回调进来，宿主本来就需要一个可被访问的 Web 栈。
 - 因此不要把 Web 容器声明进 SDK：Spring Boot 判定 Web 应用类型时，Reactive 分支要求「`DispatcherHandler` 在且 `DispatcherServlet` 不在」；SDK 一旦带上 `spring-boot-starter-web`，纯 WebFlux 宿主就会被判成 SERVLET，`DispatcherHandler` 相关装配随之失效。
-- **非 Java 工具方**不必引 SDK：`stringer-tool-provider` 不含内部实现，也可照 HTTP 协议自实现（见 §4）。
+- **非 Java 工具方**不必引 SDK：`domainplane-tool-provider` 不含内部实现，也可照 HTTP 协议自实现（见 §4）。
 
 ---
 
@@ -42,28 +42,28 @@ Stringer 采用「中间件形态」：把重逻辑全部收在服务端，对�
 服务端**固定监听 9527**。配置分两类：
 
 - **管控台配置（落地为 `config/*.json`）**：账号、模型、存储、域提示词。推荐走管控台 `http://<host>:9527/admin.html`，保存即生效、无需重启。
-- **yaml 兜底（`application.yaml` 里的 `stringer.*`）**：管控台没填的字段会回落到 yaml；只有 `stringer.settings.path` 这类部署参必须靠环境变量。
+- **yaml 兜底（`application.yaml` 里的 `domainplane.*`）**：管控台没填的字段会回落到 yaml；只有 `domainplane.settings.path` 这类部署参必须靠环境变量。
 
-### 2.1 落盘目录 `stringer.settings.path`
+### 2.1 落盘目录 `domainplane.settings.path`
 
-所有受保护资源（包括含 API Key 的文件）都落在 `<stringer.settings.path>/config/`。
+所有受保护资源（包括含 API Key 的文件）都落在 `<domainplane.settings.path>/config/`。
 
 ```yaml
 # application.yaml
-stringer:
+domainplane:
   settings:
-    path: ${STRINGER_SETTINGS_PATH:/var/lib/stringer/config}
+    path: ${DOMAINPLANE_SETTINGS_PATH:/var/lib/domainplane/config}
 ```
 
 | 参数 | 默认 | 作用 |
 |---|---|---|
-| `stringer.settings.path` | `/var/lib/stringer/config` | 配置与账号文件的落盘根目录。容器化时把该目录挂成卷即可持久化。**本机开发务必用环境变量覆盖**，否则会往系统盘根目录写。 |
+| `domainplane.settings.path` | `/var/lib/domainplane/config` | 配置与账号文件的落盘根目录。容器化时把该目录挂成卷即可持久化。**本机开发务必用环境变量覆盖**，否则会往系统盘根目录写。 |
 
 > 为什么不用 ES/Redis 存这些：配置正是用来「找到 ES/Redis 的」。一旦存进中间件，地址填错就再也读不出来，管控台失联 → 死锁。文件是本机唯一无外部依赖的介质。
 
 ### 2.2 账号 `accounts.json`
 
-- 首次启动由 jar 内种子 `accounts-seed.json` 落盘，默认账号 `stringer` / 密码 `stringer`。
+- 首次启动  jar 内种子 `accounts-seed.json` 落盘，默认账号 `domainplane` / 密码 `domainplane`。
 - 改密码走管控台「账号」页（密码是 BCrypt 哈希，手改 json 算不出哈希）。
 - **忘记密码的唯一恢复手段：删除 `config/accounts.json` 后重启**，回落到种子。凭据安全边界＝文件系统访问控制。
 - 凭证为签名式（HMAC）且不设有效期，改密码即让全部旧登录态失效。
@@ -107,7 +107,7 @@ ES 与 Redis **均可不填**——未配置时服务端照常启动（知识库
 | `host` | — | 主机名或 IP（**不要带 `redis://` 或端口**） |
 | `port` | `6379` | 端口 |
 | `password` | — | 无密码模式可空 |
-| `database` | `0` | 库号。默认 0（集群/云托管常只给 0 号库）。隔离靠 key 前缀 `stringer:`，不靠库号。**换库号＝换数据源，历史会话不迁移** |
+| `database` | `0` | 库号。默认 0（集群/云托管常只给 0 号库）。隔离靠 key 前缀 `domainplane:`，不靠库号。**换库号＝换数据源，历史会话不迁移** |
 
 > ⚠️ **Redis 是会话记忆的唯一存储，请开启持久化**：`appendonly yes` + `appendfsync everysec`（最坏丢 1 秒）；
 > 淘汰策略必须是 **`maxmemory-policy noeviction`**，否则内存紧张时 Redis 会直接淘汰记忆 key = 随机丢用户历史。
@@ -152,7 +152,7 @@ ES 与 Redis **均可不填**——未配置时服务端照常启动（知识库
 上传时给文档选一个<b>归属域</b>，语义与工具注解同构：必须是**从根域出发的完整路径**，
 挂在某域则其**全部后代域**都能检索到；不选 → 挂根域 `default`＝全域可见。**无通配写法**。
 
-**一域一索引**：每个域一个独立 ES 索引（索引名由域路径派生，如 `stringer_kb_default_sales_1a2b3c4d`），
+**一域一索引**：每个域一个独立 ES 索引（索引名 域路径派生，如 `domainplane_kb_default_sales_1a2b3c4d`），
 首次往该域上传文档时自动创建。所以"文档归属哪个域"＝"它落在哪个索引里"。
 
 **域对知识仍是两层约束**（与工具不同）：
@@ -161,7 +161,7 @@ ES 与 Redis **均可不填**——未配置时服务端照常启动（知识库
 2. **内容层** —— 文档上传到哪个域，决定"能检索时查到哪些文档"。
 
 检索域 D 时只查「D + 全部祖先」链上的索引（与工具可见性同一套累加语义）——
-域边界由"查哪些索引"保证，不再做元数据过滤。链上某个祖先域还没有索引时那条通道安静返回空。
+域边界 "查哪些索引"保证，不再做元数据过滤。链上某个祖先域还没有索引时那条通道安静返回空。
 删域会连带清掉该域及全部子孙的：知识库索引与切片预览文件、检索器缓存、提示词、模型绑定、工具声明记录，
 以及 **Redis 里的会话记忆与图检查点**（按 `{域}|` 前缀扫描删除）。
 
@@ -174,37 +174,37 @@ ES 与 Redis **均可不填**——未配置时服务端照常启动（知识库
 
 ### 2.7 yaml 兜底与可调参数
 
-除上面四份 json 外，`application.yaml` 里还有这些 `stringer.*` 参数（多数有默认值，按需调）：
+除上面四份 json 外，`application.yaml` 里还有这些 `domainplane.*` 参数（多数有默认值，按需调）：
 
 | 配置键 | 默认 | 作用 |
 |---|---|---|
-| `stringer.ai.prompt.base` / `stringer.ai.prompt.prompts` | 空 | 提示词的 yaml 兜底（管控台优先级更高） |
-| `stringer.memory.max-messages` | `100` | 会话记忆条数上限（≈50 轮问答）。**只增不淘汰**，到上限后入口拒绝新一轮（`30004`） |
-| `stringer.memory.max-tokens` | `30000` | 会话记忆 token 估算上限（同上，只约束入口；最终回答永远可写） |
-| `stringer.memory.ttl` | **永久**（null） | 记忆保留期。记忆是**长期存储**（靠 Redis RDB+AOF 保住），默认不过期；设了值则成为保留期 |
-| `stringer.memory.checkpoint-ttl` | `24h` | 断点（待审批会话）保留时长 |
-| `stringer.agent.core-pool-size` / `max-pool-size` / `queue-capacity` | `8` / `32` / `200` | 编排线程池（阻塞式执行，不可复用公共池） |
-| `stringer.instance.timeout-seconds` | `35` | 实例心跳判死窗（≈心跳周期×7） |
-| `stringer.instance.invoke-timeout-ms` | `30000` | 单次远程工具调用超时 |
-| `stringer.instance.invoke-max-attempts` | `2` | 单次调用最多试几个副本（仅传输层失败时换副本） |
-| `stringer.retrieval.*` | — | 混合检索（每索引召回条数、权重、`rrf-k`、TopN 等） |
-| `stringer.rag.ingest-pool-size` / `ingest-queue-capacity` | `2` / `16` | 知识库导入线程池与队列。队列满时上传被拒（并入 `60006`） |
-| `stringer.rag.ingest-lock-wait-seconds` | `60` | 等待"同域导入串行锁"的时长，超时即拒（一个域同时只导入一份，避免同名文档并发写入） |
-| `stringer.rag.max-file-size` / `allowed-extensions` | `5MB` / `txt,md,markdown,docx,doc,pdf,xls,xlsx` | 单文件大小上限与扩展名白名单 |
-| `stringer.rag.max-chunks-per-document` | `2000` | 单文件切片数上限，超限**直接拒绝并提示拆分**（不切一半留下） |
-| `stringer.rag.chunking.max-chars` / `overlap-sentences` / `min-chars` | `400` / `1` / `60` | 切片长度上限（撞标题就提前断，是上限不是固定长度）、重叠句数、过短片的丢弃阈值 |
-| `spring.servlet.multipart.max-file-size` | `5MB` | **容器侧**上传上限，`stringer.rag.max-file-size` 必须与它一致 |
+| `domainplane.ai.prompt.base` / `domainplane.ai.prompt.prompts` | 空 | 提示词的 yaml 兜底（管控台优先级更高） |
+| `domainplane.memory.max-messages` | `100` | 会话记忆条数上限（≈50 轮问答）。**只增不淘汰**，到上限后入口拒绝新一轮（`30004`） |
+| `domainplane.memory.max-tokens` | `30000` | 会话记忆 token 估算上限（同上，只约束入口；最终回答永远可写） |
+| `domainplane.memory.ttl` | **永久**（null） | 记忆保留期。记忆是**长期存储**（靠 Redis RDB+AOF 保住），默认不过期；设了值则成为保留期 |
+| `domainplane.memory.checkpoint-ttl` | `24h` | 断点（待审批会话）保留时长 |
+| `domainplane.agent.core-pool-size` / `max-pool-size` / `queue-capacity` | `8` / `32` / `200` | 编排线程池（阻塞式执行，不可复用公共池） |
+| `domainplane.instance.timeout-seconds` | `35` | 实例心跳判死窗（≈心跳周期×7） |
+| `domainplane.instance.invoke-timeout-ms` | `30000` | 单次远程工具调用超时 |
+| `domainplane.instance.invoke-max-attempts` | `2` | 单次调用最多试几个副本（仅传输层失败时换副本） |
+| `domainplane.retrieval.*` | — | 混合检索（每索引召回条数、权重、`rrf-k`、TopN 等） |
+| `domainplane.rag.ingest-pool-size` / `ingest-queue-capacity` | `2` / `16` | 知识库导入线程池与队列。队列满时上传被拒（并入 `60006`） |
+| `domainplane.rag.ingest-lock-wait-seconds` | `60` | 等待"同域导入串行锁"的时长，超时即拒（一个域同时只导入一份，避免同名文档并发写入） |
+| `domainplane.rag.max-file-size` / `allowed-extensions` | `5MB` / `txt,md,markdown,docx,doc,pdf,xls,xlsx` | 单文件大小上限与扩展名白名单 |
+| `domainplane.rag.max-chunks-per-document` | `2000` | 单文件切片数上限，超限**直接拒绝并提示拆分**（不切一半留下） |
+| `domainplane.rag.chunking.max-chars` / `overlap-sentences` / `min-chars` | `400` / `1` / `60` | 切片长度上限（撞标题就提前断，是上限不是固定长度）、重叠句数、过短片的丢弃阈值 |
+| `spring.servlet.multipart.max-file-size` | `5MB` | **容器侧**上传上限，`domainplane.rag.max-file-size` 必须与它一致 |
 | `spring.servlet.multipart.max-request-size` | `6MB` | 整个 multipart 请求体上限（含 boundary 与 part 头），须**大于** `max-file-size` |
 | `spring.mvc.async.request-timeout` | `-1`（不限） | SSE 异步请求超时。不设时容器默认 30s，且那是**整轮总时限**，慢回答会被拦腰掐断 |
-| `stringer.single-instance-guard` | `true` | 单实例守卫：启动时在 Redis 上抢运行权租约，抢不到即拒绝启动（详见 `DEPLOYMENT.md` §6） |
-| `stringer.logging.path` / `stringer.logging.level` | `/var/log/stringer` / `INFO` | 文件日志目录与级别（默认只输出控制台） |
+| `domainplane.single-instance-guard` | `true` | 单实例守卫：启动时在 Redis 上抢运行权租约，抢不到即拒绝启动（详见 `DEPLOYMENT.md` §6） |
+| `domainplane.logging.path` / `domainplane.logging.level` | `/var/log/domainplane` / `INFO` | 文件日志目录与级别（默认只输出控制台） |
 | `redis.timeout` / `redis.pool.*` | — | Redis 连接池与命令超时（调优用，不在管控台） |
 
-> ⚠️ yaml 缩进错位**不报错只会静默失效**。所有 `stringer.*` 都是 2 空格缩进；`stringer.logging.path` 必须在 `stringer` 下，错写成 `stringer.rag.logging.path` 就作废。
+> ⚠️ yaml 缩进错位**不报错只会静默失效**。所有 `domainplane.*` 都是 2 空格缩进；`domainplane.logging.path` 必须在 `domainplane` 下，错写成 `domainplane.rag.logging.path` 就作废。
 
 ### 2.8 启动顺序（硬约束）
 
-**先起服务端（9527），再起接入方应用（8080 等）。** 客户端 starter 在启动期就换取凭证并探测 `GET /api/agent/health`，连不上即中断启动（与 Redis/Nacos 一致，无关闭开关）。服务端正在灌库导致探测超时，可调大 `stringer.client.health-check-timeout`。
+**先起服务端（9527），再起接入方应用（8080 等）。** 客户端 starter 在启动期就换取凭证并探测 `GET /api/agent/health`，连不上即中断启动（与 Redis/Nacos 一致，无关闭开关）。服务端正在灌库导致探测超时，可调大 `domainplane.client.health-check-timeout`。
 
 ---
 
@@ -215,48 +215,48 @@ ES 与 Redis **均可不填**——未配置时服务端照常启动（知识库
 ```xml
 <dependency>
     <groupId>com.zzkingcc</groupId>
-    <artifactId>stringer-chat-client</artifactId>
+    <artifactId>domainplane-chat-client</artifactId>
     <version>v1.0-beta.1</version>
 </dependency>
 ```
 
 引入即自动装配（注册于 `AutoConfiguration.imports`），**无需** `@ComponentScan` 覆盖内部包。你只需配服务端地址。
 
-本坐标只做对话；公共底座（WebClient / 凭证 / 启动探测）与公共异常随它传递，无需额外配置。要传文档再加 `stringer-kb-client`、要提供工具再加 `stringer-tool-provider`（见 §1.1）。
+本坐标只做对话；公共底座（WebClient / 凭证 / 启动探测）与公共异常随它传递，无需额外配置。要传文档再加 `domainplane-kb-client`、要提供工具再加 `domainplane-tool-provider`（见 §1.1）。
 
 ### 3.2 application.yml 配置
 
 地址与账号只写一份，三个 SDK 与工具实例共用（见 §4.2）：
 
 ```yaml
-stringer:
-  server: ${STRINGER_SERVER:http://localhost:9527}   # 服务端地址（含协议与端口）
-  username: ${STRINGER_USERNAME:stringer}            # 接入账号（服务端账号）
-  password: ${STRINGER_PASSWORD:stringer}            # 接入密码
+domainplane:
+  server: ${DOMAINPLANE_SERVER:http://localhost:9527}   # 服务端地址（含协议与端口）
+  username: ${DOMAINPLANE_USERNAME:domainplane}            # 接入账号（服务端账号）
+  password: ${DOMAINPLANE_PASSWORD:domainplane}            # 接入密码
   client:
     health-check-timeout: 5s                          # 启动连通性探测超时
 ```
 
 | 参数 | 默认 | 作用 |
 |---|---|---|
-| `stringer.server` | `http://localhost:9527` | 服务端地址（含协议与端口）。对话 SDK / 知识库 SDK / 工具实例共用 |
-| `stringer.username` | `stringer` | 接入账号。与服务端账号一致（默认种子即 `stringer/stringer`） |
-| `stringer.password` | `stringer` | 接入密码。**不每次请求携带**：启动期用它们换签名凭证并缓存，失效才自动重登一次 |
-| `stringer.client.health-check-timeout` | `5s` | 启动期探测服务端可达性的超时 |
-| `stringer.client.connect-timeout` | `5s` | HTTP 连接超时 |
-| `stringer.client.read-timeout` | `10min` | HTTP 读超时（SSE 长连接，0＝不超时） |
+| `domainplane.server` | `http://localhost:9527` | 服务端地址（含协议与端口）。对话 SDK / 知识库 SDK / 工具实例共用 |
+| `domainplane.username` | `domainplane` | 接入账号。与服务端账号一致（默认种子即 `domainplane/domainplane`） |
+| `domainplane.password` | `domainplane` | 接入密码。**不每次请求携带**：启动期用它们换签名凭证并缓存，失效才自动重登一次 |
+| `domainplane.client.health-check-timeout` | `5s` | 启动期探测服务端可达性的超时 |
+| `domainplane.client.connect-timeout` | `5s` | HTTP 连接超时 |
+| `domainplane.client.read-timeout` | `10min` | HTTP 读超时（SSE 长连接，0＝不超时） |
 
-### 3.3 注入 StringerAgent 并调用（唯一入口）
+### 3.3 注入 DomainPlaneAgent 并调用（唯一入口）
 
-消费侧只有一个入口：`StringerAgentFactory.forDomain(...)` 拿到已绑定域的 `StringerAgent`。
+消费侧只有一个入口：`DomainPlaneAgentFactory.forDomain(...)` 拿到已绑定域的 `DomainPlaneAgent`。
 **域是接线动作**，不在每次调用的参数里 —— 所以"忘传域"写不出来。
 
 ```java
 @Service
 public class OrderService {
-    private final StringerAgent agent;                 // 已绑定域，可缓存复用（线程安全）
+    private final DomainPlaneAgent agent;                 // 已绑定域，可缓存复用（线程安全）
 
-    public OrderService(StringerAgentFactory factory) {
+    public OrderService(DomainPlaneAgentFactory factory) {
         this.agent = factory.forDomain("default.customer");  // null / 空白 → 根域 default
     }
 
@@ -279,7 +279,7 @@ public class OrderService {
 
 | 方法 | 返回 | 适用场景 |
 |---|---|---|
-| `ask` | `String` | 只要最终答案（约七成场景）。内部把 `TOKEN` 增量拼成整段文本；被 `stop` 时返回已产出的部分；**阻塞**，受 `stringer.client.read-timeout` 约束 |
+| `ask` | `String` | 只要最终答案（约七成场景）。内部把 `TOKEN` 增量拼成整段文本；被 `stop` 时返回已产出的部分；**阻塞**，受 `domainplane.client.read-timeout` 约束 |
 | `stream` | `Flux<String>` | 逐字上屏（只含模型文本增量） |
 | `events` | `Flux<AgentEvent>` | 要看工具调用 / 审批中断 / 错误码，或自行控制超时与背压（长任务优先用它） |
 
@@ -322,14 +322,14 @@ agent.events(sessionId, question).subscribe(event -> {
 
 ```java
 // 用户批准/拒绝后恢复被 INTERRUPT 挂起的会话
-// 域由门面绑定，自动原样带上；resume 会据此重新校验待执行工具是否仍可见
+// 域 门面绑定，自动原样带上；resume 会据此重新校验待执行工具是否仍可见
 agent.resume(sessionId, approved);
 
 // 主动停止（不可恢复）；返回 false = 该会话已被停止或被拒（幂等）
 boolean triggered = agent.stop(sessionId);
 ```
 
-不进 `StringerAgent` 的两件事：`CallerContext`（谁在调）与 `AgentRequest`（本轮请求原文）属于**裸 HTTP 契约**。
+不进 `DomainPlaneAgent` 的两件事：`CallerContext`（谁在调）与 `AgentRequest`（本轮请求原文）属于**裸 HTTP 契约**。
 平台信任调用方声明的域，越权判断（角色→域）在宿主侧做 —— 取得门面时的那个域字符串，就是宿主自己做鉴权后得出的结论。
 
 ---
@@ -338,50 +338,50 @@ boolean triggered = agent.stop(sessionId);
 
 工具即「给一段参数 JSON，还一段结果文本」的无状态能力。两种方式任选：
 
-- **远程（推荐，接入方用）**：在本进程用 `stringer-tool-provider` SDK 周期注册，服务端回调你暴露的 `/stringer/invoke` 执行。
-- **本地（服务端自带）**：工具随服务端进程部署，用 `@Tool` 注解声明、由 `AnnotatedToolScanner` 扫描。见 §5。
+- **远程（推荐，接入方用）**：在本进程用 `domainplane-tool-provider` SDK 周期注册，服务端回调你暴露的 `/domainplane/invoke` 执行。
+- **本地（服务端自带）**：工具随服务端进程部署，用 `@Tool` 注解声明、  `AnnotatedToolScanner` 扫描。见 §5。
 
 ### 4.1 引入依赖
 
 ```xml
 <dependency>
     <groupId>com.zzkingcc</groupId>
-    <artifactId>stringer-tool-provider</artifactId>
+    <artifactId>domainplane-tool-provider</artifactId>
     <version>v1.0-beta.1</version>
 </dependency>
 ```
 
-独立坐标，与对话 / 知识库 SDK 互不依赖（见 §1.1）——只想当工具方、不调 AI 的进程就只引它。必须打开 `stringer.tools`：引了 jar 不等于要当工具提供方。
+独立坐标，与对话 / 知识库 SDK 互不依赖（见 §1.1）——只想当工具方、不调 AI 的进程就只引它。必须打开 `domainplane.tools`：引了 jar 不等于要当工具提供方。
 
 本 SDK 不自带 Spring 容器，也刻意不引 Web 容器：它只要求宿主进程里存在一个能被服务端访问到的 Web 栈（Spring MVC 或 WebFlux 均可）。
 
 ### 4.2 application.yml 配置
 
 ```yaml
-stringer:
+domainplane:
   tools: true                                           # 默认 false：引了 jar 不等于要当工具提供方
   server: http://localhost:9527                          # 与对话 / 知识库 SDK 共用同一份（见 §3.2）
-  username: ${STRINGER_USERNAME:stringer}
-  password: ${STRINGER_PASSWORD:stringer}
+  username: ${DOMAINPLANE_USERNAME:domainplane}
+  password: ${DOMAINPLANE_PASSWORD:domainplane}
   tool-instance:
-    instance-id: ${STRINGER_INSTANCE_ID:order-svc-01}   # 重连必须沿用同一个
+    instance-id: ${DOMAINPLANE_INSTANCE_ID:order-svc-01}   # 重连必须沿用同一个
     # endpoint 留空即自动推导（见下），跨机部署必须显式写服务端可达的地址
-    # endpoint: ${STRINGER_INSTANCE_ENDPOINT:http://10.0.0.5:8081/stringer/invoke}
+    # endpoint: ${DOMAINPLANE_INSTANCE_ENDPOINT:http://10.0.0.5:8081/domainplane/invoke}
     heartbeat-interval-seconds: 5
 ```
 
 | 参数 | 默认 | 作用 |
 |---|---|---|
-| `stringer.tools` | `false` | 是否启用工具实例。会起心跳线程并暴露 HTTP 端点，属显式选择 |
-| `stringer.server` | `http://localhost:9527` | 服务端地址。**与对话 / 知识库 SDK 共用同一份**——服务端只有一份工具注册表、一个账号，指向不同服务端属破坏性配置 |
-| `stringer.username` / `stringer.password` | `stringer` | 接入账号（同服务端账号），用于登录换凭证 |
+| `domainplane.tools` | `false` | 是否启用工具实例。会起心跳线程并暴露 HTTP 端点，属显式选择 |
+| `domainplane.server` | `http://localhost:9527` | 服务端地址。**与对话 / 知识库 SDK 共用同一份**——服务端只有一份工具注册表、一个账号，指向不同服务端属破坏性配置 |
+| `domainplane.username` / `domainplane.password` | `domainplane` | 接入账号（同服务端账号），用于登录换凭证 |
 | `instance-id` | — | 实例标识。**重连必须沿用同一个**，否则服务端留下摘不掉的旧副本 |
-| `endpoint` | 自动推导 | 工具调用回流地址：服务端 POST 到这里执行工具。留空时推导为 `http://localhost:{本进程端口}/stringer/invoke`（端口取 `local.server.port`，缺失则取 `server.port`）；**路径必须是 `/stringer/invoke`** |
+| `endpoint` | 自动推导 | 工具调用回流地址：服务端 POST 到这里执行工具。留空时推导为 `http://localhost:{本进程端口}/domainplane/invoke`（端口取 `local.server.port`，缺失则取 `server.port`）；**路径必须是 `/domainplane/invoke`** |
 | `heartbeat-interval-seconds` | `5` | 心跳周期。服务端判死窗默认 `35s`（≈心跳×7），退避上限必须小于它 |
 | `max-backoff-seconds` | `20` | 心跳连续失败时的退避上限（指数退避：5→10→20 封顶，避免重启风暴）。**必须小于判死窗**，否则会出现"退避还没到就已被判死" |
 | `request-timeout-millis` | `10000` | 单次 HTTP 超时 |
 
-**关于 `endpoint` 的自动推导**：进程只能知道自己的端口，无法知道自己"从服务端看过去"是什么地址（NAT、容器网络、网关前缀都在它的视野之外），所以推导只假设**服务端与工具实例同机**，得出 `http://localhost:{端口}/stringer/invoke`。
+**关于 `endpoint` 的自动推导**：进程只能知道自己的端口，无法知道自己"从服务端看过去"是什么地址（NAT、容器网络、网关前缀都在它的视野之外），所以推导只假设**服务端与工具实例同机**，得出 `http://localhost:{端口}/domainplane/invoke`。
 
 - 同机部署 / 本地联调：不用配。
 - 跨机、容器、前面有网关：**必须显式配置**，否则地址在服务端侧指向服务端自己，注册会成功、心跳也正常，但工具一被调用就失败。
@@ -395,7 +395,7 @@ stringer:
 @Component
 public class OrderTools {
 
-    // ① 只读：客服域可见，参数 schema 由签名推导
+    // ① 只读：客服域可见，参数 schema  签名推导
     @Tool(desc = "按订单号查询订单状态。用户追问自己订单的发货/物流情况时调用",
             value = "queryOrder", domains = {"customer"})
     public String queryOrder(@ToolParam("订单号，如 FR2024001") String orderNo) {
@@ -416,10 +416,10 @@ public class OrderTools {
 
 要点：
 
-- **参数绑定**：调用时按参数名从模型的参数 JSON 里取值并转成声明类型；取不到就抛 `缺少必填参数: xxx`（由 SDK 包装成工具失败原因回喂模型）。
+- **参数绑定**：调用时按参数名从模型的参数 JSON 里取值并转成声明类型；取不到就抛 `缺少必填参数: xxx`（  SDK 包装成工具失败原因回喂模型）。
 - **参数名来源**：优先 `@ToolParam.name`，其次编译期元数据。Spring Boot 父 pom 默认开了 `-parameters`；普通 Maven 工程没开时**启动期直接报错**并提示补 `@ToolParam(name=...)`——用 `arg0` 注册出去只会让模型拿错 key，这种错必须留在启动期。
 - **返回值**：`String` 原样回喂模型，其余类型序列化成 JSON。
-- **开关**：`stringer.tool-instance.scan-annotated`（默认 `true`）。关掉则只认 §4.4 的编程式注册。
+- **开关**：`domainplane.tool-instance.scan-annotated`（默认 `true`）。关掉则只认 §4.4 的编程式注册。
 - 注解字段语义与 `ToolSpec` 完全一致，见 §4.5；`@ToolParam` / `@ToolAdvanced` 字段见 §5 的注解表。
 - **高级可选**写在方法级 `@ToolAdvanced` 上，一律 `参数名=值`、不做位置对齐：
   `@ToolAdvanced(example = {"orderNo=FR2024001"}, allowValues = {"channel=SMS|APP"}, sensitive = {"phone"})`。
@@ -499,20 +499,20 @@ public interface ToolHandler {
 - **不抛异常也能表达失败**：返回「订单不存在」这类说明文字对模型更友好；抛异常 = 执行失败（异常信息回喂模型，不回抛给用户）。
 - 有副作用的工具（关单、退款）**自己防重**：模型可能因上下文重复调用同一工具。
 
-### 4.7 回调端点 `/stringer/invoke`
+### 4.7 回调端点 `/domainplane/invoke`
 
-服务端要执行工具时，POST 到 `endpoint`（即你进程的 `/stringer/invoke`）。路径固定，不要改——改了会「注册成功但一调用就 404」。HTTP 层永远返回 200，业务失败写在响应的 `success=false` 里，以区分「实例不可达（该换副本重试）」和「工具执行失败（直接回喂模型）」。
+服务端要执行工具时，POST 到 `endpoint`（即你进程的 `/domainplane/invoke`）。路径固定，不要改——改了会「注册成功但一调用就 404」。HTTP 层永远返回 200，业务失败写在响应的 `success=false` 里，以区分「实例不可达（该换副本重试）」和「工具执行失败（直接回喂模型）」。
 
-`endpoint` 不填时由 SDK 按本进程端口推导，但推导出的主机固定是 `localhost`：**只有当服务端与工具实例在同一台机器上时它才是对的**。跨机部署请显式填写服务端可达的地址（见 §4.2）。
+`endpoint` 不填时  SDK 按本进程端口推导，但推导出的主机固定是 `localhost`：**只有当服务端与工具实例在同一台机器上时它才是对的**。跨机部署请显式填写服务端可达的地址（见 §4.2）。
 
-#### 安全边界：端点不自带鉴权，由接入方负责
+#### 安全边界：端点不自带鉴权， 接入方负责
 
 以下是**刻意的产品契约，不是缺陷**，写在这里以免被误当成漏洞报告或"顺手加上"：
 
 | 事项 | SDK 的立场 |
 | --- | --- |
-| `/stringer/invoke` 不校验任何凭证 | SDK 不内置鉴权。实例端口的暴露面由**接入方**负责收敛：需要鉴权时，在你自己的 Spring 应用里注册 `HandlerInterceptor` / `Filter` 校验服务端来源即可，SDK 不阻拦 |
-| 服务端不校验 `endpoint` 指向的地址 | 允许内网地址、回环地址。工具实例与 Stringer 同机、或同处一个内网，是**常见的部署形态**（含本地开发），一刀切拒绝内网会误伤绝大多数正常部署 |
+| `/domainplane/invoke` 不校验任何凭证 | SDK 不内置鉴权。实例端口的暴露面 **接入方**负责收敛：需要鉴权时，在你自己的 Spring 应用里注册 `HandlerInterceptor` / `Filter` 校验服务端来源即可，SDK 不阻拦 |
+| 服务端不校验 `endpoint` 指向的地址 | 允许内网地址、回环地址。工具实例与 DomainPlane 同机、或同处一个内网，是**常见的部署形态**（含本地开发），一刀切拒绝内网会误伤绝大多数正常部署 |
 | 调用方可绕过审批与域过滤 | 服务端的审批闸门与域可见性校验建立在"调用来自服务端"这一前提上。直连实例端口等于绕过它 —— 所以**端口暴露面就是安全边界**，这是接入方的部署责任 |
 
 一句话：**把实例端口当作只在可信网络内可达的服务端口**。需要更强隔离时，用网络策略（安全组 / NetworkPolicy）限制可达来源，而不是指望 SDK 内置鉴权。
@@ -522,9 +522,9 @@ public interface ToolHandler {
 ## 5. 另一种形态：工具随服务端部署（本地 Bean 工具）
 
 > **两侧写法完全一致**：工具在业务进程（工具实例）时用 §4.3，工具随服务端部署时用本节。
-> 同一段代码在两种形态之间搬迁，一个字都不用改 —— 区别只在工具实例需要 `/stringer/invoke` 回调端点，本地 Bean 工具不需要。
+> 同一段代码在两种形态之间搬迁，一个字都不用改 —— 区别只在工具实例需要 `/domainplane/invoke` 回调端点，本地 Bean 工具不需要。
 
-若工具直接放在服务端进程内（而非独立实例），用注解声明，由服务端启动期扫描，不暴露 `/stringer/invoke`：
+若工具直接放在服务端进程内（而非独立实例），用注解声明， 服务端启动期扫描，不暴露 `/domainplane/invoke`：
 
 ```java
 @Component
@@ -539,7 +539,7 @@ public class LocalTools {                                  // 任意 Spring Bean
 }
 ```
 
-> `StringerToolProvider` 是**可选标记**：实现了照样被扫到，不实现也不影响注册——与工具实例 SDK 的规则一致。
+> `DomainPlaneToolProvider` 是**可选标记**：实现了照样被扫到，不实现也不影响注册——与工具实例 SDK 的规则一致。
 > 唯一例外是工具方法所在的类被 AOP 代理且注解没留在代理方法上时，实现该接口可确保被扫到（SDK 侧遇到这种情况会打 WARN 提示）。
 
 注解字段与 `ToolSpec` 语义一致，便于「工具从哪来」对模型与管控台透明：
@@ -575,13 +575,13 @@ public class LocalTools {                                  // 任意 Spring Bean
 
 ### 6.1 会话记忆：只增不淘汰，到上限就换会话
 
-会话记忆（`stringer:chat:memory:{域}|{sessionId}`）存的是**对话面**：每轮的用户提问 + 最终文字回答。工具调用与工具结果**不进记忆**（它们只在检查点里）。
+会话记忆（`domainplane:chat:memory:{域}|{sessionId}`）存的是**对话面**：每轮的用户提问 + 最终文字回答。工具调用与工具结果**不进记忆**（它们只在检查点里）。
 
 - **只增不淘汰**：到达上限（`max-messages`=100 条 / `max-tokens`=30000）之前不会丢弃任何历史 ——
   静默丢最旧的消息会让用户"以为还记得"。
 - **到上限 → 拒绝新一轮**：入口判定不通过就返回 `30004 SESSION_MEMORY_FULL`，并且**零副作用**
   （不写记忆、不清断点、不调模型）。判定是**粘性**的：只要记忆还满着，之后每次都用同一个码拒绝。
-- **平台不代为切换**：`sessionId` 自始至终由调用方提供，满了由调用方**自己换一个新 id** 重新开始。
+- **平台不代为切换**：`sessionId` 自始至终 调用方提供，满了 调用方**自己换一个新 id** 重新开始。
   旧会话的数据保留在 Redis 里（默认不过期），只是不再接受写入。
 - **上限只约束"能不能开新一轮"**，不约束"能不能收尾"：最终回答永远允许写入，
   否则会留下有问无答的孤立提问。所以一轮结束后总量可能略微超过上限。
@@ -594,13 +594,13 @@ public class LocalTools {                                  // 任意 Spring Bean
 
 > 仓库内没有示例应用，下面是最短的一条可用路径：服务端 + 接入方应用（同时扮演客户端与工具实例）。
 
-1. 起服务端：`java -jar stringer-v1.0-beta.1.jar`（默认 9527，裸机 / 容器部署见 `DEPLOYMENT.md`）。
-2. 打开管控台 `http://localhost:9527/admin.html`，用种子账号 `stringer` / `stringer` 登录（§2.2），
+1. 起服务端：`java -jar domainplane-v1.0-beta.1.jar`（默认 9527，裸机 / 容器部署见 `DEPLOYMENT.md`）。
+2. 打开管控台 `http://localhost:9527/admin.html`，用种子账号 `domainplane` / `domainplane` 登录（§2.2），
    在「模型设置」与「存储配置」两页填好模型、ES、Redis（§2.3 / §2.4），保存即生效。
 3. 在「域空间」建一个域，如 `default.customer`（§6）。它必须是**可调用单元**才能当入口。
-4. 写接入方应用：引 `stringer-chat-client`（§3.1），配好 `stringer.server` / `username` / `password`（§3.2），
-   注入 `StringerAgentFactory` 取该域的门面（§3.3），`ask(sessionId, question)` 即可发起一轮对话。
-5. 验证工具：同一个应用再引 `stringer-tool-provider`、打开 `stringer.tools=true`（§4.1 / §4.2），
+4. 写接入方应用：引 `domainplane-chat-client`（§3.1），配好 `domainplane.server` / `username` / `password`（§3.2），
+   注入 `DomainPlaneAgentFactory` 取该域的门面（§3.3），`ask(sessionId, question)` 即可发起一轮对话。
+5. 验证工具：同一个应用再引 `domainplane-tool-provider`、打开 `domainplane.tools=true`（§4.1 / §4.2），
    用 `@Tool` 声明几个方法（§4.3）。启动后到管控台「在线实例」页确认实例在线、工具已进注册表。
 6. 验证知识库：管控台「知识库」页上传一份 md，**归属域**选到某个域（或留 `default` 让全域可见），
    再用该域的对话去检索（§2.6）。

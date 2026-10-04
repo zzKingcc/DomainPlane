@@ -1,0 +1,499 @@
+/* ==========================================================================
+   DomainPlane 管控台 · 共享样式
+   零依赖、无 CDN：私有化 / 离线部署友好。配色跟随浅色主题。
+   ========================================================================== */
+
+:root {
+    --bg: #f5f6f8;
+    --card: #fff;
+    --primary: #2563eb;
+    --primary-dim: #eff6ff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --green: #16a34a;
+    --amber: #d97706;
+    --red: #dc2626;
+    --slate: #475569;
+    --sidebar-w: 248px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* ===== 布局骨架：左侧导航列 + 右侧内容区 ===== */
+.layout { display: flex; align-items: stretch; min-height: 100vh; }
+
+.sidebar {
+    width: var(--sidebar-w);
+    flex: 0 0 var(--sidebar-w);
+    background: var(--card);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+.main {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 26px 30px 48px;
+    max-width: 1180px;
+}
+
+/* ===== 侧栏 ===== */
+.brand { padding: 20px 18px 16px; border-bottom: 1px solid var(--border); }
+.brand h1 { font-size: 15px; font-weight: 600; letter-spacing: .2px; }
+.brand .sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+.nav { padding: 10px; display: flex; flex-direction: column; gap: 2px; }
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border-radius: 6px;
+    font-size: 13.5px;
+    color: var(--slate);
+    text-decoration: none;
+    user-select: none;
+}
+.nav-item:hover { background: #f8fafc; color: var(--text); }
+.nav-item.active { background: var(--primary-dim); color: var(--primary); font-weight: 600; }
+.nav-item svg { width: 16px; height: 16px; flex: 0 0 16px; }
+.nav-item .dot-warn {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--amber); margin-left: auto; flex: 0 0 7px;
+}
+
+/* ===== 侧栏底部：当前账号 + 登出（登录态由服务端 /admin/session 判定） ===== */
+.sidebar-foot {
+    margin-top: auto;
+    padding: 12px 14px 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.sidebar-foot .foot-user {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--text); min-width: 0;
+}
+.sidebar-foot .dot-user {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex: 0 0 7px;
+}
+.sidebar-foot .foot-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600;
+}
+.sidebar-foot .foot-link {
+    font-size: 12px; color: var(--primary); text-decoration: none; padding-left: 15px;
+}
+.sidebar-foot .foot-link:hover { text-decoration: underline; }
+.sidebar-foot .foot-out {
+    margin-top: 2px; padding: 6px 10px; font-size: 12.5px;
+    background: #fff; color: var(--slate); border: 1px solid var(--border);
+    border-radius: 6px; cursor: pointer;
+}
+.sidebar-foot .foot-out:hover { background: #f8fafc; color: var(--text); }
+
+/* ===== 页头 ===== */
+.page-head { margin-bottom: 20px; }
+.page-head h2 { font-size: 18px; font-weight: 600; }
+.page-head p { font-size: 13px; color: var(--muted); margin-top: 5px; }
+.page-head .actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+
+/* ===== 页头模型数量统计（绿色背景框） ===== */
+.count-badge {
+    background: var(--green); color: #fff;
+    font-size: 12px; font-weight: 600;
+    padding: 4px 12px; border-radius: 999px;
+    white-space: nowrap;
+}
+
+/* ===== 卡片 ===== */
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+.card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.card-head h2 { font-size: 15px; font-weight: 600; }
+.card h3 {
+    font-size: 13px; color: var(--muted); font-weight: 600;
+    margin: 20px 0 10px; padding-top: 16px; border-top: 1px solid var(--border);
+}
+.card h3:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+.card > p { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+
+/* ===== 按钮 ===== */
+button {
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 14px;
+    font-family: inherit;
+    cursor: pointer;
+}
+button:hover { opacity: .9; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.ghost {
+    background: #fff; color: var(--primary);
+    border: 1px solid var(--border); font-size: 12px; padding: 4px 10px;
+}
+button.ghost:hover { background: var(--primary-dim); }
+button.sec {
+    background: #fff; color: var(--text);
+    border: 1px solid var(--border); font-size: 13px; padding: 8px 14px;
+}
+button.sec:hover { background: #f8fafc; }
+button.danger { background: var(--red); }
+
+.btn-row { display: flex; gap: 10px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+
+/* ===== 表单 ===== */
+input, select {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    width: 100%;
+    color: var(--text);
+    background: #fff;
+}
+input:focus, select:focus { outline: 2px solid var(--primary-dim); border-color: var(--primary); }
+input:disabled { background: #f8fafc; color: var(--muted); }
+.mono { font-family: ui-monospace, Consolas, monospace; }
+
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
+.field .help { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.6; }
+
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+/* .row 是 grid、[hidden] 是 UA 低优先级样式会被盖掉，隐藏时需显式覆盖 */
+.row[hidden], .field[hidden] { display: none; }
+
+/* ===== 状态行 ===== */
+.status-line {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: 13px; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px;
+}
+.status-line.ok { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.status-line.warn { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.status-line .pill {
+    font-size: 11px; padding: 1px 7px; border-radius: 8px;
+    background: rgba(255, 255, 255, .7); font-family: monospace;
+}
+
+/* ===== 结果输出 ===== */
+.result {
+    margin-top: 12px; font-size: 13px; white-space: pre-wrap;
+    background: #f9fafb; border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px; display: none;
+}
+.result.show { display: block; }
+.result.ok { color: var(--green); }
+.result.err { color: var(--red); }
+
+/* ===== 探测结果（结构化） =====
+   .result 默认 pre-wrap，用于纯文本结论；结构化块自己管换行，故撤销继承 */
+.probe { white-space: normal; }
+.probe .summary { color: var(--text); }
+.probe .facts { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
+.probe .fact { font-size: 12px; color: var(--muted); }
+.probe .fact b { color: var(--text); font-weight: 600; font-family: ui-monospace, Consolas, monospace; }
+.probe .note { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 8px; }
+.probe .note.strong { color: #b45309; }
+
+/* ===== 兼容性 / 能力判读 chip ===== */
+.compat {
+    display: inline-block; padding: 2px 9px; border-radius: 10px;
+    font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.compat.ok       { background: #ecfdf5; color: #15803d; }
+.compat.maybe    { background: #fffbeb; color: #b45309; }
+.compat.risky    { background: #fff7ed; color: #c2410c; }
+.compat.no       { background: #fef2f2; color: #b91c1c; }
+.compat.unknown  { background: #f1f5f9; color: var(--slate); }
+
+/* ===== 版本支持范围说明块 ===== */
+.compat-box {
+    border: 1px solid var(--border); border-radius: 8px;
+    background: #fafbfc; padding: 10px 12px; margin-bottom: 16px;
+}
+.compat-box .cb-head {
+    display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center;
+    font-size: 12px; color: var(--muted);
+}
+.compat-box .cb-head .cb-title { font-weight: 600; color: var(--slate); margin-right: 2px; }
+.compat-box details { margin-top: 8px; }
+.compat-box summary {
+    font-size: 12px; color: var(--primary); cursor: pointer;
+    list-style: none; display: inline-block;
+}
+.compat-box summary::-webkit-details-marker { display: none; }
+.compat-box summary::before { content: '▸ '; }
+.compat-box details[open] summary::before { content: '▾ '; }
+.compat-box ul { margin: 8px 0 0 18px; font-size: 12px; color: var(--muted); line-height: 1.7; }
+.compat-box li { margin-bottom: 4px; }
+.compat-box code {
+    background: var(--primary-dim); color: var(--primary);
+    padding: 1px 5px; border-radius: 4px; font-size: 12px;
+}
+
+/* ===== 模型卡片：一个模型一个框，彼此独立、互不干扰 ===== */
+/* 「存储配置」页复用同一套骨架，仅换左侧色条与圆点颜色以区分条目 */
+.model-card { border-left: 3px solid var(--primary); }
+.model-card.emb { border-left-color: #7c3aed; }
+.model-card.infra-es { border-left-color: #0d9488; }
+.model-card.infra-redis { border-left-color: #ea580c; }
+.model-card .card-head {
+    margin-bottom: 16px; padding-bottom: 12px;
+    border-bottom: 1px solid var(--border); flex-wrap: wrap;
+}
+.model-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--primary); flex: 0 0 8px;
+}
+.model-card.emb .model-dot { background: #7c3aed; }
+.model-card.infra-es .model-dot { background: #0d9488; }
+.model-card.infra-redis .model-dot { background: #ea580c; }
+.card-head .spacer { flex: 1 1 auto; }
+.card-note { font-size: 12px; color: #94a3b8; }
+
+/* ===== 模型页分段：向量模型与对话模型分块 ===== */
+/* 两段的卡片边框/圆点已由 .emb 区分，这里只做分段标题 */
+.seg { margin: 26px 0 12px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.seg:first-of-type { margin-top: 8px; }
+.seg h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.seg .seg-note { font-size: 12px; color: var(--muted); }
+.seg .spacer { flex: 1 1 auto; }
+
+/* 空状态：一个虚线框说明"没有"并给出下一步。
+   刻意不给可编辑的表单框 —— 没有配置时最该做的是告诉用户"还没有"，而不是摆一个空输入框等着被填错。 */
+.empty-box {
+    border: 1px dashed var(--border);
+    background: #fafbfc;
+    border-radius: 8px;
+    padding: 26px 20px;
+    text-align: center;
+}
+.empty-box .empty-title { font-size: 14px; color: var(--text); font-weight: 600; }
+.empty-box .empty-sub { font-size: 12.5px; color: var(--muted); margin-top: 6px; line-height: 1.7; }
+.empty-box .btn-primary { margin-top: 14px; }
+
+/* 模型卡片内的信息行（键值对） */
+.model-meta { display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.6; }
+.model-meta .k { display: inline-block; min-width: 92px; color: var(--muted); }
+
+.mbadge {
+    font-size: 12px; padding: 2px 8px; border-radius: 10px;
+    background: #f1f5f9; color: var(--slate); white-space: nowrap;
+}
+.mbadge.ok { background: #ecfdf5; color: var(--green); }
+.mbadge.off { background: #fffbeb; color: var(--amber); }
+.dirty { font-size: 12px; color: var(--amber); white-space: nowrap; }
+
+.card-foot {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    margin-top: 4px; padding-top: 14px; border-top: 1px solid var(--border);
+}
+.card-foot .hint { margin: 0; flex: 1 1 260px; }
+
+.head-line { display: flex; align-items: flex-start; gap: 12px; }
+.head-line > div:first-child { flex: 1 1 auto; }
+
+/* ===== 模型名控件：下拉选择 + 手动输入（输入框内容为准） ===== */
+.combo { position: relative; }
+.combo input { padding-right: 34px; }
+.combo-btn {
+    position: absolute; top: 0; right: 0; height: 100%; width: 32px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent; border: none; border-left: 1px solid var(--border);
+    border-radius: 0 6px 6px 0; color: var(--muted); cursor: pointer;
+}
+.combo-btn:hover { background: #f8fafc; color: var(--primary); opacity: 1; }
+.combo-btn svg { width: 14px; height: 14px; }
+.combo-menu {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
+    background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+    max-height: 240px; overflow-y: auto; padding: 4px;
+}
+.combo-state { font-size: 12px; color: var(--muted); padding: 8px 10px; }
+.combo-item {
+    padding: 6px 10px; border-radius: 4px; cursor: pointer;
+    font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
+    color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.combo-item:hover, .combo-item.active { background: var(--primary-dim); color: var(--primary); }
+
+.hint { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 8px; }
+.hint code {
+    background: #f1f5f9; padding: 1px 5px; border-radius: 4px;
+    font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+}
+.hint b { color: var(--slate); font-weight: 600; }
+
+/* ===== 顶部信息框：接入模型提示 + 配置文件地址 ===== */
+.info-box {
+    border: 1px solid var(--border); border-radius: 8px;
+    background: #fafbfc; padding: 12px 14px; margin-bottom: 16px;
+    font-size: 13px; color: var(--muted); line-height: 1.7;
+}
+.info-box .line + .line { margin-top: 6px; }
+.info-box b { color: var(--text); font-weight: 600; }
+.info-box .mono { color: var(--text); }
+
+/* ===== 可折叠说明（小字说明的折叠容器） =====
+   用于"规则 / 参考"类长说明：默认收起，点开看细节，避免无谓占用纵向空间。
+   短字段提示（.field .help / .hint）保持常驻，不套此容器。 */
+.disclose {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fafbfc;
+    padding: 10px 12px;
+}
+.disclose > summary {
+    font-size: 12px; color: var(--primary); cursor: pointer;
+    list-style: none; display: flex; align-items: center; gap: 5px;
+    user-select: none;
+}
+.disclose > summary::-webkit-details-marker { display: none; }
+.disclose > summary::before { content: '▸'; font-size: 10px; line-height: 1; }
+.disclose[open] > summary::before { content: '▾'; }
+.disclose > summary:hover { text-decoration: underline; }
+.disclose > .disclose-body {
+    font-size: 12px; color: var(--muted); line-height: 1.7; margin-top: 8px;
+}
+.disclose > .disclose-body code {
+    background: #f1f5f9; padding: 1px 5px; border-radius: 4px;
+    font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+}
+.disclose > .disclose-body b { color: var(--slate); font-weight: 600; }
+
+/* ===== 表格 ===== */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td {
+    text-align: left; padding: 8px 10px;
+    border-bottom: 1px solid var(--border); vertical-align: top;
+}
+th { color: var(--muted); font-weight: 500; background: #fafafa; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: #fcfcfd; }
+.table-wrap { overflow-x: auto; }
+
+/* ===== 标签 ===== */
+.tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; white-space: nowrap; }
+.tag.read { background: #ecfdf5; color: var(--green); }
+.tag.write { background: #fffbeb; color: var(--amber); }
+.tag.destructive { background: #fef2f2; color: var(--red); }
+.tag.approval { background: var(--primary-dim); color: var(--primary); }
+.tag.perm { background: #f1f5f9; color: var(--slate); font-family: monospace; margin: 0 4px 4px 0; }
+.tag.public { background: #ecfdf5; color: var(--green); }
+.perm-none { color: var(--muted); }
+
+/* 可点选的声明 chip：与 .tag 同一套视觉，但「未选 / 已选」必须一眼分得开 ——
+   模型类型与模态现在由用户声明，看不清"哪些选了"就等于没声明。 */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip {
+    padding: 3px 10px; border-radius: 10px; font-size: 12px; cursor: pointer;
+    border: 1px solid var(--border); background: #fff; color: var(--muted);
+    font-family: inherit; line-height: 1.6;
+}
+.chip:hover { border-color: var(--primary); color: var(--primary); }
+.chip.on {
+    background: var(--primary-dim); border-color: var(--primary);
+    color: var(--primary); font-weight: 600;
+}
+
+/* ===== 非同源访问警示（见 console.js warnIfCrossOrigin） =====
+   页面不在服务端地址上打开时，登录 Cookie 存不下也带不上，受保护接口会一律 401。
+   在页面上说清，避免只留一行服务端日志导致误判为鉴权逻辑 bug。 */
+.origin-warn {
+    background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;
+    border-radius: 8px; padding: 12px 14px; margin-bottom: 18px;
+    font-size: 12.5px; line-height: 1.8;
+}
+.origin-warn code {
+    background: rgba(255, 255, 255, .85); padding: 1px 5px; border-radius: 4px;
+    font-family: ui-monospace, Consolas, monospace;
+}
+.origin-warn a { color: #991b1b; font-weight: 600; }
+.origin-warn b { color: #991b1b; }
+
+/* ===== 统计块 =====
+   auto-fit 而非固定列数：概览 4 块、域空间 5 块，同一套样式都要能撑满一行；
+   固定列数会在卡片增减时留下空列，窄屏也靠它自动塌列（下方媒体查询兜底）。 */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.stat {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px;
+}
+.stat .k { font-size: 12px; color: var(--muted); }
+.stat .v { font-size: 16px; font-weight: 600; margin-top: 6px; }
+.stat .v.ok { color: var(--green); }
+.stat .v.warn { color: var(--amber); }
+.stat .v.err { color: var(--red); }
+.stat .note { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+
+/* ===== 模态框 / 遮罩层 =====
+   点「添加 / 编辑」时弹出的表单层：全屏半透明遮罩 + 居中面板。
+   注意：.modal-mask 用了 display:flex，必须显式让 [hidden] 覆盖它，
+   否则元素加上 hidden 属性也依然会显示。 */
+.modal-mask {
+    position: fixed; inset: 0; z-index: 60;
+    background: rgba(17, 24, 39, .45);
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 56px 16px; overflow-y: auto;
+}
+.modal-mask[hidden] { display: none; }
+.modal-panel {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; width: 100%; max-width: 640px;
+    box-shadow: 0 16px 44px rgba(15, 23, 42, .24);
+    padding: 20px 22px 18px;
+}
+.modal-head {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 16px; padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+.modal-head h3 { font-size: 15px; font-weight: 600; }
+.modal-head .spacer { flex: 1 1 auto; }
+.modal-close {
+    background: #fff; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 9px 3px; font-size: 17px; line-height: 1.15;
+    cursor: pointer;
+}
+.modal-close:hover { background: #f8fafc; color: var(--text); opacity: 1; }
+
+/* ===== 响应式：窄屏时侧栏转顶部横向 ===== */
+@media (max-width: 860px) {
+    .layout { flex-direction: column; }
+    .sidebar {
+        width: auto; flex: none; height: auto; position: static;
+        border-right: none; border-bottom: 1px solid var(--border);
+    }
+    .nav { flex-direction: row; overflow-x: auto; }
+    .nav-item .dot-warn { margin-left: 6px; }
+    .main { padding: 20px 16px 40px; }
+    .stats { grid-template-columns: 1fr; }
+    .row { grid-template-columns: 1fr; }
+    .modal-mask { padding: 24px 12px; }
+    .modal-panel { padding: 16px 16px 14px; }
+}

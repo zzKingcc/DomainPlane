@@ -1,4 +1,4 @@
-# Stringer 踩坑文档
+# DomainPlane 踩坑文档
 
 汇总项目的反直觉取舍、易错点、失败模式。
 每条格式为「**坑点** —— 现象与成因 → 处置」。设计与接口以 `DESIGN.md` / `API.md` 为准。
@@ -11,8 +11,8 @@
 
 ## 1 配置与启动
 
-- **`stringer.ai.prompt.*` 缩进错位会静默失效** —— yaml 中 `prompt:` 若挂在已注释的 `ai:` 之下，实际键变成 `stringer.server.prompt.*`，`@ConfigurationProperties` 不认，系统提示词静默为 null、不注入 `SystemMessage`。→ 改完 yaml 必须做键路径体检；启动摘要里确认提示词已加载。
-- **`stringer.rag.logging.*` 同类失效** —— 缩进错位后回落默认值恰好与预期相同，表面"正常"，实际 `STRINGER_LOG_PATH` 改不动日志目录。→ 校验键路径，不要靠"看起来对"。
+- **`domainplane.ai.prompt.*` 缩进错位会静默失效** —— yaml 中 `prompt:` 若挂在已注释的 `ai:` 之下，实际键变成 `domainplane.server.prompt.*`，`@ConfigurationProperties` 不认，系统提示词静默为 null、不注入 `SystemMessage`。→ 改完 yaml 必须做键路径体检；启动摘要里确认提示词已加载。
+- **`domainplane.rag.logging.*` 同类失效** —— 缩进错位后回落默认值恰好与预期相同，表面"正常"，实际 `DOMAINPLANE_LOG_PATH` 改不动日志目录。→ 校验键路径，不要靠"看起来对"。
 - **同一层级出现重复键会直接起不来** —— Boot 3.x 的 SnakeYAML 抛 `DuplicateKeyException`，不再"后者覆盖前者"；缩进错位则相反，不报错只静默失效。两种失败模式都需要专门的键路径检查脚本。
 - **"还没配"是合法初始态，不是错误** —— 启动期因未配置而失败会形成死锁：起不来 → 管控台打不开 → 配置填不上。→ 启动期只以横幅 INFO 陈述，失败推迟到调用点（`90005` + WARN）。
 - **首次启动死锁的另一种形态** —— 把 ES 连接写进 yaml 且要求启动期必达时，配置一旦挪到管控台就永远进不去管控台。→ 启动期干脆不碰 ES（知识库索引本就按需创建），未配置只打 INFO，失败推迟到调用点。
