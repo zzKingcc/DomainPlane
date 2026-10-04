@@ -111,7 +111,7 @@ body {
 .page-head { margin-bottom: 20px; }
 .page-head h2 { font-size: 18px; font-weight: 600; }
 .page-head p { font-size: 13px; color: var(--muted); margin-top: 5px; }
-.page-head .actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+.page-head .actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
 
 /* ===== 页头模型数量统计（绿色背景框） ===== */
 .count-badge {
@@ -130,7 +130,12 @@ body {
     margin-bottom: 20px;
 }
 .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-.card-head h2 { font-size: 15px; font-weight: 600; }
+/* min-width:0 + overflow-wrap：域路径 / 模型名可能很长，让标题自己折行，
+   而不是把同一行里的标签与按钮挤到竖排 */
+.card-head h2 { font-size: 15px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+/* 卡片头里的短状态文字（"工具 12 · 需确认 3"、更新时间）同样不许逐字断行。
+   .card-note 的长说明段落都不是 .card-head 的直接子元素，不会被这条波及。 */
+.card-head > .card-note { white-space: nowrap; flex: 0 0 auto; }
 .card h3 {
     font-size: 13px; color: var(--muted); font-weight: 600;
     margin: 20px 0 10px; padding-top: 16px; border-top: 1px solid var(--border);
@@ -139,6 +144,10 @@ body {
 .card > p { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
 
 /* ===== 按钮 ===== */
+/* 按钮文案一律不折行：这些标签都是「保存」「设为可调用」这类短中文，而中文可以在任意两字
+   之间断行 —— 所在 flex 行一紧就会被挤成「设/为/可/调/用」竖排。宁可让整行换行
+   （.page-head .actions / .btn-row / .card-foot 都已 flex-wrap: wrap）。
+   这与 .tag / .count-badge / .mbadge / .dirty 已有的 nowrap 是同一条规矩。 */
 button {
     background: var(--primary);
     color: #fff;
@@ -148,6 +157,7 @@ button {
     font-size: 14px;
     font-family: inherit;
     cursor: pointer;
+    white-space: nowrap;
 }
 button:hover { opacity: .9; }
 button:disabled { opacity: .5; cursor: not-allowed; }
@@ -166,7 +176,12 @@ button.danger { background: var(--red); }
 .btn-row { display: flex; gap: 10px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
 
 /* ===== 表单 ===== */
-input, select {
+/* width:100% + 内边距只对「文本类」输入成立。checkbox / radio 一旦被这条命中，就会变成
+   一个占满所在容器的方框 —— 这正是「可调用」「每 10 秒自动刷新」被挤成竖排的真正原因：
+   在 flex 容器里，百分比宽度按容器最终宽度解析，复选框吃光整行，旁边的中文只剩一个字
+   的位置；在行内 label 里（知识库「覆盖更新」），它把说明文字顶到下一行，于是同一行里
+   垂直居中的「上传」按钮看起来浮在文字上面。 */
+input:not([type="checkbox"]):not([type="radio"]), select {
     padding: 8px 12px;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -176,6 +191,15 @@ input, select {
     color: var(--text);
     background: #fff;
 }
+/* 勾选类控件恢复原生尺寸，不再被当成文本框 */
+input[type="checkbox"], input[type="radio"] {
+    width: auto; padding: 0; margin: 0;
+    flex: 0 0 auto;
+    vertical-align: middle;
+    accent-color: var(--primary);
+}
+/* 文件框保留输入框外观，但不独占整行 —— 否则「上传」按钮会被挤到单独一行 */
+input[type="file"] { width: auto; }
 input:focus, select:focus { outline: 2px solid var(--primary-dim); border-color: var(--primary); }
 input:disabled { background: #f8fafc; color: var(--muted); }
 .mono { font-family: ui-monospace, Consolas, monospace; }
@@ -473,7 +497,7 @@ tbody tr:hover { background: #fcfcfd; }
     margin-bottom: 16px; padding-bottom: 12px;
     border-bottom: 1px solid var(--border);
 }
-.modal-head h3 { font-size: 15px; font-weight: 600; }
+.modal-head h3 { font-size: 15px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .modal-head .spacer { flex: 1 1 auto; }
 .modal-close {
     background: #fff; color: var(--muted); border: 1px solid var(--border);

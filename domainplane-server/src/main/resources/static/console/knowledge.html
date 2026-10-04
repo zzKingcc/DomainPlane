@@ -31,15 +31,18 @@
                 选择文件上传（<b>同步导入</b>：切片 + 向量化完成后才返回，大文件耗时较久）。
                 同名文档<b>不区分大小写</b>，默认拒绝；勾选「覆盖更新」则先删旧再写入。
             </p>
+            <!-- 主操作一行：选文件 + 上传 —— 按钮紧挨着它所作用的输入框，
+                 不再被「覆盖更新」这类选项文字隔开 -->
             <div class="btn-row">
                 <input type="file" id="fileInput" accept=".txt,.md,.markdown,.docx,.doc,.pdf,.xls,.xlsx">
-                <label class="hint" style="margin:0;">
-                    <input type="checkbox" id="replaceChk"> 覆盖更新（已存在同名时替换）
-                </label>
                 <button id="uploadBtn">上传</button>
             </div>
+            <!-- 选项一行：覆盖策略 + 归属域 -->
             <div class="btn-row">
-                <label class="hint" style="margin:0;">
+                <label class="hint" style="margin:0; white-space:nowrap; flex:0 0 auto;">
+                    <input type="checkbox" id="replaceChk"> 覆盖更新（已存在同名时替换）
+                </label>
+                <label class="hint" style="margin:0; white-space:nowrap; flex:0 0 auto;">
                     归属域：
                     <select id="domainSelect" style="min-width:14rem;">
                         <option value="">default（根域，全域可见）</option>

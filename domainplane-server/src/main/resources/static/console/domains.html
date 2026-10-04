@@ -42,7 +42,11 @@
             <div class="actions">
                 <input type="text" id="newDomain" placeholder="完整路径域，如 default.customer-service"
                        style="width:240px; font-family:ui-monospace,Consolas,monospace;">
-                <label class="card-note" style="display:inline-flex; align-items:center; gap:4px;"
+                <!-- nowrap 必须写在这里：label 是 inline-flex，里面的「可调用」是匿名 flex 项，
+                     中文可在任意两字间断行，行内空间一紧就会被挤成竖排三个字；
+                     flex:0 0 auto 同时禁止这一行把 label 压扁 -->
+                <label class="card-note"
+                       style="display:inline-flex; align-items:center; gap:4px; white-space:nowrap; flex:0 0 auto;"
                        title="勾选=可调用单元（能作为入口）；不勾选=只做装配，供后代继承工具 / 提示词 / 模型 / 知识">
                     <input type="checkbox" id="newDomainCallable" checked> 可调用
                 </label>

@@ -12,15 +12,11 @@
 
     <main class="main">
         <div class="page-head">
-            <div class="head-line" style="align-items:center;">
-                <div><h2>模型设置</h2></div>
-                <span class="count-badge" id="modelCount">—</span>
-                <button class="ghost" id="addModelBtn">+ 添加模型</button>
-            </div>
+            <h2>模型设置</h2>
         </div>
 
         <div class="info-box">
-            <div class="line"><b>接入模型</b> —— 点右上角「添加模型」登记一个连接，添加时会自动探测模型类型并归入下方对应分段。</div>
+            <div class="line"><b>接入模型</b> —— 点各分段标题右侧的「添加」按钮登记一个连接；类型由「读取提供商信息」读到的元数据或你的点选决定，保存后归入对应分段。</div>
             <div class="line">配置文件：<span class="mono" id="settingsFileHint">—</span></div>
         </div>
 
@@ -29,6 +25,8 @@
             <h3>向量模型</h3>
             <span class="seg-note">全局只能选一个，所有域共用；知识库的灌库与向量检索都走它</span>
             <span class="spacer"></span>
+            <span class="count-badge" id="embeddingCount"
+                  title="已登记的向量档案数（含尚未选用的，它们在下方的选择框里）">—</span>
             <button class="ghost" id="addEmbeddingBtn">+ 添加向量模型</button>
         </div>
         <div id="embeddingList">
@@ -44,6 +42,8 @@
             <h3>模型</h3>
             <span class="seg-note">除向量模型外的全部档案；对话模型要在「域空间」页绑给域才能被调用</span>
             <span class="spacer"></span>
+            <span class="count-badge" id="modelCount"
+                  title="本段列出的档案数（不参与域绑定的生图 / 语音等类型也计在内）">—</span>
             <button class="ghost" id="addChatBtn">+ 添加模型</button>
         </div>
         <div id="modelList">
@@ -156,7 +156,7 @@
      · 模型 —— 除当前向量模型外的全部档案（含对话 / 生图 / 语音等所有类型）。
        不按"对话"命名，是因为探测会把档案分成好几类，只列 chat 会让其余类型
        存进去之后在页面上彻底消失；对话模型在其中按域绑定使用。
-   添加模型时统一走右上角「添加模型」/各段的添加按钮，由探测结果自动归入对应分段。
+   添加模型统一走各分段标题右侧的添加按钮，保存后按声明的类型归入对应分段。
    域 → 对话模型的绑定在「域空间」页操作。 */
 Console.renderSidebar('models');
 
@@ -516,7 +516,7 @@ Console.renderSidebar('models');
         if (!models.length) {
             box.innerHTML = '<div class="empty-box">'
                 + '<div class="empty-title">还没有配置任何模型</div>'
-                + '<div class="empty-sub">点右上角或这里的「添加模型」登记一个连接，添加时会自动探测类型；'
+                + '<div class="empty-sub">点上面的「添加模型」登记一个连接，保存后按声明的类型归类；'
                 + '对话模型要绑到域才能被调用（在「域空间」页操作）。</div>'
                 + '<button class="btn-primary" data-add-chat>+ 添加模型</button>'
                 + '</div>';
@@ -574,9 +574,16 @@ Console.renderSidebar('models');
             b.addEventListener('click', function () { deleteProfile(b.getAttribute('data-del')); });
         });
 
-        /* 页头数量优先用服务端给的档案总数（模型桶 + 向量桶），拿不到时才按可见项估算 */
-        var total = PROFILE_COUNT == null ? ((EMBEDDING.alias ? 1 : 0) + models.length) : PROFILE_COUNT;
-        pfEl('modelCount').textContent = total + ' 个模型';
+        /* 分段标题上的计数各归本段，显示在该段「添加」按钮左侧。服务端的 profileCount 是
+           「模型桶 + 向量桶」之和，而 models 只是模型段实际列出的档案（已排除被选为向量模型的
+           那一份，含双类型档案），所以 向量桶 = 总数 − models.length：两数相加恒等于总数，
+           双类型档案也不会被数两遍。拿不到服务端总数时（首屏 settings 可能先于 profiles
+           返回）才退回按可见项估算。 */
+        var vecCount = PROFILE_COUNT == null
+            ? (EMBEDDING.alias ? 1 : 0)
+            : Math.max(0, PROFILE_COUNT - models.length);
+        pfEl('embeddingCount').textContent = vecCount + ' 个';
+        pfEl('modelCount').textContent = models.length + ' 个';
     }
 
     /* ---------- 弹窗：开 / 关 / 重置 ---------- */
@@ -935,7 +942,6 @@ Console.renderSidebar('models');
     }
 
     /* ---------- 事件绑定 ---------- */
-    pfEl('addModelBtn').addEventListener('click', function () { openAdd(); });
     pfEl('addEmbeddingBtn').addEventListener('click', function () { openAdd('embedding'); });
     pfEl('addChatBtn').addEventListener('click', function () { openAdd(); });
     pfEl('readBtn').addEventListener('click', readProviderInfo);
