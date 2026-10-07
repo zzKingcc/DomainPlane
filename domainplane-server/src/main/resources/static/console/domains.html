@@ -33,9 +33,7 @@
             <div class="head-line">
                 <div>
                     <h2>域空间</h2>
-                    <p>一个域一张卡片：配置它可调用哪些模型、能看到哪些工具。域有两种角色：
-                        <b>可调用单元</b>（能作为入口被调用）与<b>装配节点</b>（只把工具 / 提示词 / 模型 / 知识传给后代）。
-                        新建的域默认<b>无可调用模型</b>，需显式指定。</p>
+                    <p>一个域一张卡片：配置可调用模型与可见工具。域分两种角色：<b>可调用单元</b>（能作为入口）与<b>装配节点</b>（只把工具 / 提示词 / 模型 / 知识传给后代）。新建域默认无可调用模型。</p>
                 </div>
                 <span class="count-badge" id="domainCount">—</span>
             </div>
@@ -153,7 +151,7 @@
             var n = dupNo(p);
             list.push({
                 alias: p.alias,
-                label: modelLabel(p) + (n > 1 ? '' : ''),
+                label: modelLabel(p),
                 note: p.baseUrl || '',
                 tags: tagList(p.endpoints, EP_LABEL) + tagList(p.input, MOD_LABEL)
                     + tagList(p.capabilities, CAP_LABEL)
@@ -236,9 +234,8 @@
                 + '</header>'
                 + (d.hasChildren
                         ? '<div class="card-note" style="margin-top:6px;">'
-                          + '该域有子域，按<b>只有叶子域可以作为可调用单元</b>的规则，它只能作为装配节点'
-                          + '（把工具 / 提示词 / 模型 / 知识传给后代），不能当入口。'
-                          + '需要这一层的入口，请另建一个没有子域的域。</div>'
+                          + '该域有子域，按"只有叶子域可作为可调用单元"的规则，它只能作装配节点'
+                          + '（把工具 / 提示词 / 模型 / 知识传给后代），不能当入口。需要这一层入口请另建无子域的域。</div>'
                         : '')
                 + '<div class="model-meta">'
                 +   '<div><span class="k">可调用模型</span>' + boundTags + '</div>'

@@ -9,8 +9,8 @@ import java.util.Map;
 /**
  * AI 提示词配置模型（平台自有，统一前缀 {@code domainplane.ai.prompt}）
  *
- * <p>与管控台 {@code prompts.json} 同构：没有公共基线，根域 {@code default} 的片段就是基底，
- * 生效提示词按域链从根拼接。键是完整路径域。</p>
+ * 与管控台 {@code prompts.json} 同构：没有公共基线，根域 {@code default} 的片段就是基底，
+ * 生效提示词按域链从根拼接。键是完整路径域。
  *
  * @author zzkingcc
  */

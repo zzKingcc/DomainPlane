@@ -8,8 +8,6 @@ import co.elastic.clients.elasticsearch.indices.IndexState;
 import co.elastic.clients.json.JsonData;
 import com.zzkingcc.domainplane.api.support.KbIndexes;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.List;
@@ -25,25 +23,25 @@ public class EsIndexManager {
     /**
      * 切片元数据里"所属域"的字段名（完整路径域，单个值）。
      *
-     * <p>索引本身已经是<b>一域一索引</b>，检索不再靠这个字段过滤；它只用于管控台列表展示，
-     * 以及索引名无法反查域路径（名里是哈希）时仍能读出归属。必须是 {@code keyword}。</p>
+     * 索引本身已经是一域一索引，检索不再靠这个字段过滤；它只用于管控台列表展示，
+     * 以及索引名无法反查域路径（名里是哈希）时仍能读出归属。必须是 {@code keyword}。
      */
     public static final String DOMAIN_FIELD = "domain";
 
     private EsIndexManager() {}
 
     /**
-     * 索引是否存在。<b>查询本身失败时抛异常，不返回 {@code false}</b>。
+     * 索引是否存在。查询本身失败时抛异常，不返回 {@code false}。
      *
-     * <p>为什么不能 fail-open：调用方拿这个结果做的是<b>破坏性决策</b> ——
+     * 为什么不能 fail-open：调用方拿这个结果做的是破坏性决策 ——
      * {@link #deleteIndex} 会先问"存在吗"，答"不"就直接跳过删除。
      * 若把"查不到"当成"不存在"，那么 ES 一抖动（超时、连接被拒、集群 red），
      * 删域就会静默跳过索引删除并继续往下走，域没了索引还在 ——
      * 而同一路径域重建后索引名相同（{@link KbIndexes#nameOf} 是路径哈希），
-     * 这份"本该删掉的知识内容"会原样复活，且没有任何报错。</p>
+     * 这份"本该删掉的知识内容"会原样复活，且没有任何报错。
      *
-     * <p>失败时抛而不是返回，是这一类的通用判据：**存疑时宁可让操作失败，
-     * 不能给一个看起来正常的错答案**。</p>
+     * 失败时抛而不是返回，是这一类的通用判据：存疑时宁可让操作失败，
+     * 不能给一个看起来正常的错答案。
      *
      * @throws EsAccessException ES 不可达或查询失败
      */
@@ -59,9 +57,9 @@ public class EsIndexManager {
     /**
      * 列出匹配 {@code pattern}（支持通配）的索引名，按字典序返回；一个都没有时返回空列表。
      *
-     * <p>与 {@link #exists} 不同，这里<b>保持 fail-open</b>：它只用于管控台列表展示
+     * 与 {@link #exists} 不同，这里保持 fail-open：它只用于管控台列表展示
      * 与"当前有哪些域有索引"的展示口径，返回空列表的代价是多显示一行空，
-     * 而抛异常的代价是页面整个打不开。</p>
+     * 而抛异常的代价是页面整个打不开。
      */
     public static List<String> listIndices(ElasticsearchClient esClient, String pattern) {
         try {
@@ -74,10 +72,10 @@ public class EsIndexManager {
     }
 
     /**
-     * 删除单个索引；<b>确实不存在</b>时返回 {@code false}（没有东西可删）。
+     * 删除单个索引；确实不存在时返回 {@code false}（没有东西可删）。
      *
      * @return 是否确实删掉了一个已存在的索引
-     * @throws EsAccessException 查询或删除失败 —— 调用方<b>必须</b>当成失败处理，
+     * @throws EsAccessException 查询或删除失败 —— 调用方必须当成失败处理，
      *                              不能继续往下删域
      */
     public static boolean deleteIndex(ElasticsearchClient esClient, String indexName) {
@@ -164,20 +162,20 @@ public class EsIndexManager {
     /**
      * 构造 IK 分词器版本的索引 mapping JSON。
      *
-     * <p>metadata 用 {@code dynamic:false} + 全部字段显式声明：
-     * <ol>
-     *   <li>防字段污染（切片器将来加字段不会悄悄变成 text 把检索带偏）；</li>
-     *   <li>{@code doc_id} 必须显式声明为可精确查询的类型 —— 它一旦被动态映射成 text，
-     *       删除/统计用的 {@code term(metadata.doc_id)} 就会失效：UUID 被分词后基本查不中。</li>
-     * </ol>
+     * metadata 用 {@code dynamic:false} + 全部字段显式声明：
      *
-     * <p>text 挂两个子字段：{@code keyword} 精确等值（留档）；
+     *   • 防字段污染（切片器将来加字段不会悄悄变成 text 把检索带偏）；
+     *   • {@code doc_id} 必须显式声明为可精确查询的类型 —— 它一旦被动态映射成 text，
+     *       删除/统计用的 {@code term(metadata.doc_id)} 就会失效：UUID 被分词后基本查不中。
+     *
+     *
+     * text 挂两个子字段：{@code keyword} 精确等值（留档）；
      * {@code standard} 标准分词器，救 ik 会把英文词/数字/订单号切碎的场景
-     * （{@code ik_smart} 对 "SKU-10086"、"v2.1" 这类标识符切出来的词往往对不上）。</p>
+     * （{@code ik_smart} 对 "SKU-10086"、"v2.1" 这类标识符切出来的词往往对不上）。
      *
-     * <p>⚠️ <b>字段名必须与 {@link ChunkMetadataKeys} 一致</b>。这里是 JSON 字面量，
+     * 字段名必须与 {@link ChunkMetadataKeys} 一致。这里是 JSON 字面量，
      * 用不了常量，只能靠约定 —— 所以 {@code EsMetadataMappingTest} 会把两边逐字比对，
-     * 改名只改一处时那条测试会红。</p>
+     * 改名只改一处时那条测试会红。
      */
     static String buildIkMapping(int dims) {
         return """

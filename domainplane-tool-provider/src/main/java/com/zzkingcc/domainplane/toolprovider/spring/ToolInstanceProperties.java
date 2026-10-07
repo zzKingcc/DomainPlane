@@ -2,6 +2,8 @@ package com.zzkingcc.domainplane.toolprovider.spring;
 
 import com.zzkingcc.domainplane.sdkcore.config.DomainPlaneProperties;
 import com.zzkingcc.domainplane.toolprovider.ToolInstanceConfig;
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -10,6 +12,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * 属于"要不要当工具提供方"的显式选择，不该因为引了 jar 就默认发生。
  * @author zzkingcc
  */
+@Getter
+@Setter
 @ConfigurationProperties(prefix = "domainplane.tool-instance")
 public class ToolInstanceProperties {
 
@@ -27,6 +31,7 @@ public class ToolInstanceProperties {
      * 本实例的工具调用回流地址：服务端 POST 到它执行工具，必须服务端可达。
      * 留空即按 {@code http://localhost:本进程端口/domainplane/invoke} 自动推导——
      * 只对"服务端与工具实例同机"成立，跨机或前面有网关时必须显式填写。
+     * 推导不出来时视为空（不接反向调用），不影响工具注册与心跳，也不阻断启动。
      */
     private String endpoint;
 
@@ -43,53 +48,5 @@ public class ToolInstanceProperties {
     public ToolInstanceConfig toConfig(DomainPlaneProperties server, String endpoint) {
         return new ToolInstanceConfig(server.getHost(), server.getPort(), server.getUsername(), server.getPassword(),
                 instanceId, endpoint, heartbeatIntervalSeconds, maxBackoffSeconds, requestTimeoutMillis);
-    }
-
-    public boolean isScanAnnotated() {
-        return scanAnnotated;
-    }
-
-    public void setScanAnnotated(boolean scanAnnotated) {
-        this.scanAnnotated = scanAnnotated;
-    }
-
-    public String getInstanceId() {
-        return instanceId;
-    }
-
-    public void setInstanceId(String instanceId) {
-        this.instanceId = instanceId;
-    }
-
-    public String getEndpoint() {
-        return endpoint;
-    }
-
-    public void setEndpoint(String endpoint) {
-        this.endpoint = endpoint;
-    }
-
-    public int getHeartbeatIntervalSeconds() {
-        return heartbeatIntervalSeconds;
-    }
-
-    public void setHeartbeatIntervalSeconds(int heartbeatIntervalSeconds) {
-        this.heartbeatIntervalSeconds = heartbeatIntervalSeconds;
-    }
-
-    public int getMaxBackoffSeconds() {
-        return maxBackoffSeconds;
-    }
-
-    public void setMaxBackoffSeconds(int maxBackoffSeconds) {
-        this.maxBackoffSeconds = maxBackoffSeconds;
-    }
-
-    public int getRequestTimeoutMillis() {
-        return requestTimeoutMillis;
-    }
-
-    public void setRequestTimeoutMillis(int requestTimeoutMillis) {
-        this.requestTimeoutMillis = requestTimeoutMillis;
     }
 }

@@ -14,19 +14,19 @@ import java.util.List;
 /**
  * 通用切片层：把 {@link Block} 流打包成 {@link TextSegment}。
  *
- * <p><b>md / docx / pdf 共用这一份，且与 txt 共用同一个 {@link Chunker}</b> ——
+ * md / docx / pdf 共用这一份，且与 txt 共用同一个 {@link Chunker} ——
  * 格式适配层负责把每种格式翻译成 {@code Block}，这里只管三件事：
- * 标题路径栈、可切 / 不可切的分派、句子级打包。</p>
+ * 标题路径栈、可切 / 不可切的分派、句子级打包。
  *
- * <p>三条定死的规则（别改回去）：</p>
- * <ol>
- *   <li><b>撞标题立刻断。</b>短的开篇段落不会被并进下一节 ——
- *       它是上一节的归属，合并会让模型看不出层级。</li>
- *   <li><b>代码块与表格整块独占。</b>一条 shell 命令被切成两半、一张表被拦腰截断，
- *       这条知识就废了；宁可让单片超过 {@code maxChars} 也不切。</li>
- *   <li><b>标题层级直接用格式给的。</b>{@code level} 由 {@code Block} 带进来，
- *       这里不猜、不归一化 —— md 的 {@code ###} 与 docx 的 {@code Heading 3} 都是 level 3。</li>
- * </ol>
+ * 三条定死的规则（别改回去）：
+ *
+ *   • 撞标题立刻断。短的开篇段落不会被并进下一节 ——
+ *       它是上一节的归属，合并会让模型看不出层级。
+ *   • 代码块与表格整块独占。一条 shell 命令被切成两半、一张表被拦腰截断，
+ *       这条知识就废了；宁可让单片超过 {@code maxChars} 也不切。
+ *   • 标题层级直接用格式给的。{@code level} 由 {@code Block} 带进来，
+ *       这里不猜、不归一化 —— md 的 {@code ###} 与 docx 的 {@code Heading 3} 都是 level 3。
+ *
  *
  * @author zzkingcc
  */
@@ -252,9 +252,9 @@ public final class BlockSplitter {
     // ==================== 不可切块的自有切法 ====================
 
     /**
-     * 代码块超长时<b>按行切</b>：不按句切、不加重叠，每片重新包上围栏。
+     * 代码块超长时按行切：不按句切、不加重叠，每片重新包上围栏。
      *
-     * <p>保留围栏（含语言标记）是为了让模型看得出这是一段代码而不是正文。</p>
+     * 保留围栏（含语言标记）是为了让模型看得出这是一段代码而不是正文。
      */
     private List<String> codeParts(String raw) {
         if (count(raw) <= maxChars) {
@@ -312,9 +312,9 @@ public final class BlockSplitter {
     }
 
     /**
-     * 表格超长时<b>按数据行切，每片重复表头行</b>。
+     * 表格超长时按数据行切，每片重复表头行。
      *
-     * <p>不重复表头的话，第 2 片起就只剩孤零零的数据行，谁也不知道哪一列是哪一列。</p>
+     * 不重复表头的话，第 2 片起就只剩孤零零的数据行，谁也不知道哪一列是哪一列。
      */
     private List<String> tableParts(String raw) {
         if (count(raw) <= maxChars) {

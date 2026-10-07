@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 /**
  * 密码哈希（BCrypt）。
  *
- * <p>单一职责：只管"明文 ↔ 哈希"的转换，不碰存储与凭证。</p>
+ * 单一职责：只管"明文 ↔ 哈希"的转换，不碰存储与凭证。
  * @author zzkingcc
  */
 public final class PasswordHasher {
@@ -37,7 +37,7 @@ public final class PasswordHasher {
     /**
      * 校验明文与哈希是否匹配。
      *
-     * <p>哈希为空 / 格式非法一律返回 false，<b>不抛异常</b>——损坏的账号文件不应把登录接口打成 500。</p>
+     * 哈希为空 / 格式非法一律返回 false，不抛异常——损坏的账号文件不应把登录接口打成 500。
      */
     public static boolean matches(String rawPassword, String passwordHash) {
         if (rawPassword == null || passwordHash == null || passwordHash.isBlank()) {

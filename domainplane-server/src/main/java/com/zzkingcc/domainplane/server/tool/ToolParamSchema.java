@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 把工具实例声明的 <b>JSON Schema</b> 翻译成内核能用的两样东西
+ * 把工具实例声明的 JSON Schema 翻译成内核能用的两样东西
  * @author zzkingcc
  */
 final class ToolParamSchema {
@@ -34,11 +34,11 @@ final class ToolParamSchema {
     }
 
     /**
-     * 由根级 JSON Schema 派生描述符参数列表 —— <b>递归保留嵌套结构</b>，与本地 Bean 工具口径一致。
+     * 由根级 JSON Schema 派生描述符参数列表 —— 递归保留嵌套结构，与本地 Bean 工具口径一致。
      *
-     * <p>必须递归保留嵌套结构：把嵌套拍成 object/array 会让"同一段工具代码"在本地部署与
+     * 必须递归保留嵌套结构：把嵌套拍成 object/array 会让"同一段工具代码"在本地部署与
      * 远端实例两种形态下得到不同的描述符（远端看不到 DTO 子字段，进而看不到声明在子字段上的
-     * 示例 / 白名单 / 敏感）。上报报文里本来就带着 {@code properties}，没有理由丢掉。</p>
+     * 示例 / 白名单 / 敏感）。上报报文里本来就带着 {@code properties}，没有理由丢掉。
      */
     static List<ToolDescriptor.Param> toParams(JsonNode parameters) {
         if (parameters == null || !parameters.isObject()) {

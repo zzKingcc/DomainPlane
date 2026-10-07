@@ -64,8 +64,8 @@ public class CredentialService {
     /**
      * 校验凭证。
      *
-     * <p>任何异常（格式错、Base64 解不开、账号为空）都返回 false，<b>不抛</b>——
-     * 凭证来自不可信输入，让它可以被伪造出来的输入打穿成 500 是自找麻烦。</p>
+     * 任何异常（格式错、Base64 解不开、账号为空）都返回 false，不抛——
+     * 凭证来自不可信输入，让它可以被伪造出来的输入打穿成 500 是自找麻烦。
      *
      * @param account    当前账号；为 null 时直接 false
      * @param credential 待校验凭证

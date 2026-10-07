@@ -14,12 +14,12 @@ import java.util.List;
 /**
  * Markdown 文档处理策略（{@code .md} / {@code .markdown}）。
  *
- * <p>管线只有两步：<b>md 解析（读结构）→ 通用切片层</b>。与 txt 的差别就在这第一步 ——
+ * 管线只有两步：md 解析（读结构）→ 通用切片层。与 txt 的差别就在这第一步 ——
  * txt 用正则「猜」标题，md 的 {@code #} 前缀是确定信息；
- * 后面的句子打包、重叠、去重、向量化由 {@link AbstractDocumentProcessStrategy} 统一封装。</p>
+ * 后面的句子打包、重叠、去重、向量化由 {@link AbstractDocumentProcessStrategy} 统一封装。
  *
- * <p><b>md 不走 {@code TxtCleaner}</b>：那套规则是给「不知道哪里是结构」的纯文本用的，
- * 它会把重复出现的短正文行当成页眉页脚删掉；而 md 里的重复短行往往是列表项。</p>
+ * md 不走 {@code TxtCleaner}：那套规则是给「不知道哪里是结构」的纯文本用的，
+ * 它会把重复出现的短正文行当成页眉页脚删掉；而 md 里的重复短行往往是列表项。
  *
  * @author zzkingcc
  */

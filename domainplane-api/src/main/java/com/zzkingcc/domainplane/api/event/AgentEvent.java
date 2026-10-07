@@ -2,6 +2,8 @@ package com.zzkingcc.domainplane.api.event;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Getter;
+import lombok.ToString;
 
 import java.io.Serializable;
 
@@ -10,20 +12,27 @@ import java.io.Serializable;
  *
  * @author zzkingcc
  */
+@Getter
+@ToString
 public final class AgentEvent implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    /** 事件类型 */
     private final AgentEventType type;
+    /** 会话 ID */
     private final String sessionId;
+    /** 事件类型对应的中文描述 */
     private final String content;
+    /** 事件类型给程序解读的结构化 Json */
     private final String payload;
-    /** 状态码。*/
+    /** 状态码 */
     private final Integer code;
-    /** 状态枚举名。 */
+    /** 状态枚举名 */
     private final String codeName;
-    /** 排障标识。 */
+    /** 一次完整调用的追踪 ID */
     private final String traceId;
+    /** 事件产生时间 */
     private final long timestamp;
 
     /**
@@ -62,6 +71,11 @@ public final class AgentEvent implements Serializable {
         return new AgentEvent(AgentEventType.TOKEN, sessionId, content, null);
     }
 
+    /** 模型思考增量输出 */
+    public static AgentEvent thinking(String sessionId, String content) {
+        return new AgentEvent(AgentEventType.THINKING, sessionId, content, null);
+    }
+
     /** 工具调用请求 */
     public static AgentEvent toolCall(String sessionId, String toolName, String argumentsJson) {
         return new AgentEvent(AgentEventType.TOOL_CALL, sessionId, toolName, argumentsJson);
@@ -72,7 +86,7 @@ public final class AgentEvent implements Serializable {
         return new AgentEvent(AgentEventType.TOOL_RESULT, sessionId, toolName, result);
     }
 
-    /** 挂起等待人工授权;payload 为 {@link com.zzkingcc.domainplane.api.model.ToolCallPayload} 的 JSON */
+    /** 挂起等待人工授权 */
     public static AgentEvent interrupt(String sessionId, String toolsJson) {
         return new AgentEvent(AgentEventType.INTERRUPT, sessionId, null, toolsJson);
     }
@@ -82,7 +96,7 @@ public final class AgentEvent implements Serializable {
         return new AgentEvent(AgentEventType.STOPPED, sessionId, null, null);
     }
 
-    /** 执行异常（无状态码，不推荐：前端无法区分该重试还是该提示） */
+    /** 执行异常 */
     public static AgentEvent error(String sessionId, String message) {
         return new AgentEvent(AgentEventType.ERROR, sessionId, message, null);
     }
@@ -91,7 +105,7 @@ public final class AgentEvent implements Serializable {
      * 执行异常
      *
      * @param errorCode 状态码，决定前端该采取的行动
-     * @param traceId   排障标识
+     * @param traceId   一次完整调用的追踪 ID
      */
     public static AgentEvent error(String sessionId, String message,
                                    com.zzkingcc.domainplane.api.code.ErrorCode errorCode, String traceId) {
@@ -109,55 +123,5 @@ public final class AgentEvent implements Serializable {
     /** 本轮执行正常结束 */
     public static AgentEvent done(String sessionId) {
         return new AgentEvent(AgentEventType.DONE, sessionId, null, null);
-    }
-
-    public AgentEventType getType() {
-        return type;
-    }
-
-    public String getSessionId() {
-        return sessionId;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public String getPayload() {
-        return payload;
-    }
-
-    /**
-     * 状态码。
-     */
-    public Integer getCode() {
-        return code;
-    }
-
-    /** 状态枚举名，前端应以此定义常量而非硬编码数字 */
-    public String getCodeName() {
-        return codeName;
-    }
-
-    /** 排障标识 */
-    public String getTraceId() {
-        return traceId;
-    }
-
-    /** 事件产生时间 */
-    public long getTimestamp() {
-        return timestamp;
-    }
-
-    @Override
-    public String toString() {
-        return "AgentEvent{type=" + type
-                + ", sessionId='" + sessionId + '\''
-                + ", content=" + (content == null ? "null" : "'" + content + "'")
-                + ", payload=" + payload
-                + ", code=" + code
-                + ", codeName=" + codeName
-                + ", traceId=" + traceId
-                + ", timestamp=" + timestamp + '}';
     }
 }

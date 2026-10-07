@@ -6,11 +6,11 @@ import java.util.Map;
 /**
  * 域提示词设置（落盘 {@code config/prompts.json}）
  *
- * <p>没有"公共基线"这一层：根域 {@code default} 就是基底，它的提示词存在
- * {@code prompts["default"]} 里，与别的域完全同构。生效提示词是<b>沿链拼接</b>的结果 ——
- * 从根域到当前域，依次取出每段的片段拼成一段。</p>
+ * 没有"公共基线"这一层：根域 {@code default} 就是基底，它的提示词存在
+ * {@code prompts["default"]} 里，与别的域完全同构。生效提示词是沿链拼接的结果 ——
+ * 从根域到当前域，依次取出每段的片段拼成一段。
  *
- * <p>键是<b>完整路径域</b>（{@code default.sales.order}），与工具声明、知识库同构。</p>
+ * 键是完整路径域（{@code default.sales.order}），与工具声明、知识库同构。
  *
  * @author zzkingcc
  */

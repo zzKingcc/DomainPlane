@@ -1,12 +1,14 @@
 package com.zzkingcc.domainplane.common.exception;
 
 import com.zzkingcc.domainplane.api.code.ErrorCode;
+import lombok.Getter;
 
 /**
  * 全局异常体系基类
  *
  * @author zzkingcc
  */
+@Getter
 public class BaseException extends RuntimeException {
 
     private final ErrorCode errorCode;
@@ -37,19 +39,5 @@ public class BaseException extends RuntimeException {
     /** 优先使用 detail，为空时回退到枚举默认文案 */
     private static String fill(String detail, String fallback) {
         return (detail != null && !detail.isBlank()) ? detail : fallback;
-    }
-
-    public ErrorCode getErrorCode() {
-        return errorCode;
-    }
-
-    /** 业务状态码 */
-    public int getCode() {
-        return code;
-    }
-
-    /** 枚举名 */
-    public String getCodeName() {
-        return codeName;
     }
 }

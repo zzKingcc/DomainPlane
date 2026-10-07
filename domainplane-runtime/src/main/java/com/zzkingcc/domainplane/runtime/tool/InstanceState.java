@@ -3,17 +3,17 @@ package com.zzkingcc.domainplane.runtime.tool;
 /**
  * 工具实例的存活状态
  *
- * <pre>
+ *
  *         整包心跳(受理)            lastSeen 超时 / 强制下线标记
  * ONLINE ──────────────▶ ONLINE ─────────────────────▶ DRAINING ──▶ OFFLINE
  *   │                                                                  │
  *   └──▶ MUTED ──（控制台恢复 / 实例重启）──▶ ONLINE                     │
  *        副本已摘除但心跳照常受理           重连 整包心跳(受理) ◀────────┘
  *                                    (FORCE_OFFLINE 不可恢复，重连心跳返 410)
- * </pre>
  *
- * <p>DRAINING 是为"判死与清理并发"准备的中间态：超时定时器与强制下线可能同时触发，
- * 靠状态机单飞——只有把 ONLINE 改成 DRAINING 成功的那一方，才获得清理权。</p>
+ *
+ * DRAINING 是为"判死与清理并发"准备的中间态：超时定时器与强制下线可能同时触发，
+ * 靠状态机单飞——只有把 ONLINE 改成 DRAINING 成功的那一方，才获得清理权。
  * @author zzkingcc
  */
 public enum InstanceState {

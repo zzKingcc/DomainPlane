@@ -445,6 +445,34 @@ tbody tr:hover { background: #fcfcfd; }
     color: var(--primary); font-weight: 600;
 }
 
+/* ===== 模型档案表单：识别结果（只读） =====
+   类型 / 模态 / 能力只能来自「读取提供商信息」，所以这里只有只读标签，没有可点的 chip。
+   "未读到"必须与"确实没有"分开说：两者在挑模型这件事上完全是两回事。 */
+.detected-box {
+    border: 1px dashed var(--border); border-radius: 6px;
+    padding: 10px 12px; background: #f9fafb; margin-bottom: 12px;
+}
+.detected-title {
+    font-size: 12px; color: var(--text); font-weight: 600;
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.detected-note { font-weight: 400; color: var(--muted); font-size: 12px; }
+/* 只读标签：刻意不用 .chip —— 那个带 hover / cursor:pointer，点不动却像能点 */
+.detected-tag {
+    padding: 3px 10px; border-radius: 10px; font-size: 12px; line-height: 1.6;
+    border: 1px solid var(--border); background: #fff; color: var(--text);
+}
+.detected-tag.dim { color: var(--muted); border-style: dashed; }
+.detected-rows { margin-top: 8px; }
+.detected-row {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    padding: 3px 0; font-size: 12px;
+}
+.detected-row > .k {
+    color: var(--muted); flex: 0 0 68px; text-align: right;
+}
+.detected-row .tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
 /* ===== 非同源访问警示（见 console.js warnIfCrossOrigin） =====
    页面不在服务端地址上打开时，登录 Cookie 存不下也带不上，受保护接口会一律 401。
    在页面上说清，避免只留一行服务端日志导致误判为鉴权逻辑 bug。 */

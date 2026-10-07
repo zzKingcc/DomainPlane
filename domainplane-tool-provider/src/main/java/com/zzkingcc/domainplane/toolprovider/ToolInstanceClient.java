@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 工具实例客户端 —— 客户侧的一整半
+ * 工具实例客户端 —— 客户侧的核心组件（SDK 入口）
  *
  * @author zzkingcc
  */
@@ -76,7 +76,7 @@ public class ToolInstanceClient implements ToolRegistrar {
     /**
      * 声明一个工具（可链式调用多次）
      *
-     * <p>启动后再调也生效：下一次心跳会把新工具带上去（注册表随之 diff 出新副本）。</p>
+     * 启动后再调也生效：下一次心跳会把新工具带上去（注册表随之 diff 出新副本）。
      */
     @Override
     public ToolInstanceClient register(ToolSpec spec, ToolHandler handler) {
@@ -269,7 +269,7 @@ public class ToolInstanceClient implements ToolRegistrar {
     /**
      * 处理一次工具调用（服务端 POST 到本实例 endpoint 时由 Web 层转发进来）。
      *
-     * @param request 服务端请求体：{@code {requestId, toolName, arguments, tenantId, userId, traceId}}
+     * @param request 服务端请求体：{@code {requestId, toolName, arguments, traceId}}
      * @return 协议响应：{@code {requestId, success, result}} 或 {@code {requestId, success:false, error, retryable}}
      */
     public JsonNode invoke(JsonNode request) {

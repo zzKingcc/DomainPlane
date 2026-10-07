@@ -12,11 +12,14 @@
 
     <main class="main">
         <div class="page-head">
-            <h2>模型设置</h2>
+            <div class="head-line">
+                <div><h2>模型设置</h2></div>
+                <button class="ghost" id="openConnBtn">连接库</button>
+            </div>
         </div>
 
         <div class="info-box">
-            <div class="line"><b>接入模型</b> —— 点各分段标题右侧的「添加」按钮登记一个连接；类型由「读取提供商信息」读到的元数据或你的点选决定，保存后归入对应分段。</div>
+            <div class="line">点击各分段右侧「添加」登记一个连接；类型由「读取提供商信息」识别，保存后归入对应分段。</div>
             <div class="line">配置文件：<span class="mono" id="settingsFileHint">—</span></div>
         </div>
 
@@ -54,7 +57,7 @@
              只有一种表单：编辑一份模型档案。向量模型不是独立表单 ——
              它是「被选中的那份 embedding 档案」。
              类型 / 模态 / 能力由「读取提供商信息」（只读 /models，不发试探请求）+ 手工点选决定；
-             读不到就留空，不替用户猜。 -->
+             读不到就留空，不替用户猜；但会写清读到了什么、读不到什么、该手工勾什么。 -->
         <div class="modal-mask" id="profileModal" hidden>
             <div class="modal-panel" role="dialog" aria-modal="true"
                  aria-labelledby="profileModalTitle">
@@ -73,22 +76,39 @@
 
                 <div class="field" id="fBaseUrl">
                     <label>服务商地址（OpenAI 兼容 baseUrl）</label>
-                    <input id="pfBaseUrl" class="mono" placeholder="https://api.example.com/v1">
+                    <div class="combo" id="pfBaseUrlCombo">
+                        <input id="pfBaseUrl" class="mono" placeholder="https://api.example.com/v1"
+                               autocomplete="off" aria-haspopup="listbox" aria-expanded="false"
+                               aria-controls="pfBaseUrlMenu">
+                        <button type="button" class="combo-btn" id="pfBaseUrlBtn"
+                                title="从连接库选择（地址与密钥一起填入）" aria-label="展开连接库">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                        </button>
+                        <div class="combo-menu" id="pfBaseUrlMenu" role="listbox"
+                             aria-label="连接库" style="display:none;"></div>
+                    </div>
+                    <div class="help">
+                        点右侧按钮从「连接库」选用 —— 一条连接＝服务商地址 +（可选）密钥，选中后两项一起填入
+                        （页面右上角可维护）；也可直接手填。
+                    </div>
                 </div>
 
                 <div class="row">
                     <div class="field">
                         <label>API Key</label>
-                        <input id="pfApiKey" type="password" class="mono" placeholder="必填">
+                        <input id="pfApiKey" type="password" class="mono" placeholder="必填"
+                               autocomplete="off">
+                        <div class="help">从连接库选用时会自动带入；也可以直接粘贴。</div>
                     </div>
                     <div class="field">
                         <label>模型名</label>
-                        <div class="combo">
+                        <div class="combo" id="pfModelCombo">
                             <input id="pfModelName" class="mono" placeholder="gpt-4o"
                                    autocomplete="off" role="combobox" aria-expanded="false"
                                    aria-controls="pfModelMenu" aria-autocomplete="list">
-                            <button type="button" class="combo-btn" title="从服务商获取模型列表"
-                                    aria-label="展开模型列表">
+                            <button type="button" class="combo-btn" id="pfModelBtn"
+                                    title="从服务商获取模型列表" aria-label="展开模型列表">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                                      stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
                             </button>
@@ -100,30 +120,70 @@
                 </div>
 
                 <div class="field" id="fDeclare">
-                    <label>模型类型与模态（点一下切换选中）</label>
-                    <div class="chips" id="chipsEndpoints"></div>
-                    <div class="chips" id="chipsInput" style="margin-top:6px;"></div>
-                    <div class="chips" id="chipsOutput" style="margin-top:6px;"></div>
-                    <div class="chips" id="chipsCaps" style="margin-top:6px;"></div>
+                    <label>模型类型与模态（来自识别，不可手工修改）</label>
+
+                    <!-- 只读展示区：类型与模态**只来自「读取提供商信息」**。
+                         读到的就是读到的，读不到的就写"未读到"—— 不用可点的 chip 去补，
+                         免得"没显示出来的"被读成"没有"，而未识别与确实没有是两回事。 -->
+                    <div class="detected-box" id="detectedBox">
+                        <div class="detected-title">识别结果
+                            <span class="detected-note" id="detectedSource">尚未读取</span>
+                        </div>
+                        <div class="detected-rows" id="detectedRows"></div>
+                        <div class="help" id="detectedHelp"></div>
+                    </div>
+
                     <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:10px;">
                         <button type="button" class="sec" id="readBtn">读取提供商信息</button>
-                        <span class="hint" style="margin:0;">只读提供商的 /models，不发任何试探请求</span>
+                        <span class="hint" style="margin:0;">只读提供商的 /models，不发任何试探请求（向量档案会多发一条极短的 /embeddings 实测维度）</span>
                     </div>
-                    <div class="help" id="readResult"></div>
+                    <div class="help" id="readResult" style="white-space: pre-wrap;"></div>
                     <div class="help">
-                        类型只能来自提供商元数据或你在这里的声明；<b>读不到就留空，不会替你猜</b> ——
-                        猜成对话模型会让向量 / 生图模型被误用（能绑到域、却当不了向量模型）。
+                        服务商未必公开全部信息：<b>布尔能力（流式 / 工具调用）在 OpenAI 规范的
+                        <span class="mono">/models</span> 里根本没有</b>，会一直显示"未读到"。
+                        此类档案仍可保存，但绑到域上时工具会静默不生效。
                     </div>
                 </div>
 
                 <div class="row" id="rowTempTokens">
                     <div class="field">
-                        <label>采样温度（可空）</label>
-                        <input id="pfTemperature" type="number" step="0.1" min="0" max="2" placeholder="0.3">
+                        <label>采样温度（留空 = <span id="tempDefaultLabel">0.5</span>）</label>
+                        <input id="pfTemperature" type="number" step="0.1" min="0" max="2"
+                               placeholder="留空则按默认温度">
+                        <div class="help">
+                            未声明时按默认温度发给服务商 —— 不设这一项的话各家端点各给各的
+                            （常见 0.7 / 1.0），换个服务商行为就变了且没有提示。
+                        </div>
                     </div>
                     <div class="field">
-                        <label>单次最大 Token（可空）</label>
-                        <input id="pfMaxTokens" type="number" min="1" placeholder="4096">
+                        <label>单次最大 Token（留空 = <b>不限制</b>）</label>
+                        <input id="pfMaxTokens" type="number" min="1" placeholder="留空 = 不限制">
+                        <div class="help">
+                            留空即<b>不限制</b>：不向服务商发送 max_tokens，由模型与上下文长度决定；
+                            只有填了值才会对单次输出设上限。
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 思考开关：**只在探测到 reasoning 能力时才显示**（OpenAI 规范的 /models 不给这项，
+                     OpenRouter 风格的元数据才带 reasoning 对象）。读不到就整行不显示，
+                     而不是显示成"已关闭"—— 后者会让用户以为关掉了，实际每轮还在烧思考 token。
+                     显示时机由 renderDetected → syncThinkingRow 统一控制。 -->
+                <div class="row" id="rowThinking" hidden>
+                    <div class="field">
+                        <label>思考模式</label>
+                        <div><input type="checkbox" id="pfThinking"> 开启（发给服务商 enable_thinking）</div>
+                        <div class="help">
+                            关掉能让回答更快，也不再产生用户看不到的思考开支
+                            （实测思考可占输出的 95%）。
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label>思考内容</label>
+                        <div><input type="checkbox" id="pfReturnThinking"> 输出（交平台解析）</div>
+                        <div class="help">
+                            展示思考的通道尚未接入，目前只决定平台解不解析，不改变页面展示。
+                        </div>
                     </div>
                 </div>
 
@@ -143,6 +203,61 @@
                     <button id="saveProfileBtn">保存</button>
                     <span class="hint" id="modalHint"></span>
                 </footer>
+            </div>
+        </div>
+
+        <!-- ============ 服务商连接库：遮罩层弹窗 ============
+             与「添加模型」不是同一个弹窗，但刻意用同一套遮罩层与表单样式：
+             两处都是"往受保护配置里写一份凭据"，视觉与操作习惯应当一致。
+
+             一条连接 = 名称 + 服务商地址 +（可选）密钥。**地址与密钥合成一条**而不是拆成两个库：
+             这两个字段从来一起换（换服务商就是地址与 Key 同时换），合成一条才能一次填好表单，
+             也避免配出"地址是 A、密钥是 B"的错搭。
+
+             它只是**取连接快捷方式**，不是引用关系 —— 选中后把两项填进模型表单，
+             档案保存时仍各自保存明文副本。因此删除库里的一条**不会**影响任何已保存档案，
+             这一点在列表下方与删除后的提示里都写明。 -->
+        <div class="modal-mask" id="connModal" hidden>
+            <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="connModalTitle">
+                <div class="modal-head">
+                    <h3 id="connModalTitle">服务商连接库</h3>
+                    <span class="spacer"></span>
+                    <button type="button" class="modal-close" id="connModalClose" aria-label="关闭">×</button>
+                </div>
+
+                <div class="hint" style="margin:0 0 12px;">
+                    按<b>唯一名称</b>存放「服务商地址 + 密钥」。模型档案表单的服务商地址输入框右侧有下拉，
+                    选中一条即把<b>地址与密钥一起</b>填入。列表里密钥只显示脱敏值。
+                </div>
+
+                <div class="field">
+                    <label>名称（唯一，不可重复）</label>
+                    <input id="cnName" placeholder="如：硅基流动-主 / 本地 Ollama / openrouter-免费档">
+                </div>
+                <div class="field">
+                    <label>服务商地址（OpenAI 兼容 baseUrl）</label>
+                    <input id="cnBaseUrl" class="mono" placeholder="https://api.example.com/v1" autocomplete="off">
+                    <div class="help">
+                        自建端点（Ollama / vLLM / LM Studio）也走 OpenAI 规范，
+                        地址通常需要带 <span class="mono">/v1</span>。
+                    </div>
+                </div>
+                <div class="field">
+                    <label>API Key（可空）</label>
+                    <input id="cnApiKey" type="password" class="mono" placeholder="自建端点可留空；模型档案侧仍需一个非空占位" autocomplete="off">
+                </div>
+
+                <footer class="card-foot">
+                    <button class="sec" id="cnClearBtn">清空</button>
+                    <button id="cnAddBtn">添加</button>
+                </footer>
+
+                <div id="cnResult" class="result"></div>
+                <div id="cnList"></div>
+                <div class="hint" style="margin-top:12px;">
+                    落盘位置：<span class="mono" id="cnFileHint">—</span>。
+                    删除只影响这个库 —— 已保存的模型档案各自存的是独立副本，不会被牵连。
+                </div>
             </div>
         </div>
     </main>
@@ -169,6 +284,10 @@ Console.renderSidebar('models');
     /* 服务端给出的档案总数（模型桶 + 向量桶）。前端加不出来：未选中的向量档案
        不在 PROFILES 里，又可能因不可用而不进 CANDIDATES。 */
     var PROFILE_COUNT = null;
+    /* 采样温度默认值：由服务端下发（GET /admin/model-profiles 的 defaultTemperature），
+       不在前端另写一份 —— 两处各写一个 0.5 的话，改了后端就会出现"表单写着 A、实际跑 B"。
+       取不到时回落 0.5，保证表单仍显示一个真实生效的值。 */
+    var DEFAULT_TEMPERATURE = 0.5;
     var SETTINGS = null;               /* /admin/settings：对话 / 向量 两组部署配置（yaml 兜底） */
 
     /* 表单只有一种：编辑一份模型档案（MODE 恒为 profile，保留变量只为 openModal 内赋值处自洽）。
@@ -176,18 +295,14 @@ Console.renderSidebar('models');
     var MODE = 'profile';
     var ADD_KIND = null;                /* 从哪个分段进来的（chat/embedding）：只影响模型名候选池从哪个端点拉 */
     var EDIT_ALIAS = null;              /* 正在编辑的档案别名（别名已不在表单里，编辑时靠它定位） */
-    var PFEPS = [];
-    var PFIN = [];
-    var PFOUT = [];
-    var PFCAPS = [];                /* 四项都是"声明"：来自元数据或用户点选，空 = 未声明 */
     /* 端点族 → 该端点下要展示的配置组。以后加音频 / 视频，就在这里加一条即可 */
     var EP_FIELDS = { chat: ['rowTempTokens'], embedding: ['fDimensions'] };
     /* 展示用的中文名 */
     var EP_LABEL = { chat: '对话', embedding: '向量', rerank: '重排', images: '生图',
                      tts: '语音合成', asr: '语音识别', video: '视频' };
     var MOD_LABEL = { text: '文本', image: '图片', audio: '音频', video: '视频',
-                      file: '文件', embedding: '向量' };
-    var CAP_LABEL = { streaming: '流式', tools: '工具调用' };
+                      file: '文件', embedding: '向量', score: '相关性分数' };
+    var CAP_LABEL = { streaming: '流式', tools: '工具调用', reasoning: '思考模式' };
 
     function pfEl(id) { return document.getElementById(id); }
     function show(id, on) { pfEl(id).hidden = !on; }
@@ -218,6 +333,12 @@ Console.renderSidebar('models');
             };
             CANDIDATES = (r && r.embeddingCandidates) || [];
             PROFILE_COUNT = (r && typeof r.profileCount === 'number') ? r.profileCount : null;
+            if (r && typeof r.defaultTemperature === 'number') {
+                DEFAULT_TEMPERATURE = r.defaultTemperature;
+                /* 标签上那个"留空 = x"跟着一起变，否则文案会与实际生效值脱节 */
+                var lbl = pfEl('tempDefaultLabel');
+                if (lbl) { lbl.textContent = r.defaultTemperature; }
+            }
             renderProfiles();
         }).catch(function (e) {
             pfEl('modelList').innerHTML = '<div class="card" style="color:var(--red);">'
@@ -271,68 +392,19 @@ Console.renderSidebar('models');
         return n > 1 ? '<span class="mbadge mono">#' + n + '</span>' : '';
     }
 
-    /* ---------- 声明区：类型 / 模态 / 能力 都靠点选 ----------
-       类型只能来自提供商元数据或用户声明，所以这里必须是<b>可编辑</b>的，
-       不能像以前那样只回显探测结果。 */
-
-    /* 可选的取值。刻意把每一类都列全（而不是"探到什么列什么"），
-       因为提供商元数据经常只说一部分，剩下的必须由人补。 */
-    var EP_KEYS = ['chat', 'embedding', 'rerank', 'images', 'tts', 'asr', 'video'];
-    var CAP_KEYS = ['streaming', 'tools'];
-    var MOD_IN_KEYS = ['text', 'image', 'audio', 'video', 'file'];
-    var MOD_OUT_KEYS = ['text', 'image', 'audio', 'video', 'embedding'];
-
-    function toggleKey(list, key) {
-        var out = (list || []).slice();
-        var i = out.indexOf(key);
-        if (i >= 0) { out.splice(i, 1); } else { out.push(key); }
-        return out;
-    }
-
-    /* 并集：元数据读到的补进来，用户已点选的不动 —— 提供商只给一部分信息是常态 */
-    function unionKeys(a, b) {
-        var out = (a || []).slice();
-        (b || []).forEach(function (k) { if (out.indexOf(k) < 0) { out.push(k); } });
-        return out;
-    }
-
-    function chips(elId, keys, labelMap, selected, onToggle) {
-        var box = pfEl(elId);
-        box.innerHTML = keys.map(function (k) {
-            var on = (selected || []).indexOf(k) >= 0;
-            return '<button type="button" class="chip' + (on ? ' on' : '') + '" data-key="'
-                + Console.escapeHtml(k) + '">' + Console.escapeHtml(labelMap[k] || k) + '</button>';
-        }).join('');
-        box.querySelectorAll('.chip').forEach(function (b) {
-            b.addEventListener('click', function () { onToggle(b.getAttribute('data-key')); });
-        });
-    }
-
-    /* 配置组按声明出来的端点族自适应：对话 → 温度 / 上限 token，向量 → 维度 */
+    /* ---------- 类型 / 模态 / 能力：只来自「读取提供商信息」，不可手工修改 ----------
+       没有可勾选的候选清单 —— 识别到什么就展示什么，读不到就保持未声明。 */
+    /* 配置组按识别出的端点族自适应：对话 → 温度 / 上限 token，向量 → 维度。
+       取 DET.eps：端点族只有一个来源，没有第二份"手工声明"要合并。 */
     function applyTypeGroups() {
         var groups = [];
-        (PFEPS || []).forEach(function (ep) {
+        (DET.eps || []).forEach(function (ep) {
             (EP_FIELDS[ep] || []).forEach(function (g) {
                 if (groups.indexOf(g) < 0) { groups.push(g); }
             });
         });
         ['rowTempTokens', 'fDimensions'].forEach(function (id) {
             show(id, groups.indexOf(id) >= 0);
-        });
-    }
-
-    function renderDeclared() {
-        chips('chipsEndpoints', EP_KEYS, EP_LABEL, PFEPS, function (k) {
-            PFEPS = toggleKey(PFEPS, k); renderDeclared(); applyTypeGroups();
-        });
-        chips('chipsInput', MOD_IN_KEYS, MOD_LABEL, PFIN, function (k) {
-            PFIN = toggleKey(PFIN, k); renderDeclared();
-        });
-        chips('chipsOutput', MOD_OUT_KEYS, MOD_LABEL, PFOUT, function (k) {
-            PFOUT = toggleKey(PFOUT, k); renderDeclared();
-        });
-        chips('chipsCaps', CAP_KEYS, CAP_LABEL, PFCAPS, function (k) {
-            PFCAPS = toggleKey(PFCAPS, k); renderDeclared();
         });
     }
 
@@ -417,11 +489,11 @@ Console.renderSidebar('models');
             +   '<span class="hint" style="flex:1 1 320px;">切换向量模型会让已灌库的向量作废，'
             +     '届时需选择「用新向量重灌」或「丢弃旧内容」。</span>'
             +   '<select id="embSelect" class="mono" style="min-width:220px;"'
-            +     + (CANDIDATES.length ? '' : ' disabled') + '>'
+            +     (CANDIDATES.length ? '' : ' disabled') + '>'
             +     '<option value="">— 选择向量模型 —</option>' + options
             +   '</select>'
             +   '<button class="sec" id="embApplyBtn"'
-            +     + (CANDIDATES.length ? '' : ' disabled') + '>'
+            +     (CANDIDATES.length ? '' : ' disabled') + '>'
             +     (alias ? '更换' : '应用') + '</button>'
             + '</div>'
             + '</section>';
@@ -592,10 +664,12 @@ Console.renderSidebar('models');
     function openModal(title) {
         MODE = 'profile';
         pfEl('profileModalTitle').textContent = title;
-        pfEl('modalHint').textContent = '保存后立即生效，无需重启；类型与模态由提供商元数据 + 你的声明共同决定。';
+        pfEl('modalHint').textContent = '保存后立即生效，无需重启；类型与模态来自「读取提供商信息」的识别结果。';
         combo.items = [];
         comboClose();
-        renderDeclared();
+        cnMenuClose();         /* 连接库下拉浮在本弹窗之上：开着模型窗时不该还留着它 */
+        clearDetected();
+        renderDetected();
         applyTypeGroups();
         pfEl('profileModal').hidden = false;
         document.body.style.overflow = 'hidden';
@@ -603,12 +677,20 @@ Console.renderSidebar('models');
     function closeModal() {
         comboClose();
         pfEl('profileModal').hidden = true;
-        document.body.style.overflow = '';
+        /* 密钥库弹窗可能还开着：只在自己是最后一道遮罩时才解锁滚动 */
+        if (pfEl('connModal').hidden) { document.body.style.overflow = ''; }
     }
     function resetForm() {
         ['pfBaseUrl', 'pfApiKey', 'pfModelName',
          'pfTemperature', 'pfMaxTokens', 'pfDimensions']
             .forEach(function (id) { pfEl(id).value = ''; });
+        /* 温度预填服务端下发的默认值：让"不填会发生什么"看得见，而不是藏成一段文案。
+           最大 token 则刻意留空 —— 留空就是"不限制"，没有需要预填的默认值。 */
+        pfEl('pfTemperature').value = DEFAULT_TEMPERATURE;
+        /* 思考开关随表单一起清空并回到"不显示"：新建时尚未读取，
+           既没有依据显示它，也不该带着上一次的勾选状态保存下去。 */
+        pfEl('pfThinking').checked = false;
+        pfEl('pfReturnThinking').checked = false;
         var box = pfEl('profileResult');
         box.textContent = '';
         box.className = 'result';
@@ -616,6 +698,90 @@ Console.renderSidebar('models');
         var readBox = pfEl('readResult');
         readBox.textContent = '';
         readBox.style.color = '';
+    }
+
+    /* ---------- 类型 / 模态 / 能力：唯一来源是「读取提供商信息」 ----------
+   DET 既是展示内容，也是保存时写进档案的内容（没有第二份状态）。
+   saved 标记区分这两种情形，文案必须分开说，否则会把"档案里原有的值"讲成"这次读到的"：
+     · saved=false —— 尚未读取；此时展示的是编辑进来时档案里已有的值
+     · saved=true  —— 最近一次读取的结果 */
+    var DET = { eps: null, in: null, out: null, caps: null, dimension: null, flavor: null, saved: false };
+
+    /* 思考开关的显示条件：**探测到 reasoning 能力才显示**。
+       读不到就整行不显示，而不是显示成"未开启"——OpenAI 规范的 /models 根本没有这项，
+       把"这家没给这个字段"讲成"这个模型不支持 / 已经关掉了"，用户会以为关掉了、
+       实际每轮还在烧思考 token。能力与开关是两件事：支持思考的模型也可以把思考关掉。 */
+    function syncThinkingRow() {
+        show('rowThinking', (DET.caps || []).indexOf('reasoning') >= 0);
+    }
+
+    function renderDetected() {
+        syncThinkingRow();
+        var box = pfEl('detectedRows');
+        var help = pfEl('detectedHelp');
+        var src = pfEl('detectedSource');
+        if (!DET.saved && (DET.eps === null)) {
+            box.innerHTML = '';
+            src.textContent = '尚未读取';
+            help.innerHTML = '点下方「读取提供商信息」，这里会显示服务商给出的端点族与模态 ——'
+                + '<b>类型与模态只能由识别决定</b>，读不到就保持未声明。';
+            return;
+        }
+        src.textContent = DET.saved ? '本次读取' : '档案已保存的值（本次未读取）';
+
+        var rows = [
+            ['端点族', DET.eps, EP_LABEL],
+            ['输入模态', DET.in, MOD_LABEL],
+            ['输出模态', DET.out, MOD_LABEL],
+            ['布尔能力', DET.caps, CAP_LABEL]
+        ];
+        box.innerHTML = rows.map(function (r) {
+            var labels = (r[1] || []).map(function (k) { return r[2][k] || k; });
+            var html = labels.length
+                ? labels.map(function (t) {
+                      return '<span class="detected-tag">' + Console.escapeHtml(t) + '</span>';
+                  }).join('')
+                /* 空数组不是"没有这一项"，而是"没读到" —— 文案必须分开 */
+                : '<span class="detected-tag dim">未读到</span>';
+            var extra = (r[0] === '布尔能力' && !(DET.caps || []).length)
+                ? '<span class="detected-tag dim">服务商清单不提供这一项</span>' : '';
+            return '<div class="detected-row"><span class="k">' + r[0] + '</span>'
+                + '<span class="tags">' + html + extra + '</span></div>';
+        }).join('')
+            + (DET.dimension == null
+                ? '' : '<div class="detected-row"><span class="k">向量维度</span><span class="tags">'
+                    + '<span class="detected-tag">' + DET.dimension + '（实测）</span></span></div>');
+
+        var missing = rows.filter(function (r) { return !(r[1] || []).length; })
+                          .map(function (r) { return r[0]; });
+        if (!DET.saved) {
+            help.innerHTML = '这是档案里已保存的值。点「读取提供商信息」可用服务商的最新元数据刷新它们。';
+            return;
+        }
+        help.innerHTML = DET.flavor
+            ? '元数据来源：' + Console.escapeHtml(DET.flavor) + '。'
+                + (missing.length
+                    ? '<b>' + missing.join('、') + '</b>未读到 —— 读不到就保持未声明，不会替你猜。'
+                    : '四项全部读到。')
+            : (missing.length
+                ? '<b>' + missing.join('、') + '</b>未读到 —— 读不到就保持未声明，不会替你猜。'
+                : '四项全部读到。');
+    }
+
+    function clearDetected() {
+        DET = { eps: null, in: null, out: null, caps: null, dimension: null, flavor: null, saved: false };
+    }
+
+    /* 编辑已有档案：把档案里已存的值放进识别区展示（saved=false，标明"本次未读取"）。
+       必须回填 —— 否则"打开就保存"会把端点族 / 模态 / 能力全部清空，属于静默丢配置。 */
+    function seedDetectedFrom(profile) {
+        DET.eps = (profile.endpoints || []).slice();
+        DET.in = (profile.input || []).slice();
+        DET.out = (profile.output || []).slice();
+        DET.caps = (profile.capabilities || []).slice();
+        DET.dimension = (profile.dimensions == null ? null : profile.dimensions);
+        DET.flavor = null;
+        DET.saved = false;
     }
 
     /* ---------- 模型名下拉：从服务商拉候选（POST /admin/models） ---------- */
@@ -677,21 +843,26 @@ Console.renderSidebar('models');
             .then(function (data) {
                 if (!data || !data.success) {
                     combo.items = [];
-                    comboState('连接失败：' + Console.sanitizeError((data && data.error) || '未知原因'));
+                    comboState('拉取候选失败：' + Console.sanitizeError((data && data.error) || '未知原因'));
                     return;
                 }
                 combo.items = data.models || [];
                 comboRender();
                 comboOpen();
             })
-            .catch(function () { combo.items = []; comboState('连接失败：无法访问管控接口'); })
+            /* 用「拉取候选」而不是「连接」：页面里已有「连接库」这个功能名，
+               再说"连接失败"会被读成连接库出错 */
+            .catch(function () { combo.items = []; comboState('拉取候选失败：无法访问管控接口'); })
             .then(function () { combo.loading = false; });
     }
 
     (function () {
         var input = pfEl('pfModelName');
-        pfEl('profileModal').querySelector('.combo-btn')
-            .addEventListener('click', comboLoad);
+        /* 必须按 id 绑，不能用 querySelector('.combo-btn') 取"弹窗里的第一个"：
+           弹窗里现在有两个 .combo（服务商地址的连接库、模型名的候选池），位置一旦调整
+           就会静默绑错 —— 表现为"点连接库的下拉，模型候选也跟着弹出来"，而且模型名那个
+           ▾ 按钮同时变成死按钮。位置依赖的写法在这里已经坑过一次。 */
+        pfEl('pfModelBtn').addEventListener('click', comboLoad);
         input.addEventListener('focus', function () {
             if (combo.items.length && comboMenu().style.display !== 'block') {
                 comboRender();
@@ -727,8 +898,11 @@ Console.renderSidebar('models');
             var item = ev.target.closest ? ev.target.closest('.combo-item') : null;
             if (item) { comboPick(item.getAttribute('data-id')); }
         });
+        /* "点到外面就收起"必须按各自的 combo 判，不能笼统判 .combo：
+           弹窗里现在有两个 .combo，笼统判的话点进另一个（连接库 / 候选池）不会收起，
+           于是两个下拉会同时挂在页面上。 */
         document.addEventListener('click', function (ev) {
-            if (!ev.target.closest || !ev.target.closest('.combo')) { comboClose(); }
+            if (!ev.target.closest || !ev.target.closest('#pfModelCombo')) { comboClose(); }
         });
     })();
 
@@ -747,40 +921,46 @@ Console.renderSidebar('models');
         btn.disabled = true;
         readSay(true, '读取中…');
         Console.jsonRequest('/admin/model-profiles/inspect', 'POST',
-                            { baseUrl: baseUrl, apiKey: val('pfApiKey'), modelName: modelName })
+                            { baseUrl: baseUrl, apiKey: val('pfApiKey'), modelName: modelName,
+                              dimensions: num('pfDimensions') })
             .then(function (r) {
                 if (!r || r.code !== 0 || !r.success) {
                     throw new Error(Console.sanitizeError((r && (r.detail || r.error)) || '读取失败'));
                 }
-                /* 并集填入：读到的补进来，你已经点选的不动。提供商只给一部分是常态，
-                   整体覆盖会把手工声明冲掉。 */
-                PFEPS = unionKeys(PFEPS, r.endpoints);
-                PFIN = unionKeys(PFIN, r.input);
-                PFOUT = unionKeys(PFOUT, r.output);
-                PFCAPS = unionKeys(PFCAPS, r.capabilities);
+                /* 识别结果是类型 / 模态 / 能力的唯一来源，整份替换 —— 它就是"这次读到了什么"，
+                   留着上一次的旧值只会让展示与实际不符。 */
+                DET.eps = (r.endpoints || []).slice();
+                DET.in = (r.input || []).slice();
+                DET.out = (r.output || []).slice();
+                DET.caps = (r.capabilities || []).slice();
+                DET.dimension = (r.dimension == null ? null : r.dimension);
+                DET.flavor = r.flavorLabel || null;
+                DET.saved = true;
                 if (r.dimension != null && !pfEl('pfDimensions').value) {
                     pfEl('pfDimensions').value = r.dimension;
                 }
-                renderDeclared();
+                /* 新建时首次探测出思考能力 → 把「思考模式」预置为开，与编辑已存档案的口径一致
+                   （null = 未声明按开显示）。不预置的话，"读取 + 保存"会替用户把思考关掉。
+                   编辑已有档案时不碰它：档案里若显式写了 false，重新读取不该把它翻回开。 */
+                if (EDIT_ALIAS === null && (DET.caps || []).indexOf('reasoning') >= 0) {
+                    pfEl('pfThinking').checked = true;
+                }
+                renderDetected();
                 applyTypeGroups();
-                /* 把"读到了什么 / 为什么读不到"如实展示 —— 读不到时用户得知道要自己声明 */
+                /* 把"读到了什么 / 为什么读不到"如实展示 —— 读不到时用户得知道这是识别不出来的 */
                 readSay(true, r.message || '已读取');
             })
             .catch(function (e) { readSay(false, e.message); })
             .then(function () { btn.disabled = false; });
     }
 
-    /* 添加：kind 只影响标题与预置（点哪个分段的按钮进来）。类型不再由探测决定 ——
-       它来自「读取提供商信息」读到的元数据，或用户在声明区点选。
+    /* 添加：kind 只影响标题与预置（点哪个分段的按钮进来）。
+       类型与模态完全来自「读取提供商信息」的识别结果，表单里没有可点的声明区。
        MODE 恒为 profile：不管从哪个分段进来，存的都是同一份档案。 */
     function openAdd(kind) {
         resetForm();
         EDIT_ALIAS = null;
         ADD_KIND = kind || null;
-        PFEPS = [];
-        PFIN = [];
-        PFOUT = [];
-        PFCAPS = [];
         openModal(kind === 'embedding' ? '添加向量模型'
                  : (kind === 'chat' ? '添加对话模型' : '添加模型'));
         pfEl('pfBaseUrl').focus();
@@ -791,15 +971,18 @@ Console.renderSidebar('models');
         resetForm();
         EDIT_ALIAS = alias;                 /* 别名不再可改，编辑时沿用原值 */
         ADD_KIND = isEmbeddingProfile(p) ? 'embedding' : 'chat';
-        PFEPS = p.endpoints || [];
-        PFIN = p.input || [];
-        PFOUT = p.output || [];
-        PFCAPS = p.capabilities || [];
+        /* 回填档案里已存的值（openModal 刚 clearDetected 过，这里紧接着种回去）。
+           不回填的话，编辑时"打开就保存"会把端点族 / 模态 / 能力整块清空 —— 静默丢配置。 */
+        seedDetectedFrom(p);
         pfEl('pfBaseUrl').value = p.baseUrl || '';
         pfEl('pfModelName').value = p.modelName || '';
-        pfEl('pfTemperature').value = (p.temperature == null ? '' : p.temperature);
+        pfEl('pfTemperature').value = (p.temperature == null ? DEFAULT_TEMPERATURE : p.temperature);
         pfEl('pfMaxTokens').value = (p.maxTokens == null ? '' : p.maxTokens);
         pfEl('pfDimensions').value = (p.dimensions == null ? '' : p.dimensions);
+        /* 思考：只有档案里显式写了 false 才算"关"，null（未声明）按"开"显示 ——
+           服务商默认多半是开，把 null 显示成未勾选再保存，等于"打开就保存"顺手关掉了思考。 */
+        pfEl('pfThinking').checked = (p.thinking !== false);
+        pfEl('pfReturnThinking').checked = (p.returnThinking === true);
         openModal('编辑模型');
         showResult(true, '');
     }
@@ -819,9 +1002,11 @@ Console.renderSidebar('models');
 
     function showResult(ok, message) {
         var box = pfEl('profileResult');
-        box.className = 'result';
-        box.style.color = ok ? '' : 'var(--red)';
-        box.textContent = message;
+        /* 必须带 .show：.result 默认 display:none，只写 'result' 等于把提示藏起来 ——
+           "请填写 API Key" 这类校验提示此前就是这样一条都没显示过。
+           空文案则撤掉 .show 来真的清空（编辑时 showResult(true, '') 就是这个用法）。 */
+        box.className = message ? 'result show ' + (ok ? 'ok' : 'err') : 'result';
+        box.textContent = message || '';
     }
 
     /* ---------- 保存 ----------
@@ -832,29 +1017,39 @@ Console.renderSidebar('models');
         if (!val('pfApiKey')) { showResult(false, '请填写 API Key'); return; }
         var modelName = pfEl('pfModelName').value.trim();
         if (!modelName) { showResult(false, '请先填写模型名'); return; }
-        /* 端点族为空是允许的 —— 表示"类型未声明"，卡片上会明示，不会替用户猜成对话模型。
-           但类型不问自明是有用的：提醒一句，避免存下一份绑不了域也用不上的档案。 */
-        if (!PFEPS.length) {
-            var ok = window.confirm('还没有声明任何类型（对话 / 向量 / 生图 …）。\n\n'
+        /* 别名已从表单移除：编辑沿用原别名，新建按模型名派生 */
+        var alias = EDIT_ALIAS || deriveAlias(modelName);
+        /* 类型 / 模态 / 能力直接取识别结果 —— 表单里已经没有第二份状态了，DET 就是全部。
+           编辑进来未重新读取时，DET 里是档案原有的值（renderDetected 会标明"本次未读取"），
+           所以"打开就保存"是原样写回，不会丢配置。 */
+        var eps = DET.eps || [];
+        /* 端点族为空是允许的 —— 表示"未识别出类型"，卡片上会明示，不会替用户猜成对话模型。
+           但一份用不了的档案值得提醒一句。 */
+        if (!eps.length) {
+            var ok = window.confirm('还没有识别出任何类型（对话 / 向量 / 生图 …）。\n\n'
                 + '该档案将无法绑到域上，也不能被选为向量模型，只能先存着。\n'
-                + '若这是某提供商的模型，可先点「读取提供商信息」试试能否自动读到。\n\n'
+                + '请先填好服务商地址、API Key 与模型名，再点「读取提供商信息」由平台识别。\n\n'
                 + '仍要保存吗？');
             if (!ok) { return; }
         }
-        /* 别名已从表单移除：编辑沿用原别名，新建按模型名派生 */
-        var alias = EDIT_ALIAS || deriveAlias(modelName);
+        /* 思考开关只在探测到 reasoning 能力（= 两个开关真的显示在页面上）时才有意义：
+           没显示时一律传 null（不声明），绝不落一个来路不明的 false 进档案 ——
+           那会让"没探测出来"变成"明确关闭"，而用户在页面上根本看不到自己关了什么。 */
+        var hasReasoning = (DET.caps || []).indexOf('reasoning') >= 0;
         var body = {
             alias: alias,
-            endpoints: PFEPS,
-            input: PFIN,
-            output: PFOUT,
+            endpoints: eps,
+            input: DET.in || [],
+            output: DET.out || [],
             baseUrl: pfEl('pfBaseUrl').value.trim(),
             apiKey: pfEl('pfApiKey').value,
             modelName: modelName,
             temperature: num('pfTemperature'),
             maxTokens: num('pfMaxTokens'),
+            thinking: hasReasoning ? pfEl('pfThinking').checked : null,
+            returnThinking: hasReasoning ? pfEl('pfReturnThinking').checked : null,
             dimensions: num('pfDimensions'),
-            capabilities: PFCAPS
+            capabilities: DET.caps || []
         };
         Console.jsonRequest('/admin/model-profiles', 'POST', body)
             .then(function (r) {
@@ -864,7 +1059,7 @@ Console.renderSidebar('models');
                     /* 向量段是单槽位：新建的向量档案直接占用该槽位，即"新的顶替旧的"。
                        这里刻意不再问"要不要启用" —— 一旦用户点了取消，他就再也选不中
                        刚存的那份档案（早先空状态不给下拉），只能不断添加新档案。 */
-                    var isEmb = (PFEPS || []).indexOf('embedding') >= 0;
+                    var isEmb = eps.indexOf('embedding') >= 0;
                     if (isEmb && EDIT_ALIAS === null) {
                         applyEmbedding(alias);
                     }
@@ -876,13 +1071,17 @@ Console.renderSidebar('models');
     /* 把探测结果拼成一段人能读的摘要。
        为什么必须显式回显：探测的产出是"实测到了什么"，而卡片只画端点族 / 模态 / 能力。
        对向量模型来说探测完仍是 ["embedding"]，卡片渲染结果与探测前**一模一样** ——
-       只刷新卡片等于什么都没发生，用户会以为按钮坏了。 */
+       只刷新卡片等于什么都没发生，用户会以为按钮坏了。
+       "元数据来源"放第一行：探测读不出东西本身也是一种结论，不说清是谁不给
+       （服务商清单没有该字段 / Key 没权限 / 模型名写错），用户无从判断该做什么。 */
     function probeSummary(r) {
-        return '端点族：' + cnList(r.endpoints, EP_LABEL)
-            + '\n输入模态：' + cnList(r.input, MOD_LABEL)
-            + '\n输出模态：' + cnList(r.output, MOD_LABEL)
-            + '\n布尔能力：' + cnList(r.capabilities, CAP_LABEL)
-            + (r.dimension == null ? '' : '\n向量维度：' + r.dimension);
+        var UNDECLARED = '未声明（需手工勾选）';
+        return '元数据来源：' + (r.flavorLabel || '未标注')
+            + '\n端点族：' + cnList(r.endpoints, EP_LABEL, UNDECLARED)
+            + '\n输入模态：' + cnList(r.input, MOD_LABEL, UNDECLARED)
+            + '\n输出模态：' + cnList(r.output, MOD_LABEL, UNDECLARED)
+            + '\n布尔能力：' + cnList(r.capabilities, CAP_LABEL, UNDECLARED)
+            + (r.dimension == null ? '' : '\n向量维度：' + r.dimension + '（实测）');
     }
 
     /* ---------- 卡片上的「读取」----------
@@ -941,7 +1140,203 @@ Console.renderSidebar('models');
             .catch(function (e) { alert('删除失败：' + e.message); });
     }
 
+/* ---------- 服务商连接库（config/provider-connections.json）----------
+       定位：它是"取连接快捷方式"，不是引用关系。
+       一条连接 = 名称 + 服务商地址 +（可选）密钥；地址与密钥合成一条而不是拆成两个库，
+       因为这两个字段从来一起换（换服务商就是地址与 Key 同时换）。
+       选中后把两项一起填进表单，档案保存时仍各自保存明文副本；
+       删除库里的一条**不影响**任何已保存档案，反过来在表单里改了也不回写库里。
+       列表只回脱敏密钥，明文只在选中某个名称时按名单取一次 —— 见 /admin/provider-connections/resolve。 */
+
+    var CONNECTIONS = null;   /* null = 还没拉过；[] = 库里为空。刻意区分：没拉过不该显示"库里没有" */
+
+    function loadConnections(force) {
+        if (CONNECTIONS !== null && !force) { return Promise.resolve(CONNECTIONS); }
+        return Console.jsonRequest('/admin/provider-connections', 'GET')
+            .then(function (r) {
+                CONNECTIONS = (r && r.connections) || [];
+                return CONNECTIONS;
+            })
+            .catch(function (e) {
+                CONNECTIONS = null;
+                throw e;
+            });
+    }
+
+    /* ---------- 连接库弹窗 ---------- */
+    function cnSay(ok, text) {
+        var el = pfEl('cnResult');
+        el.textContent = text;
+        el.className = 'result' + (text ? (ok ? ' show ok' : ' show err') : '');
+    }
+    function renderConnectionList() {
+        var box = pfEl('cnList');
+        if (!CONNECTIONS || !CONNECTIONS.length) {
+            box.innerHTML = '<div class="empty-box">连接库还是空的。'
+                + '添加后，模型档案表单的服务商地址输入框右侧会出现下拉，选中一条即把地址与密钥一起填入。</div>';
+            return;
+        }
+        box.innerHTML = CONNECTIONS.map(function (c) {
+            /* 地址原样展示（不是凭据，排障时要看到真实地址）；密钥只给脱敏值 */
+            var key = c.hasApiKey ? (c.maskedApiKey || '****') : '（无密钥）';
+            return '<div class="card"><div class="card-head">'
+                + '<div><b>' + Console.escapeHtml(c.name) + '</b>'
+                + '<div class="mono hint" style="margin:2px 0 0;">' + Console.escapeHtml(c.baseUrl) + '</div></div>'
+                + '<span class="spacer"></span>'
+                + '<span class="mono hint" style="margin:0;">' + Console.escapeHtml(key) + '</span>'
+                + '<button class="ghost" data-cn-del="' + Console.escapeHtml(c.name) + '">删除</button>'
+                + '</div></div>';
+        }).join('');
+    }
+    function openConnModal() {
+        pfEl('connModal').hidden = false;
+        document.body.style.overflow = 'hidden';
+        cnSay(true, '');
+        loadConnections(true)
+            .then(function () {
+                renderConnectionList();
+                pfEl('cnName').focus();
+            })
+            .catch(function (e) {
+                renderConnectionList();
+                cnSay(false, '读取连接库失败：' + e.message);
+            });
+    }
+    function closeConnModal() {
+        pfEl('connModal').hidden = true;
+        /* profileModal 可能同时开着（先开模型窗再开连接窗），只在自己是最后一道遮罩时才解锁滚动 */
+        if (pfEl('profileModal').hidden) { document.body.style.overflow = ''; }
+    }
+    function addConnection() {
+        var name = (pfEl('cnName').value || '').trim();
+        var baseUrl = (pfEl('cnBaseUrl').value || '').trim();
+        var secret = (pfEl('cnApiKey').value || '').trim();
+        if (!name) { cnSay(false, '名称不能为空'); return; }
+        if (!baseUrl) { cnSay(false, '服务商地址不能为空'); return; }
+        var btn = pfEl('cnAddBtn');
+        btn.disabled = true;
+        Console.jsonRequest('/admin/provider-connections', 'POST',
+                            { name: name, baseUrl: baseUrl, apiKey: secret })
+            .then(function (r) {
+                if (r && r.code && r.code !== 0) {
+                    throw new Error(Console.sanitizeError(r.detail || r.error) || '添加失败');
+                }
+                /* 成功就把明文从表单里抹掉：它已经落盘，继续留在输入框只会多一处副本 */
+                pfEl('cnName').value = '';
+                pfEl('cnBaseUrl').value = '';
+                pfEl('cnApiKey').value = '';
+                pfEl('cnFileHint').textContent = (r && r.settingsFile) || '—';
+                cnSay(true, (r && r.message) || ('已添加「' + name + '」'));
+                return loadConnections(true);
+            })
+            .then(function () { renderConnectionList(); })
+            .catch(function (e) { cnSay(false, Console.sanitizeError(e.message)); })
+            .then(function () { btn.disabled = false; });
+    }
+    function deleteConnection(name) {
+        if (!confirm('从连接库删除「' + name + '」？\n\n'
+            + '已保存的模型档案不受影响：它们各自保存的是独立副本，不是对库中这一条的引用。')) { return; }
+        Console.jsonRequest('/admin/provider-connections?name=' + encodeURIComponent(name), 'DELETE')
+            .then(function (r) {
+                if (r && r.code && r.code !== 0) {
+                    throw new Error(Console.sanitizeError(r.detail || r.error) || '删除失败');
+                }
+                cnSay(true, (r && r.message) || ('已删除「' + name + '」'));
+                return loadConnections(true);
+            })
+            .then(function () { renderConnectionList(); })
+            .catch(function (e) { cnSay(false, Console.sanitizeError(e.message)); });
+    }
+
+    /* ---------- 服务商地址输入框右侧的下拉 ---------- */
+    function cnMenu() { return pfEl('pfBaseUrlMenu'); }
+    function cnMenuOpen() {
+        cnMenu().style.display = 'block';
+        pfEl('pfBaseUrl').setAttribute('aria-expanded', 'true');
+    }
+    function cnMenuClose() {
+        cnMenu().style.display = 'none';
+        pfEl('pfBaseUrl').setAttribute('aria-expanded', 'false');
+    }
+    function cnMenuState(text) {
+        cnMenu().innerHTML = '<div class="combo-state">' + Console.escapeHtml(text) + '</div>';
+    }
+    function renderCnMenu() {
+        if (!CONNECTIONS || !CONNECTIONS.length) {
+            cnMenuState('连接库为空：点页面右上角「连接库」添加');
+            return;
+        }
+        cnMenu().innerHTML = CONNECTIONS.map(function (c) {
+            return '<div class="combo-item" role="option" data-cn="' + Console.escapeHtml(c.name) + '"'
+                + ' title="' + Console.escapeHtml(c.baseUrl) + '">'
+                + Console.escapeHtml(c.name) + '</div>';
+        }).join('');
+    }
+    function openCnMenu() {
+        cnMenuOpen();
+        if (CONNECTIONS !== null) { renderCnMenu(); return; }
+        cnMenuState('加载中…');
+        loadConnections(false)
+            .then(function () { renderCnMenu(); cnMenuOpen(); })
+            .catch(function (e) { cnMenuState('读取失败：' + Console.sanitizeError(e.message)); cnMenuOpen(); });
+    }
+    function pickConnection(name) {
+        cnMenuClose();
+        Console.jsonRequest('/admin/provider-connections/resolve?name=' + encodeURIComponent(name), 'POST')
+            .then(function (r) {
+                if (!r || r.code !== 0 || !r.baseUrl) {
+                    throw new Error(Console.sanitizeError((r && (r.detail || r.error)) || '取连接失败'));
+                }
+                pfEl('pfBaseUrl').value = r.baseUrl;
+                if (r.hasApiKey && r.apiKey) {
+                    pfEl('pfApiKey').value = r.apiKey;
+                    readSay(true, '已从连接库填入「' + name + '」的地址与密钥'
+                        + '（档案保存时会用它们，库里那份不受改动）');
+                } else {
+                    /* 该条没配密钥：只填地址，**不去动已经填好的 Key** ——
+                       静默清空用户手填的密钥比不填更糟。 */
+                    readSay(true, '已从连接库填入「' + name + '」的地址；该条未配密钥，'
+                        + 'API Key 保持原样，请自行填写');
+                }
+            })
+            .catch(function (e) {
+                readSay(false, Console.sanitizeError(e.message));
+                /* 条目可能刚被别人删了：刷新一次缓存，避免下次还点一个已经不在的选项 */
+                loadConnections(true);
+            });
+    }
+
+    (function () {
+        pfEl('pfBaseUrlBtn').addEventListener('click', openCnMenu);
+        cnMenu().addEventListener('click', function (ev) {
+            var item = ev.target.closest ? ev.target.closest('[data-cn]') : null;
+            if (item) { pickConnection(item.getAttribute('data-cn')); }
+        });
+        /* 与模型名下拉共用"点到外面就收起"：判定必须落在**包住输入框/按钮/菜单的那个 .combo** 上。
+           只判 #pfBaseUrl（输入框本身）的话，点按钮会先被 openCnMenu 打开、紧接着被这条
+           在 document 上的监听收掉 —— 下拉一开就被关，用户只会看到"点了没反应"。 */
+        document.addEventListener('click', function (ev) {
+            if (!ev.target.closest || !ev.target.closest('#pfBaseUrlCombo')) { cnMenuClose(); }
+        });
+    })();
+
     /* ---------- 事件绑定 ---------- */
+    pfEl('openConnBtn').addEventListener('click', openConnModal);
+    pfEl('connModalClose').addEventListener('click', closeConnModal);
+    pfEl('connModal').addEventListener('click', function (e) {
+        if (e.target === pfEl('connModal')) { closeConnModal(); }
+    });
+    pfEl('cnAddBtn').addEventListener('click', addConnection);
+    pfEl('cnClearBtn').addEventListener('click', function () {
+        pfEl('cnName').value = '';
+        pfEl('cnBaseUrl').value = '';
+        pfEl('cnApiKey').value = '';
+        cnSay(true, '');
+    });
+    pfEl('cnList').addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('[data-cn-del]') : null;
+        if (btn) { deleteConnection(btn.getAttribute('data-cn-del')); }
+    });
     pfEl('addEmbeddingBtn').addEventListener('click', function () { openAdd('embedding'); });
     pfEl('addChatBtn').addEventListener('click', function () { openAdd(); });
     pfEl('readBtn').addEventListener('click', readProviderInfo);
@@ -952,7 +1347,11 @@ Console.renderSidebar('models');
         if (e.target === pfEl('profileModal')) { closeModal(); }
     });
     document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && !pfEl('profileModal').hidden) { closeModal(); }
+        if (e.key !== 'Escape') { return; }
+        /* 下拉优先收：它浮在遮罩层之上，不先关掉的话第一次 Esc 只关了下拉，看不出层还在 */
+        if (cnMenu().style.display === 'block') { cnMenuClose(); return; }
+        if (!pfEl('connModal').hidden) { closeConnModal(); return; }
+        if (!pfEl('profileModal').hidden) { closeModal(); }
     });
 
     Console.ready(function () {

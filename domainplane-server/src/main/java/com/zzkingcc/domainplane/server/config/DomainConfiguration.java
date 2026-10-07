@@ -1,6 +1,5 @@
 package com.zzkingcc.domainplane.server.config;
 
-import com.zzkingcc.domainplane.api.agent.Domains;
 import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
 import com.zzkingcc.domainplane.server.settings.DomainStore;
 import org.slf4j.Logger;
@@ -26,7 +25,7 @@ public class DomainConfiguration {
     /**
      * 域注册表：根域 default 由构造期预置（恒为可调用单元），管控台声明的域从落盘恢复。
      *
-     * <p>恢复时<b>只按条目显式给定的可调用性</b>，沿链补齐出来的祖先一律是装配节点。</p>
+     * 恢复时只按条目显式给定的可调用性，沿链补齐出来的祖先一律是装配节点。
      */
     @Bean
     @ConditionalOnMissingBean
@@ -49,11 +48,11 @@ public class DomainConfiguration {
     /**
      * 一次性归一：把"当前已经有子域"的域的落盘标记改成装配节点。
      *
-     * <p><b>叶子规则本身不靠这里保证</b> —— 它由 {@link DomainRegistry#isCallable} 在读取时派生
-     * （显式标记 ∧ 无子域），无论标记从哪来都越不过去。本迁移只是把<b>历史落盘值</b>
-     * 一次性对齐成生效值，免得文件里留着一堆与实际角色不符的 {@code true}。</p>
+     * 叶子规则本身不靠这里保证 —— 它由 {@link DomainRegistry#isCallable} 在读取时派生
+     * （显式标记 ∧ 无子域），无论标记从哪来都越不过去。本迁移只是把历史落盘值
+     * 一次性对齐成生效值，免得文件里留着一堆与实际角色不符的 {@code true}。
      *
-     * <p>只跑一次（落盘的 {@code callableMigrated} 为真即跳过）。</p>
+     * 只跑一次（落盘的 {@code callableMigrated} 为真即跳过）。
      */
     @Bean
     public SmartInitializingSingleton domainCallableMigration(DomainRegistry domainRegistry,

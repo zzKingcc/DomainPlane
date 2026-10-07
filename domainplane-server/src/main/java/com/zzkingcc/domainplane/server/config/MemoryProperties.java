@@ -8,7 +8,7 @@ import java.time.Duration;
 /**
  * 会话记忆配置
  *
- * <p>前缀 {@code domainplane.memory}。阈值统一外置在 yaml，便于调整窗口而无需重新编译。</p>
+ * 前缀 {@code domainplane.memory}。阈值统一外置在 yaml，便于调整窗口而无需重新编译。
  * @author zzkingcc
  */
 @Data
@@ -21,7 +21,7 @@ public class MemoryProperties {
     /** 单会话消息累计 Token 估算上限 */
     private int maxTokens = 30000;
 
-    /** 会话记忆保留期；{@code null} = <b>永久不过期</b>（一期默认）。
+    /** 会话记忆保留期；{@code null} = 永久不过期（一期默认）。
      *  记忆是长期存储（靠 Redis RDB+AOF 保住），按缓存对待并不合适 —— 到上限后由入口拒绝新一轮，
      *  而不是丢弃最旧的消息（静默丢历史会让用户"以为还记得"）。 */
     private Duration ttl = null;

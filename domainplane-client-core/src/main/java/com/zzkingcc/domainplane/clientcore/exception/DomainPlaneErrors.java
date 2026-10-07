@@ -31,6 +31,12 @@ public final class DomainPlaneErrors {
      * 传输层异常 → 带码的客户端异常。
      */
     public static DomainPlaneException fromTransport(Throwable error) {
+        if (error instanceof DomainPlaneStartupException startup) {
+            // 凭证换取失败仍带 StartupException 类型（登录失败就是登录失败，码与文案都准），
+            // 但对业务调用方而言它就是一次普通的远端不可用 —— 归一成父类，
+            // 免得接入方为了 catch 一次"服务端没启动"而依赖启动期的异常类型。
+            return new DomainPlaneException(startup.getErrorCode(), startup.getMessage(), startup);
+        }
         if (error instanceof DomainPlaneException domainplaneException) {
             return domainplaneException;
         }

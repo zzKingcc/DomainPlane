@@ -72,11 +72,16 @@ public class ToolInstanceAutoConfiguration {
     /**
      * 提示端点的暴露面 —— 刻意提醒而非拦截。
      *
-     * <p>{@code /domainplane/invoke} 不自带鉴权是产品契约（见 docs/INSTANCE.md §4.7）：
+     * {@code /domainplane/invoke} 不自带鉴权是产品契约（见 docs/INSTANCE.md §4.7）：
      * 实例端口的暴露面由接入方负责收敛。因此这里只把这条事实讲清楚，
-     * 让接入方在日志里就能看到，不做任何行为变更。</p>
+     * 让接入方在日志里就能看到，不做任何行为变更。
+     * endpoint 为空（推导失败）时不提示：此时根本没有端点可暴露，原因已在 resolveEndpoint 报过。
      */
     private void warnAboutUnauthenticatedInvokeEndpoint(ToolInstanceConfig config) {
+        String endpoint = config.endpoint();
+        if (endpoint == null || endpoint.isBlank()) {
+            return;
+        }
         log.info("[工具实例] {} 暴露的 {} 不自带鉴权（SDK 刻意不内置）："
                         + "能连到本端口的一方可以直接执行本实例的工具，且不经过服务端的审批闸门与域过滤。"
                         + "请确保该端口只在可信网络内可达；需要鉴权时在自己的应用里加拦截器即可。",
@@ -91,11 +96,26 @@ public class ToolInstanceAutoConfiguration {
     }
 
     /**
+     * 连接状态快照 Bean。
+     *
+     * 心跳失败不阻断启动，"进程活着但工具没注册上"只能靠状态区分 —— 这个 Bean 就是那个出口：
+     * 接入方注入它接到自己的健康检查端点或 Actuator 上即可。
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public ToolInstanceConnectionStatus toolInstanceConnectionStatus(ToolInstanceClient client) {
+        return new ToolInstanceConnectionStatus(client);
+    }
+
+    /**
      * 解析工具调用回流地址：显式配置优先，留空则按本进程端口推导。
      *
-     * <p>端口依次取 {@code local.server.port}（容器实际端口，随机端口时才有）与
-     * {@code server.port}；两者都拿不到说明本进程没有可用的 Web 端口，此时推导不出地址，
-     * 直接失败比注册一个服务端永远回调不到的地址更可控。</p>
+     * 端口依次取 {@code local.server.port}（容器实际端口，随机端口时才有）与
+     * {@code server.port}；两者都拿不到说明本进程没有可用的 Web 端口。
+     *
+     * 推导不出来时返回空串而不是抛异常：地址配错的后果是"服务端回调不到本实例"，
+     * 而那本来就该在真正发生调用时才暴露，不该让接入方的程序起不来。
+     * 本实例仍会照常注册并心跳，工具也照常被声明 —— 只有反向调用这条路是空的。
      */
     private String resolveEndpoint(ToolInstanceProperties properties, Environment environment) {
         String explicit = properties.getEndpoint();
@@ -104,12 +124,14 @@ public class ToolInstanceAutoConfiguration {
         }
         String port = environment.getProperty("local.server.port");
         if (!StringUtils.hasText(port)) {
-            port = environment.getProperty("server.port", "8080");
+            port = environment.getProperty("server.port");
         }
         if (!StringUtils.hasText(port) || "0".equals(port.trim())) {
-            throw new IllegalStateException("无法推导工具调用回流地址：本进程没有可用的 Web 端口，"
-                    + "请显式配置 domainplane.tool-instance.endpoint 为服务端可达的完整地址"
-                    + "（形如 http://10.0.0.5:8081" + ToolInstanceInvokeController.INVOKE_PATH + "）");
+            log.error("[工具实例] 推导不出工具调用回流地址：本进程没有可用的 Web 端口，"
+                            + "服务端将无法回调本实例（工具仍会正常注册与心跳）。"
+                            + "请显式配置 domainplane.tool-instance.endpoint 为服务端可达的完整地址"
+                            + "（形如 http://10.0.0.5:8081" + ToolInstanceInvokeController.INVOKE_PATH + "）");
+            return "";
         }
         String derived = "http://" + DERIVED_HOST + ":" + port.trim() + ToolInstanceInvokeController.INVOKE_PATH;
         log.info("[工具实例] 未配置 domainplane.tool-instance.endpoint，按本进程端口推导为 {}；"
@@ -121,11 +143,16 @@ public class ToolInstanceAutoConfiguration {
      * 提示 endpoint 的路径与本 SDK 实际监听的路径不一致。
      */
     private void warnIfEndpointPathMismatch(ToolInstanceConfig config) {
+        // 推导失败时 endpoint 为空：原因已在 resolveEndpoint 处报过，这里不重复刷屏
+        String endpoint = config.endpoint();
+        if (endpoint == null || endpoint.isBlank()) {
+            return;
+        }
         String path;
         try {
-            path = URI.create(config.endpoint()).getPath();
+            path = URI.create(endpoint).getPath();
         } catch (Exception e) {
-            log.warn("[工具实例] endpoint 不是合法 URL（{}），服务端将无法回调本实例", config.endpoint());
+            log.warn("[工具实例] endpoint 不是合法 URL（{}），服务端将无法回调本实例", endpoint);
             return;
         }
         if (path == null || !path.endsWith(ToolInstanceInvokeController.INVOKE_PATH)) {

@@ -16,8 +16,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * 客户端凭证持有者：账号密码 → 签名凭证，进程内缓存一份。
  *
- * <p>对话 SDK 与知识库 SDK 共用同一个实例（同一份配置只换一次凭证），
- * 因此它是 Bean 而不是各 SDK 内部 new 出来的字段。</p>
+ * 对话 SDK 与知识库 SDK 共用同一个实例（同一份配置只换一次凭证），
+ * 因此它是 Bean 而不是各 SDK 内部 new 出来的字段。
  *
  * @author zzkingcc
  */
@@ -46,7 +46,9 @@ public class ClientCredential {
     /**
      * 取凭证；没有就登录一次（并发下只登一次）。
      *
-     * @throws DomainPlaneStartupException 启动期调用且登录失败（调用方决定是中断启动还是仅记日志）
+     * 不在启动期调用：凭证在首次业务调用时才换取，服务端未启动不阻断接入方启动。
+     * 登录失败抛 {@link DomainPlaneStartupException}，由调用方经
+     * {@link DomainPlaneErrors#fromTransport} 翻成统一的带码业务异常。
      */
     public String get() {
         String cached = credential.get();

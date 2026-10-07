@@ -6,12 +6,12 @@ import com.zzkingcc.domainplane.clientcore.exception.DomainPlaneException;
 import com.zzkingcc.domainplane.api.agent.AgentRequest;
 import com.zzkingcc.domainplane.api.agent.AgentService;
 import com.zzkingcc.domainplane.api.agent.ApprovalRequiredException;
-import com.zzkingcc.domainplane.api.agent.CallerContext;
 import com.zzkingcc.domainplane.api.agent.DomainPlaneAgent;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.api.event.AgentEvent;
 import com.zzkingcc.domainplane.api.event.AgentEventType;
 import com.zzkingcc.domainplane.api.model.ToolCall;
+import lombok.ToString;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
@@ -24,11 +24,12 @@ import java.util.Objects;
 /**
  * {@link DomainPlaneAgent} 的实现：把"答案 / 逐字 / 事件"三种消费方式收在同一个已绑定域的门面上。
  *
- * <p>三种方式的差别只在于<b>怎么消费那条事件流</b>，底层走的是同一个 {@link AgentService}
- * 远程通道 —— 没有第二套协议，也没有第二份状态。</p>
+ * 三种方式的差别只在于怎么消费那条事件流，底层走的是同一个 {@link AgentService}
+ * 远程通道 —— 没有第二套协议，也没有第二份状态。
  *
  * @author zzkingcc
  */
+@ToString(onlyExplicitlyIncluded = true)
 public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultDomainPlaneAgent.class);
@@ -38,15 +39,21 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
     /**
      * {@code ask} 的默认上限。
      *
-     * <p>SSE 正常结束由终止事件（{@code DONE}）判定，不需要靠超时收尾；但服务端完全不响应
+     * SSE 正常结束由终止事件（{@code DONE}）判定，不需要靠超时收尾；但服务端完全不响应
      * （线程池满、网关挂起、连接建立后不吐任何帧）时，无参 {@code block()} 会让调用线程
-     * <b>永久阻塞</b>。给一个有界的兜底：宽到能容下一次正常的长回答，窄到不会挂死业务线程。</p>
+     * 永久阻塞。给一个有界的兜底：宽到能容下一次正常的长回答，窄到不会挂死业务线程。
      */
     public static final Duration DEFAULT_ANSWER_TIMEOUT = Duration.ofMinutes(30);
 
     private final AgentService transport;
     private final String domainId;
     private final Duration answerTimeout;
+
+    /** 只出域：transport / 超时时长不进日志，避免把连接细节和内部超时带出去 */
+    @ToString.Include(name = "domainId")
+    private String domainForLog() {
+        return domainId;
+    }
 
     public DefaultDomainPlaneAgent(AgentService transport, String domainId) {
         this(transport, domainId, DEFAULT_ANSWER_TIMEOUT);
@@ -67,14 +74,9 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
 
     @Override
     public String ask(String sessionId, String question) {
-        return ask(sessionId, question, null, null);
-    }
-
-    @Override
-    public String ask(String sessionId, String question, String tenantId, String userId) {
         List<AgentEvent> collected;
         try {
-            collected = events(sessionId, question, tenantId, userId).collectList().block(answerTimeout);
+            collected = events(sessionId, question).collectList().block(answerTimeout);
         } catch (IllegalStateException e) {
             // reactor 的 block(Duration) 超时抛这个，消息通常不含业务信息
             throw timedOut(sessionId, e);
@@ -111,7 +113,7 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
     /**
      * 终止事件：流"正常结束"的唯一凭据。
      *
-     * <p>没有它，HTTP 连接被中间层掐断与"这一轮答完了"在客户端看来一模一样。</p>
+     * 没有它，HTTP 连接被中间层掐断与"这一轮答完了"在客户端看来一模一样。
      */
     private static boolean isTerminal(AgentEventType type) {
         return type == AgentEventType.DONE
@@ -140,16 +142,11 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
 
     @Override
     public Flux<String> stream(String sessionId, String question) {
-        return stream(sessionId, question, null, null);
-    }
-
-    @Override
-    public Flux<String> stream(String sessionId, String question, String tenantId, String userId) {
         // 截断检测：记录是否见过终止事件，流"正常结束"时若没见过就补一个错误 ——
         // 没有终止事件就没有"答完了"的凭据，半截答案绝不能按完整答案交给业务方。
         var terminated = new java.util.concurrent.atomic.AtomicBoolean(false);
         var counter = new java.util.concurrent.atomic.AtomicInteger();
-        return events(sessionId, question, tenantId, userId)
+        return events(sessionId, question)
                 .concatMap(event -> {
                     counter.incrementAndGet();
                     if (isTerminal(event.getType())) {
@@ -169,29 +166,22 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
 
     @Override
     public Flux<AgentEvent> events(String sessionId, String question) {
-        return events(sessionId, question, null, null);
-    }
-
-    @Override
-    public Flux<AgentEvent> events(String sessionId, String question, String tenantId, String userId) {
         return transport.chat(AgentRequest.builder()
                 .sessionId(sessionId)
                 .message(question)
-                .profile(domainId)
-                .tenantId(tenantId)
-                .userId(userId)
+                .domain(domainId)
                 .build());
     }
 
     @Override
     public Flux<AgentEvent> resume(String sessionId, boolean approved) {
-        return transport.resume(sessionId, approved, CallerContext.of(domainId));
+        return transport.resume(sessionId, approved, domainId);
     }
 
     @Override
     public boolean stop(String sessionId) {
         // 会话状态按 (域, sessionId) 隔离：stop 必须带上本门面绑定的域，否则停不到这个域里的会话
-        return transport.stop(sessionId, CallerContext.of(domainId));
+        return transport.stop(sessionId, domainId);
     }
 
     // ==================== 事件 → 异常 ====================
@@ -204,12 +194,12 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
     /**
      * 解析中断 payload（{@code {"tools":[{"name":..,"arguments":{..},"requireApproval":true}]}}）。
      *
-     * <p><b>解析失败即失败</b>，不当成"没有待授权工具"往下走：
+     * 解析失败即失败，不当成"没有待授权工具"往下走：
      * 空清单会被宿主渲染成一张空的确认框，宿主照样能点批准 → 危险动作执行，
      * 而没人看到过批准内容。这与"丢掉需要审批这件事"一样糟，只是更隐蔽 ——
-     * 后者宿主知道出事了，前者宿主以为自己批的是空操作。</p>
+     * 后者宿主知道出事了，前者宿主以为自己批的是空操作。
      *
-     * <p>抛出的异常不含原始 payload（避免把工具参数带进异常消息落到日志里）。</p>
+     * 抛出的异常不含原始 payload（避免把工具参数带进异常消息落到日志里）。
      */
     private List<ToolCall> parseToolCalls(String sessionId, String payload) {
         if (payload == null || payload.isBlank()) {
@@ -262,10 +252,5 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
             message = message + "（traceId=" + event.getTraceId() + "）";
         }
         return new DomainPlaneException(code, message);
-    }
-
-    @Override
-    public String toString() {
-        return "DomainPlaneAgent{domainId='" + domainId + "'}";
     }
 }

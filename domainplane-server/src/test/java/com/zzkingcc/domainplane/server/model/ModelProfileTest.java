@@ -21,7 +21,7 @@ class ModelProfileTest {
                                         List<String> output, List<String> capabilities,
                                         Integer dimensions) {
         return new ModelProfile("a", endpoints, input, output,
-                "https://api.example.com/v1", "sk-test", "m", null, null, dimensions,
+                "https://api.example.com/v1", "sk-test", "m", null, null, null, null, dimensions,
                 capabilities, null);
     }
 
@@ -74,8 +74,9 @@ class ModelProfileTest {
                 List.of(ModelProfile.EP_CHAT, ModelProfile.EP_TTS),
                 List.of(ModelProfile.MOD_TEXT),
                 List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_AUDIO),
-                "https://api.example.com/v1", "sk-test", "gpt-4o", 0.5, 100, null,
-                List.of(ModelProfile.CAP_STREAMING), List.of("backup"));
+                "https://api.example.com/v1", "sk-test", "gpt-4o", 0.5, 100,
+                Boolean.FALSE, Boolean.TRUE, null,
+                List.of(ModelProfile.CAP_STREAMING, ModelProfile.CAP_REASONING), List.of("backup"));
 
         ModelProfile back = ProfileData.from(p).toProfile(p.alias());
         assert back.endpoints().equals(p.endpoints()) : "端点族应往返一致： " + back.endpoints();
@@ -83,5 +84,71 @@ class ModelProfileTest {
         assert back.output().equals(p.output()) : "输出模态应往返一致： " + back.output();
         assert back.capabilities().equals(p.capabilities()) : "能力应往返一致： " + back.capabilities();
         assert back.fallbacks().equals(p.fallbacks()) : "降级链应往返一致： " + back.fallbacks();
+        assert Boolean.FALSE.equals(back.thinking()) && Boolean.TRUE.equals(back.returnThinking())
+                : "思考开关应往返一致（false 是「显式关闭」，不能在往返里被抹成 null —— "
+                        + "那等于用户关掉的思考又自己打开了），实际 thinking=" + back.thinking()
+                        + ", returnThinking=" + back.returnThinking();
+    }
+
+    @Test
+    void 思考开关参与指纹() {
+        ModelProfile on = profile(List.of(ModelProfile.EP_CHAT), null, null, null, null);
+        ModelProfile off = new ModelProfile(on.alias(), on.endpoints(), on.input(), on.output(),
+                on.baseUrl(), on.apiKey(), on.modelName(), null, null,
+                Boolean.FALSE, null, null, null, null);
+
+        assert !on.fingerprint().equals(off.fingerprint())
+                : "思考开关变了指纹就必须变，否则缓存里那份旧客户端照旧在用 —— "
+                        + "表现为「保存成功、开关也变了，思考却还在烧」";
+    }
+
+    @Test
+    void 未探测到思考能力时不标记() {
+        ModelProfile p = profile(List.of(ModelProfile.EP_CHAT), null, null,
+                List.of(ModelProfile.CAP_TOOLS), null);
+
+        assert !p.capabilities().contains(ModelProfile.CAP_REASONING)
+                : "没读到 reasoning 元数据就不该标成支持思考：管控台据此不显示思考开关，"
+                        + "而不是显示成「已关闭」让用户以为关掉了、实际每轮还在烧思考 token";
+    }
+
+    // ==================== 采样参数默认值 ====================
+
+    /** 变异验证点：把 {@code effectiveTemperature} 改回直接返回 {@code temperature}（即 null），
+     *  {@link #未声明温度时按0_5而不是交给服务商默认()} 就会变红。 */
+    @Test
+    void 未声明温度时按0_5而不是交给服务商默认() {
+        ModelProfile p = profile(List.of(ModelProfile.EP_CHAT), null, null, null, null);
+
+        assert p.temperature() == null : "原始声明值应保持 null（未声明），实际 " + p.temperature();
+        assert p.effectiveTemperature() == ModelProfile.DEFAULT_TEMPERATURE
+                : "未声明时必须落到固定默认值；不设 temperature 的话各家端点各给各的"
+                + "（常见 0.7 / 1.0），换个服务商行为就变了且没有提示，实际 " + p.effectiveTemperature();
+        assert ModelProfile.DEFAULT_TEMPERATURE == 0.5 : "默认温度应为 0.5，实际 " + ModelProfile.DEFAULT_TEMPERATURE;
+    }
+
+    @Test
+    void 声明了温度就以声明值为准() {
+        ModelProfile p = new ModelProfile("a", List.of(ModelProfile.EP_CHAT), null, null,
+                "https://api.example.com/v1", "sk", "m", 0.1, null, null, null, null, null, null);
+
+        assert p.effectiveTemperature() == 0.1 : "显式声明不该被默认值盖掉，实际 " + p.effectiveTemperature();
+    }
+
+    @Test
+    void 未声明最大token时不限制() {
+        ModelProfile p = profile(List.of(ModelProfile.EP_CHAT), null, null, null, null);
+
+        assert p.maxTokens() == null : "原始声明值应保持 null，实际 " + p.maxTokens();
+        assert p.effectiveMaxTokens() == null
+                : "留空就是「不限制」：调用方据此不发送 max_tokens，由模型上下文决定";
+    }
+
+    @Test
+    void 声明了最大token就以声明值为准() {
+        ModelProfile p = new ModelProfile("a", List.of(ModelProfile.EP_CHAT), null, null,
+                "https://api.example.com/v1", "sk", "m", null, 2048, null, null, null, null, null);
+
+        assert p.effectiveMaxTokens() == 2048 : "显式声明就该设限，实际 " + p.effectiveMaxTokens();
     }
 }

@@ -16,19 +16,19 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * 提示词 ↔ 工具可见性 一致性自检（启动期跑，<b>只提醒、不阻断</b>）。
+ * 提示词 ↔ 工具可见性 一致性自检（启动期跑，只提醒、不阻断）。
  *
- * <p>要挡的是什么：域同时绑定【工具集 + 系统提示词】，而两者分处两个地方维护
+ * 要挡的是什么：域同时绑定【工具集 + 系统提示词】，而两者分处两个地方维护
  * （工具声明在 {@code @Tool}，提示词在管控台 {@code prompts.json} / yaml），
  * 于是很容易写出"提示词里点名了某个工具、但它在当前域不可见"。
- * 提示词沿链拼接，所以祖先域的片段同样会落到后代域身上。</p>
+ * 提示词沿链拼接，所以祖先域的片段同样会落到后代域身上。
  * 后果是模型被告知有能力却调不到，要么反复失败、要么拿近义工具硬凑。
- * 这类问题<b>不抛异常、不进错误日志、HTTP 依旧 200</b>，只能靠人工比对发现 ——
- * 正是自检该覆盖的那一类。</p>
+ * 这类问题不抛异常、不进错误日志、HTTP 依旧 200，只能靠人工比对发现 ——
+ * 正是自检该覆盖的那一类。
  *
- * <p>边界（刻意保守）：只认"提示词里出现的<b>工具名</b>"。中文提示词通常用业务语言描述能力
+ * 边界（刻意保守）：只认"提示词里出现的工具名"。中文提示词通常用业务语言描述能力
  * （"查订单"）而不写 {@code queryOrder}，那种情形本自检覆盖不到 ——
- * <b>宁可漏报，也不误报</b>：误报会让人不再信任这条告警。</p>
+ * 宁可漏报，也不误报：误报会让人不再信任这条告警。
  *
  * @author zzkingcc
  */
@@ -55,7 +55,7 @@ public class PromptToolConsistencyAudit {
     /**
      * 跑一次自检并输出结论。
      *
-     * <p>任何异常都只降级为一条 WARN —— 自检绝不能把服务端拉不起来。</p>
+     * 任何异常都只降级为一条 WARN —— 自检绝不能把服务端拉不起来。
      */
     public void audit() {
         try {
@@ -105,9 +105,9 @@ public class PromptToolConsistencyAudit {
     /**
      * 找出"提示词点名了、但该域不可见"的工具。
      *
-     * <p>判据是<b>该域生效的全文提示词</b>（沿链拼接后的结果）：提示词没有基线这一层，
+     * 判据是该域生效的全文提示词（沿链拼接后的结果）：提示词没有基线这一层，
      * 根域的片段就是基底。点名可能出自链上任意一段，
-     * 因此修法都是二选一：把工具声明到这些域，或从<b>链上某段的</b>提示词里删掉该工具名。</p>
+     * 因此修法都是二选一：把工具声明到这些域，或从链上某段的提示词里删掉该工具名。
      */
     static List<String> findMismatches(List<ToolDescriptor> tools,
                                        Set<String> domains,
@@ -153,10 +153,10 @@ public class PromptToolConsistencyAudit {
     }
 
     /**
-     * 提示词里是否<b>点名</b>了该工具。
+     * 提示词里是否点名了该工具。
      *
-     * <p>按词边界匹配，不用 {@code contains}：工具名是标识符，
-     * {@code queryOrderDetail} 里出现 {@code queryOrder} 不算点名。</p>
+     * 按词边界匹配，不用 {@code contains}：工具名是标识符，
+     * {@code queryOrderDetail} 里出现 {@code queryOrder} 不算点名。
      */
     static boolean mentions(String text, String name) {
         if (text == null || text.isBlank() || name == null || name.isBlank()) {

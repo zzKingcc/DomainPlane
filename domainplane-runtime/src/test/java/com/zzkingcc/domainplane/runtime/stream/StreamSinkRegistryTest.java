@@ -1,6 +1,5 @@
 package com.zzkingcc.domainplane.runtime.stream;
 
-import com.zzkingcc.domainplane.api.agent.CallerContext;
 import com.zzkingcc.domainplane.api.event.AgentEvent;
 import org.junit.jupiter.api.Test;
 import reactor.core.Disposable;
@@ -50,7 +49,7 @@ class StreamSinkRegistryTest {
         SinkHolder running = new SinkHolder();
         running.wire(() -> {
         });
-        registry.register(KEY, running.sink, CallerContext.of("default"));
+        registry.register(KEY, running.sink, "default");
 
         // 本轮：被并发闸门拒绝的那一份上下文
         SinkHolder rejected = new SinkHolder();
@@ -60,7 +59,7 @@ class StreamSinkRegistryTest {
                 stopRequested.set(true);
             }
         });
-        StreamContext mine = registry.register(KEY, rejected.sink, CallerContext.of("default"));
+        StreamContext mine = registry.register(KEY, rejected.sink, "default");
         self[0] = mine;
 
         // 修复后的顺序：先注销，再收尾
@@ -84,7 +83,7 @@ class StreamSinkRegistryTest {
                 stopRequested.set(true);
             }
         });
-        StreamContext ctx = registry.register(KEY, holder.sink, CallerContext.of("default"));
+        StreamContext ctx = registry.register(KEY, holder.sink, "default");
         self[0] = ctx;
 
         // 旧顺序：先 complete（同步触发 onDispose，此时还没注销 → isCurrent 仍 true）

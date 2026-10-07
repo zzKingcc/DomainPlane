@@ -1,6 +1,5 @@
 package com.zzkingcc.domainplane.runtime.stream;
 
-import com.zzkingcc.domainplane.api.agent.CallerContext;
 import com.zzkingcc.domainplane.api.event.AgentEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,11 +22,11 @@ public class StreamSinkRegistry {
      *
      * @param sessionId 会话 ID
      * @param sink      事件流 sink
-     * @param caller    本轮调用方身份（权限决定可见工具集）
+     * @param domain    本轮所处的域（决定可见工具集）
      * @return 新注册的上下文
      */
-    public StreamContext register(String sessionId, FluxSink<AgentEvent> sink, CallerContext caller) {
-        StreamContext context = new StreamContext(sessionId, sink, caller);
+    public StreamContext register(String sessionId, FluxSink<AgentEvent> sink, String domain) {
+        StreamContext context = new StreamContext(sessionId, sink, domain);
         StreamContext previous = contexts.put(sessionId, context);
         if (previous != null) {
             log.warn("[流式注册] 会话[{}] 存在未清理的旧上下文,已覆盖并结束旧流——同一会话不允许并发调用", sessionId);

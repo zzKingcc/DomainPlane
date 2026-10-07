@@ -12,8 +12,8 @@ import org.springframework.context.annotation.Configuration;
 /**
  * 模型档案装配：档案注册表 → 客户端工厂 → 解析器。
  *
- * <p>解析器以 {@link ModelResolver} 契约暴露给内核（{@code domainplane-runtime}），
- * 内核不感知档案、绑定这些概念。</p>
+ * 解析器以 {@link ModelResolver} 契约暴露给内核（{@code domainplane-runtime}），
+ * 内核不感知档案、绑定这些概念。
  *
  * @author zzkingcc
  */

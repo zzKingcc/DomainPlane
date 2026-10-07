@@ -110,7 +110,7 @@ public class InfraSettingsHolder {
     // ===== 保存并立即生效 =====
 
     /**
-     * 保存设置并<b>立即生效</b>
+     * 保存设置并立即生效
      */
     public synchronized void apply(InfraSettings incoming) {
         fillBlankSecrets(incoming);

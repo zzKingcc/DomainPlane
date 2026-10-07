@@ -85,7 +85,7 @@ class ToolDomainRetentionTest {
     /**
      * 生产路径：<b>工具还活着</b>时删域。
      *
-     * <p>{@code knownDomains()} 会从活着的工具声明里把域捞回来，所以只清 declaredProfiles 是不够的 ——
+     * <p>{@code knownDomains()} 会从活着的工具声明里把域捞回来，所以只清 declaredDomains 是不够的 ——
      * 那会让被删的域继续留在「域空间」列表里，再点删除报"域不存在"，看着像没删干净。
      * 上一版只覆盖了"工具已下线"的路径，生产路径没测到。</p>
      */

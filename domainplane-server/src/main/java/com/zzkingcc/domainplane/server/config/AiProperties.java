@@ -3,8 +3,6 @@ package com.zzkingcc.domainplane.server.config;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-import java.util.List;
-
 /**
  * AI 模型配置（统一前缀 {@code domainplane.ai}）。
  * @author zzkingcc

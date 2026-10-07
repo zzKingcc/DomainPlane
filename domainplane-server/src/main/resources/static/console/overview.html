@@ -47,7 +47,7 @@
 <script src="assets/console.js"></script>
 <script>
     /* 工具数与域数都取自 /admin/domains（与「域空间」页同一口径）。
-       刻意不在前端自己按 tools[].profiles 去重统计 —— 那样就多了一个"可见性判据"副本，
+       刻意不在前端自己按 tools[].domains 去重统计 —— 那样就多了一个"可见性判据"副本，
        一旦与 ToolRegistry 的过滤条件不一致，概览与域空间会各说各话。
 
        「0」要读成"未注册"而不是"出错了"：这两件事的处置完全不同（前者去写工具注解，

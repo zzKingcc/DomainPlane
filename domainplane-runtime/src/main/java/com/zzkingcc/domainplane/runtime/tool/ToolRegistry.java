@@ -35,7 +35,7 @@ public class ToolRegistry {
     private final Map<String, Set<String>> byInstance = new ConcurrentHashMap<>();
 
     /**
-     * 本进程内<b>出现过</b>的域：某个工具一旦声明过它，就记在这里不再移除。
+     * 本进程内出现过的域：某个工具一旦声明过它，就记在这里不再移除。
      * 域是调用方沿用的命名空间，工具断开（实例熔断 / 判死）不该让域跟着消失，
      * 因此"域是否可用"看的是它被声明过没有，而不是此刻还有没有工具在声明它。
      */
@@ -44,7 +44,7 @@ public class ToolRegistry {
     /**
      * 域注册表：工具声明的域在这里沿链派生（完整路径，缺失祖先一并补齐）。
      *
-     * <p>只给工具注册表时，用缺省实例（仅含根域）—— 供单元测试与最小装配使用。</p>
+     * 只给工具注册表时，用缺省实例（仅含根域）—— 供单元测试与最小装配使用。
      */
     private final DomainRegistry domainRegistry;
 
@@ -69,7 +69,7 @@ public class ToolRegistry {
     }
 
     /**
-     * 注册单个本地工具；<b>重名直接失败</b>
+     * 注册单个本地工具；重名直接失败
      */
     public void register(Registered registered) {
         String name = registered.descriptor().name();
@@ -93,7 +93,7 @@ public class ToolRegistry {
     // ==================== 来源二：远程整包注册（运行期） ====================
 
     /**
-     * 收到某实例的整包 manifest：<b>diff 增量同步</b>该实例的副本。
+     * 收到某实例的整包 manifest：diff 增量同步该实例的副本。
      *
      * @param instanceId 实例标识（不可为 {@code local}，那是本地工具的保留标识）
      * @param endpoint   实例的调用回流地址
@@ -212,7 +212,7 @@ public class ToolRegistry {
     }
 
     /**
-     * 刷新本实例的副本：<b>地址无条件校对</b>，声明与条目不一致时以本次声明为准。
+     * 刷新本实例的副本：地址无条件校对，声明与条目不一致时以本次声明为准。
      */
     private void refreshReplica(String name, String instanceId, String endpoint, Registered incoming) {
         tools.computeIfPresent(name, (key, old) -> {
@@ -284,7 +284,7 @@ public class ToolRegistry {
     }
 
     /**
-     * 比较声明是否一致时<b>排除 {@code source}</b>：远程工具的 source 里带的是
+     * 比较声明是否一致时排除 {@code source}：远程工具的 source 里带的是
      * "某个 instanceId@endpoint"，两个副本天然不同，带上它会把每次心跳都误判成"声明漂移"。
      */
     private static ToolDescriptor withoutSource(ToolDescriptor d) {
@@ -322,9 +322,9 @@ public class ToolRegistry {
     }
 
     /**
-     * 按本轮域过滤后的工具规格列表 —— <b>喂给 LLM 的唯一来源</b>。
+     * 按本轮域过滤后的工具规格列表 —— 喂给 LLM 的唯一来源。
      *
-     * @param profile 本轮所处的域
+     * @param domainId 本轮所处的域
      */
     public List<ToolSpecification> toolSpecifications(String domainId) {
         return tools.values().stream()
@@ -353,7 +353,7 @@ public class ToolRegistry {
     }
 
     /**
-     * 注册表里出现过的<b>全部域</b>——含"曾经有人声明、此刻已无工具"的域，
+     * 注册表里出现过的全部域——含"曾经有人声明、此刻已无工具"的域，
      * 因此入口不会因为一次工具断开就把某个域判成不存在。
      */
     public Set<String> knownDomains() {
@@ -389,23 +389,23 @@ public class ToolRegistry {
     }
 
     /**
-     * 该域是否被<b>至少一个工具声明过</b>（含已断开的声明，供管控台展示与排障）。
+     * 该域是否被至少一个工具声明过（含已断开的声明，供管控台展示与排障）。
      */
     public boolean containsDomain(String domainId) {
         return knownDomains().contains(domainId);
     }
 
         /**
-     * 删域时清理：把这些域从"本进程出现过的域"里摘掉，<b>并从仍活着的工具声明里剥离</b>。
+     * 删域时清理：把这些域从"本进程出现过的域"里摘掉，并从仍活着的工具声明里剥离。
      *
-     * <p>剥离与清 {@code declaredDomains} 缺一不可：{@link #knownDomains()} 会
+     * 剥离与清 {@code declaredDomains} 缺一不可：{@link #knownDomains()} 会
      * {@link #addDomains 从活着的工具条目} 把域重新捞回来，只清 declaredDomains 的话，
      * 被删的域仍留在「域空间」列表里（来源显示"工具派生"），再点删除还会报"域不存在"——
-     * 看着像没删干净，实际是"已删但仍被工具声明复活"。</p>
+     * 看着像没删干净，实际是"已删但仍被工具声明复活"。
      *
-     * <p>剥离还有一个安全含义：工具可见性完全由 descriptor 的域列表决定
-     * （见 {@code ToolDescriptor.visibleIn}），不清掉的话，删域对该域的授权边界<b>不撤销</b> ——
-     * 正在飞行的破坏性工具调用照常通过复核。</p>
+     * 剥离还有一个安全含义：工具可见性完全由 descriptor 的域列表决定
+     * （见 {@code ToolDescriptor.visibleIn}），不清掉的话，删域对该域的授权边界不撤销 ——
+     * 正在飞行的破坏性工具调用照常通过复核。
      */
     public void forgetDomains(Collection<String> domains) {
         if (domains == null || domains.isEmpty()) {
@@ -444,10 +444,10 @@ public class ToolRegistry {
     }
 
     /**
-     * 某工具被声明为<b>敏感</b>的参数名集合（递归含 DTO 展开出的字段名）。
+     * 某工具被声明为敏感的参数名集合（递归含 DTO 展开出的字段名）。
      *
-     * <p>用途只有一个：把"给人看的参数文本"（工具调用事件、审批 payload）掩码，
-     * 执行时用的仍是原值。工具不存在、或没声明过 sensitive，都返回空集。</p>
+     * 用途只有一个：把"给人看的参数文本"（工具调用事件、审批 payload）掩码，
+     * 执行时用的仍是原值。工具不存在、或没声明过 sensitive，都返回空集。
      */
     public Set<String> sensitiveParams(String toolName) {
         return find(toolName)

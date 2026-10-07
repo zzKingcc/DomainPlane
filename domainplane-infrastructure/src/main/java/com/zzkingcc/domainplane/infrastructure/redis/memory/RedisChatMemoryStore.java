@@ -36,7 +36,7 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
 
     /**
      * @param redisTemplate Redis 模板
-     * @param ttl           记忆保留期；{@code null} = <b>永久不过期</b>（一期默认：记忆是长期存储，不是缓存）
+     * @param ttl           记忆保留期；{@code null} = 永久不过期（一期默认：记忆是长期存储，不是缓存）
      */
     public RedisChatMemoryStore(StringRedisTemplate redisTemplate, Duration ttl) {
         this.redisTemplate = redisTemplate;
@@ -117,20 +117,20 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
     }
 
     /**
-     * 删除某个<b>域</b>下的全部会话记忆（删域级联清理用）。
+     * 删除某个域下的全部会话记忆（删域级联清理用）。
      *
-     * <p>键形如 {@code domainplane:chat:memory:{域}|{sessionId}}，因此按 {@code 域|} 前缀扫描即可。
-     * 记忆保留期默认是<b>永久</b>，不清掉的话：同路径域将来重建，这段对话历史会原样复活 ——
-     * 用户以为域已删干净，实际上一句旧话就把它勾回来了。</p>
+     * 键形如 {@code domainplane:chat:memory:{域}|{sessionId}}，因此按 {@code 域|} 前缀扫描即可。
+     * 记忆保留期默认是永久，不清掉的话：同路径域将来重建，这段对话历史会原样复活 ——
+     * 用户以为域已删干净，实际上一句旧话就把它勾回来了。
      *
-     * <p>用 SCAN 而非 KEYS：KEYS 会阻塞整个 Redis 实例。</p>
+     * 用 SCAN 而非 KEYS：KEYS 会阻塞整个 Redis 实例。
      *
      * @return 删除的键数
      */
     public int deleteByDomain(String domain) {
         String normalized = domain == null ? "" : domain.trim();
         // 守卫必须在拼 pattern 之前：domain 为空时 pattern 会退化成
-        // "domainplane:chat:memory:|*"，匹配**全部域**的记忆 —— 一次误传就是全量清空，
+        // "domainplane:chat:memory:|*"，匹配全部域的记忆 —— 一次误传就是全量清空，
         // 而记忆保留期默认永久、清掉不可恢复。RedisCheckpointSaver 里有同款守卫。
         if (normalized.isEmpty()) {
             throw new ChatMemoryException(ErrorCode.INVALID_PARAMETER,
@@ -140,17 +140,16 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
     }
 
     /**
-     * 按模式删除本存储负责的键。<b>失败直接抛</b>，不再"只告警"。
+     * 按模式删除本存储负责的键。失败直接抛，不再"只告警"。
      *
-     * <p>原注释的理由是"删域流程不应因清理失败而中止（域本身的删除已经完成）"——
-     * <b>这个前提不成立</b>：删域流程里这一步在 {@code domainRegistry.delete} 之前，
-     * 抛出去正是中止在那之前，域还在。这两处 Redis 清理各自承担一条安全保证：
-     * <ul>
-     *   <li>记忆保留期默认永久 —— 不清的话同路径域重建，这段对话历史原样复活；</li>
-     *   <li>断点里存着"即将执行、尚未执行"的工具调用 —— 不清的话，24 小时内重建域
-     *       就能 {@code resume(approved=true)} 把当初被拦下的破坏性动作补执行掉。</li>
-     * </ul>
-     * 失败只 warn 等于把这两条保证静默降级为"尽力而为"，而用户看到的是"删除成功"。</p>
+     * 删域流程里这一步在 {@code domainRegistry.delete} 之前，抛异常正好中止删域，域仍保留。
+     * 这两处 Redis 清理各自承担一条安全保证：
+     *
+     *   • 记忆保留期默认永久 —— 不清的话同路径域重建，这段对话历史原样复活；
+     *   • 断点里存着"即将执行、尚未执行"的工具调用 —— 不清的话，24 小时内重建域
+     *       就能 {@code resume(approved=true)} 把当初被拦下的破坏性动作补执行掉。
+     *
+     * 失败只 warn 等于把两条保证静默降级为"尽力而为"，而用户看到的是"删除成功"。
      */
     private int deleteByPattern(String pattern, String what) {
         if (pattern == null || pattern.isBlank()) {

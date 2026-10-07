@@ -9,7 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 账号与凭证的<b>唯一业务入口</b>。
+ * 账号与凭证的唯一业务入口。
  * @author zzkingcc
  */
 @Slf4j
@@ -25,8 +25,8 @@ public class AuthService {
     /**
      * "读-改-写"整段的互斥锁。
      *
-     * <p>{@link AccountStore#save} 自身同步只能保证单次写入不交错；改密与初始化都是
-     * "读当前账号 → 改 → 写回"，两个并发请求会各自读到旧值再各自写回，两边都回成功而后者覆盖前者。</p>
+     * {@link AccountStore#save} 自身同步只能保证单次写入不交错；改密与初始化都是
+     * "读当前账号 → 改 → 写回"，两个并发请求会各自读到旧值再各自写回，两边都回成功而后者覆盖前者。
      */
     private final Object writeLock = new Object();
 
@@ -47,8 +47,8 @@ public class AuthService {
     /**
      * 账号文件是否已损坏（文件存在、但读不出来）。
      *
-     * <p>与"未初始化"是两个相反的处置：本状态必须<b>拒绝一切受保护请求</b>，
-     * 且<b>不开放初始化入口</b>——账号数据已经在里面了，允许重新初始化等于允许任何人接管实例。</p>
+     * 与"未初始化"是两个相反的处置：本状态必须拒绝一切受保护请求，
+     * 且不开放初始化入口——账号数据已经在里面了，允许重新初始化等于允许任何人接管实例。
      */
     public boolean isStoreCorrupted() {
         return accountStore.state() == AccountStore.StoreState.CORRUPTED;
@@ -120,9 +120,9 @@ public class AuthService {
     /**
      * 记录最后登录信息。
      *
-     * <p>尽力而为，不阻断登录：这是审计信息，丢了不影响鉴权；而账号目录只读（容器挂载
+     * 尽力而为，不阻断登录：这是审计信息，丢了不影响鉴权；而账号目录只读（容器挂载
      * 只读卷、权限收紧）时若照旧抛错，会出现"密码正确却永远登不进管控台，还报系统内部错误"——
-     * 那才是真的把人锁在门外。真正必须报错的写盘是改密码：静默失败会让用户以为新密码已生效。</p>
+     * 那才是真的把人锁在门外。真正必须报错的写盘是改密码：静默失败会让用户以为新密码已生效。
      */
     private void recordLogin(String from) {
         // 锁内重读当前账号再写回：与 changePassword 并发时，后者已落盘的新哈希不能被这次

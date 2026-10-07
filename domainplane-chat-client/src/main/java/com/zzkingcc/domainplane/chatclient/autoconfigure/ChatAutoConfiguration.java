@@ -15,9 +15,12 @@ import org.springframework.web.reactive.function.client.WebClient;
 /**
  * DomainPlane 对话 SDK 自动装配。
  *
- * <p>本模块只多一个 Bean：{@code domainplaneAgentFactory}。WebClient / 凭证 / 启动期连通性探测
+ * 本模块只多一个 Bean：{@code domainplaneAgentFactory}。WebClient 与凭证
  * 由 {@link DomainPlaneClientAutoConfiguration} 提供 —— 这些与"引了哪个 SDK"无关，
- * 知识库 SDK 引的是同一份，两个 SDK 同时在场也只会装配一次。</p>
+ * 知识库 SDK 引的是同一份，两个 SDK 同时在场也只会装配一次。
+ *
+ * 本模块不做启动期连通性校验：服务端未启动不阻断接入方启动，
+ * 远端不可达由首次 {@code chat} / {@code stream} 调用暴露成带码的 {@code DomainPlaneException}。
  *
  * @author zzkingcc
  */
@@ -25,13 +28,13 @@ import org.springframework.web.reactive.function.client.WebClient;
 public class ChatAutoConfiguration {
 
     /**
-     * 对话的<b>唯一入口</b>：域门面工厂。
+     * 对话的唯一入口：域门面工厂。
      *
-     * <p>{@code forDomain("customer")} 拿到绑定域的门面，之后 {@code ask} / {@code stream} /
-     * {@code events} / {@code resume} / {@code stop} 都不必再提域 —— 域是接线动作，不是每次调用都要记得传的参数。</p>
+     * {@code forDomain("customer")} 拿到绑定域的门面，之后 {@code ask} / {@code stream} /
+     * {@code events} / {@code resume} / {@code stop} 都不必再提域 —— 域是接线动作，不是每次调用都要记得传的参数。
      *
-     * <p>底层远程通道（{@code AgentServiceClient}）由这里内部持有，<b>不单独暴露 Bean</b>：
-     * 对外只留这一个入口。要看工具调用 / 审批中断 / 错误码用 {@code agent.events(...)}。</p>
+     * 底层远程通道（{@code AgentServiceClient}）由这里内部持有，不单独暴露 Bean：
+     * 对外只留这一个入口。要看工具调用 / 审批中断 / 错误码用 {@code agent.events(...)}。
      */
     @Bean
     @ConditionalOnMissingBean

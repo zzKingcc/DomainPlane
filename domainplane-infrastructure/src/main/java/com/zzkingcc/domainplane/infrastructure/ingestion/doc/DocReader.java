@@ -24,35 +24,32 @@ import java.util.regex.Pattern;
 /**
  * 旧版 {@code .doc}（Word 97–2003，OLE2 二进制）解析器：{@code byte[] → List<Block>}。
  *
- * <p><b>为什么不是 Tika</b>：Tika 的 HWPF 抽取器输出的是「格式无关纯文本」，标题层级与表格结构
- * 都会被拍平 —— 而这两样恰好是切片要的东西。所以直连 HWPF。</p>
+ * 为什么不是 Tika：Tika 的 HWPF 抽取器输出的是「格式无关纯文本」，标题层级与表格结构
+ * 都会被拍平 —— 而这两样恰好是切片要的东西。所以直连 HWPF。
  *
- * <p><b>标题层级有两路来源，顺序不能反</b>（都是实测结论，见 src/test/resources/ingestion/doc/README.md）：</p>
- * <ol>
- *   <li><b>样式名</b>（{@code Heading 1} / {@code 标题 1}）—— 与 docx 同一条规则。但
- *       <b>样式名是本地化的</b>：俄文文档里 {@code Normal} 叫 {@code Базовый}，
- *       所以这一路只能当"能用就用"的正向信号，不能当唯一依据。</li>
- *   <li><b>大纲级别 {@link Paragraph#getLvl()}</b> —— 语言无关的那一路，也是真正兜底的那一路。
- *       实测 {@code Heading 1} 的段落 = {@code 0}、正文 = {@code 9}（Word 正文的默认值）。</li>
- * </ol>
+ * 标题层级有两路来源，顺序不能反：
  *
- * <p><b>实测出来的三个坑，别改回去</b>：</p>
- * <ul>
- *   <li>{@code TableRow.isTableHeader()} 在真实表格里也返回 {@code false} → 表头只能按「第一行」。</li>
- *   <li>单元格文本以 {@code \u0007} 结尾，且一个单元格内可以含多个 {@code \r}（多段落）→ 必须折叠。</li>
- *   <li>表格里每一行末尾还有一个"行结束段落"（{@code isTableRowEnd()}），它的文本是纯控制符。
- *       遍历时必须用 {@link Table#getEndOffset()} 把整张表一次跳过去，否则会重复计数。</li>
- * </ul>
+ *   • 样式名（{@code Heading 1} / {@code 标题 1}）—— 与 docx 同一条规则。但
+ *       样式名是本地化的：俄文文档里 {@code Normal} 叫 {@code Базовый}，
+ *       所以这一路只能当"能用就用"的正向信号，不能当唯一依据。
+ *   • 大纲级别 {@link Paragraph#getLvl()} —— 语言无关的那一路，也是真正兜底的那一路。
+ *       {@code Heading 1} 的段落 = {@code 0}、正文 = {@code 9}（Word 正文的默认值）。
  *
- * <p><b>不支持的</b>：Word 6/95（{@link OldWordFileFormatException}，另有一套 {@code HWPFOldDocument}
- * API，本格式不接）、文本框里的文字（{@code getMainTextboxRange()} 是另一个 story，与 docx 保持一致不读）。</p>
+ *
+ * 实测出来的三个坑，别改回去：
+ *
+ *   • {@code TableRow.isTableHeader()} 在真实表格里也返回 {@code false} → 表头只能按「第一行」。
+ *   • 单元格文本以 {@code \u0007} 结尾，且一个单元格内可以含多个 {@code \r}（多段落）→ 必须折叠。
+ *   • 表格里每一行末尾还有一个"行结束段落"（{@code isTableRowEnd()}），它的文本是纯控制符。
+ *       遍历时必须用 {@link Table#getEndOffset()} 把整张表一次跳过去，否则会重复计数。
+ *
+ *
+ * 不支持的：Word 6/95（{@link OldWordFileFormatException}，另有一套 {@code HWPFOldDocument}
+ * API，本格式不接）、文本框里的文字（{@code getMainTextboxRange()} 是另一个 story，与 docx 保持一致不读）。
  *
  * @author zzkingcc
  */
 public final class DocReader {
-
-    /** Word 正文段落的默认大纲级别；0~8 才表示它落在大纲里 */
-    private static final int BODY_OUTLINE_LEVEL = 9;
 
     /** 我们最多认六级标题，对应大纲级别 0~5 */
     private static final int MAX_OUTLINE_TITLE_LEVEL = 5;
@@ -196,8 +193,8 @@ public final class DocReader {
     /**
      * 段落文本归一：所有控制符折叠成空格。
      *
-     * <p>HWPF 把这些控制符混在正文里，一个都不能漏：{@code \r} 段落标记、{@code \u0007} 单元格标记、
-     * {@code \f} 分页符、{@code \u000B} 软回车。</p>
+     * HWPF 把这些控制符混在正文里，一个都不能漏：{@code \r} 段落标记、{@code \u0007} 单元格标记、
+     * {@code \f} 分页符、{@code \u000B} 软回车。
      */
     private static String clean(String raw) {
         if (raw == null) {

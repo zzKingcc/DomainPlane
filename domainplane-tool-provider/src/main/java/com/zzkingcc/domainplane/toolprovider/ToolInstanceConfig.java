@@ -8,11 +8,12 @@ package com.zzkingcc.domainplane.toolprovider;
  * @param serverPort             DomainPlane 服务端端口（服务端固定 9527）
  * @param username                接入账号（服务端账号，默认种子是 {@code domainplane/domainplane}）
  * @param password                接入密码
- * @param instanceId              实例标识；<b>重连必须沿用同一个</b>，否则会留下一个摘不掉的旧副本
- * @param endpoint                本实例的<b>工具调用回流地址</b>（服务端 POST 到它来执行工具），
- *                                必须是服务端能访问到的地址；由配置层解析（显式配置优先，留空则按本进程端口推导）
+ * @param instanceId              实例标识；重连必须沿用同一个，否则会留下一个摘不掉的旧副本
+ * @param endpoint                本实例的工具调用回流地址（服务端 POST 到它来执行工具），
+ *                                必须是服务端能访问到的地址；由配置层解析（显式配置优先，留空则按本进程端口推导）。
+ *                                推导不出来时为空串 —— 表示"本实例不接反向调用"，不影响注册与心跳
  * @param heartbeatIntervalSeconds 心跳周期（秒）。服务端判死窗默认 35s = 它的 7 倍
- * @param maxBackoffSeconds       心跳连续失败时的退避上限（秒）。默认 20s，<b>必须小于判死窗</b>
+ * @param maxBackoffSeconds       心跳连续失败时的退避上限（秒）。默认 20s，必须小于判死窗
  *                                （否则实例在被判死前都来不及重连）
  * @param requestTimeoutMillis    单次 HTTP 超时（毫秒）
  */
@@ -38,7 +39,10 @@ public record ToolInstanceConfig(String serverHost,
         username = required(username, "username");
         password = required(password, "password");
         instanceId = required(instanceId, "instanceId");
-        endpoint = required(endpoint, "endpoint");
+        // endpoint 允许为空：推导不出回流地址只意味着"服务端无法反向调用本实例"，
+        // 工具声明与心跳注册都不受影响，不该因此让接入方的程序起不来。
+        // 空值在注册报文里会被服务端读成"本实例不接反向调用"。
+        endpoint = endpoint == null ? "" : endpoint.trim();
         heartbeatIntervalSeconds = heartbeatIntervalSeconds <= 0
                 ? DEFAULT_HEARTBEAT_SECONDS : heartbeatIntervalSeconds;
         maxBackoffSeconds = maxBackoffSeconds <= 0 ? DEFAULT_MAX_BACKOFF_SECONDS : maxBackoffSeconds;

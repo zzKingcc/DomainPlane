@@ -15,17 +15,17 @@ import java.util.List;
 /**
  * 旧版 Word（{@code .doc}，Word 97–2003）文档处理策略。
  *
- * <p>格式适配用 POI 的 HWPF 直读，之后交给通用的 {@link BlockSplitter} —— 与 docx 策略同形，
- * 差别只在"标题层级从哪来"：docx 读 {@code Heading N} 样式，doc 读样式名 + <b>大纲级别</b>。</p>
+ * 格式适配用 POI 的 HWPF 直读，之后交给通用的 {@link BlockSplitter} —— 与 docx 策略同形，
+ * 差别只在"标题层级从哪来"：docx 读 {@code Heading N} 样式，doc 读样式名 + 大纲级别。
  *
- * <p><b>为什么接这个格式</b>：HWPF 的段落样式名不可靠（<b>是本地化的</b>：俄文文档里
- * {@code Normal} 叫 {@code Базовый}），但 {@code Paragraph.getLvl()} 给的是<b>语言无关的大纲级别</b>，
- * {@code Heading 1} 的段落实测返回 {@code 0}、正文返回 {@code 9}。加上"样式名能用就用"这一路，
- * 标题层级是拿得到的，所以 {@code .doc} 也能接进来。</p>
+ * 为什么接这个格式：HWPF 的段落样式名不可靠（是本地化的：俄文文档里
+ * {@code Normal} 叫 {@code Базовый}），但 {@code Paragraph.getLvl()} 给的是语言无关的大纲级别，
+ * {@code Heading 1} 的段落返回 {@code 0}、正文返回 {@code 9}。加上"样式名能用就用"这一路，
+ * 标题层级是拿得到的，所以 {@code .doc} 也能接进来。
  *
- * <p>代价要说清楚：<b>老 .doc 绝大多数段落是 {@code Normal}</b>（实测 7 个真实样例里只有 1 个带标题样式），
+ * 代价要说清楚：老 .doc 绝大多数段落是 {@code Normal}（7 个真实样例里只有 1 个带标题样式），
  * 这类文档整篇落进一个 {@code section_path}（= 文件名），靠 {@code chunk_seq} 保序 ——
- * 与"没有标题的 docx"表现完全一致。</p>
+ * 与"没有标题的 docx"表现完全一致。
  *
  * @author zzkingcc
  */
@@ -61,7 +61,7 @@ public class DocDocumentProcessStrategy extends AbstractDocumentProcessStrategy 
         return new SplitResult(all, titles, dropped);
     }
 
-    /** 旧版 doc 是 OLE2 二进制：入口<b>不解码</b>，原始字节交给 HWPF */
+    /** 旧版 doc 是 OLE2 二进制：入口不解码，原始字节交给 HWPF */
     @Override
     public boolean binary() {
         return true;

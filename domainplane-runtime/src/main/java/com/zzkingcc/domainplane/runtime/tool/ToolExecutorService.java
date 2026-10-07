@@ -1,6 +1,5 @@
 package com.zzkingcc.domainplane.runtime.tool;
 
-import com.zzkingcc.domainplane.api.agent.CallerContext;
 import com.zzkingcc.domainplane.api.support.RetrievalScope;
 import com.zzkingcc.domainplane.api.support.TraceId;
 import org.slf4j.Logger;
@@ -19,23 +18,23 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 本地工具执行的<b>超时与隔离</b>层。
+ * 本地工具执行的超时与隔离层。
  *
- * <p>为什么需要它：远程工具走 HTTP，{@code HttpRequest.timeout()} 天然兜底；
- * 而本地 Bean 工具是在<b>编排线程上直接调用</b>的 —— 一个死循环或永久阻塞的方法
+ * 为什么需要它：远程工具走 HTTP，{@code HttpRequest.timeout()} 天然兜底；
+ * 而本地 Bean 工具是在编排线程上直接调用的 —— 一个死循环或永久阻塞的方法
  * 会占住一个编排线程直到进程结束。编排池 max 32，几十个这样的调用就能让整个服务停摆，
- * 而且不报错、不释放，日志上只表现为"突然变慢"。</p>
+ * 而且不报错、不释放，日志上只表现为"突然变慢"。
  *
- * <p>做法是把执行挪到独立的有界线程池，用 {@code future.get(timeout)} 卡上限。
- * 但有三个 ThreadLocal 是编排在<b>自己线程</b>上绑的（{@link ToolInvocationContext}
+ * 做法是把执行挪到独立的有界线程池，用 {@code future.get(timeout)} 卡上限。
+ * 但有三个 ThreadLocal 是编排在自己线程上绑的（{@link ToolInvocationContext}
  * 审计身份、{@link RetrievalScope} 检索域、{@link TraceId} 排障标识），换线程执行它们就丢了 ——
  * 检索域丢失会让知识库从"按本轮域过滤"退化成"全库检索"（越权读），
- * 审计身份丢失会让工具调用查不到是谁发的。所以这里必须显式<b>搬运并复原</b>。</p>
+ * 审计身份丢失会让工具调用查不到是谁发的。所以这里必须显式搬运并复原。
  *
- * <p>超时只能让调用方<b>不再等</b>，不能真正杀死死循环的线程（除非它响应中断）。
- * 所以池必须是<b>有界且独立</b>的：卡死的工具最多占满工具池，编排线程照常释放，
+ * 超时只能让调用方不再等，不能真正杀死死循环的线程（除非它响应中断）。
+ * 所以池必须是有界且独立的：卡死的工具最多占满工具池，编排线程照常释放，
  * 不会把编排池一起拖死。池满时直接拒（回喂模型"系统繁忙"），不排队等 ——
- * 排队等于把超时压力转嫁给编排线程。</p>
+ * 排队等于把超时压力转嫁给编排线程。
  *
  * @author zzkingcc
  */
@@ -49,8 +48,8 @@ public class ToolExecutorService implements AutoCloseable {
     /**
      * 未显式注入隔离层时（单元测试、最小装配）使用的共享默认实例。
      *
-     * <p>共享而非各建一个：它只在<b>真的提交了任务</b>时才创建线程（线程池懒创建），
-     * 不用的实例零开销；而一旦每处new 一个，测试里就会散落一批关不掉的池。</p>
+     * 共享而非各建一个：它只在真的提交了任务时才创建线程（线程池懒创建），
+     * 不用的实例零开销；而一旦每处new 一个，测试里就会散落一批关不掉的池。
      */
     private static final ToolExecutorService SHARED_DEFAULT = create(64, DEFAULT_TIMEOUT_MS);
 
@@ -67,13 +66,13 @@ public class ToolExecutorService implements AutoCloseable {
     }
 
     /**
-     * 建一个<b>有界且独立</b>的隔离池。
+     * 建一个有界且独立的隔离池。
      *
-     * <p>用零队列 + {@code SynchronousQueue}：任务<b>不排队</b>，池满立刻拒。
+     * 用零队列 + {@code SynchronousQueue}：任务不排队，池满立刻拒。
      * 排队等于把超时压力原样转嫁给编排线程（提交线程会阻塞在入队上），
-     * 那就等于没做隔离 —— 编排池满的根源会被这个"缓冲"掩盖成变慢而不是拒绝。</p>
+     * 那就等于没做隔离 —— 编排池满的根源会被这个"缓冲"掩盖成变慢而不是拒绝。
      *
-     * <p>线程为 daemon：残留的死循环工具线程不阻止 JVM 退出。</p>
+     * 线程为 daemon：残留的死循环工具线程不阻止 JVM 退出。
      */
     public static ToolExecutorService create(int maxThreads, long timeoutMs) {
         int threads = Math.max(1, maxThreads);
@@ -189,13 +188,12 @@ public class ToolExecutorService implements AutoCloseable {
     /**
      * 调用线程上下文的搬运包。
      *
-     * <p>为什么必须搬运：工具执行被挪到隔离线程后 {@code ThreadLocal} 天然不跟随，
-     * 而这三个每一个都不能丢 ——
+     * 为什么必须搬运：工具执行被挪到隔离线程后 {@code ThreadLocal} 天然不跟随，
+     * 而这两个每一个都不能丢 ——
      * {@link RetrievalScope} 丢了会让检索从"本轮域 + 祖先链"退化成全库检索（越权读）；
-     * {@link ToolInvocationContext} 丢了会让审计查不到租户与用户；
-     * {@link TraceId} 丢了会让工具侧日志与服务端这次调用对不上，排障线索断掉。</p>
+     * {@link TraceId} 丢了会让工具侧日志与服务端这次调用对不上，排障线索断掉。
      */
-    record ContextSnapshot(CallerContext caller, String traceId, String domain) {
+    record ContextSnapshot(String traceId, String domain) {
 
         static ContextSnapshot capture() {
             // traceId 有两个来源，且**不等价**：编排层 bind 进来的是本次调用的 traceId（权威），
@@ -206,25 +204,15 @@ public class ToolExecutorService implements AutoCloseable {
             if (traceId == null || traceId.isBlank()) {
                 traceId = TraceId.current();
             }
-            return new ContextSnapshot(captureCaller(), traceId, RetrievalScope.current());
-        }
-
-        /** 从 {@link ToolInvocationContext} 三个读接口反推出完整的 caller（它不暴露对象本身） */
-        private static CallerContext captureCaller() {
-            String tenant = ToolInvocationContext.tenantId();
-            String user = ToolInvocationContext.userId();
-            if (tenant == null && user == null) {
-                return null;
-            }
-            return CallerContext.of(null, tenant, user);
+            return new ContextSnapshot(traceId, RetrievalScope.current());
         }
 
         /** 在隔离线程上复原。复原不完整比不复原更危险，所以逐项显式设置 */
         void applyToCurrentThread() {
             // 判据只能读快照自己的字段：ToolInvocationContext.traceId() 读的是**工具线程**上的值，
-            // 此刻必然为 null，用它做判据会让"只有 traceId 没有 caller"的情况整段跳过绑定
-            if (caller != null || traceId != null) {
-                ToolInvocationContext.bind(caller, traceId);
+            // 此刻必然为 null，用它做判据会让"没绑 traceId"的情况整段跳过绑定
+            if (traceId != null) {
+                ToolInvocationContext.bind(traceId);
             }
             if (domain != null) {
                 RetrievalScope.bind(domain);

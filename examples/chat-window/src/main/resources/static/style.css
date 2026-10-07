@@ -1,0 +1,180 @@
+/* 白色对话式版式：一列限宽 720px 居中，气泡左右分侧，输入区固定在底部。
+   显式声明 color-scheme，避免浏览器暗色模式把表单控件反色成深色。 */
+:root {
+    color-scheme: light;
+    --bg: #f7f8fa;
+    --surface: #ffffff;
+    --text: #1f2329;
+    --muted: #8a9099;
+    --border: #e5e6eb;
+    --accent: #0b67ff;
+    --accent-hover: #0a5ae0;
+    --danger-bg: #fef2f2;
+    --danger-border: #fbd5d5;
+    --danger-text: #c22a2a;
+    /* 内容列的左边界：720px 居中列再减去 24px 内边距。
+       顶栏与输入区靠它对齐内容列，同时保留通栏的底/顶边框。 */
+    --gutter: max(24px, calc(50% - 336px));
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.7 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ===== 顶栏 ===== */
+.bar {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    height: 52px;
+    padding: 0 var(--gutter);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+}
+
+.brand { font-weight: 600; letter-spacing: .2px; }
+
+/* ===== 对话区 ===== */
+.log {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    padding: 28px 24px 8px;
+}
+
+.bubble {
+    max-width: 74%;
+    align-self: flex-start;
+    padding: 11px 15px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.bubble.user {
+    max-width: 66%;
+    align-self: flex-end;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+}
+
+/* 正在输出时末尾的光标 */
+.bubble.typing::after {
+    content: "";
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 2px;
+    vertical-align: -2px;
+    background: var(--accent);
+    animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink { 50% { opacity: 0; } }
+
+/* 工具调用等过程提示：小字灰，贴左 */
+.note {
+    align-self: flex-start;
+    color: var(--muted);
+    font-size: 12.5px;
+    word-break: break-word;
+}
+
+/* 思考段（THINKING 帧）：刻意不与答案气泡同形 —— 左侧一道细线 + 小灰字，
+   读的人一眼能分出"过程"与"结果"。答案一开始就整体压暗（.done），
+   注意力回到答案上，但内容还在、可回看。 */
+.think {
+    align-self: stretch;
+    padding: 2px 2px 2px 12px;
+    border-left: 2px solid var(--border);
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.think-label {
+    margin-bottom: 2px;
+    font-size: 11.5px;
+    color: var(--muted);
+}
+
+.think.done { opacity: .72; }
+
+.error {
+    align-self: stretch;
+    padding: 9px 14px;
+    border: 1px solid var(--danger-border);
+    border-radius: 10px;
+    background: var(--danger-bg);
+    color: var(--danger-text);
+    font-size: 13px;
+    word-break: break-word;
+}
+
+/* ===== 输入区 ===== */
+.composer {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 10px;
+    align-items: flex-end;
+    padding: 12px var(--gutter) 18px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+}
+
+textarea {
+    flex: 1;
+    padding: 11px 14px;
+    resize: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    font: inherit;
+    transition: border-color .15s, box-shadow .15s;
+}
+
+textarea::placeholder { color: var(--muted); }
+
+textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(11, 103, 255, .12);
+}
+
+button {
+    flex: 0 0 auto;
+    padding: 11px 22px;
+    border: none;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #fff;
+    font: inherit;
+    cursor: pointer;
+    transition: background .15s;
+}
+
+button:hover:not(:disabled) { background: var(--accent-hover); }
+
+button:disabled { opacity: .45; cursor: not-allowed; }

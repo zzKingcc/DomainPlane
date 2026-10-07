@@ -144,7 +144,7 @@ public class AuthController {
 
     // ==================== 内部工具 ====================
 
-    /** 凭证 Cookie：HttpOnly + SameSite=Lax；<b>不设 Max-Age</b> = 会话级（关浏览器即失效） */
+    /** 凭证 Cookie：HttpOnly + SameSite=Lax；不设 Max-Age = 会话级（关浏览器即失效） */
     private void writeCookie(HttpServletResponse response, String credential) {
         Cookie cookie = new Cookie(CredentialService.CREDENTIAL_COOKIE, credential);
         cookie.setPath(COOKIE_PATH);

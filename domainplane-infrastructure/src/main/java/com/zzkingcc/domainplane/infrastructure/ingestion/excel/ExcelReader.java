@@ -22,25 +22,25 @@ import java.util.Map;
 /**
  * Excel 表格（{@code .xls} / {@code .xlsx}）解析器：{@code byte[] → List<Block>}。
  *
- * <p>表格是最接近「切片天生就该是表格」的格式 —— 没有任何结构可丢，所以这里的活只有两件：
- * <b>把每个工作表取出来</b>、<b>渲染成 markdown 表格</b>。分节按<b>工作表</b>走：
- * {@code section_path = 文件名 > 工作表名}，与 pdf 的「文件名 &gt; 第N页」同形。</p>
+ * 表格是最接近「切片天生就该是表格」的格式 —— 没有任何结构可丢，所以这里的活只有两件：
+ * 把每个工作表取出来、渲染成 markdown 表格。分节按工作表走：
+ * {@code section_path = 文件名 > 工作表名}，与 pdf 的「文件名 > 第N页」同形。
  *
- * <p>.xls（HSSF）与 .xlsx（XSSF）用同一个入口 {@link WorkbookFactory#create} ——
- * 它按文件头判类型，所以「.xls 改名成 .xlsx」也能正确打开，不必自己按扩展名分叉。</p>
+ * .xls（HSSF）与 .xlsx（XSSF）用同一个入口 {@link WorkbookFactory#create} ——
+ * 它按文件头判类型，所以「.xls 改名成 .xlsx」也能正确打开，不必自己按扩展名分叉。
  *
- * <p><b>四处实测结论</b>（探针结论，别再靠推理改回去）：</p>
- * <ul>
- *   <li><b>公式格必须传 {@link FormulaEvaluator}</b>：不传的话 {@code formatCellValue} 返回的是
- *       <b>公式文本</b>（{@code C2*2}）而不是值。个别函数 POI 算不出来（外部引用、新函数），
- *       这时退回公式文本 —— 宁可让这一格露出原文，也不能让一个格子毁掉整张表。</li>
- *   <li><b>不能按 {@code getFirstRowNum()..getLastRowNum()} 遍历</b>：稀疏表的区间可以很大，
- *       而 {@link Sheet} 的迭代器只会产出真实存在的行。</li>
- *   <li><b>合并单元格只有左上角有值</b>，其余格子是空的 —— 必须按合并区域回填，
- *       否则纵向合并的「类别」列只有第一行有值，后面几行全空。</li>
- *   <li><b>取值用 {@link DataFormatter}</b>：日期 / 数字按单元格自己的格式串出来
- *       （{@code 2026-05-29}），而不是序列号 {@code 46170}。</li>
- * </ul>
+ * 四条关键约束（别再靠推理改回去）：
+ *
+ *   • 公式格必须传 {@link FormulaEvaluator}：不传的话 {@code formatCellValue} 返回的是
+ *       公式文本（{@code C2*2}）而不是值。个别函数 POI 算不出来（外部引用、新函数），
+ *       这时退回公式文本 —— 宁可让这一格露出原文，也不能让一个格子毁掉整张表。
+ *   • 不能按 {@code getFirstRowNum()..getLastRowNum()} 遍历：稀疏表的区间可以很大，
+ *       而 {@link Sheet} 的迭代器只会产出真实存在的行。
+ *   • 合并单元格只有左上角有值，其余格子是空的 —— 必须按合并区域回填，
+ *       否则纵向合并的「类别」列只有第一行有值，后面几行全空。
+ *   • 取值用 {@link DataFormatter}：日期 / 数字按单元格自己的格式串出来
+ *       （{@code 2026-05-29}），而不是序列号 {@code 46170}。
+ *
  *
  * @author zzkingcc
  */
@@ -49,9 +49,9 @@ public final class ExcelReader {
     /**
      * 单行最多取多少列。
      *
-     * <p>这是防脏数据的闸门，不是功能上限：某个格子被误格式化到很远的列上时，
+     * 这是防脏数据的闸门，不是功能上限：某个格子被误格式化到很远的列上时，
      * {@code getLastCellNum()} 会返回上万，一行就会撑成几万列的空表头。
-     * 真实的表格不会超过 256 列。</p>
+     * 真实的表格不会超过 256 列。
      */
     private static final int MAX_COLUMNS = 256;
 
@@ -167,7 +167,7 @@ public final class ExcelReader {
     /**
      * 合并区域回填索引：{@code (行, 列) → 左上角格子的值}。
      *
-     * <p>纵向合并的「类别」列、横向合并的表头都靠这一步才能填满，否则表格会缺一大片。</p>
+     * 纵向合并的「类别」列、横向合并的表头都靠这一步才能填满，否则表格会缺一大片。
      */
     private static Map<Long, String> mergedFills(Sheet sheet, DataFormatter formatter, FormulaEvaluator evaluator) {
         List<CellRangeAddress> regions = sheet.getMergedRegions();

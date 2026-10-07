@@ -5,8 +5,8 @@ import java.util.Objects;
 /**
  * 块 —— 格式适配层与通用切片层之间的中间表示。
  *
- * <p><b>格式适配层只做一件事：{@code 文件 → List<Block>}</b>，
- * 标题层级由格式自己给出（md 的 {@code ###}、docx 的 {@code Heading 3}），而不是像 txt 那样靠正则猜。</p>
+ * 格式适配层只做一件事：{@code 文件 → List<Block>}，
+ * 标题层级由格式自己给出（md 的 {@code ###}、docx 的 {@code Heading 3}），而不是像 txt 那样靠正则猜。
  *
  * @param kind   种类（决定可切 / 不可切）
  * @param level  仅 {@link BlockKind#TITLE} 用，取值范围 1~6；其余恒为 0

@@ -6,10 +6,10 @@ import java.util.List;
 /**
  * 切片（txt 入库第 4 步）。
  *
- * <p><b>{@code maxChars} 是长度上限，不是目标长度。</b>切点永远落在标题或句子上：撞到标题立刻断、
- * 整段不足上限就是实际字数。想强行凑满只能跨标题拼内容，反而让模型看不出层级。</p>
+ * {@code maxChars} 是长度上限，不是目标长度。切点永远落在标题或句子上：撞到标题立刻断、
+ * 整段不足上限就是实际字数。想强行凑满只能跨标题拼内容，反而让模型看不出层级。
  *
- * <p>入参是<b>一个小节</b>的正文行（小节之间不合并），出参是该小节的若干切片正文。</p>
+ * 入参是一个小节的正文行（小节之间不合并），出参是该小节的若干切片正文。
  *
  * @author zzkingcc
  */
@@ -149,13 +149,13 @@ public final class Chunker {
     /**
      * 单句超过上限时的兜底：先在软断点处断，再不行按字数硬切
      *
-     * <p>长度判断用 {@code StringBuilder.length()}（O(1)）而不是「每字符重建字符串再全量数」：
+     * 长度判断用 {@code StringBuilder.length()}（O(1)）而不是「每字符重建字符串再全量数」：
      * 后者是 O(n²) —— 一个 10,000 字的无标点行（minified JS、base64、异常堆栈）会放大到
      * 约 1 亿次字符操作，而导入是全局串行的（{@code Semaphore(1)}），一条这样的数据
-     * 就能把整个知识库入库队列卡住。</p>
+     * 就能把整个知识库入库队列卡住。
      *
-     * <p>{@code length()} 数的是 UTF-16 单元，对代理对会多算 1 —— 用于「是否超上限」的粗判
-     * 完全够；需要精确字符数时用 {@code CjkWidth.countChars}。</p>
+     * {@code length()} 数的是 UTF-16 单元，对代理对会多算 1 —— 用于「是否超上限」的粗判
+     * 完全够；需要精确字符数时用 {@code CjkWidth.countChars}。
      */
     private List<String> breakLongSentence(String sentence) {
         List<String> parts = new ArrayList<>();

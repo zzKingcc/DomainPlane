@@ -16,13 +16,13 @@ import java.util.stream.Collectors;
 /**
  * 域注册表 —— 域树的唯一登记处。
  *
- * <p>域以<b>完整路径</b>为标识（{@code default.sales.order}），根为 {@link Domains#DEFAULT}。
- * 登记一律走<b>沿链补齐</b>：给一条完整路径，链上缺失的祖先节点一并建出，已存在的节点原样复用
- * （不改它的 {@link Source}）。因此不存在悬空节点 —— 每个域都挂得到根上。</p>
+ * 域以完整路径为标识（{@code default.sales.order}），根为 {@link Domains#DEFAULT}。
+ * 登记一律走沿链补齐：给一条完整路径，链上缺失的祖先节点一并建出，已存在的节点原样复用
+ * （不改它的 {@link Source}）。因此不存在悬空节点 —— 每个域都挂得到根上。
  *
- * <p>{@link Source} 只标记<b>这个域是怎么来的</b>，不是等级：三种来源同级，删除规则一视同仁
+ * {@link Source} 只标记这个域是怎么来的，不是等级：三种来源同级，删除规则一视同仁
  * （只有根域因是整棵树的起点而不可删）。来源差异仅体现在生命周期上 ——
- * {@code MANUAL} 落盘、重启仍在；{@code DERIVED} 由工具声明产生、不落盘，重启后随声明重建。</p>
+ * {@code MANUAL} 落盘、重启仍在；{@code DERIVED} 由工具声明产生、不落盘，重启后随声明重建。
  *
  * @author zzkingcc
  */
@@ -46,8 +46,8 @@ public class DomainRegistry {
      * @param id        完整路径标识
      * @param parentId  父域标识（根域为 {@code null}）
      * @param source    来源
-     * @param callable  是否为<b>可调用单元</b>：只有它为 {@code true} 的域能作为入口被调用，
-     *                  其余是<b>装配节点</b>（供后代继承工具 / 提示词 / 模型绑定 / 知识）
+     * @param callable  是否为可调用单元：只有它为 {@code true} 的域能作为入口被调用，
+     *                  其余是装配节点（供后代继承工具 / 提示词 / 模型绑定 / 知识）
      * @param createdAt 创建时间戳（毫秒）
      */
     public record Domain(String id, String parentId, Source source, boolean callable, long createdAt) {
@@ -83,7 +83,7 @@ public class DomainRegistry {
      * 沿链登记结果
      *
      * @param domain  登记的路径
-     * @param created 本次<b>新建</b>的节点（已存在的不计入）
+     * @param created 本次新建的节点（已存在的不计入）
      * @param reason  {@code null} 表示成功
      */
     public record LinkResult(String domain, List<String> created, String reason) {
@@ -103,11 +103,11 @@ public class DomainRegistry {
     private final Map<String, Domain> domains = new ConcurrentHashMap<>();
 
     /**
-     * 被<b>显式声明过可调用性</b>的域 → 该值（落盘用）。
+     * 被显式声明过可调用性的域 → 该值（落盘用）。
      *
-     * <p>与 {@code domains} 的区别：沿链补齐出来的祖先、以及工具声明派生出来的域都不在这里 ——
+     * 与 {@code domains} 的区别：沿链补齐出来的祖先、以及工具声明派生出来的域都不在这里 ——
      * 它们的可调用性由创建路径的默认值决定（祖先不可调用、被声明的域可调用），重启后可按同样的
-     * 规则重建，不需要落盘。只有"人点过"的决定才需要持久化。</p>
+     * 规则重建，不需要落盘。只有"人点过"的决定才需要持久化。
      */
     private final Map<String, Boolean> explicitCallable = new ConcurrentHashMap<>();
 
@@ -122,13 +122,13 @@ public class DomainRegistry {
     /**
      * 载入管控台声明的域（启动期从落盘恢复）。
      *
-     * <p><b>只按条目显式给定的可调用性</b>；沿链补齐出来的祖先一律<b>不可调用</b>（装配节点），
-     * 因此"给 default.a.b 打标记"不会连带把 default 与 default.a 变成可调用单元。</p>
+     * 只按条目显式给定的可调用性；沿链补齐出来的祖先一律不可调用（装配节点），
+     * 因此"给 default.a.b 打标记"不会连带把 default 与 default.a 变成可调用单元。
      *
-     * <p>条目按路径长度升序处理：显式条目先落，避免某个条目在成为更深条目的祖先时被建成不可调用、
-     * 之后又因为"已存在即保留"而丢掉它自己声明的可调用性。</p>
+     * 条目按路径长度升序处理：显式条目先落，避免某个条目在成为更深条目的祖先时被建成不可调用、
+     * 之后又因为"已存在即保留"而丢掉它自己声明的可调用性。
      *
-     * <p>非法路径只跳过并告警，不阻断启动。</p>
+     * 非法路径只跳过并告警，不阻断启动。
      *
      * @param callableById 域标识 → 是否可调用
      */
@@ -153,7 +153,7 @@ public class DomainRegistry {
     }
 
     /**
-     * 管控台创建域，默认建为<b>可调用单元</b>。
+     * 管控台创建域，默认建为可调用单元。
      */
     public CreateResult create(String domainId) {
         return create(domainId, true);
@@ -190,7 +190,7 @@ public class DomainRegistry {
     /**
      * 工具声明派生：按 {@link Source#DERIVED} 沿链补齐。已存在节点保持原来源不变。
      *
-     * <p>幂等 —— 重复声明同一个域不会改写它。</p>
+     * 幂等 —— 重复声明同一个域不会改写它。
      */
     public LinkResult ensureChain(String domainId) {
         LinkResult linked = link(domainId, Source.DERIVED, true);
@@ -218,9 +218,9 @@ public class DomainRegistry {
 
     /**
      * 沿链登记：路径上每一段都确保存在，缺失的按 {@code source} 建出，已存在的原样保留
-     * （<b>不改它的 source，也不改它的 callable</b> —— 显式声明过的可调用性优先）。
+     * （不改它的 source，也不改它的 callable —— 显式声明过的可调用性优先）。
      *
-     * @param targetCallable 链尾那个<b>被显式声明</b>的域是否可调用；沿链补齐出来的祖先一律不可调用
+     * @param targetCallable 链尾那个被显式声明的域是否可调用；沿链补齐出来的祖先一律不可调用
      */
     private synchronized LinkResult link(String domainId, Source source, boolean targetCallable) {
         String reason = Domains.validatePath(domainId);
@@ -249,9 +249,9 @@ public class DomainRegistry {
     /**
      * 切换某个域的可调用性（管控台「域空间」页）。
      *
-     * <p>只影响这一个域，不向下传播。但<b>向上受叶子规则约束</b>：
+     * 只影响这一个域，不向下传播。但向上受叶子规则约束：
      * 有子域的域只能作为装配节点，设成可调用会被拒绝并给出原因
-     * （要"父域整体"的入口，请另建一个叶子域）。</p>
+     * （要"父域整体"的入口，请另建一个叶子域）。
      */
     public synchronized CallableResult setCallable(String domainId, boolean callable) {
         String id = Domains.normalize(domainId);
@@ -293,10 +293,10 @@ public class DomainRegistry {
     // ==================== 删除 ====================
 
     /**
-     * 删除域及其<b>全部子孙</b>（递归，不向上提升层级）。
+     * 删除域及其全部子孙（递归，不向上提升层级）。
      *
-     * <p>只有根域拒绝删除 —— 它是整棵树的起点。其余域不论来源都可删；
-     * 派生域删掉后重启会随工具声明重建，这是它生命周期的固有结果，不另设限制。</p>
+     * 只有根域拒绝删除 —— 它是整棵树的起点。其余域不论来源都可删；
+     * 派生域删掉后重启会随工具声明重建，这是它生命周期的固有结果，不另设限制。
      */
     public DomainDeleteResult delete(String domainId) {
         String reason = Domains.validatePath(domainId);
@@ -332,18 +332,18 @@ public class DomainRegistry {
     }
 
     /**
-     * 该域是否为<b>可调用单元</b>（入口唯一判据）。
+     * 该域是否为可调用单元（入口唯一判据）。
      *
-     * <p>判据 = 已登记 ∧ 显式标记可调用 ∧ <b>是叶子域</b>（无子域）。</p>
+     * 判据 = 已登记 ∧ 显式标记可调用 ∧ 是叶子域（无子域）。
      *
-     * <p><b>叶子约束是本域树的硬性规则</b>：一个域只要有子域，就必须作为装配节点存在、
+     * 叶子约束是本域树的硬性规则：一个域只要有子域，就必须作为装配节点存在、
      * 不能当入口；根域也服从这条规则 —— 只要它有了子域，它同样只是装配节点。
      * 于是"整棵树只有一个根域"时根域可调用，一旦往下建了子域，入口就必须落到叶子。
-     * 需要"父域整体"的入口时，请另建一个叶子域，而不是把父域本身变成入口。</p>
+     * 需要"父域整体"的入口时，请另建一个叶子域，而不是把父域本身变成入口。
      *
-     * <p>为什么在<b>读取时派生</b>而不是在写入路径上维护标记：标记有多个来源
+     * 为什么在读取时派生而不是在写入路径上维护标记：标记有多个来源
      * （管控台显式声明、工具声明派生、落盘文件里的历史值），任何一处漏改都会破掉规则。
-     * 派生则只有这一个判据实现，绕不过去 —— 写入侧存的是"意图"，这里算的是"生效"。</p>
+     * 派生则只有这一个判据实现，绕不过去 —— 写入侧存的是"意图"，这里算的是"生效"。
      */
     public boolean isCallable(String domainId) {
         Domain domain = domains.get(Domains.normalize(domainId));
@@ -366,7 +366,7 @@ public class DomainRegistry {
     }
 
     /**
-     * 该域的<b>直接子域</b>（不含更深的后代），按标识排序。
+     * 该域的直接子域（不含更深的后代），按标识排序。
      */
     public List<String> childrenOf(String domainId) {
         String id = Domains.normalize(domainId);
@@ -407,7 +407,7 @@ public class DomainRegistry {
     }
 
     /**
-     * 该域的<b>全部子孙</b>（不含自身），按标识排序。
+     * 该域的全部子孙（不含自身），按标识排序。
      */
     public List<String> descendantsOf(String domainId) {
         String id = Domains.normalize(domainId);
@@ -427,13 +427,13 @@ public class DomainRegistry {
     }
 
     /**
-     * 需要落盘的域与其可调用性（只含<b>被显式声明过</b>的域），按标识排序。
+     * 需要落盘的域与其可调用性（只含被显式声明过的域），按标识排序。
      *
-     * <p>派生域与沿链补齐的祖先不进这里 —— 它们的可调用性能按创建规则重建。</p>
+     * 派生域与沿链补齐的祖先不进这里 —— 它们的可调用性能按创建规则重建。
      *
-     * <p>写出去的是<b>生效值</b>（显式标记 ∧ 无子域），不是原始意图：一个有子域的域
+     * 写出去的是生效值（显式标记 ∧ 无子域），不是原始意图：一个有子域的域
      * 无论曾被声明成什么，落盘都记装配节点。这样文件与管控台展示、与入口判据三者一致，
-     * 不会出现"文件说可调用、实际却是装配节点"的错位。</p>
+     * 不会出现"文件说可调用、实际却是装配节点"的错位。
      */
     public Map<String, Boolean> manualConfig() {
         Map<String, Boolean> config = new java.util.LinkedHashMap<>();

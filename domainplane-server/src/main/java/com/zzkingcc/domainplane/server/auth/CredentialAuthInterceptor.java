@@ -142,7 +142,7 @@ public class CredentialAuthInterceptor implements HandlerInterceptor {
         return request.getHeader(CredentialService.CREDENTIAL_HEADER);
     }
 
-    /** 只含状态码与可读原因，<b>不回显任何凭证内容</b> */
+    /** 只含状态码与可读原因，不回显任何凭证内容 */
     private void reject(HttpServletResponse response, ErrorCode code, String detail) throws IOException {
         response.setStatus(code.getHttpStatus());
         response.setContentType("application/json;charset=UTF-8");

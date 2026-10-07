@@ -35,26 +35,26 @@ import java.util.Set;
 /**
  * 注解式工具扫描器 —— 在客户进程里把"方法"直接变成"工具"
  *
- * <h2>解决什么</h2>
- * <p>编程式注册要写 {@code registrar.register(ToolSpec.of(...), this::method)}，
+ * 解决什么
+ * 编程式注册要写 {@code registrar.register(ToolSpec.of(...), this::method)}，
  * 参数 schema、副作用等级、审批策略全都堆在一段与业务方法分离的代码里。
- * 本扫描器让这些治理信息回到方法本身：</p>
- * <pre>
- * &#64;Tool(desc = "退款", value = "refundOrder", domains = {"default.admin"},
+ * 本扫描器让这些治理信息回到方法本身：
+ *
+ * @Tool(desc = "退款", value = "refundOrder", domains = {"default.admin"},
  *           effect = Tool.Effect.WRITE, approval = Tool.Approval.ALWAYS,
  *           approvalReason = "退款需人工确认")
- * public String refundOrder(&#64;ToolParam("订单号") String orderNo,
- *                           &#64;ToolParam("退款金额，单位：元") BigDecimal amount) { ... }
- * </pre>
- * <p>方法签名即参数 schema，注解即治理策略，方法体即执行逻辑 —— 三者合一。</p>
+ * public String refundOrder(@ToolParam("订单号") String orderNo,
+ *                           @ToolParam("退款金额，单位：元") BigDecimal amount) { ... }
  *
- * <h2>什么时候扫</h2>
- * <p>在 {@code ToolInstanceClient} 装配时执行（见 {@link ToolInstanceAutoConfiguration}），
- * 早于心跳启动。扫描只取"类型"做筛选，只对命中的 Bean 触发实例化，不做全容器提前初始化。</p>
+ * 方法签名即参数 schema，注解即治理策略，方法体即执行逻辑 —— 三者合一。
  *
- * <h2>失败策略</h2>
- * <p>参数名解析不出、工具名重复、{@code desc} 缺失 —— 全部<b>启动期直接抛异常</b>。
- * 工具声明错了却等到模型来调用才发现，排查成本远高于启动失败。</p>
+ * 什么时候扫
+ * 在 {@code ToolInstanceClient} 装配时执行（见 {@link ToolInstanceAutoConfiguration}），
+ * 早于心跳启动。扫描只取"类型"做筛选，只对命中的 Bean 触发实例化，不做全容器提前初始化。
+ *
+ * 失败策略
+ * 参数名解析不出、工具名重复、{@code desc} 缺失 —— 全部启动期直接抛异常。
+ * 工具声明错了却等到模型来调用才发现，排查成本远高于启动失败。
  *
  * @author zzkingcc
  */
@@ -123,7 +123,7 @@ public final class ToolProviderScanner {
     /**
      * 收集该类（及其接口）上带 {@link Tool} 的方法。
      *
-     * <p>接口也要扫：JDK 动态代理下注解只留在接口方法上，实现类的方法拿不到。</p>
+     * 接口也要扫：JDK 动态代理下注解只留在接口方法上，实现类的方法拿不到。
      */
     private List<Method> annotatedMethods(Class<?> userClass) {
         List<Method> raw = new ArrayList<>(List.of(userClass.getMethods()));
@@ -246,9 +246,9 @@ public final class ToolProviderScanner {
     /**
      * 解析方法参数：名字、类型、是否必填。
      *
-     * <p>参数名优先取 {@code @ToolParam.name}，其次取编译期元数据 / 调试信息。
+     * 参数名优先取 {@code @ToolParam.name}，其次取编译期元数据 / 调试信息。
      * 取不到就直接失败 —— 用 {@code arg0} 当参数名注册出去，模型会拿着错误的 key 调参，
-     * 这种错在联调时极难定位。</p>
+     * 这种错在联调时极难定位。
      */
     private ScanBinding binding(Method method, String where) {
         Parameter[] parameters = method.getParameters();

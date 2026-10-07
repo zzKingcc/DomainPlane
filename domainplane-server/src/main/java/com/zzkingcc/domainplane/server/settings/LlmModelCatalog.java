@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 模型目录查询 —— 走 <b>OpenAI 规范</b>的 {@code GET {baseUrl}/models}
+ * 模型目录查询 —— 走 OpenAI 规范的 {@code GET {baseUrl}/models}
  * @author zzkingcc
  */
 @Component

@@ -4,7 +4,6 @@ import com.zzkingcc.domainplane.clientcore.exception.DomainPlaneException;
 import com.zzkingcc.domainplane.api.agent.AgentRequest;
 import com.zzkingcc.domainplane.api.agent.AgentService;
 import com.zzkingcc.domainplane.api.agent.ApprovalRequiredException;
-import com.zzkingcc.domainplane.api.agent.CallerContext;
 import com.zzkingcc.domainplane.api.agent.Domains;
 import com.zzkingcc.domainplane.api.agent.DomainPlaneAgent;
 import com.zzkingcc.domainplane.api.agent.DomainPlaneAgentFactory;
@@ -37,8 +36,8 @@ class DefaultDomainPlaneAgentTest {
                     + "\"requireApproval\":true}]}";
 
     private final List<AgentRequest> chats = new ArrayList<>();
-    private final List<CallerContext> resumes = new ArrayList<>();
-    private final List<CallerContext> stopCallers = new ArrayList<>();
+    private final List<String> resumes = new ArrayList<>();
+    private final List<String> stopDomains = new ArrayList<>();
     private final List<String> stops = new ArrayList<>();
 
     private Flux<AgentEvent> scripted = Flux.empty();
@@ -51,15 +50,15 @@ class DefaultDomainPlaneAgentTest {
         }
 
         @Override
-        public Flux<AgentEvent> resume(String sessionId, boolean approved, CallerContext caller) {
-            resumes.add(caller);
+        public Flux<AgentEvent> resume(String sessionId, boolean approved, String domain) {
+            resumes.add(domain);
             return Flux.just(AgentEvent.done(sessionId));
         }
 
         @Override
-        public boolean stop(String sessionId, CallerContext caller) {
+        public boolean stop(String sessionId, String domain) {
             stops.add(sessionId);
-            stopCallers.add(caller);
+            stopDomains.add(domain);
             return true;
         }
     };
@@ -80,7 +79,7 @@ class DefaultDomainPlaneAgentTest {
         String answer = agentOf("customer").ask(SESSION, "我的订单到哪了");
 
         assertEquals("订单 已发货", answer);
-        assertEquals("customer", chats.get(0).getProfile());
+        assertEquals("customer", chats.get(0).getDomain());
         assertEquals(SESSION, chats.get(0).getSessionId());
         assertEquals("我的订单到哪了", chats.get(0).getMessage());
     }
@@ -106,12 +105,12 @@ class DefaultDomainPlaneAgentTest {
     @Test
     void ask遇ERROR事件还原成带码异常() {
         scripted = Flux.just(AgentEvent.error(SESSION, "指定的域不存在",
-                ErrorCode.PROFILE_NOT_FOUND, "trace-9"));
+                ErrorCode.DOMAIN_NOT_FOUND, "trace-9"));
 
         DomainPlaneException ex = assertThrows(DomainPlaneException.class,
                 () -> agentOf("ghost").ask(SESSION, "在吗"));
 
-        assertEquals(ErrorCode.PROFILE_NOT_FOUND, ex.getErrorCode());
+        assertEquals(ErrorCode.DOMAIN_NOT_FOUND, ex.getErrorCode());
         assertEquals(10004, ex.getCode());
         assertTrue(ex.getMessage().contains("trace-9"), "traceId 要并进文案便于排障");
         assertFalse(ex.isRetryable());
@@ -189,11 +188,11 @@ class DefaultDomainPlaneAgentTest {
         DomainPlaneAgent agent = agentOf("admin");
 
         agent.resume(SESSION, true);
-        assertEquals("admin", resumes.get(0).profile());
+        assertEquals("admin", resumes.get(0));
 
         assertTrue(agent.stop(SESSION));
         assertEquals(SESSION, stops.get(0));
-        assertEquals("admin", stopCallers.get(0).profile(), "stop 必须带上门面绑定的域，服务端才能定位 (域, sessionId)");
+        assertEquals("admin", stopDomains.get(0), "stop 必须带上门面绑定的域，服务端才能定位 (域, sessionId)");
     }
 
     // ==================== 审批清单不可用时不得放行 ====================

@@ -3,7 +3,6 @@ package com.zzkingcc.domainplane.runtime.orchestration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzkingcc.domainplane.api.agent.AgentRequest;
 import com.zzkingcc.domainplane.api.agent.AgentService;
-import com.zzkingcc.domainplane.api.agent.CallerContext;
 import com.zzkingcc.domainplane.api.agent.Domains;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.api.event.AgentEvent;
@@ -35,6 +34,8 @@ import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ChatRequestParameters;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.PartialThinking;
+import dev.langchain4j.model.chat.response.PartialThinkingContext;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.CompiledGraph;
@@ -50,7 +51,6 @@ import org.bsc.langgraph4j.serializer.std.ObjectStreamStateSerializer;
 import org.bsc.langgraph4j.state.Channel;
 import org.bsc.langgraph4j.state.Channels;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.FluxSink;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -61,7 +61,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -90,8 +89,8 @@ public class AgentOrchestrationService implements AgentService {
     /**
      * 「挂起未批 + 用户直接开新对话」时补的那条占位回答。
      *
-     * <p>语义是"用户拒绝了那次审批"。补一条回答是为了让挂起的那一轮成为<b>完整轮次</b>——
-     * 否则记忆里会留下一条永远没人回答的提问，下一轮模型会看到"用户问过、却没人答"。</p>
+     * 语义是"用户拒绝了那次审批"。补一条回答是为了让挂起的那一轮成为完整轮次——
+     * 否则记忆里会留下一条永远没人回答的提问，下一轮模型会看到"用户问过、却没人答"。
      */
     private static final String APPROVAL_REJECTED_PLACEHOLDER = "（用户未确认，该次需要审批的操作已取消）";
 
@@ -239,10 +238,10 @@ public class AgentOrchestrationService implements AgentService {
     /**
      * metadata 里携带本轮流式上下文的键名。
      *
-     * <p>本轮的 {@link StreamContext} 必须<b>随图执行一路传下去</b>，绝不能在节点里按
+     * 本轮的 {@link StreamContext} 必须随图执行一路传下去，绝不能在节点里按
      * threadId 回查全局注册表：注册表里存的是"当前那一轮"，而节点跑的是"发起它的那一轮"。
-     * 两者在两个请求重叠时会不一致 —— 此时 A 的工具调用会被记到 B 的租户名下、
-     * A 的模型 token 会流进 B 的 SSE 流。这是跨租户串号，不是显示问题。</p>
+     * 两者在两个请求重叠时会不一致 —— 此时 A 的工具调用会按 B 的域过滤、
+     * A 的模型 token 会流进 B 的 SSE 流。这是跨域串号，不是显示问题。
      */
     private static final String CTX_METADATA_KEY = "domainplane.streamContext";
 
@@ -254,7 +253,7 @@ public class AgentOrchestrationService implements AgentService {
         }
         // 兜底：仅用于图在编排器之外被直接驱动的情形（如测试）。
         // 这里刻意告警而不是静默：按 key 回查在两个请求重叠时会拿到别的轮次的上下文，
-        // 那是跨租户串号，必须让这种驱动方式在日志里显形。
+        // 那是跨域串号，必须让这种驱动方式在日志里显形。
         StreamContext fallback = streamSinks.get(stateKeyOf(config));
         log.warn("[Agent编排] 会话[{}] 图配置未携带本轮上下文，回退到按 key 查询注册表"
                 + "（若存在同一会话的重叠请求，可能取到别的轮次的上下文）", sessionIdOfKey(stateKeyOf(config)));
@@ -305,6 +304,40 @@ public class AgentOrchestrationService implements AgentService {
                     }
                 }
 
+                /**
+                 * 思考增量：只打标记、原样透传。
+                 *
+                 * 三处"不"是刻意的：
+                 *
+                 *   • 不并入答案 —— 思考不是答案的一部分，混进 {@code TOKEN} 流之后
+                 *       下游就再也分不开了（只能靠猜文本规律）；
+                 *   • 不进 {@code appendPartial} —— 那段是"本轮已产出的答案"，停止回滚
+                 *       与最终回答都用它；混进思考会让用户点了停止后拿到的半截回答里带着推理过程；
+                 *   • 不解析内容 —— 展示成折叠块、灰色小字、还是干脆不显示，是消费方的决定，
+                 *       平台只负责把两类帧分开。
+                 *
+                 *
+                 * 只有档案里「输出思考」打开的模型才会走到这里（框架不返回思考时这条回调不会触发）；
+                 * 关着的档案不产生这类帧，消费方不需要为此分支。
+                 */
+                @Override
+                public void onPartialThinking(PartialThinking partialThinking,
+                                              PartialThinkingContext partialThinkingContext) {
+                    // 停止检查与 onPartialResponse 同口径：漏了这里，模型一直在"想"而没吐答案时，
+                    // 用户点了停止这一轮照旧跑完 —— 现象就是"停止偶尔不灵"。
+                    if (cancellationRegistry.isCancelled(key)) {
+                        future.completeExceptionally(new CancellationException("用户主动停止"));
+                        return;
+                    }
+                    if (context == null || partialThinking == null) {
+                        return;
+                    }
+                    String text = partialThinking.text();
+                    if (text != null && !text.isEmpty()) {
+                        context.emit(AgentEvent.thinking(sessionId, text));
+                    }
+                }
+
                 @Override
                 public void onCompleteResponse(ChatResponse completeResponse) {
                     // 这个回调同样要查停止标志：模型不分片、一次性返回时若只在 onPartialResponse
@@ -333,9 +366,9 @@ public class AgentOrchestrationService implements AgentService {
     /**
      * 解析本轮使用的对话模型。
      *
-     * <p>没有解析器（未装配模型档案的部署、单元测试）时退回构造期注入的模型，行为与"全局一个模型"一致。
-     * 一旦装配了解析器，解析不到 / 解析异常都<b>不回落任何内置默认模型</b>：未绑定 = 无可调用，
-     * 如实体上报 {@link NotConfiguredException}，让调用方拿到明确原因。</p>
+     * 没有解析器（未装配模型档案的部署、单元测试）时退回构造期注入的模型，行为与"全局一个模型"一致。
+     * 一旦装配了解析器，解析不到 / 解析异常都不回落任何内置默认模型：未绑定 = 无可调用，
+     * 如实体上报 {@link NotConfiguredException}，让调用方拿到明确原因。
      */
     private StreamingChatModel resolveModel(String domainId) {
         if (modelResolver == null) {
@@ -404,11 +437,10 @@ public class AgentOrchestrationService implements AgentService {
             }
 
             // 通过 ToolRouter 统一路由执行(内含 Token 用量统计与异常兜底)
-            // 远程工具要把租户/用户/traceId 带给工具实例,而 execute(request, memoryId) 的签名里
-            // 没有身份位置,故在此绑定线程上下文、执行完立即解除。工具执行是同步阻塞调用,
+            // 远程工具要把 traceId 带给工具实例,而 execute(request, memoryId) 的签名里
+            // 没有它,故在此绑定线程上下文、执行完立即解除。工具执行是同步阻塞调用,
             // 绑定与解除都在本线程同一次调用内,不会泄漏到同线程的下一轮。
-            ToolInvocationContext.bind(context == null ? null : context.caller(),
-                    context == null ? null : context.traceId());
+            ToolInvocationContext.bind(context == null ? null : context.traceId());
             // 知识库检索要按本轮域过滤，而工具签名里没有域参数：在这里把域绑给检索层。
             // 与 ToolInvocationContext 同绑定点、同解除点，不会泄漏到同线程的下一轮。
             RetrievalScope.bind(domainId);
@@ -467,12 +499,10 @@ public class AgentOrchestrationService implements AgentService {
     @Override
     public Flux<AgentEvent> chat(AgentRequest request) {
         Objects.requireNonNull(request, "request 不能为空");
-        CallerContext caller = CallerContext.from(request);
-        log.info("[Agent编排] 会话[{}] 收到调用请求, profile={}, tenantId={}, userId={}, attributes={}",
-                request.getSessionId(), caller == null ? null : caller.profile(),
-                request.getTenantId(), request.getUserId(), request.getAttributes().keySet());
+        String domain = request.getDomain();
+        log.info("[Agent编排] 会话[{}] 收到调用请求, domain={}", request.getSessionId(), domain);
 
-        DomainCheck check = checkDomain(caller);
+        DomainCheck check = checkDomain(domain);
         if (check != DomainCheck.OK) {
             log.warn("[Agent编排] 会话[{}] 域校验未通过: {}", request.getSessionId(), check.detail());
             // 本方法跑在 HTTP 线程上，那时还没 begin 过 traceId：用 currentOrNew 保证事件里的
@@ -486,24 +516,20 @@ public class AgentOrchestrationService implements AgentService {
             return Flux.just(AgentEvent.error(request.getSessionId(), sessionIdReason,
                     ErrorCode.INVALID_PARAMETER, TraceId.currentOrNew()));
         }
-        return orchestrate(request.getSessionId(), request.getMessage(), caller);
+        return orchestrate(request.getSessionId(), request.getMessage(), domain);
     }
 
     /**
-     * 校验本轮调用方身份与域：缺身份拒绝；<b>域为空归一化为根域</b>；域不存在或不是可调用单元都拒绝。
+     * 校验本轮域：域为空归一化为根域；域不存在或不是可调用单元都拒绝。
      *
-     * <p>可调用性是<b>显式声明</b>的（见 {@code DomainRegistry}）：父域可以只做装配
-     * （供后代继承工具 / 提示词 / 模型绑定 / 知识），由叶子当入口。</p>
+     * 可调用性是显式声明的（见 {@code DomainRegistry}）：父域可以只做装配
+     * （供后代继承工具 / 提示词 / 模型绑定 / 知识），由叶子当入口。
      */
-    private DomainCheck checkDomain(CallerContext caller) {
-        if (caller == null) {
-            return DomainCheck.fail(ErrorCode.CALLER_CONTEXT_REQUIRED,
-                    "缺少调用方身份（CallerContext 必填：tenantId / userId / profile）");
-        }
+    private DomainCheck checkDomain(String domain) {
         // 域为空 → 归一化为根域 default（根域不可删、恒存在且恒为可调用单元），不当作入参错误。
-        String domainId = Domains.normalize(caller.normalizedProfile());
+        String domainId = Domains.normalize(domain);
         if (!toolRouter.knownDomains().contains(domainId)) {
-            return DomainCheck.fail(ErrorCode.PROFILE_NOT_FOUND,
+            return DomainCheck.fail(ErrorCode.DOMAIN_NOT_FOUND,
                     "域不存在: " + domainId + "（已登记的域: " + toolRouter.knownDomains() + "）");
         }
         if (!toolRouter.isCallableDomain(domainId)) {
@@ -533,46 +559,46 @@ public class AgentOrchestrationService implements AgentService {
     /**
      * 对外契约入口:请求停止任务
      *
-     * <p>必须带上与发起对话时<b>同一个域</b>：会话状态按 (域, sessionId) 隔离，
-     * 只给 sessionId 停不到另一个域里的同名会话。客户端断连触发的隐式停止同理。</p>
+     * 必须带上与发起对话时同一个域：会话状态按 (域, sessionId) 隔离，
+     * 只给 sessionId 停不到另一个域里的同名会话。客户端断连触发的隐式停止同理。
      */
     @Override
-    public boolean stop(String sessionId, CallerContext caller) {
-        return cancellationRegistry.requestStop(stateKeyOf(caller, sessionId));
+    public boolean stop(String sessionId, String domain) {
+        return cancellationRegistry.requestStop(stateKeyOf(domain, sessionId));
     }
 
-    /** (域, sessionId) → 会话状态键；调用方身份缺失时按根域算 */
-    private static String stateKeyOf(CallerContext caller, String sessionId) {
-        return SessionKeys.of(caller == null ? null : caller.normalizedProfile(), sessionId);
+    /** (域, sessionId) → 会话状态键；域缺失时按根域算 */
+    private static String stateKeyOf(String domain, String sessionId) {
+        return SessionKeys.of(domain, sessionId);
     }
 
     /**
      * Agent 对话入口(流式)
      *
-     * <p>流程:
-     * <ol>
-     *   <li>清理上一轮遗留的停止标志与 checkpoint</li>
-     *   <li>加载会话记忆,添加 UserMessage</li>
-     *   <li>构建初始状态: [SystemMessage] + 历史消息</li>
-     *   <li>stream 消费 graph 执行,实时推送事件</li>
-     *   <li>检测到中断(review 前):推送 INTERRUPT 事件,挂起等待 resume</li>
-     *   <li>正常完成:将最终 AiMessage 存入会话记忆</li>
-     * </ol>
+     * 流程:
      *
-     * @param sessionId 会话 ID（<b>域内唯一</b>：不同域可以用同一个 sessionId）
+     *   • 清理上一轮遗留的停止标志与 checkpoint
+     *   • 加载会话记忆,添加 UserMessage
+     *   • 构建初始状态: [SystemMessage] + 历史消息
+     *   • stream 消费 graph 执行,实时推送事件
+     *   • 检测到中断(review 前):推送 INTERRUPT 事件,挂起等待 resume
+     *   • 正常完成:将最终 AiMessage 存入会话记忆
+     *
+     *
+     * @param sessionId 会话 ID（域内唯一：不同域可以用同一个 sessionId）
      * @param message   用户问题
-     * @param caller    调用方身份（域 / 租户 / 用户）；域决定本轮可见工具集
+     * @param domain    本轮所处的域；决定本轮可见工具集
      * @return 事件流,挂起时下发 {@code INTERRUPT} 事件,正常结束下发 {@code DONE}
      */
-    public Flux<AgentEvent> orchestrate(String sessionId, String message, CallerContext caller) {
-        String key = stateKeyOf(caller, sessionId);
+    public Flux<AgentEvent> orchestrate(String sessionId, String message, String domain) {
+        String key = stateKeyOf(domain, sessionId);
         // 清上一轮遗留的停止标志 —— 必须在这里，**提交进线程池之前**。
         // 编排任务会先排队，用户可以在排队期间点停止；清理若发生在任务出队后执行，
         // 那次停止就被抹掉了（任务照跑到底，界面显示"停止中"却什么都没发生）。
         // 这就是 R-03 的根因：清理的时机决定了"排队期间的停止"能否生效。
         cancellationRegistry.prepareNewRound(key);
         return Flux.create(sink -> {
-            StreamContext context = streamSinks.register(key, sink, caller);
+            StreamContext context = streamSinks.register(key, sink, domain);
             // 流被取消(客户端断连)或终止时,通知执行线程退出并清理上下文。
             // 只有"自己仍是当前上下文"才算客户端断连：同一会话换了一轮（中断后紧接 resume、
             // 客户端重试）时，上一轮的收尾也会跑到这里，若照旧置停止标志，会把刚启动的新一轮一起取消。
@@ -596,14 +622,14 @@ public class AgentOrchestrationService implements AgentService {
 
     private void runOrchestrate(String sessionId, String key, String message, StreamContext context) {
         // 同会话串行：本会话已有一轮在执行则直接拒绝（最细粒度的并发控制）。
-        // ⚠️ 停止标志的清理**不在这里**，而在提交进线程池之前（见 orchestrate 的 prepareNewRound）。
-        // 若在这里清：本方法是在任务**出队后**才执行的，而用户可以在"排队中"点停止——
+        // 停止标志的清理不在这里，而在提交进线程池之前（见 orchestrate 的 prepareNewRound）。
+        // 若在这里清：本方法是在任务出队后才执行的，而用户可以在"排队中"点停止——
         // 那次停止会被这一次清理抹掉，任务照跑到底，界面上"停止中"却什么都没发生。
         // 不报错、不留痕，只表现为"停止偶尔不灵"。
         if (!cancellationRegistry.tryMarkRunning(key)) {
             log.warn("[Agent编排] 会话[{}] 正在执行中，拒绝并发请求（如需重开请先 stop 并等其结束）", sessionId);
             context.emit(AgentEvent.error(sessionId, ErrorCode.SESSION_BUSY, TraceId.currentOrNew()));
-            // 顺序是硬要求：**先注销再 complete**。complete() 会同步触发 sink.onDispose，
+            // 顺序是硬要求：先注销再 complete。complete() 会同步触发 sink.onDispose，
             // 而 onDispose 里要靠 isCurrent 判断"这是不是我这一轮"——注销在前，它就判 false，
             // 不会把"停止标志"打到别人身上。反过来（先 complete）的话，被拒绝的这一轮
             // 会亲手把正在正常执行的那一轮置为停止：它的回答被回滚、事件被丢弃，
@@ -622,7 +648,7 @@ public class AgentOrchestrationService implements AgentService {
         try {
             ChatMemory memory = chatMemoryProvider.get(key);
 
-            // ① 先读断点：这一轮<b>是否要额外补一条占位回答</b>取决于有没有待审批断点，
+            // ① 先读断点：这一轮是否要额外补一条占位回答取决于有没有待审批断点，
             //    而封顶判定必须按真实写入量算（3 条 vs 2 条），所以顺序不能反。
             //    读不出来 ≠ 没有待审批：此刻绝不能走到入口清理——那恰好会把待审批的断点删掉，
             //    正是本轮要防的那件事。直接报"检查点读写失败"并返回，由调用方退避后重试。
@@ -756,23 +782,23 @@ public class AgentOrchestrationService implements AgentService {
      *
      * @param sessionId 会话 ID,需与 orchestrate 时一致
      * @param approved  true=批准执行工具; false=拒绝,注入拒绝反馈让 agent 重新决策
-     * @param caller    调用方身份（域 / 租户 / 用户），不得为 {@code null}
+     * @param domain    会话所属的域，必须与发起对话时同一个域
      * @return 事件流,resume 后的输出继续推送
      */
     @Override
-    public Flux<AgentEvent> resume(String sessionId, boolean approved, CallerContext caller) {
-        DomainCheck check = checkDomain(caller);
+    public Flux<AgentEvent> resume(String sessionId, boolean approved, String domain) {
+        DomainCheck check = checkDomain(domain);
         if (check != DomainCheck.OK) {
             log.warn("[Agent编排] 会话[{}] resume 域校验未通过: {}", sessionId, check.detail());
             return Flux.just(AgentEvent.error(sessionId, check.detail(), check.code(),
                     TraceId.currentOrNew()));
         }
-        String key = stateKeyOf(caller, sessionId);
+        String key = stateKeyOf(domain, sessionId);
         // 同 orchestrate：清上一轮遗留的停止标志必须发生在提交进线程池之前，
         // 否则用户在排队期间点的 stop 会被任务出队后的清理抹掉
         cancellationRegistry.prepareNewRound(key);
         return Flux.create(sink -> {
-            StreamContext context = streamSinks.register(key, sink, caller);
+            StreamContext context = streamSinks.register(key, sink, domain);
             // 同 orchestrate：只有"自己仍是当前上下文"才算客户端断连，
             // 否则上一轮的收尾会把这轮的停止标志置上
             sink.onDispose(() -> {
@@ -963,9 +989,9 @@ public class AgentOrchestrationService implements AgentService {
 
     /**
      * 给人看的工具参数：声明的敏感项（{@code @ToolAdvanced.sensitive}）在
-     * <b>工具调用事件</b>与<b>审批 payload</b> 里只显示掩码。
+     * 工具调用事件与审批 payload 里只显示掩码。
      *
-     * <p>只改展示文本 —— 真正执行与回喂模型的参数仍是原文，否则工具会拿到 {@code ***} 而失效。</p>
+     * 只改展示文本 —— 真正执行与回喂模型的参数仍是原文，否则工具会拿到 {@code ***} 而失效。
      */
     private String displayArguments(String toolName, String arguments) {
         return SensitiveMasker.mask(arguments, toolRouter.sensitiveParams(toolName));
@@ -974,10 +1000,10 @@ public class AgentOrchestrationService implements AgentService {
     /**
      * 构建中断事件 payload:待授权工具调用列表(JSON)
      *
-     * <p><b>失败即失败</b>：序列化异常时向上抛，绝不降级成空清单。
+     * 失败即失败：序列化异常时向上抛，绝不降级成空清单。
      * 空清单会被客户端渲染成"没有待授权动作"，用户据此点了批准 → 危险动作照常执行，
      * 而他从头到尾没看到自己在批准什么。这比整轮失败危险得多。
-     * 抛出后由上层 catch 收尾：清断点（不能留下可被 resume 的待授权断点）+ ERROR 事件。</p>
+     * 抛出后由上层 catch 收尾：清断点（不能留下可被 resume 的待授权断点）+ ERROR 事件。
      */
     private String buildInterruptPayload(MessagesState<ChatMessage> state, String domainId) {
         Set<String> approvalTools = toolRouter.toolsRequiringApproval(domainId);
@@ -1011,12 +1037,6 @@ public class AgentOrchestrationService implements AgentService {
             throw new IllegalStateException("构建审批清单失败，已阻断本轮（不会在用户未看清内容的情况下放行工具执行）: "
                     + e.getMessage(), e);
         }
-    }
-
-    /** 异常描述,避免把 null 或空串下发给调用方 */
-    private String describe(Throwable e) {
-        String message = e.getMessage();
-        return (message == null || message.isBlank()) ? e.getClass().getSimpleName() : message;
     }
 
     /**

@@ -29,7 +29,7 @@ public class InstanceRegistry {
      * @param manifestDigest 本次 manifest 摘要（调用方算好，本类不碰 manifest 内容）
      * @param toolNames      本次声明的工具名
      * @param syncManifest   digest 或回流地址变化时的同步动作（由接入层提供，内部走
-     *                       {@link ToolRegistry#replaceInstanceTools}）；<b>快路径下不会被调用</b>
+     *                       {@link ToolRegistry#replaceInstanceTools}）；快路径下不会被调用
      * @return {@code true} = 已受理（接入层回 200）；{@code false} = 该实例已被强制下线（回 410 Gone，
      * 实例应停止心跳并退出）
      */

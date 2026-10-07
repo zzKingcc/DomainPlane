@@ -118,7 +118,7 @@ public class DomainPlaneServerApplication {
     }
 
     /**
-     * 账号状态描述（只输出状态与账号名，<b>不回显哈希与凭证</b>）
+     * 账号状态描述（只输出状态与账号名，不回显哈希与凭证）
      */
     private String accountStatus() {
         if (accountStore.state() == com.zzkingcc.domainplane.server.auth.AccountStore.StoreState.CORRUPTED) {

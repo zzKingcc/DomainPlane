@@ -13,8 +13,8 @@ import java.util.Set;
 /**
  * 融合策略共用的辅助函数（去重哈希、取分、标题 / 文件名命中判定、命中通道命名）。
  *
- * <p>抽出来是为了让分数制（{@link DefaultFusionStrategy}）与排名制（{@link RrfFusionStrategy}）
- * 共用同一套判定，避免两处各写一份而慢慢走偏。</p>
+ * 抽出来是为了让分数制（{@link DefaultFusionStrategy}）与排名制（{@link RrfFusionStrategy}）
+ * 共用同一套判定，避免两处各写一份而慢慢走偏。
  *
  * @author zzkingcc
  */
@@ -54,8 +54,8 @@ final class FusionSupport {
     /**
      * 切片序号（同一文档内的顺序）。
      *
-     * <p>只用于<b>同分时的稳定排序</b>：融合分完全相同时按原文顺序排，
-     * 让结果可复现（否则 ES 返回顺序抖动会让同一问题两次答案不一致）。</p>
+     * 只用于同分时的稳定排序：融合分完全相同时按原文顺序排，
+     * 让结果可复现（否则 ES 返回顺序抖动会让同一问题两次答案不一致）。
      */
     static int chunkSeq(Content content) {
         try {
@@ -70,7 +70,7 @@ final class FusionSupport {
      * 标题是否命中查询词。
      *
      * @param queryKeywords 由 {@link #keywords(String)} 预先切好的候选词 ——
-     *        切分结果与 query 一一对应且在整轮融合内不变，<b>不能在每条 content 上重算</b>：
+     *        切分结果与 query 一一对应且在整轮融合内不变，不能在每条 content 上重算：
      *        2000 字的中文查询会展开出上千个 bigram 候选，重算一次就是上千次字符串分配 × 条数。
      */
     static boolean titleHit(Content content, Set<String> queryKeywords) {
@@ -93,15 +93,11 @@ final class FusionSupport {
     }
 
     /**
-     * 切出查询的候选关键词。<b>整轮融合只应调一次</b>，结果复用于每条 content 的标题/文件名判定。
+     * 切出查询的候选关键词。整轮融合只应调一次，结果复用于每条 content 的标题/文件名判定。
      *
-     * <p><b>中文必须按 n-gram 匹配，不能只按整段匹配</b>：中文没有词边界，若只按标点/空白切段，
-     * 「会员退款的时效说明」会被切成一整段 10 个字，{@code section_title} 里几乎不可能出现这一整串 ——
-     * 实测 10 条真实中文查询<b>全部不命中</b>，{@code title-boost} / {@code file-name-boost}
-     * 两个配置项在中文场景下形同空转。故对含 CJK 的段额外生成<b>二元组（bigram）</b>候选：
-     * 「会员退款的时效说明」→ 会员 / 员退 / 退款 / 款的 / …，其中「退款」能命中标题。</p>
-     *
-     * <p>整段本身也留在候选里：短查询（「退款」）靠它精确命中，纯拉丁/数字段的既有行为也靠它保持不变。</p>
+     * 中文无词边界，只按整段匹配会让 {@code section_title} 几乎不可能命中，
+     * {@code title-boost} / {@code file-name-boost} 形同空转。
+     * 故对含 CJK 的段额外生成二元组（bigram）候选；短查询与纯拉丁/数字段仍靠整段精确命中。
      */
     static Set<String> keywords(String query) {
         Set<String> keywords = new LinkedHashSet<>();
@@ -128,8 +124,8 @@ final class FusionSupport {
     /**
      * 用预先切好的候选词判定文本是否命中。
      *
-     * <p>单个 CJK 字符不作候选（{@code kw.length() >= 2} 这道闸）—— 单字命中率接近 100%，
-     * 放进来会让标题增益变成常量、彻底失去区分度。</p>
+     * 单个 CJK 字符不作候选（{@code kw.length() >= 2} 这道闸）—— 单字命中率接近 100%，
+     * 放进来会让标题增益变成常量、彻底失去区分度。
      */
     static boolean containsAnyKeyword(String text, Set<String> queryKeywords) {
         if (text == null || queryKeywords == null || queryKeywords.isEmpty()) {
@@ -148,15 +144,10 @@ final class FusionSupport {
     private static final String SEGMENT_SPLIT = "[\\s，。！？、；：\"'（）《》【】〔〕,.!?;:()]+";
 
     /**
-     * 高频虚字（疑问词、助词、连词、介词、指示词、数词、量词）——
-     * <b>只用于过滤 bigram，不过滤整段</b>。
-     *
-     * <p>bigram 若不拦这道闸，「如何」「什么」「怎么」这类无区分度的组合会被算成命中，
-     * 标题「这个」「是什么」会被几乎任何问句命中，增益再次变成常量。</p>
-     *
-     * <p>判据是「两个字<b>全是</b>虚字才算无区分度」，而不是「含虚字就丢」：
-     * 「申请」含虚字「请」但「申」是实义字，必须保留；「如何」两个字都是虚字，才丢。
-     * 少丢一个的代价是增益偏高一点（乘 1.15，可控），多丢一个的代价是真命中被吞（查得到却排不上去）。</p>
+     * 高频虚字（疑问词、助词、连词、介词、指示词、数词、量词），只用于过滤 bigram，不过滤整段。
+     * 若不拦，无区分度的组合（如「如何」）会让标题被几乎任何问句命中，增益变成常量。
+     * 判据为「两字全是虚字才丢」，保留「申请」等含一个实义字的组合——
+     * 少丢只是增益略高（可控），多丢会吞掉真命中（查得到却排不上去）。
      */
     private static final String FUNCTION_CHARS =
             "的了着过是在和与或也就都而及又但却吗呢吧啊哪什怎样么如何请这那之其被把对从到于为以"
@@ -174,13 +165,9 @@ final class FusionSupport {
     }
 
     /**
-     * 展开二元组。
-     *
-     * <p>按 code point 走（生僻字是代理对，按 char 切会切出半个字符）。</p>
-     *
-     * <p>非 CJK 的相邻字符不生成：「api设计规范」若不跳过，会切出 {@code pi}、{@code i设} 这类跨文种碎片 ——
-     * 而 {@code "api"} 里正好含 {@code "pi"}，标题「api」就会被中文查询误判为命中。
-     * 拉丁部分交给整段匹配即可。</p>
+     * 展开二元组，按 code point 走（生僻字是代理对，按 char 切会切出半个字符）。
+     * 非 CJK 的相邻字符不生成，避免跨文种碎片（如「api设计规范」切出 {@code pi}）让
+     * 标题「api」被中文查询误命中；拉丁部分交给整段匹配。
      */
     private static void addBigrams(String segment, Set<String> keywords) {
         int[] cps = segment.codePoints().toArray();
@@ -198,8 +185,8 @@ final class FusionSupport {
     /**
      * code point 版 CJK 判定。
      *
-     * <p>不能直接 {@code CjkWidth.isCjk((char) cp)}：生僻字（扩展 B 及以上）是代理对，
-     * 截成 char 会拿到代理项（落在 D800-DFFF）而被判成非 CJK，这类字就再也不会产出 bigram。</p>
+     * 不能直接 {@code CjkWidth.isCjk((char) cp)}：生僻字（扩展 B 及以上）是代理对，
+     * 截成 char 会拿到代理项（落在 D800-DFFF）而被判成非 CJK，这类字就再也不会产出 bigram。
      */
     private static boolean isCjkCodePoint(int cp) {
         return cp > 0xFFFF || CjkWidth.isCjk((char) cp);

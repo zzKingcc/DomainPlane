@@ -15,12 +15,12 @@ import java.util.List;
 /**
  * Excel 表格（{@code .xls} / {@code .xlsx}）文档处理策略。
  *
- * <p>{@code .xls}（HSSF）与 {@code .xlsx}（XSSF）由同一个读取器处理 ——
- * {@code WorkbookFactory} 按文件头判类型，不需要按扩展名分叉，所以这里<b>一条策略覆盖两个扩展名</b>。
- * 这与"加格式 = 加一套适配器"不冲突：适配器只有一个（Excel 表格），扩展名只是它的入口。</p>
+ * {@code .xls}（HSSF）与 {@code .xlsx}（XSSF）由同一个读取器处理 ——
+ * {@code WorkbookFactory} 按文件头判类型，不需要按扩展名分叉，所以这里一条策略覆盖两个扩展名。
+ * 这与"加格式 = 加一套适配器"不冲突：适配器只有一个（Excel 表格），扩展名只是它的入口。
  *
- * <p>分节按<b>工作表</b>走：{@code section_path = 文件名 > 工作表名}。每个工作表整体渲染成一张
- * markdown 表格交给 {@link BlockSplitter}；单表超长时由切片层按数据行切、每片重复表头。</p>
+ * 分节按工作表走：{@code section_path = 文件名 > 工作表名}。每个工作表整体渲染成一张
+ * markdown 表格交给 {@link BlockSplitter}；单表超长时由切片层按数据行切、每片重复表头。
  *
  * @author zzkingcc
  */
@@ -58,7 +58,7 @@ public class ExcelDocumentProcessStrategy extends AbstractDocumentProcessStrateg
         return new SplitResult(all, titles, dropped);
     }
 
-    /** excel 是二进制：入口<b>不解码</b>，原始字节交给 POI */
+    /** excel 是二进制：入口不解码，原始字节交给 POI */
     @Override
     public boolean binary() {
         return true;

@@ -18,7 +18,7 @@ import java.util.List;
  * @param idempotent  是否幂等（决定能否自动重试）
  * @param toModel     结果是否回填 LLM
  * @param params      参数列表（结构 + 语义，用于校验与生成 schema）
- * @param domains     本工具的可用域（<b>授权边界</b>）：每项都是<b>从根域出发的完整路径</b>；
+ * @param domains     本工具的可用域（授权边界）：每项都是从根域出发的完整路径；
  *                    留空 = 挂在根域上（按累加语义对全树可见）
  * @param approval    二次确认策略
  * @param source      来源标识，如 {@code com.foo.Bean#method}，用于排障与审计
@@ -37,20 +37,20 @@ public record ToolDescriptor(
         String source) {
 
     /**
-     * <b>域被撤销后写入的哨兵</b>：{@code <revoked>} 里的尖括号不在 {@link Domains} 的
+     * 域被撤销后写入的哨兵：{@code <revoked>} 里的尖括号不在 {@link Domains} 的
      * 域段字符集 {@code [A-Za-z0-9_-]} 内，因此它既过不了 {@link Domains#validatePath}，
      * 也永远不会出现在任何域的祖先链上 —— 写进去等于这个工具对任何域都不可见。
      *
-     * <p><b>不能用空串或纯空白</b>：{@link #declaredDomains()} 会把空白项过滤掉，
+     * 不能用空串或纯空白：{@link #declaredDomains()} 会把空白项过滤掉，
      * 过滤完又是空列表，又会回落根域 —— 那正是本哨兵要防的那个 bug。
      * {@code <revoked>} 既非空白（{@code isBlank} 为 false）也不会被 {@code trim} 改动，可安全作哨兵。
      *
-     * <p><b>为什么需要它</b>：删域时 {@code ToolRegistry.forgetDomains} 会把被删的域从工具声明里
-     * 剥掉。若工具恰好只声明了被删的那一个域，剥完就是<b>空列表</b> —— 而空列表按累加语义
-     * 表示"挂在根域上"，根域在每个域的祖先链里，于是这个工具会对<b>所有域可见</b>。
-     * 删域本意是撤销授权，实际效果却是把授权<b>放大到全域</b>。
+     * 为什么需要它：删域时 {@code ToolRegistry.forgetDomains} 会把被删的域从工具声明里
+     * 剥掉。若工具恰好只声明了被删的那一个域，剥完就是空列表 —— 而空列表按累加语义
+     * 表示"挂在根域上"，根域在每个域的祖先链里，于是这个工具会对所有域可见。
+     * 删域本意是撤销授权，实际效果却是把授权放大到全域。
      *
-     * <p>用哨兵而不是就地移除条目：移除会让该工具在管控台上彻底消失，排障时看不出
+     * 用哨兵而不是就地移除条目：移除会让该工具在管控台上彻底消失，排障时看不出
      * 这里原本有个工具。保留条目 + 标记为不可见，既维持可观测性，又能在作者改完代码
      * 重新注册（本地工具重启 / 远程工具下一次心跳带新声明）时自动恢复
      * —— {@code refreshReplica} 会用新声明覆盖这个哨兵。
@@ -58,13 +58,13 @@ public record ToolDescriptor(
     public static final String REVOKED_DOMAIN = "<revoked>";
 
     /**
-     * 本工具是否对指定域可见 —— <b>授权判定</b>，不是过滤偏好。
+     * 本工具是否对指定域可见 —— 授权判定，不是过滤偏好。
      *
-     * <p>判定按<b>累加</b>语义：声明命中该域，或命中它的任一祖先，即视为可见。
-     * 于是"挂父域、子域默认可用"成立 —— 公共能力挂到根域一次即可，无需逐域声明。</p>
+     * 判定按累加语义：声明命中该域，或命中它的任一祖先，即视为可见。
+     * 于是"挂父域、子域默认可用"成立 —— 公共能力挂到根域一次即可，无需逐域声明。
      *
-     * <p>声明留空 = 挂在根域上。根域在<b>任何</b>域的祖先链里，因此留空即全树可见；
-     * 想收紧就显式写出完整路径。</p>
+     * 声明留空 = 挂在根域上。根域在任何域的祖先链里，因此留空即全树可见；
+     * 想收紧就显式写出完整路径。
      */
     public boolean visibleIn(String domainId) {
         List<String> chain = Domains.chainOf(Domains.normalize(domainId));
@@ -82,7 +82,7 @@ public record ToolDescriptor(
     /**
      * 声明的可用域；留空视为只挂根域 {@link Domains#DEFAULT}。
      *
-     * <p><b>含 {@link #REVOKED_DOMAIN} 时直接返回它自己</b>，不回落根域：
+     * 含 {@link #REVOKED_DOMAIN} 时直接返回它自己，不回落根域：
      * 回落意味着全树可见，那会让「删域撤销授权」变成「删域放开授权」。
      * 部分撤销（还剩别的域）时把哨兵滤掉、只留真实域。
      */
@@ -114,10 +114,10 @@ public record ToolDescriptor(
      * @param allowValues 枚举白名单（{@code type=enum} 时有效）
      * @param example     示例值
      * @param sensitive   是否敏感（日志 / 事件 / 审批 payload 中脱敏）
-     * @param properties  <b>{@code type=object} 时的子字段</b>；简单类型为空列表。
+     * @param properties  {@code type=object} 时的子字段；简单类型为空列表。
      *                    这就是 DTO / record 参数被展开后的嵌套结构 —— 没有它，
      *                    模型只会看到一个"字符串"，无法构造出对象。
-     * @param items       <b>{@code type=array} 时的元素结构</b>；非数组为空列表。
+     * @param items       {@code type=array} 时的元素结构；非数组为空列表。
      *                    元素如果是 DTO，这里递归展开成对象，模型才知道数组里该填什么 ——
      *                    和 {@code properties} 是同一类"不能退化成字符串"的规则，只不过套在数组里。
      */
@@ -152,7 +152,7 @@ public record ToolDescriptor(
      * @param mode           NONE / ALWAYS
      * @param condition      条件表达式（CONDITIONAL 模式）
      * @param reason         展示给审批人的原因
-     * @param approverRoles  有批准权的角色标识，由<b>宿主</b>判定——平台不预定义角色，也不做校验
+     * @param approverRoles  有批准权的角色标识，由宿主判定——平台不预定义角色，也不做校验
      * @param timeoutSeconds 审批超时（秒）
      */
     public record Approval(

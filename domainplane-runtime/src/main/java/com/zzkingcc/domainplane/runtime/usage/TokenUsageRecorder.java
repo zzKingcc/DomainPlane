@@ -37,11 +37,11 @@ public final class TokenUsageRecorder {
     /**
      * 估算一段文本的 token 数。
      *
-     * <p>流式回调在<b>模型线程</b>上调用它累加计数，而 {@link #recordLlmOutputChunk(String)}
+     * 流式回调在模型线程上调用它累加计数，而 {@link #recordLlmOutputChunk(String)}
      * 记的是当前线程的 ThreadLocal —— 两者不是同一个统计桶，所以这里只提供估算、
-     * 不落状态，累加仍由调用方拿到累计值自己 {@code addAndGet}。</p>
+     * 不落状态，累加仍由调用方拿到累计值自己 {@code addAndGet}。
      *
-     * <p>宽度判定只有 {@link CjkWidth} 一份实现，避免"两处各判一次"再次分叉。</p>
+     * 宽度判定只有 {@link CjkWidth} 一份实现，避免"两处各判一次"再次分叉。
      */
     public static int estimateTokens(String text) {
         return CjkWidth.estimateTokens(text);

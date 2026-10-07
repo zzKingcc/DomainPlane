@@ -15,11 +15,11 @@ import java.util.List;
  * txt 切片入口：把 {@link TxtNormalizer} → {@link TxtCleaner} → {@link OutlineReader} → {@link Chunker}
  * 四步串起来。
  *
- * <p>四步里<b>只有「认标题」与格式相关</b> —— 将来加 md / html 只换那一步，其余三步原样复用。
- * 这也是 {@code DocumentProcessStrategyFactory} 与各策略保留不动的意义。</p>
+ * 四步里只有「认标题」与格式相关 —— 将来加 md / html 只换那一步，其余三步原样复用。
+ * 这也是 {@code DocumentProcessStrategyFactory} 与各策略保留不动的意义。
  *
- * <p>切片正文的构造：{@code section_path + 空行 + 正文}。把标题路径写进正文，模型能看出这段话
- * 在第几章第几节；同时向量通道与 BM25 通道吃的是同一份文本，两条召回不会各看各的。</p>
+ * 切片正文的构造：{@code section_path + 空行 + 正文}。把标题路径写进正文，模型能看出这段话
+ * 在第几章第几节；同时向量通道与 BM25 通道吃的是同一份文本，两条召回不会各看各的。
  *
  * @author zzkingcc
  */

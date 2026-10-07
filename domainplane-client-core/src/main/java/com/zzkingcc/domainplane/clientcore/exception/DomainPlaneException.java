@@ -5,7 +5,7 @@ import com.zzkingcc.domainplane.api.code.ErrorCode;
 /**
  * DomainPlane 客户端异常
  *
- * <p>对话 SDK 与知识库 SDK 共用同一个异常类型 —— 接入方写一个全局异常处理器即可覆盖两者。</p>
+ * 对话 SDK 与知识库 SDK 共用同一个异常类型 —— 接入方写一个全局异常处理器即可覆盖两者。
  *
  * @author zzkingcc
  */

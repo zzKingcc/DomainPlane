@@ -3,12 +3,12 @@ package com.zzkingcc.domainplane.infrastructure.ingestion.block;
 /**
  * 结构化（md / docx / pdf）切片参数的全局取值点。
  *
- * <p>为什么需要它：策略工厂是静态的、策略实例是无参构造的单例，拿不到 Spring 的配置对象，
- * 所以把 {@code domainplane.rag.chunking.*} 在这里落一份，服务端启动时注入一次。</p>
+ * 为什么需要它：策略工厂是静态的、策略实例是无参构造的单例，拿不到 Spring 的配置对象，
+ * 所以把 {@code domainplane.rag.chunking.*} 在这里落一份，服务端启动时注入一次。
  *
- * <p>取值来源与 {@code TxtChunking} 完全相同（同一份 rag.chunking 配置），
+ * 取值来源与 {@code TxtChunking} 完全相同（同一份 rag.chunking 配置），
  * 两个取值点各自持有，是因为 txt 切片器与结构化切片器是两条独立的管线 ——
- * 谁也不该因为对方改参数而变化。</p>
+ * 谁也不该因为对方改参数而变化。
  *
  * @author zzkingcc
  */

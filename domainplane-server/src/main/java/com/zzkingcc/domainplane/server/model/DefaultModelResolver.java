@@ -11,9 +11,9 @@ import java.util.List;
 /**
  * 默认模型解析器：把「域 → 档案 → 客户端」这条链路接起来。
  *
- * <p>没有"内置 default"这一说：对话模型只来自用户自建的模型档案。别名命中档案后由
+ * 没有"内置 default"这一说：对话模型只来自用户自建的模型档案。别名命中档案后由
  * {@code ModelClientFactory} 按指纹缓存构建；命中不了（域没绑 / 档案不存在 / 不可用 / 非对话类型）就如实抛出
- * {@link NotConfiguredException}，让调用方拿到明确原因，而不是回落到一个幽灵模型。</p>
+ * {@link NotConfiguredException}，让调用方拿到明确原因，而不是回落到一个幽灵模型。
  *
  * @author zzkingcc
  */

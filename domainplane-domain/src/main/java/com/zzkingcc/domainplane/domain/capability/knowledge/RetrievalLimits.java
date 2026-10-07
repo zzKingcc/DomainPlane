@@ -1,14 +1,14 @@
 package com.zzkingcc.domainplane.domain.capability.knowledge;
 
 /**
- * 检索结果<b>注入侧</b>的两个上限（条数 / 字符预算）的全局取值点。
+ * 检索结果注入侧的两个上限（条数 / 字符预算）的全局取值点。
  *
- * <p>为什么要一个静态取值点：{@link KnowledgeSearchService} 是无状态组件、构造参数只有检索器，
+ * 为什么要一个静态取值点：{@link KnowledgeSearchService} 是无状态组件、构造参数只有检索器，
  * 而这两个值来自 server 模块的 {@code domainplane.retrieval.*}（domain 不能反向依赖 server）。
  * 由 server 侧的配置类启动时调一次 {@link #configure} 注入 —— 与切片参数
- * （{@code TxtChunking}）同一套路。</p>
+ * （{@code TxtChunking}）同一套路。
  *
- * <p>取默认值时与升级前行为一致（条数 8、预算 3000 字符）；配置类没被加载时仍可用。</p>
+ * 取默认值时与升级前行为一致（条数 8、预算 3000 字符）；配置类没被加载时仍可用。
  *
  * @author zzkingcc
  */

@@ -12,8 +12,8 @@ public final class RetrievalScoreKeys {
     /**
      * ES 原始检索分数。
      *
-     * <p>它由 infrastructure 的检索器写入、由本模块的融合阶段读取，是跨模块契约，
-     * 所以定义在 {@link ChunkMetadataKeys}；这里保留别名是因为融合/排序相关的键都归本类管。</p>
+     * 它由 infrastructure 的检索器写入、由本模块的融合阶段读取，是跨模块契约，
+     * 所以定义在 {@link ChunkMetadataKeys}；这里保留别名是因为融合/排序相关的键都归本类管。
      */
     public static final String RAW_SCORE = ChunkMetadataKeys.RAW_SCORE;
 

@@ -1,5 +1,6 @@
 package com.zzkingcc.domainplane.server.controller;
 
+import com.zzkingcc.domainplane.server.model.ModelCatalog;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -52,5 +53,37 @@ class AdminModelProfileControllerMergeTest {
                 AdminModelProfileController.union(List.of("tools"), null));
         assertEquals(List.of(),
                 AdminModelProfileController.union(null, null));
+    }
+
+    /**
+     * 变异验证点：把「基线值当完整枚举」改回来（这里直接把 mergeModalities 换成 prefer），
+     * {@link #基线模态不能覆盖用户为多模态模型声明的输入()} 就会变红。
+     */
+    @Test
+    void 基线模态不能覆盖用户为多模态模型声明的输入() {
+        /* sub_type=chat 的读数：端点族 chat、输入输出都是按 /chat/completions 规范给的基线 text */
+        ModelCatalog.CatalogResult subTypeChat = result(ModelCatalog.Flavor.SUB_TYPE_FILTER,
+                List.of("text"), List.of("text"));
+
+        assertEquals(List.of("text", "image"),
+                AdminModelProfileController.mergeModalities(
+                        subTypeChat, List.of("text"), List.of("text", "image")),
+                "基线值里的 text 不能当完整枚举；用户为 VLM 声明的 image 不能被一次「读取」抹掉");
+    }
+
+    @Test
+    void 完整枚举的模态仍以元数据为准() {
+        ModelCatalog.CatalogResult openRouter = result(ModelCatalog.Flavor.OPENROUTER_METADATA,
+                List.of("text"), List.of("text"));
+
+        assertEquals(List.of("text"),
+                AdminModelProfileController.mergeModalities(openRouter, List.of("text"), List.of("text", "image")),
+                "input_modalities 是完整枚举，读到就该覆盖档案里过时的旧模态");
+    }
+
+    private static ModelCatalog.CatalogResult result(ModelCatalog.Flavor flavor,
+                                                     List<String> input, List<String> output) {
+        return new ModelCatalog.CatalogResult(flavor, List.of("chat"), input, output,
+                List.of(), null, "");
     }
 }

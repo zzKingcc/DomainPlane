@@ -56,23 +56,23 @@ class ModelProfileVectorSplitTest {
 
     private static ModelProfile chat(String alias) {
         return new ModelProfile(alias, List.of("chat"), List.of("text"), List.of("text"),
-                "https://x/v1", "k", alias, null, null, null, List.of(), List.of());
+                "https://x/v1", "k", alias, null, null, null, null, null, List.of(), List.of());
     }
 
     private static ModelProfile images(String alias) {
         return new ModelProfile(alias, List.of("images"), List.of("text"), List.of("image"),
-                "https://x/v1", "k", alias, null, null, null, List.of(), List.of());
+                "https://x/v1", "k", alias, null, null, null, null, null, List.of(), List.of());
     }
 
     private static ModelProfile vector(String alias) {
         return new ModelProfile(alias, List.of("embedding"), List.of("text"), List.of("embedding"),
-                "https://x/v1", "k", alias, null, null, 2048, List.of(), List.of());
+                "https://x/v1", "k", alias, null, null, null, null, 2048, List.of(), List.of());
     }
 
     /** 同时支持对话与向量 —— 它必须留在模型桶，否则既不能绑域、也从「模型」段消失 */
     private static ModelProfile dual(String alias) {
         return new ModelProfile(alias, List.of("chat", "embedding"), List.of("text"), List.of("text"),
-                "https://x/v1", "k", alias, null, null, 1024, List.of(), List.of());
+                "https://x/v1", "k", alias, null, null, null, null, 1024, List.of(), List.of());
     }
 
     private static ModelProfileSettings.ProfileData data(ModelProfile p) {

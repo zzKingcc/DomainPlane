@@ -30,17 +30,17 @@ import java.util.List;
 /**
  * 模型持有者 —— 支持运行时热替换
  *
- * <p><b>向量模型的来源有两条，按显式程度排序</b>：</p>
- * <ol>
- *   <li>「模型设置」页里被<b>选中为向量模型</b>的那个档案（{@code ModelProfileSettings.embeddingAlias}）；
- *       向量模型全局只有一个，所有域共用；</li>
- *   <li>都没选时，回落到部署 yaml（{@code domainplane.ai.embedding.*}）—— 这是部署期兜底，
- *       不是界面上的第二套配置。</li>
- * </ol>
+ * 向量模型的来源有两条，按显式程度排序：
  *
- * <p>关键：<b>选中过档案、但该档案已不可用时，绝不静默回落到 yaml</b>。回落会让用户
+ *   • 「模型设置」页里被选中为向量模型的那个档案（{@code ModelProfileSettings.embeddingAlias}）；
+ *       向量模型全局只有一个，所有域共用；
+ *   • 都没选时，回落到部署 yaml（{@code domainplane.ai.embedding.*}）—— 这是部署期兜底，
+ *       不是界面上的第二套配置。
+ *
+ *
+ * 关键：选中过档案、但该档案已不可用时，绝不静默回落到 yaml。回落会让用户
  * 以为"已经换成新模型了"，实际检索用的还是老向量 —— 表现是灌库成功、检索结果莫名其妙，
- * 且没有任何报错。这里宁可当成未配置，让调用点显式报错。</p>
+ * 且没有任何报错。这里宁可当成未配置，让调用点显式报错。
  *
  * @author zzkingcc
  */
@@ -78,9 +78,9 @@ public class LlmModelHolder {
     /**
      * Spring 注入入口 —— 必须显式标注 {@code @Autowired}。
      *
-     * <p>本类有两个构造器，Spring 只在"唯一构造器"时才隐式选用；有多个且都没标注时，
+     * 本类有两个构造器，Spring 只在"唯一构造器"时才隐式选用；有多个且都没标注时，
      * 它会退回去找无参构造器并抛 {@code NoSuchMethodException: LlmModelHolder.<init>()}，
-     * 表现为启动时 adminController → openAiEmbeddingModel 连锁创建失败。</p>
+     * 表现为启动时 adminController → openAiEmbeddingModel 连锁创建失败。
      */
     @Autowired
     public LlmModelHolder(AiProperties yamlProps, LlmSettingsStore store,
@@ -145,8 +145,8 @@ public class LlmModelHolder {
     /**
      * 当前应当用于 ES 索引的向量维度。
      *
-     * <p>取自<b>实际生效的那个向量模型</b>：选中档案时用档案声明的维度（可为空 → 回落实测），
-     * 用 yaml 兜底时同理。维度是索引 mapping 的不可变参数，两条来源不能各说各话。</p>
+     * 取自实际生效的那个向量模型：选中档案时用档案声明的维度（可为空 → 回落实测），
+     * 用 yaml 兜底时同理。维度是索引 mapping 的不可变参数，两条来源不能各说各话。
      *
      * @throws NotConfiguredException 向量模型未配置
      */
@@ -176,11 +176,11 @@ public class LlmModelHolder {
     }
 
     /**
-     * 界面上被<b>选中</b>的向量档案；没选则返回 {@code null}。
+     * 界面上被选中的向量档案；没选则返回 {@code null}。
      *
-     * <p>与 {@code embeddingProfile()} 的区别：这里<b>不</b>做可用性过滤。
+     * 与 {@code embeddingProfile()} 的区别：这里不做可用性过滤。
      * "选中过一个档案"这件事本身必须被看见 —— 哪怕它此刻已不可用，也要如实反映成
-     * "选了但坏了"，而不是悄悄显示成"没配置"或回落 yaml。</p>
+     * "选了但坏了"，而不是悄悄显示成"没配置"或回落 yaml。
      */
     private ModelProfile selectedEmbeddingProfile() {
         if (profileRegistry == null) {
@@ -194,10 +194,10 @@ public class LlmModelHolder {
     }
 
     /**
-     * 生效中的向量档案：只有<b>已选中且此刻可用</b>才算。
+     * 生效中的向量档案：只有已选中且此刻可用才算。
      *
-     * <p>选中但不可用时返回 {@code null}，而 {@link #selectedEmbeddingProfile()} 仍非空 ——
-     * 两者不一致正是"选了档案但它坏了"的判据，{@link #rebuild} 据此拒绝回落 yaml。</p>
+     * 选中但不可用时返回 {@code null}，而 {@link #selectedEmbeddingProfile()} 仍非空 ——
+     * 两者不一致正是"选了档案但它坏了"的判据，{@link #rebuild} 据此拒绝回落 yaml。
      */
     private ModelProfile usableEmbeddingProfile() {
         ModelProfile selected = selectedEmbeddingProfile();
@@ -229,8 +229,8 @@ public class LlmModelHolder {
     /**
      * 向量档案被切换 / 删除后重新装配向量模型。
      *
-     * <p>不复用 {@link #apply}：向量模型的落盘位置是 {@code models.json} 的 {@code embeddingAlias}，
-     * 不在 {@code llm-settings.json} 里，走 apply 会把对话侧的配置无谓重写一遍。</p>
+     * 不复用 {@link #apply}：向量模型的落盘位置是 {@code models.json} 的 {@code embeddingAlias}，
+     * 不在 {@code llm-settings.json} 里，走 apply 会把对话侧的配置无谓重写一遍。
      */
     public synchronized void refreshEmbedding() {
         rebuildEmbedding();
@@ -311,8 +311,8 @@ public class LlmModelHolder {
     /**
      * 按「选中的向量档案 → yaml 兜底」的顺序重建向量模型。
      *
-     * <p>刻意<b>不复用对话模型的就绪判据</b>：向量模型现在完全独立于对话模型，
-     * 对话模型没配不该把向量也判成未配置（两者可以是不同服务商、不同模型）。</p>
+     * 刻意不复用对话模型的就绪判据：向量模型现在完全独立于对话模型，
+     * 对话模型没配不该把向量也判成未配置（两者可以是不同服务商、不同模型）。
      */
     private void rebuildEmbedding() {
         ModelProfile selected = selectedEmbeddingProfile();
@@ -376,8 +376,8 @@ public class LlmModelHolder {
     /**
      * 把携带通用 {@link ChatRequestParameters} 的请求提升为 {@link OpenAiChatRequestParameters}。
      *
-     * <p>提升必须以模型的默认参数为基线：OpenAI 模型在 doChat 里只认 request.parameters()，
-     * 不兜自己的默认值；凭空新建一份参数会把 modelName 丢掉。</p>
+     * 提升必须以模型的默认参数为基线：OpenAI 模型在 doChat 里只认 request.parameters()，
+     * 不兜自己的默认值；凭空新建一份参数会把 modelName 丢掉。
      */
     // package-private：保留给同包单元测试直接校验"通用参数 → OpenAI 参数"的提升逻辑
     ChatRequest promote(ChatRequest request) {
@@ -560,7 +560,7 @@ public class LlmModelHolder {
     }
 
     /**
-     * 用"候选设置"探测向量模型连通性，<b>并裁决维度契约</b>。
+     * 用"候选设置"探测向量模型连通性，并裁决维度契约。
      *
      * @return 实测维度与声明维度的对照结果，由调用方决定如何呈现
      * @throws IllegalStateException 必填项缺失、维度非法，或上游连接/鉴权失败

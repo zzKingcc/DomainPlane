@@ -37,10 +37,10 @@ public class ToolConfiguration {
     /**
      * 工具注册表：扫描所有工具
      *
-     * <p>两侧写法统一：方法上有 {@code @Tool} 就算工具，<b>不要求类实现
-     * {@link DomainPlaneToolProvider}</b>——该接口只是可选标记（实现了照样被扫到，
+     * 两侧写法统一：方法上有 {@code @Tool} 就算工具，不要求类实现
+     * {@link DomainPlaneToolProvider}——该接口只是可选标记（实现了照样被扫到，
      * 不实现也一样），与工具实例 SDK（{@code domainplane-tool-instance}）的扫描规则一致。
-     * 同一段工具代码在服务端进程与业务进程之间搬迁，不用改一个字。</p>
+     * 同一段工具代码在服务端进程与业务进程之间搬迁，不用改一个字。
      */
     @Bean
     @ConditionalOnMissingBean
@@ -124,8 +124,8 @@ public class ToolConfiguration {
     /**
      * 工具路由器（内核唯一的能力调用入口）。
      *
-     * <p>注入域注册表：域有两个来源（注册表登记的内置/人工域、工具声明派生的域），
-     * 判定与展示都需要合并两者。</p>
+     * 注入域注册表：域有两个来源（注册表登记的内置/人工域、工具声明派生的域），
+     * 判定与展示都需要合并两者。
      */
     @Bean
     @ConditionalOnMissingBean
@@ -135,15 +135,15 @@ public class ToolConfiguration {
     }
 
     /**
-     * 本地工具执行隔离层：<b>有界池 + 超时上限</b>，让卡死的工具不会占住编排线程。
+     * 本地工具执行隔离层：有界池 + 超时上限，让卡死的工具不会占住编排线程。
      *
-     * <p>容量取编排池上限（{@code domainplane.agent.max-pool-size}）的同量级而不是同一份配置：
+     * 容量取编排池上限（{@code domainplane.agent.max-pool-size}）的同量级而不是同一份配置：
      * 两者服务的是不同资源（编排池是会话并发，工具池是单次调用并发），
      * 但工具池必须至少能同时承接编排池能发出的调用数，否则正常负载下就会被自己的池拒。
-     * 队列为零：满即拒，理由见 {@link ToolExecutorService#create}。</p>
+     * 队列为零：满即拒，理由见 {@link ToolExecutorService#create}。
      *
-     * <p>{@code destroyMethod = "close"}：Spring 关闭时 {@code shutdownNow}，
-     * 不留非守护线程挂着进程。</p>
+     * {@code destroyMethod = "close"}：Spring 关闭时 {@code shutdownNow}，
+     * 不留非守护线程挂着进程。
      */
     @Bean(destroyMethod = "close")
     @ConditionalOnMissingBean

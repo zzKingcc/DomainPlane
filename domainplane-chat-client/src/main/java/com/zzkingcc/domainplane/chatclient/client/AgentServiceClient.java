@@ -2,7 +2,6 @@ package com.zzkingcc.domainplane.chatclient.client;
 
 import com.zzkingcc.domainplane.api.agent.AgentRequest;
 import com.zzkingcc.domainplane.api.agent.AgentService;
-import com.zzkingcc.domainplane.api.agent.CallerContext;
 import com.zzkingcc.domainplane.api.event.AgentEvent;
 import com.zzkingcc.domainplane.clientcore.exception.DomainPlaneErrors;
 import com.zzkingcc.domainplane.clientcore.exception.DomainPlaneException;
@@ -15,7 +14,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * DomainPlane 客户端
@@ -37,16 +35,19 @@ public class AgentServiceClient implements AgentService {
 
     @Override
     public Flux<AgentEvent> chat(AgentRequest request) {
-        log.info("[DomainPlane客户端] chat 会话[{}] profile={}",
-                request.getSessionId(), request.getProfile());
-        return webClient.post()
+        log.info("[DomainPlane客户端] chat 会话[{}] domain={}",
+                request.getSessionId(), request.getDomain());
+        // defer 是必需的：凭证在首次调用时才换取，若在链外同步 get()，换凭证失败会直接抛在
+        // chat() 调用处，onErrorMap 根本拦不到，接入方就会拿到"启动期异常"而不是带码的业务异常。
+        // 包进 defer 后，凭证失败与网络失败走同一条错误翻译，出口统一。
+        return Flux.defer(() -> webClient.post()
                 .uri("/api/agent/chat")
                 .header(ClientCredential.CREDENTIAL_HEADER, credential.get())
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_EVENT_STREAM)
                 .bodyValue(request)
                 .retrieve()
-                .bodyToFlux(AgentEvent.class)
+                .bodyToFlux(AgentEvent.class))
                 .doOnError(this::invalidateIfUnauthorized)
                 // 传输层失败不会变成"流里的一项"，而是 Flux.onError 里的裸异常（Netty / Reactor 包了好几层）。
                 // 统一翻译成带码的 DomainPlaneException，接入方 catch 到的就是 90001/90002/10002 这类可分支的码，
@@ -56,23 +57,23 @@ public class AgentServiceClient implements AgentService {
 
     /**
      * 恢复被挂起的会话。
+     *
+     * 域走查询参数：会话状态按 (域, sessionId) 隔离，服务端要拿它定位到那个域里的会话。
      */
     @Override
-    public Flux<AgentEvent> resume(String sessionId, boolean approved, CallerContext caller) {
-        Objects.requireNonNull(caller, "caller 不能为空：resume 必须携带 profile");
-        log.info("[DomainPlane客户端] resume 会话[{}] approved={} profile={}",
-                sessionId, approved, caller.profile());
-        return webClient.post()
+    public Flux<AgentEvent> resume(String sessionId, boolean approved, String domain) {
+        log.info("[DomainPlane客户端] resume 会话[{}] approved={} domain={}",
+                sessionId, approved, domain);
+        return Flux.defer(() -> webClient.post()
                 .uri(uriBuilder -> uriBuilder.path("/api/agent/resume")
                         .queryParam("sessionId", sessionId)
                         .queryParam("approved", approved)
+                        .queryParam("domain", domain)
                         .build())
                 .header(ClientCredential.CREDENTIAL_HEADER, credential.get())
-                .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_EVENT_STREAM)
-                .bodyValue(caller)
                 .retrieve()
-                .bodyToFlux(AgentEvent.class)
+                .bodyToFlux(AgentEvent.class))
                 .doOnError(this::invalidateIfUnauthorized)
                 .onErrorMap(DomainPlaneErrors::fromTransport);
     }
@@ -80,20 +81,19 @@ public class AgentServiceClient implements AgentService {
     /**
      * 停止任务。
      *
-     * <p>会话状态在服务端按 (域, sessionId) 隔离，因此 stop 必须携带与 chat 相同的域 ——
-     * 门面已绑定域，这里由调用方传入的 {@code caller} 决定。</p>
+     * 会话状态在服务端按 (域, sessionId) 隔离，因此 stop 必须携带与 chat 相同的域 ——
+     * 门面已绑定域，这里由调用方传入的 {@code domain} 决定。
      */
     @Override
-    public boolean stop(String sessionId, CallerContext caller) {
-        log.info("[DomainPlane客户端] stop 会话[{}] profile={}", sessionId,
-                caller == null ? null : caller.profile());
+    public boolean stop(String sessionId, String domain) {
+        log.info("[DomainPlane客户端] stop 会话[{}] domain={}", sessionId, domain);
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> resp = webClient.post()
-                    .uri("/api/agent/stop/{sessionId}", sessionId)
+                    .uri(uriBuilder -> uriBuilder.path("/api/agent/stop/{sessionId}")
+                            .queryParam("domain", domain)
+                            .build(sessionId))
                     .header(ClientCredential.CREDENTIAL_HEADER, credential.get())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue(caller)
                     .retrieve()
                     .bodyToMono(Map.class)
                     .block();

@@ -11,7 +11,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 
 /**
  * 域提示词的持久化存储（{@code config/prompts.json}）
@@ -73,7 +72,7 @@ public class DomainSettingsStore {
     /**
      * 删域时清理：移除这些域的提示词片段。
      *
-     * <p>不清理的话，键会变成孤儿 —— 同路径域将来重建时会<b>静默复活</b>旧提示词。</p>
+     * 不清理的话，键会变成孤儿 —— 同路径域将来重建时会静默复活旧提示词。
      */
     public void removePrompts(java.util.Collection<String> domains) {
         if (domains == null || domains.isEmpty()) {

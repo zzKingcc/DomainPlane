@@ -2,17 +2,20 @@ package com.zzkingcc.domainplane.api.model;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Getter;
+import lombok.ToString;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 
 /**
- * 中断事件的 payload 结构
+ * 审批工具列表，用于回写给用户。
  *
  * @author zzkingcc
  */
+@Getter
+@ToString(onlyExplicitlyIncluded = true)
 public final class ToolCallPayload {
 
     private final List<ToolCall> tools;
@@ -32,12 +35,9 @@ public final class ToolCallPayload {
         return new ToolCallPayload(Collections.emptyList());
     }
 
-    public List<ToolCall> getTools() {
-        return tools;
-    }
-
-    @Override
-    public String toString() {
-        return "ToolCallPayload{tools=" + Objects.requireNonNull(tools).size() + '}';
+    /** 只出个数：清单里带着工具参数，整份打进日志属泄露，也没人读 */
+    @ToString.Include(name = "tools")
+    private int toolCount() {
+        return tools.size();
     }
 }

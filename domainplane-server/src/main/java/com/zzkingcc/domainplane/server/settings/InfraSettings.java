@@ -22,7 +22,7 @@ public class InfraSettings {
     /**
      * Elasticsearch 连接参数。
      *
-     * <p>只留"连接身份"与超时；其余（索引名、分词、灌库开关）仍属平台行为配置，留在 yaml。</p>
+     * 只留"连接身份"与超时；其余（索引名、分词、灌库开关）仍属平台行为配置，留在 yaml。
      */
     @Data
     public static class Elasticsearch {

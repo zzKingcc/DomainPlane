@@ -145,11 +145,8 @@ public class AdminController {
         body.put("chatTemperature", current.getChatTemperature());
         body.put("chatMaxTokens", current.getChatMaxTokens());
         body.put("chatCapabilities", current.getChatCapabilities());
-        /* 向量模型的「名字 / 地址」必须和上面那个 embeddingConfigured 同源。
-           embeddingConfigured 取自 holder（认识"选中的档案"），而 LlmSettings 只认
-           llm-settings.json / yaml —— 向量模型改由档案单选之后，那两处通常是空的。
-           两者混用会让知识库页拿到 configured=true 却显示空的模型名，地址还会回落到
-           对话模型的 baseUrl，看上去像"配了却没生效"。这里按档案优先、yaml 兜底取值。 */
+        /* 向量模型的名字/地址优先取选中的档案，档案为空才回落 yaml。
+           embeddingConfigured 与展示值必须同源，否则知识库页会显示"已配置"却取不到模型名。 */
         ModelProfile embProfile = modelProfileRegistry.embeddingProfile().orElse(null);
         body.put("embeddingBaseUrl", embProfile != null
                 ? embProfile.baseUrl() : current.getEmbeddingBaseUrl());
@@ -201,15 +198,13 @@ public class AdminController {
             return failBody(e.getMessage());
         }
 
-        // 维度变化且用户已确认 → 紧接着重建索引。
-        // 注意注入的 embeddingModel 是持有者的委派代理，apply() 之后已指向新模型。
+        // 维度变化且用户已确认 → 紧接着重建索引（embeddingModel 是持有者委派代理，apply 后已指向新模型）。
         boolean rebuilt = false;
         if (dim.verdict() == DimVerdict.NEEDS_REBUILD) {
             log.warn("[管控] 维度 {} → {}，开始重建全部知识库索引", dim.indexDims(), dim.newDims());
             try {
-                // 维度必须显式传入：索引维度是 mapping 的不可变参数，取"三处同源"的公共取值点。
-                // apply() 已生效，这里拿到的就是新模型的维度。
-                // 重建语义是"删掉重建"：维度变了，旧索引留着也没用——不删就永远修不好。
+                // 维度必须显式传入：索引维度是 mapping 不可变参数，取 apply 后生效的新模型维度。
+                // 重建即删旧建新：维度变了旧索引无用，留着会导致灌库失败。
                 List<String> rebuiltIndices =
                         knowledgeBaseService.rebuildAll(modelHolder.effectiveEmbeddingDimension());
                 rebuilt = true;
@@ -243,8 +238,8 @@ public class AdminController {
     /**
      * 清空内置的某个模型配置（{@code kind} = {@code chat} / {@code embedding}）。
      *
-     * <p>只清目标那一组，另一组原样保留。清空后该模型视为「未配置」；
-     * 若 yaml 里也没有兜底值，则<b>未绑定任何档案的域将没有可用模型</b> —— 管控台需二次确认。</p>
+     * 只清目标那一组，另一组原样保留。清空后该模型视为「未配置」；
+     * 若 yaml 里也没有兜底值，则未绑定任何档案的域将没有可用模型 —— 管控台需二次确认。
      */
     @DeleteMapping("/settings/{kind}")
     public Map<String, Object> clearSettings(@PathVariable("kind") String kind) {
@@ -343,9 +338,8 @@ public class AdminController {
         if (!embeddingChanged(incoming, modelHolder.currentSettings())) {
             return new DimCheck(DimVerdict.OK, null, null, null, null);
         }
-        // 读索引维度失败（ES 未配置 / 不可达 / 索引尚不存在）不阻断保存：拿不到就对不了账，
-        // 退化为"不做预检"即可。与"实测维度失败必须放行"同一哲学——否则用户会被卡在
-        // "必须先配好 ES 才能改模型配置"的循环里，自救路径被切断。
+        // 读不到索引维度（ES 未配置/不可达/索引不存在）不阻断保存：退化为不做预检。
+        // 否则用户会被卡在"必须先配好 ES 才能改模型"的死循环里，无法自救。
         try {
             indexDims = knowledgeBaseService.currentVectorDims();
         } catch (Exception e) {
@@ -357,8 +351,7 @@ public class AdminController {
         try {
             probe = modelHolder.testEmbeddingConnection(incoming);
         } catch (Exception e) {
-            // 未填全 / Key 无效 / 网络不通 —— 此时必须放行保存：
-            // 若因"测不出维度"就禁止保存，用户连改 Key 自救都做不到。
+            // 未填全 / Key 无效 / 网络不通时仍须放行保存：否则用户连改 Key 自救都做不到。
             String reason = LlmFailureDescriber.describe(e);
             log.warn("[管控] 保存前无法实测向量维度，跳过预检并放行: {}", reason);
             return new DimCheck(DimVerdict.UNKNOWN, indexDims, null, null,
@@ -580,8 +573,7 @@ public class AdminController {
         DomainSystemPromptResolver resolver =
                 new DomainSystemPromptResolver(domainSettingsStore, promptProperties);
 
-        /* 全域可见＝声明里带根域 default 的工具：根域在每个域的祖先链里，
-           按累加语义它们对每个域都可见。含"声明留空"——留空即挂根。 */
+        /* 全域可见＝声明带根域 default 的工具（声明留空即挂根），对每个域都可见。 */
         List<ToolDescriptor> globalTools = all.stream()
                 .filter(d -> d.declaredDomains().contains(Domains.DEFAULT))
                 .toList();
@@ -687,7 +679,7 @@ public class AdminController {
     /**
      * 域来源：根域 / 人工创建 / 工具声明派生（三种同级，不构成等级）。
      *
-     * <p>两处来源合并判断：{@code DomainRegistry} 管内置与人工，派生域归 {@code ToolRegistry}。</p>
+     * 两处来源合并判断：{@code DomainRegistry} 管内置与人工，派生域归 {@code ToolRegistry}。
      */
     private String domainSource(String domain) {
         DomainRegistry.Source source = domainRegistry.sourceOf(domain);
@@ -926,7 +918,7 @@ public class AdminController {
     /**
      * 手动重建全部知识库索引（诊断 + 删旧 + 建 IK mapping + 校验）。
      *
-     * <p>语义是「删掉重建」，因此<b>索引会被清空，文档需重新上传</b>。</p>
+     * 语义是「删掉重建」，因此索引会被清空，文档需重新上传。
      */
     @PostMapping("/kb/rebuild")
     public Map<String, Object> rebuildKnowledgeIndex() {
@@ -1116,8 +1108,8 @@ public class AdminController {
     /**
      * 读取提示词设定。
      *
-     * <p>没有公共基线：根域 {@code default} 的片段就是基底，生效提示词沿域链从根拼接。
-     * 每个域额外带上它的祖先链，管控台要能看出"这段是从哪继承来的"。</p>
+     * 没有公共基线：根域 {@code default} 的片段就是基底，生效提示词沿域链从根拼接。
+     * 每个域额外带上它的祖先链，管控台要能看出"这段是从哪继承来的"。
      */
     @GetMapping("/prompts")
     public Map<String, Object> prompts() {
@@ -1246,7 +1238,7 @@ public class AdminController {
         for (String domain : toolRouter.knownDomains()) {
             merged.putIfAbsent(domain, "");
         }
-        /* 编辑框里<b>不放未登记的域</b>：保存是整份覆盖，放进来等于让前端把孤儿键反复写回去，
+        /* 编辑框里不放未登记的域：保存是整份覆盖，放进来等于让前端把孤儿键反复写回去，
            而且保存入口现在会拒绝未登记的域 —— 留着它们会把整个页面卡在"保存失败"上。
            孤儿键仍然通过 orphanPrompts 字段只读地暴露出来。 */
         merged.keySet().removeIf(domain -> !domainRegistry.contains(domain));

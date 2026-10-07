@@ -3,7 +3,7 @@ package com.zzkingcc.domainplane.runtime.tool;
 import java.util.Set;
 
 /**
- * 在线表条目 —— 服务端对一个工具实例的<b>全部认知</b>
+ * 在线表条目 —— 服务端对一个工具实例的全部认知
  *
  * @author zzkingcc
  * @param instanceId     实例标识（由实例自报，重连需沿用同一个才能覆盖自己的旧副本）

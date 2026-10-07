@@ -19,19 +19,19 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /**
- * 默认融合策略（<b>分数制</b>）—— <b>单来源</b>场景使用（一域一索引时即"只查到本域或某个祖先的索引"）：
+ * 默认融合策略（分数制）—— 单来源场景使用（一域一索引时即"只查到本域或某个祖先的索引"）：
  *
- * <ul>
- *   <li>把多份排名表按模态拼回两路（向量 / 关键词），保持各表内部顺序；</li>
- *   <li>去重：按文本内容 SHA-256 判同一条；两路都命中只记一次，但两个通道分都保留</li>
- *   <li>归一化：向量分 / 关键词分各自做 min-max（单路缺失按 0 算）</li>
- *   <li>加权：{@code 向量权重×归一化向量分 + 关键词权重×归一化关键词分}，再乘标题 / 文件名增益</li>
- *   <li>重排：按融合分降序（同分按 chunk_seq），取 TopN，回写分项分 / 融合分 / 名次 / 命中通道</li>
- * </ul>
  *
- * <p>只在"实际有命中的来源数 ≤ 1"时被选中（见 {@link AdaptiveFusionStrategy}）—— 此时所有表同源，
+ *   • 把多份排名表按模态拼回两路（向量 / 关键词），保持各表内部顺序；
+ *   • 去重：按文本内容 SHA-256 判同一条；两路都命中只记一次，但两个通道分都保留
+ *   • 归一化：向量分 / 关键词分各自做 min-max（单路缺失按 0 算）
+ *   • 加权：{@code 向量权重×归一化向量分 + 关键词权重×归一化关键词分}，再乘标题 / 文件名增益
+ *   • 重排：按融合分降序（同分按 chunk_seq），取 TopN，回写分项分 / 融合分 / 名次 / 命中通道
+ *
+ *
+ * 只在"实际有命中的来源数 ≤ 1"时被选中（见 {@link AdaptiveFusionStrategy}）—— 此时所有表同源，
  * BM25 分数在同一索引内可比，分数制才成立。多来源场景由 {@link RrfFusionStrategy} 承担。
- * 也因为是单来源，本策略<b>不使用</b> {@code RankedList#depth}（层级衰减无意义）。</p>
+ * 也因为是单来源，本策略不使用 {@code RankedList#depth}（层级衰减无意义）。
  *
  * @author zzkingcc
  */
@@ -151,9 +151,9 @@ public class DefaultFusionStrategy implements FusionStrategy {
     /**
      * 计算融合分数：加权求和 × 标题/文件名增益
      *
-     * <p>增益是<b>乘法</b>（{@code 分 × (1 + boost)}），与 {@link RrfFusionStrategy} 语义一致。
+     * 增益是乘法（{@code 分 × (1 + boost)}），与 {@link RrfFusionStrategy} 语义一致。
      * 加法 boost 在本轨（归一化分 0~1）看着合理，但在 RRF 轨（分约 0.01 量级）会变成十几倍、
-     * 直接统治排序 —— 同一个常量在两轨下含义不同是隐性坑，故统一为乘法。</p>
+     * 直接统治排序 —— 同一个常量在两轨下含义不同是隐性坑，故统一为乘法。
      */
     private void computeFusedScores(List<ScoreEntry> entries) {
         for (ScoreEntry e : entries) {

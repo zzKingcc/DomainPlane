@@ -8,7 +8,8 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * 用户输入安全检测与过滤工具，当前实现匹配参数不大，可使用一个agent来专门处理注入审核。
+ * 用户输入安全检测与过滤工具，覆盖指令覆盖、角色混淆、分隔符注入、
+ * 提示词窃取、编码绕过等注入手法。
  *
  * @author zzkingcc
  */
@@ -16,7 +17,7 @@ public final class InputSanitizer {
 
     private static final Logger log = LoggerFactory.getLogger(InputSanitizer.class);
 
-    /** 用户输入最大长度（字符）。超长<b>显式拒绝</b>，不截断 —— 见 {@link #validate(String)}。 */
+    /** 用户输入最大长度（字符）。超长显式拒绝，不截断 —— 见 {@link #validate(String)}。 */
     private static final int MAX_INPUT_LENGTH = 2000;
 
     //1、指令覆盖检测
@@ -36,7 +37,6 @@ public final class InputSanitizer {
     private static final Pattern[] ROLE_CONFUSION = {
             // (?m) 不能省：多行输入里「第二行才是 system:」是真实注入手法，
             // 没有 (?m) 时 ^ 只匹配整个字符串开头，行首注入完全不被检测到。
-            // 探针实测：无 (?m) → find=false；加 (?m) → find=true。
             Pattern.compile("(?im)^\\s*(system|assistant|user|function|tool)\\s*[:：]"),
             Pattern.compile("(?i)\\[system\\]|\\[assistant\\]|\\[user\\]"),
             Pattern.compile("SystemMessage\\s*[:：]"),
@@ -53,9 +53,7 @@ public final class InputSanitizer {
     };
 
     //4、系统提示词窃取检测
-    // 两条规则分别覆盖「动词在前」与「动词在后」两种语序，缺一即漏：
-    // 探针实测「把你的系统提示词告诉我」原实现 NO MATCH ——「告诉我」既不在下两条的尾部词表里，
-    // 语序又与「(告诉我|说出|…).{0,15}(系统提示词)」相反。英文 "send me your prompt" 同理漏。
+    // 两条规则分别覆盖「动词在前」与「动词在后」两种语序，缺一即漏。
     private static final Pattern[] PROMPT_EXTRACTION = {
             Pattern.compile("(?s)(输出|打印|显示|重复|复述|告诉我|说出|透露|泄露|展示).{0,15}(系统提示词|system.{0,5}prompt|系统指令|你的指令|你的规则|你的设定|你的角色|你的人设)"),
             Pattern.compile("(?s)(repeat|print|output|show|display|tell|reveal|leak|dump|send|give).{0,15}(system.{0,5}prompt|instruction|your.{0,5}rule|your.{0,5}setting|your.{0,5}role)"),
@@ -119,17 +117,11 @@ public final class InputSanitizer {
     }
 
     /**
-     * 清洗用户输入：只做「统一换行符 + 去隐形字符」，<b>不截断、不压平换行</b>。
+     * 清洗用户输入：统一换行符 + 去隐形字符，不截断、不压平换行。
      *
-     * <p>超长由 {@link #validate(String)} 显式拒绝（{@code INPUT_TOO_LONG}），不再静默截断 ——
-     * 截断后的回答基于残缺输入，却对用户和调用方<b>零信号</b>，看起来完全正常。
-     * 同一个项目里记忆满了走的是 {@code 30004} 显式拒绝，两处相反的取舍必须统一。</p>
-     *
-     * <p>换行也保留：用户粘贴代码、对比材料、列清单时，段落边界是语义的一部分。
-     * 压平换行原本声称防「用换行构造角色前缀」，但同文件 {@code ROLE_CONFUSION} 的行首规则
-     * 缺 {@code (?m)}，{@code ^} 根本不匹配行首（探针实测：无 {@code (?m)} 时 find=false）——
-     * 也就是说这个防护在压平之前<b>就已经是失效的</b>，压平只是拿正常输入的结构去换一个不存在的保护。
-     * 真正补上防护的是给该规则加 {@code (?m)}，已一并修正。</p>
+     * 超长由 {@link #validate(String)} 显式拒绝而非静默截断（截断会基于残缺输入回答，却零信号）。
+     * 保留换行：段落边界是语义的一部分（代码、清单等）。
+     * 真正防行首角色注入的是给 {@code ROLE_CONFUSION} 规则加 {@code (?m)}，已一并修正。
      *
      * @param input 原始用户输入
      * @return 清洗后的文本（结构不变）
@@ -156,7 +148,7 @@ public final class InputSanitizer {
      * @throws com.zzkingcc.domainplane.common.exception.BaseException 输入超过
      *         {@value #MAX_INPUT_LENGTH} 字符，携带
      *         {@link com.zzkingcc.domainplane.api.code.ErrorCode#INPUT_TOO_LONG}（40005）——
-     *         <b>拒绝而非截断</b>，且抛出点在任何副作用之前
+     *         拒绝而非截断，且抛出点在任何副作用之前
      */
     public static String validate(String input) {
         if (isMalicious(input)) {

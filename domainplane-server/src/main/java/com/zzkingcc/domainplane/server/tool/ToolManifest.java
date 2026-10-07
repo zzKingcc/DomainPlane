@@ -166,10 +166,10 @@ public final class ToolManifest {
     }
 
     /**
-     * 域：去空白 + 去重 + 剔空，并<b>校验路径合法性</b>；非法域直接拒绝整包注册。
+     * 域：去空白 + 去重 + 剔空，并校验路径合法性；非法域直接拒绝整包注册。
      *
-     * <p>非法域不能只 warn 放过：这些字符串会进 {@code declaredProfiles} 并让入口放行，
-     * 等于让外部报文凭空造出一个"可用的域"。空列表是合法的（= 挂根域）。</p>
+     * 非法域不能只 warn 放过：这些字符串会进 {@code declaredDomains} 并让入口放行，
+     * 等于让外部报文凭空造出一个"可用的域"。空列表是合法的（= 挂根域）。
      */
     private static List<String> domains(JsonNode node, String toolName) {
         List<String> domains = textList(node).stream().map(String::trim).distinct().toList();

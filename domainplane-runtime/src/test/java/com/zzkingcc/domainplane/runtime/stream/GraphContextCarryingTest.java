@@ -1,6 +1,5 @@
 package com.zzkingcc.domainplane.runtime.stream;
 
-import com.zzkingcc.domainplane.api.agent.CallerContext;
 import com.zzkingcc.domainplane.api.event.AgentEvent;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.junit.jupiter.api.Test;
@@ -19,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>为什么这条不能靠"读注释"保证：注册表里存的是"当前那一轮"，而节点跑的是"发起它的那一轮"。
  * 两个请求重叠时（网关重试、前端双击、同一会话并发 resume），注册表已经指向后者，
- * 按 key 回查会让前者的节点拿到后者的上下文 —— 工具调用记到别人的租户名下、
+ * 按 key 回查会让前者的节点拿到后者的上下文 —— 工具调用按别人的域过滤、
  * 模型的 token 流进别人的 SSE 流。这条测试用"注册表指向 B、但配置携带 A"来复现该场景。</p>
  */
 class GraphContextCarryingTest {
@@ -33,7 +32,7 @@ class GraphContextCarryingTest {
             s.onDispose(() -> {
             });
         }).subscribe();
-        return registry.register(KEY, holder[0], CallerContext.of("default"));
+        return registry.register(KEY, holder[0], "default");
     }
 
     @Test
@@ -58,7 +57,7 @@ class GraphContextCarryingTest {
         // A 的节点从配置里取，取到的必须仍然是 A 自己
         Object carried = configA.metadata("domainplane.streamContext").orElseThrow();
         assertSame(a, carried,
-                "A 的节点必须拿到 A 的上下文；拿到 B 就意味着 A 的调用被记到了 B 的租户名下");
+                "A 的节点必须拿到 A 的上下文；拿到 B 就意味着 A 的调用被按 B 的域过滤");
         assertEquals(traceA, ((StreamContext) carried).traceId());
     }
 

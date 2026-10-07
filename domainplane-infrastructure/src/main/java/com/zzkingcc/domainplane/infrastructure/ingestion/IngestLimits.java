@@ -3,8 +3,8 @@ package com.zzkingcc.domainplane.infrastructure.ingestion;
 /**
  * 导入侧的全局限制取值点。
  *
- * <p>与 {@code TxtChunking} / {@code BlockChunking} 同样的原因：策略工厂是静态的、
- * 策略实例是无参构造的单例，拿不到 Spring 的配置对象，所以把配置在这里落一份。</p>
+ * 与 {@code TxtChunking} / {@code BlockChunking} 同样的原因：策略工厂是静态的、
+ * 策略实例是无参构造的单例，拿不到 Spring 的配置对象，所以把配置在这里落一份。
  *
  * @author zzkingcc
  */
@@ -27,8 +27,8 @@ public final class IngestLimits {
     /**
      * 单文件（单次上传）允许的最大切片数。
      *
-     * <p>这不是限制功能，是防雪崩：几百页的文档一次就能产出几千片，
-     * 而向量化是分批请求模型的，一次上传就能把导入队列堵死。</p>
+     * 这不是限制功能，是防雪崩：几百页的文档一次就能产出几千片，
+     * 而向量化是分批请求模型的，一次上传就能把导入队列堵死。
      */
     public static int maxChunksPerDocument() {
         return maxChunksPerDocument;

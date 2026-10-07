@@ -3,7 +3,7 @@ package com.zzkingcc.domainplane.clientcore.exception;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
 
 /**
- * DomainPlane 客户端<b>启动期</b>异常
+ * DomainPlane 客户端启动期异常
  *
  * @author zzkingcc
  */

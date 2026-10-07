@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.zzkingcc</groupId>
+        <artifactId>DomainPlane</artifactId>
+        <version>v1.0-beta.1</version>
+        <!-- relativePath 指到上一级：本模块在 examples/ 下，默认的 ../pom.xml 会找不到根 pom -->
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>domainplane-example-chat-window</artifactId>
+    <name>domainplane-example-chat-window</name>
+    <description>示例 01：一个对话框页面，与 DomainPlane 对话。最小接入路径 ——
+        引对话 SDK，起一个页面，把 events() 的流原样转成浏览器能消费的 SSE。</description>
+
+    <dependencies>
+        <!-- ===== 唯一业务依赖：对话 SDK =====
+             引它就得到 DomainPlaneAgentFactory（唯一入口），以及 WebClient / 凭证 /
+             启动期连通性探测 —— 这些由 SDK 的自动装配提供，示例里一行都不用写。 -->
+        <dependency>
+            <groupId>com.zzkingcc</groupId>
+            <artifactId>domainplane-chat-client</artifactId>
+        </dependency>
+
+        <!-- ===== 响应式 Web =====
+             直接使用，属显式声明而不依赖 sdk 的传递依赖。
+
+             本模块只用 WebFlux 一个 web 栈（不再引 spring-boot-starter-web）：
+             两个同时在场时 Spring Boot 会按 Servlet 走，那样返回 Flux 反而会落到
+             Servlet 那套适配上去。
+
+             注意 SDK 的凭证层是阻塞的（ClientCredential.get() 内部 block()，
+             且在 events() 里同步调用），而 WebFlux 的请求处理跑在 Netty 事件循环线程上 ——
+             所以建流必须 defer + subscribeOn(boundedElastic)，见 ChatController。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
+        <!-- JSON：请求体与 AgentEvent 的序列化都由它做，属直接使用 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- 日志门面：@Slf4j 生成的就是它，属直接使用，显式声明而不依赖传递依赖。
+             实现（logback）由 starter 带进来 —— 门面与实现分开声明，换实现不用动这里。 -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <!-- Lombok：@Slf4j / @RequiredArgsConstructor 只在编译期生成代码，provided 不进交付物 -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- 可执行 jar：mvn -pl examples/chat-window spring-boot:run 就能起 -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- Lombok 是编译期注解处理器，provided 作用域仍会被 Boot 打进 fat jar，
+                         这里显式排除 —— 它只在本模块编译时用得到，运行期与整个依赖树都无关。 -->
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -27,8 +27,13 @@ public class RedisProperties {
      */
     private int database = 0;
 
-    /** 连接 / 读取超时 */
-    private Duration timeout = Duration.ofMillis(2000);
+    /**
+     * 连接 / 读取超时。
+     *
+     * 默认值要跟 {@code application.yaml} 里的 {@code domainplane.redis.timeout} 一致：
+     * 配公网/跨机房 Redis 时 2s 太紧，一次抖动就会变成 70004 CHECKPOINT_ERROR。
+     */
+    private Duration timeout = Duration.ofSeconds(5);
 
     /** Lettuce 连接池配置 */
     private Pool pool = new Pool();

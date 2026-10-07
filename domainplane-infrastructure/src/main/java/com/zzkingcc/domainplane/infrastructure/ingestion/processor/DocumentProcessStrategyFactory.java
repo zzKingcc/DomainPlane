@@ -66,7 +66,7 @@ public class DocumentProcessStrategyFactory {
 
     /**
      * 按照文档划分构建各处理器扫描链。
-     * 
+     *
      * @param documents 待分组的文档列表
      * @return
      */

@@ -16,8 +16,7 @@ public final class TraceId {
 
     private static final ThreadLocal<String> HOLDER = new ThreadLocal<>();
 
-    private TraceId() {
-    }
+    private TraceId() {}
 
     /**
      * 开始一段链路。

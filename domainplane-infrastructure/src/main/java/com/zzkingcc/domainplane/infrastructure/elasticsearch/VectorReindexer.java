@@ -19,22 +19,22 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 换向量模型时<b>保留原文</b>地重灌索引。
+ * 换向量模型时保留原文地重灌索引。
  *
- * <p><b>为什么需要它</b>：ES 的 {@code dense_vector} 维度是 mapping 的不可变参数，
+ * 为什么需要它：ES 的 {@code dense_vector} 维度是 mapping 的不可变参数，
  * 维度变了只能删索引重建。但索引里除了向量还有 {@code text}（BM25 原文）与
  * {@code metadata}（{@code doc_id} / {@code file_name} / {@code chunk_seq} …）——
- * <b>原文明明还在</b>。直接 {@code deleteIndex + create} 等于把可复用的东西一起扔了，
- * 用户得把每个文档重新上传一遍，而切片是服务端算出来的、本可以就地重算向量。</p>
+ * 原文明明还在。直接 {@code deleteIndex + create} 等于把可复用的东西一起扔了，
+ * 用户得把每个文档重新上传一遍，而切片是服务端算出来的、本可以就地重算向量。
  *
- * <p><b>做法</b>：先把各索引的 {@code text + metadata} 捞进内存（不含 vector），
+ * 做法：先把各索引的 {@code text + metadata} 捞进内存（不含 vector），
  * 删索引、按新维度重建 mapping，再用新向量模型对原文重新向量化写回。
- * 切片与元数据原样保留，所以 BM25 通道的召回结果不会变，只有向量换了。</p>
+ * 切片与元数据原样保留，所以 BM25 通道的召回结果不会变，只有向量换了。
  *
- * <p><b>失败语义是fail-closed</b>：任一步失败立即抛，中止在"还有东西没被删"的位置。
- * 特别注意<b>先全部捞完再开始删</b> —— 一个索引一个索引地"捞→删→重灌"，
+ * 失败语义是fail-closed：任一步失败立即抛，中止在"还有东西没被删"的位置。
+ * 特别注意先全部捞完再开始删 —— 一个索引一个索引地"捞→删→重灌"，
  * 中途失败会留下前面几个索引已换新向量、后面几个还是老向量的混合状态，
- * 而向量空间不同、维度相同的两个模型混在一个索引里，检索结果会静默失真。</p>
+ * 而向量空间不同、维度相同的两个模型混在一个索引里，检索结果会静默失真。
  *
  * @author zzkingcc
  */
@@ -55,7 +55,7 @@ public final class VectorReindexer {
     }
 
     /**
-     * 一条被保留下来的切片：正文 + 全部元数据（<b>不含向量</b>）。
+     * 一条被保留下来的切片：正文 + 全部元数据（不含向量）。
      *
      * @param text     切片正文（BM25 与向量共用的原文）
      * @param metadata {@code _source.metadata} 的原始内容
@@ -67,8 +67,8 @@ public final class VectorReindexer {
     /**
      * 重建结果。
      *
-     * @param preserved 各索引<b>捞回来的</b>条数
-     * @param reindexed 各索引<b>实际写回的</b>条数
+     * @param preserved 各索引捞回来的条数
+     * @param reindexed 各索引实际写回的条数
      * @implNote 两者必须逐项相等；不等就意味着丢切片（捞取被截断、或写回中途失败），
      * 而向量缺失的切片在向量检索里等于凭空消失 —— 所以刻意把它作为可核对的返回值暴露出去。
      */
@@ -78,9 +78,9 @@ public final class VectorReindexer {
     /**
      * 把一批索引的原文捞出来（删索引之前调用）。
      *
-     * <p><b>翻页到取完为止</b>：单个索引的切片数没有上限（单文件就允许 2000 片），
+     * 翻页到取完为止：单个索引的切片数没有上限（单文件就允许 2000 片），
      * 只取第一页等于静默丢弃尾部原文 —— 而后面就要删索引了，那部分数据就此不可恢复。
-     * 所以用 {@code search_after} 一页一页取，直到返回不足一页。</p>
+     * 所以用 {@code search_after} 一页一页取，直到返回不足一页。
      *
      * @return 索引名 → 该索引的切片列表（无文档的索引不出现在结果里）
      */
@@ -90,7 +90,7 @@ public final class VectorReindexer {
         for (String index : indices) {
             List<PreservedChunk> chunks = new ArrayList<>();
             List<FieldValue> cursor = null;
-            // 已从 ES 消费掉的文档数（<b>含</b>被跳过的脏文档）：翻页判据用它跟 total 比，
+            // 已从 ES 消费掉的文档数（含被跳过的脏文档）：翻页判据用它跟 total 比，
             // 用 chunks.size() 会因脏文档而误判成"取完了"
             long consumed = 0L;
             try {
@@ -126,7 +126,7 @@ public final class VectorReindexer {
                     }
                     consumed += hits.size();
 
-                    // 判"取完了"必须看 total，<b>不能</b>看"这页是不是满页"：
+                    // 判"取完了"必须看 total，不能看"这页是不是满页"：
                     // ES 侧有自己的单页上限（index.max_result_window / 分片限制），实际返回条数
                     // 可能小于我们请求的 size。那种情况下"不足一页"不等于"没有更多"，
                     // 按页大小判断会在大索引上静默截断 —— 而下一步就要删索引，截掉的部分永久丢失。
@@ -219,8 +219,8 @@ public final class VectorReindexer {
     /**
      * 把保留的切片还原成 {@link TextSegment}，元数据按键名搬回。
      *
-     * <p>必须搬齐：{@code doc_id} 决定"删文档"能不能删干净，{@code chunk_seq}/{@code chunk_total}
-     * 是融合阶段的稳定排序二级键，缺了会让同一份知识每次检索顺序都不同。</p>
+     * 必须搬齐：{@code doc_id} 决定"删文档"能不能删干净，{@code chunk_seq}/{@code chunk_total}
+     * 是融合阶段的稳定排序二级键，缺了会让同一份知识每次检索顺序都不同。
      */
     private static TextSegment segmentOf(PreservedChunk chunk) {
         TextSegment segment = TextSegment.from(chunk.text());

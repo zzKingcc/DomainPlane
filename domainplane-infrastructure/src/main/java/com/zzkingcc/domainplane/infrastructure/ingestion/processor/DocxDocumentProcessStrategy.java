@@ -15,12 +15,12 @@ import java.util.List;
 /**
  * Word（{@code .docx}）文档处理策略。
  *
- * <p>格式适配用 POI 直读：段落样式拿标题层级、{@code getBodyElements()} 保证表格与段落按原文顺序穿插、
- * 页眉页脚压根不读。之后的打包与去重交给通用的 {@link BlockSplitter}。</p>
+ * 格式适配用 POI 直读：段落样式拿标题层级、{@code getBodyElements()} 保证表格与段落按原文顺序穿插、
+ * 页眉页脚压根不读。之后的打包与去重交给通用的 {@link BlockSplitter}。
  *
- * <p><b>旧版 {@code .doc} 走另一条策略</b>（{@code DocDocumentProcessStrategy} + HWPF）：
+ * 旧版 {@code .doc} 走另一条策略（{@code DocDocumentProcessStrategy} + HWPF）：
  * 二进制格式不同、标题层级的来源也不同（docx 读 {@code Heading N} 样式，doc 还要靠大纲级别兜底），
- * 所以是两个适配器，不是一个。</p>
+ * 所以是两个适配器，不是一个。
  *
  * @author zzkingcc
  */
@@ -56,7 +56,7 @@ public class DocxDocumentProcessStrategy extends AbstractDocumentProcessStrategy
         return new SplitResult(all, titles, dropped);
     }
 
-    /** docx 是二进制：入口<b>不解码</b> */
+    /** docx 是二进制：入口不解码 */
     @Override
     public boolean binary() {
         return true;

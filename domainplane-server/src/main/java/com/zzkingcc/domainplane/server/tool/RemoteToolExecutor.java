@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 远程工具执行器 —— 把一次工具调用<b>推</b>到工具实例上执行
+ * 远程工具执行器 —— 把一次工具调用推到工具实例上执行
  * @author zzkingcc
  */
 public class RemoteToolExecutor implements ToolExecutor {
@@ -92,9 +92,6 @@ public class RemoteToolExecutor implements ToolExecutor {
         body.put("requestId", requestId);
         body.put("toolName", toolName);
         body.set("arguments", parseArguments(request.arguments()));
-        // 审计字段：租户 / 用户由编排层绑定在 ToolInvocationContext 上（域不参与过滤，纯审计）
-        putIfPresent(body, "tenantId", ToolInvocationContext.tenantId());
-        putIfPresent(body, "userId", ToolInvocationContext.userId());
         // traceId 让实例侧日志与服务端这次调用对齐；未绑定时退回当前 MDC 值
         String traceId = ToolInvocationContext.traceId() == null
                 ? TraceId.current() : ToolInvocationContext.traceId();

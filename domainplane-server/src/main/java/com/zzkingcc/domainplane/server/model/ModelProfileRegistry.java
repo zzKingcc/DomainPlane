@@ -16,18 +16,18 @@ import java.util.Set;
 /**
  * 模型档案注册表 —— 档案与「域 → 档案」绑定的唯一真相。
  *
- * <p>两条规则（与产品口径一致）：</p>
- * <ol>
- *   <li><b>档案不自动绑定任何域</b>：绑定只能由管控台显式写入；新档案建完就是"未绑定"状态；</li>
- *   <li><b>一个域只绑一组模型</b>：绑定是<b>有序列表</b>，整体覆盖，列表首个为当前使用、其余留给多 agent / 降级；
- *       空列表即"无可调用模型"。</li>
- * </ol>
+ * 两条规则（与产品口径一致）：
  *
- * <p><b>没有内置对话模型</b>：对话模型只来自「模型设置」页里用户自建的模型档案。域未绑定时沿<b>域链</b>向上找
+ *   • 档案不自动绑定任何域：绑定只能由管控台显式写入；新档案建完就是"未绑定"状态；
+ *   • 一个域只绑一组模型：绑定是有序列表，整体覆盖，列表首个为当前使用、其余留给多 agent / 降级；
+ *       空列表即"无可调用模型"。
+ *
+ *
+ * 没有内置对话模型：对话模型只来自「模型设置」页里用户自建的模型档案。域未绑定时沿域链向上找
  * 最近一个绑了模型的祖先（回落的是域链，不是任何内置默认值）；整条链都没绑即"无可调用"，
- * 调用时直接报"未配置"（由 {@code DefaultModelResolver} 抛出）。</p>
+ * 调用时直接报"未配置"（由 {@code DefaultModelResolver} 抛出）。
  *
- * <p>内存态 + 落盘：每次写操作先改内存、再整体落盘（写盘失败会抛异常，调用方必须感知）。</p>
+ * 内存态 + 落盘：每次写操作先改内存、再整体落盘（写盘失败会抛异常，调用方必须感知）。
  *
  * @author zzkingcc
  */
@@ -51,10 +51,10 @@ public class ModelProfileRegistry {
     // ==================== 解析 ====================
 
     /**
-     * 解析该域的可调用模型列表，<b>沿域链回落</b>：自身没绑就向上找最近一个绑了模型的祖先。
+     * 解析该域的可调用模型列表，沿域链回落：自身没绑就向上找最近一个绑了模型的祖先。
      *
-     * <p>回落的是<b>域链</b>，不是任何内置默认值 —— 根域也未绑定时返回空，
-     * 调用方据此判断"无可调用"。于是根域绑一次，整棵树都能用，不必逐域配一遍。</p>
+     * 回落的是域链，不是任何内置默认值 —— 根域也未绑定时返回空，
+     * 调用方据此判断"无可调用"。于是根域绑一次，整棵树都能用，不必逐域配一遍。
      */
     public ModelProfileSettings.DomainBinding resolve(String domain) {
         return settings.resolveAlong(domain);
@@ -63,8 +63,8 @@ public class ModelProfileRegistry {
     /**
      * 取档案（两类里都找）。
      *
-     * <p>全部档案都存于本注册表，没有"内置 default"那一类了；向量档案单独存放，
-     * 但按别名取用时调用方不该关心它存在哪个桶里。</p>
+     * 全部档案都存于本注册表，没有"内置 default"那一类了；向量档案单独存放，
+     * 但按别名取用时调用方不该关心它存在哪个桶里。
      */
     public Optional<ModelProfile> profile(String alias) {
         if (!hasText(alias)) {
@@ -75,10 +75,10 @@ public class ModelProfileRegistry {
     }
 
     /**
-     * <b>非向量</b>档案（对话 / 生图 / 语音…），按别名排序。
+     * 非向量档案（对话 / 生图 / 语音…），按别名排序。
      *
-     * <p>纯向量档案<b>不</b>在此列 —— 它们单独存放，见 {@link #embeddingProfiles()}。
-     * 管控台「模型」段直接渲染这个列表，因此不会冒出向量模型。</p>
+     * 纯向量档案不在此列 —— 它们单独存放，见 {@link #embeddingProfiles()}。
+     * 管控台「模型」段直接渲染这个列表，因此不会冒出向量模型。
      */
     public List<ModelProfile> profiles() {
         List<ModelProfile> list = new ArrayList<>();
@@ -87,7 +87,7 @@ public class ModelProfileRegistry {
         return List.copyOf(list);
     }
 
-    /** <b>纯向量</b>档案（单独存放的那一批），按别名排序 */
+    /** 纯向量档案（单独存放的那一批），按别名排序 */
     public List<ModelProfile> embeddingProfiles() {
         List<ModelProfile> list = new ArrayList<>();
         settings.getEmbeddingProfiles().forEach((alias, data) -> list.add(data.toProfile(alias)));
@@ -118,9 +118,9 @@ public class ModelProfileRegistry {
     /**
      * 当前启用的向量档案；未配置返回 {@link Optional#empty()}。
      *
-     * <p><b>只在档案真是向量档案且必填项齐备时才返回</b> —— 落盘可能被手工改坏，
+     * 只在档案真是向量档案且必填项齐备时才返回 —— 落盘可能被手工改坏，
      * 解析期就该把"选中了一个不能用的档案"暴露成"未配置"，而不是留一个 null
-     * 让灌库链路在几层之后才炸。</p>
+     * 让灌库链路在几层之后才炸。
      */
     public Optional<ModelProfile> embeddingProfile() {
         String alias = settings.getEmbeddingAlias();
@@ -199,10 +199,10 @@ public class ModelProfileRegistry {
     }
 
     /**
-     * 删除档案，并<b>级联清理所有域对该别名的绑定</b>。
+     * 删除档案，并级联清理所有域对该别名的绑定。
      *
-     * <p>不做"仍被绑定就拒绝"：级联摘掉后，那些域立即进入"无可调用"状态，由管控台（域空间页）明确提示，
-     * 而不是把删除拦在半路。返回结果里带出被清掉了绑定的域，便于前端提示。</p>
+     * 不做"仍被绑定就拒绝"：级联摘掉后，那些域立即进入"无可调用"状态，由管控台（域空间页）明确提示，
+     * 而不是把删除拦在半路。返回结果里带出被清掉了绑定的域，便于前端提示。
      *
      * @return 删除结果（含被级联清理的域）
      */
@@ -243,9 +243,9 @@ public class ModelProfileRegistry {
     }
 
     /**
-     * 设置域的可调用模型列表。<b>整体覆盖</b>，列表顺序即优先级。
+     * 设置域的可调用模型列表。整体覆盖，列表顺序即优先级。
      *
-     * @param aliases 空/空白表示<b>解绑</b>（解绑后该域即"无可调用模型"）
+     * @param aliases 空/空白表示解绑（解绑后该域即"无可调用模型"）
      * @return 失败原因；{@code null} 表示成功
      */
     public synchronized String bind(String domain, List<String> aliases) {
@@ -300,7 +300,7 @@ public class ModelProfileRegistry {
     /**
      * 删域时清理：摘掉这些域的模型绑定。
      *
-     * <p>不清理的话，绑定会变成孤儿 —— 同路径域将来重建时会沿链<b>静默继承</b>旧绑定。</p>
+     * 不清理的话，绑定会变成孤儿 —— 同路径域将来重建时会沿链静默继承旧绑定。
      */
     public synchronized void unbindDomains(Collection<String> domains) {
         if (domains == null || domains.isEmpty()) {

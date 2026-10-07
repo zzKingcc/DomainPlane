@@ -49,9 +49,7 @@
         <div class="page-head">
             <h2>提示词设定</h2>
             <p>
-                系统提示词<b>沿域链从根域拼接</b>：根域 <span class="mono">default</span> 的片段是基底，
-                后代域的片段追加在后，改祖先一处则整条链生效。
-                本页只编辑提示词，新建与删除域在<a href="domains.html">域空间</a>。
+                系统提示词<b>沿域链从根域拼接</b>：根域 <span class="mono">default</span> 为基底，后代域片段追加在后，改祖先一处则整条链生效。新建 / 删除域在<a href="domains.html">域空间</a>。
             </p>
         </div>
 
@@ -238,8 +236,7 @@
             if (orphans.length) {
                 box.style.display = 'block';
                 box.innerHTML = '<b>孤儿提示词条目：</b>' + orphans.map(esc).join('、')
-                    + '<br>这些域从未被任何工具声明过，配置留着但不会生效，也不会被自动清理；'
-                    + '若确认不再需要，可在下方域编辑区之外手工删除配置项。';
+                    + '<br>这些域从未被任何工具声明过，配置留着不生效、也不自动清理；若确认不再需要，可在下方编辑区之外手工删除配置项。';
             } else {
                 box.style.display = 'none';
             }

@@ -15,14 +15,14 @@ import java.util.List;
 /**
  * PDF（{@code .pdf}）文档处理策略。
  *
- * <p>格式适配用 PDFBox 抽行：拿得到「文本 + 字号 + 坐标 + 页码」，这是 Java 生态里唯一做得到的成熟库
- * （Tika 的输出里字号与坐标全丢）。抽完行之后删页眉页脚、拼跨页段落，再交给通用的 {@link BlockSplitter}。</p>
+ * 格式适配用 PDFBox 抽行：拿得到「文本 + 字号 + 坐标 + 页码」，这是 Java 生态里唯一做得到的成熟库
+ * （Tika 的输出里字号与坐标全丢）。抽完行之后删页眉页脚、拼跨页段落，再交给通用的 {@link BlockSplitter}。
  *
- * <p><b>本轮不做字号推断标题</b>（设计里的阶段 5），所以分节按「页」走：
- * {@code section_path = 文件名 > 第N页}，切片同时带 {@code metadata.page_from}。</p>
+ * 本轮不做字号推断标题（设计里的阶段 5），所以分节按「页」走：
+ * {@code section_path = 文件名 > 第N页}，切片同时带 {@code metadata.page_from}。
  *
- * <p><b>抽不出文字必须报错</b>：扫描件（整页是图片）在文本层里什么都没有，
- * 这时要给一句"没有可抽取的文本"，而不是"导入成功、0 个切片" —— 后者会让用户以为入库了。</p>
+ * 抽不出文字必须报错：扫描件（整页是图片）在文本层里什么都没有，
+ * 这时要给一句"没有可抽取的文本"，而不是"导入成功、0 个切片" —— 后者会让用户以为入库了。
  *
  * @author zzkingcc
  */
@@ -59,7 +59,7 @@ public class PdfDocumentProcessStrategy extends AbstractDocumentProcessStrategy 
         return new SplitResult(all, titles, dropped);
     }
 
-    /** pdf 是二进制：入口<b>不解码</b>，原始字节交给 PDFBox */
+    /** pdf 是二进制：入口不解码，原始字节交给 PDFBox */
     @Override
     public boolean binary() {
         return true;

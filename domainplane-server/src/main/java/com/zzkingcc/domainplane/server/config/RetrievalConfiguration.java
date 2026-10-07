@@ -25,17 +25,17 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * 检索配置：混合检索的编排与融合。
  *
- * <p>召回通道不是固定的两路，而是<b>按当前域动态解析</b>：一域一索引，检索域 D 时
+ * 召回通道不是固定的两路，而是按当前域动态解析：一域一索引，检索域 D 时
  * 对 D 自身与祖先链上的每个索引各召回「向量 + 关键词」两路（见 {@link DomainChannelProvider}）。
- * 域链越长通道越多，因此融合必须能在"单来源"与"多来源"之间切换：</p>
- * <ul>
- *   <li>结果实际只来自一个索引 → {@code DefaultFusionStrategy}（分数制，同索引内 BM25 可比）；</li>
- *   <li>结果来自多个索引 → {@code RrfFusionStrategy}（排名制，规避 BM25 跨索引不可比）。</li>
- * </ul>
- * <p>{@link AdaptiveFusionStrategy} 就是这条双轨的自动切换入口。</p>
+ * 域链越长通道越多，因此融合必须能在"单来源"与"多来源"之间切换：
  *
- * <p>知识库索引在首次上传时按需建出（见 {@code KnowledgeBaseService#ensureIndex}）：
- * 域是运行期由用户创建的，索引跟着域走，没有统一的"启动期建索引"这一步。</p>
+ *   • 结果实际只来自一个索引 → {@code DefaultFusionStrategy}（分数制，同索引内 BM25 可比）；
+ *   • 结果来自多个索引 → {@code RrfFusionStrategy}（排名制，规避 BM25 跨索引不可比）。
+ *
+ * {@link AdaptiveFusionStrategy} 就是这条双轨的自动切换入口。
+ *
+ * 知识库索引在首次上传时按需建出（见 {@code KnowledgeBaseService#ensureIndex}）：
+ * 域是运行期由用户创建的，索引跟着域走，没有统一的"启动期建索引"这一步。
  *
  * @author zzkingcc
  */
@@ -78,11 +78,11 @@ public class RetrievalConfiguration {
     /**
      * 域通道提供者：按当前域解析出"该查哪些索引、每个索引走哪两路召回"。
      *
-     * <p>提成独立 bean 而不是内联 new 进 {@link CompositeRetriever}：
+     * 提成独立 bean 而不是内联 new 进 {@link CompositeRetriever}：
      * 删域流程要用它失效检索器缓存（索引删了但还在缓存里会被旧检索器继续命中），
      * 那是与"查询"无关的另一条使用路径。内联构造时它拿不到 bean 引用，
      * {@code AdminDomainController} 就只能声明一个根本不存在类型的依赖 ——
-     * 于是 ES 未配置、检索器未装配的场景下整个应用起不来。</p>
+     * 于是 ES 未配置、检索器未装配的场景下整个应用起不来。
      */
     @Bean
     @Lazy

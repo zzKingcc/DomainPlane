@@ -5,8 +5,8 @@ package com.zzkingcc.domainplane.domain.rag.fusion;
  *
  * @param vectorWeight   向量权重（多索引时按「向量排名表个数」均摊到各表）
  * @param keywordWeight  关键词权重（多索引时按「关键词排名表个数」均摊到各表）
- * @param titleBoost     标题命中时的<b>乘法</b>增益：{@code 分 × (1 + titleBoost)}
- * @param fileNameBoost  文件名命中时的<b>乘法</b>增益：{@code 分 × (1 + fileNameBoost)}
+ * @param titleBoost     标题命中时的乘法增益：{@code 分 × (1 + titleBoost)}
+ * @param fileNameBoost  文件名命中时的乘法增益：{@code 分 × (1 + fileNameBoost)}
  * @param topN           重排后返回条数
  * @param rrfK           RRF 平滑常数（多索引排名制融合用）
  * @param ancestorDecay  层级衰减系数（多索引排名制融合用）：距查询域每远一层，权重乘一次该系数。

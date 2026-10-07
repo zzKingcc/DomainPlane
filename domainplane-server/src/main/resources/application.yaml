@@ -65,7 +65,8 @@ domainplane:
 
   # Redis 连接提供默认配置
   redis:
-    timeout: 2000ms
+    # 命令超时。配公网/跨机房 Redis 时 2s 太紧：一次抖动就变成 70004 CHECKPOINT_ERROR。
+    timeout: 5s
     pool:
       max-active: 8
       max-idle: 8

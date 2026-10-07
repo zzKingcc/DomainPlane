@@ -15,10 +15,10 @@ import java.time.Duration;
 /**
  * 单实例守卫的装配。
  *
- * <p>与 {@link StartupSelfCheckConfiguration} 里的自检分开：那些是<b>只提醒不阻断</b>的
- * （"配置不对但还能跑"），而本守卫是<b>会拦启动</b>的 —— 它挡的不是配置不当，
+ * 与 {@link StartupSelfCheckConfiguration} 里的自检分开：那些是只提醒不阻断的
+ * （"配置不对但还能跑"），而本守卫是会拦启动的 —— 它挡的不是配置不当，
  * 而是"多实例共用 Redis 会静默产生错误结果"这种正确性问题。因此它不是普通自检，
- * 也不该跟着 {@code domainplane.single-instance-guard} 之外的自检项一起被误当成提醒。</p>
+ * 也不该跟着 {@code domainplane.single-instance-guard} 之外的自检项一起被误当成提醒。
  *
  * @author zzkingcc
  */
@@ -30,8 +30,8 @@ public class SingleInstanceGuardConfiguration {
     /**
      * 租约有效期。
      *
-     * <p>取 90s 是权衡：短到"实例被 kill -9 之后，运维不必等太久就能重启接管"，
-     * 长到"一次正常的优雅停机释放失败，也不会立刻把下一次启动挡在门外"。</p>
+     * 取 90s 是权衡：短到"实例被 kill -9 之后，运维不必等太久就能重启接管"，
+     * 长到"一次正常的优雅停机释放失败，也不会立刻把下一次启动挡在门外"。
      */
     private static final Duration LEASE_TTL = Duration.ofSeconds(90);
 
@@ -50,8 +50,8 @@ public class SingleInstanceGuardConfiguration {
     /**
      * 启动时抢占运行权。
      *
-     * <p>失败会抛异常并中断启动 —— 这是<b>刻意</b>的：多实例的失败方式是不报错的错误结果，
-     * 宁可起不来，也不要让两个实例在同一份会话状态上互相覆盖。</p>
+     * 失败会抛异常并中断启动 —— 这是刻意的：多实例的失败方式是不报错的错误结果，
+     * 宁可起不来，也不要让两个实例在同一份会话状态上互相覆盖。
      */
     @Bean
     public DisposableBean domainplaneSingleInstanceGuardStartup(SingleInstanceGuard guard) {

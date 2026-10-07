@@ -20,8 +20,7 @@
             <div class="card-head"><h2>向量模型状态</h2></div>
             <div id="embStatus" class="status-line warn"><span>加载中…</span></div>
             <div class="hint">
-                上传与重建都会调用向量模型，因此请先确认向量模型<b>已配置</b>；
-                若刚更换过向量模型，其输出维度可能与 ES 索引 mapping 不一致，重建正是为此。
+                上传与重建都调用向量模型，请先确认其<b>已配置</b>；若刚换过向量模型，输出维度可能与 ES 索引 mapping 不一致，重建正是为此。
             </div>
         </div>
 
@@ -52,8 +51,7 @@
             <details class="disclose">
                 <summary>归属域的作用</summary>
                 <div class="disclose-body">
-                    一个域对应一个独立索引。文档落在哪个域，就<b>只有该域及其后代域</b>的对话能检索到它；
-                    选根域 <code>default</code> = 全域可见。检索工具本身仍由部署方声明到哪些域，两层叠加。
+                    一个域对应一个独立索引。文档落在哪个域，就<b>只有该域及其后代域</b>能检索到它；选根域 <code>default</code> = 全域可见。检索工具仍由部署方声明到哪些域，两层叠加。
                 </div>
             </details>
             <div id="uploadResult" class="result"></div>
@@ -74,7 +72,6 @@
             </p>
             <div class="btn-row">
                 <button id="rebuildBtn" class="danger">触发重建</button>
-                <span class="hint" style="margin:0;">该操作会删除并重建索引，其中已有数据将被清空。</span>
             </div>
             <div id="rebuildResult" class="result"></div>
         </div>

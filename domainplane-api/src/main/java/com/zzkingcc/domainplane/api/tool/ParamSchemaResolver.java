@@ -36,20 +36,6 @@ import org.slf4j.LoggerFactory;
 /**
  * 方法签名 + 注解 → 参数结构（含 DTO 递归展开）。
  *
- * <p>为什么单独抽出来：<b>服务端（本地 Bean 工具）与工具实例 SDK 各有一份扫描器</b>，
- * 两边如果各自实现一遍，同一段工具代码搬到另一侧就会得到不同的参数 schema ——
- * 这正好违背"工具代码在两侧搬迁不用改一个字"的承诺。这里就是那份<b>共用的真相</b>。</p>
- *
- * <p>只产出平台自己的中间结构（{@link ToolDescriptor.Param} 树），<b>不依赖任何模型框架</b>；
- * 两端各自把它转成自己需要的 schema（服务端转 langchain4j Schema，工具实例转上报 JSON）。</p>
- *
- * <p>支持两种载体：形参前的 {@code @ToolParam}，以及参数 DTO 字段上的 {@code @ToolParam}；
- * 形参优先（就近覆盖）。</p>
- *
- * <p>方法级的 {@link ToolAdvanced} 在树建好之后按<b>参数名</b>统一套上（示例 / 枚举白名单 / 敏感），
- * 名字既可是形参名也可是 DTO 展开出的字段名 —— 因此 {@code @ToolAdvanced} 的约定是"按名字对应，
- * 不做位置对齐"。</p>
- *
  * @author zzkingcc
  */
 public final class ParamSchemaResolver {
@@ -147,9 +133,9 @@ public final class ParamSchemaResolver {
     /**
      * 从参数泛型里取出"数组 / 集合的元素类型"。
      *
-     * <p>{@code List<Foo>} / {@code Set<Foo>} 取第一个类型实参；{@code Foo[]} 取组件类型；
+     * {@code List<Foo>} / {@code Set<Foo>} 取第一个类型实参；{@code Foo[]} 取组件类型；
      * 裸 {@code Collection}（无泛型）或纯数组之外的类型返回 {@code null} —— 元素结构展不开时，
-     * 调用方会把数组当成"元素未知"，由下游按字符串兜底。</p>
+     * 调用方会把数组当成"元素未知"，由下游按字符串兜底。
      */
     private static Type elementTypeOf(Type generic, Class<?> raw) {
         if (generic instanceof ParameterizedType parameterized
@@ -224,9 +210,9 @@ public final class ParamSchemaResolver {
     /**
      * 把 {@link ToolAdvanced} 按参数名套到已建好的参数树上。
      *
-     * <p>递归整棵树：名字既可能是形参名，也可能是 DTO 展开出的字段名，两者一视同仁。
+     * 递归整棵树：名字既可能是形参名，也可能是 DTO 展开出的字段名，两者一视同仁。
      * 顺带处理"白名单把类型变成 enum"与"示例并入说明"两件事 —— 它们是这三个字段能被模型看见的
-     * 唯一途径（底层 schema 只有 description 一个自由文本位，没有独立的 example 槽）。</p>
+     * 唯一途径（底层 schema 只有 description 一个自由文本位，没有独立的 example 槽）。
      */
     static List<ToolDescriptor.Param> applyOverrides(List<ToolDescriptor.Param> params,
                                                      ParamOverrides overrides) {
@@ -262,10 +248,10 @@ public final class ParamSchemaResolver {
     /**
      * 把参数树渲染成"上报 JSON Schema"的 {@link Map} 形式（不依赖任何 JSON 库，纯 {@link Map}）。
      *
-     * <p>工具实例侧用它生成要发给服务端的报文；服务端 {@code ToolParamSchema} 认的就是这套键
+     * 工具实例侧用它生成要发给服务端的报文；服务端 {@code ToolParamSchema} 认的就是这套键
      * （{@code type / description / example / enum / x-sensitive / properties / required / items}）。
      * 两端共用这一份渲染，保证"工具实例上报的"与"服务端本地扫描的"是同一棵树、同一种格式 ——
-     * 同一段工具代码搬到另一侧，模型看到的 schema 一字不差。</p>
+     * 同一段工具代码搬到另一侧，模型看到的 schema 一字不差。
      */
     public static Map<String, Object> toWireSchema(List<ToolDescriptor.Param> params) {
         Map<String, Object> properties = new LinkedHashMap<>();
@@ -326,14 +312,14 @@ public final class ParamSchemaResolver {
     /**
      * 没写 {@code @ToolParam("名称")} 时的参数名兜底：只认编译期元数据。
      *
-     * <p>取不到就<b>直接失败</b>，不编造名字：
+     * 取不到就直接失败，不编造名字：
      * 未开启 {@code -parameters} 时反射拿到的是 {@code arg0} / {@code arg1}，编个 {@code param1}
      * 出去，模型就会拿着错误的 key 调参 —— 这种错在联调时极难定位。
      * 工具实例侧（{@code toolprovider} 的 {@code binding}）本来就是这么做的，两侧口径必须一致；
-     * {@code INSTANCE.md} 描述的也是这条。</p>
+     * {@code INSTANCE.md} 描述的也是这条。
      *
-     * <p>早前的判据是 {@code startsWith("arg")}，把 {@code argName} / {@code argument} /
-     * {@code args} 这些完全正常的业务参数名也误伤了 —— 判据只该匹配占位形态本身。</p>
+     * 早前的判据是 {@code startsWith("arg")}，把 {@code argName} / {@code argument} /
+     * {@code args} 这些完全正常的业务参数名也误伤了 —— 判据只该匹配占位形态本身。
      */
     private static String fallbackParamName(Parameter parameter, int index) {
         String reflected = parameter.getName();
@@ -356,7 +342,7 @@ public final class ParamSchemaResolver {
     /**
      * Java 类型 → JSON Schema 类型名。
      *
-     * <p>复杂对象（DTO / record）展开为 {@code object} 并递归其字段，让模型能构造出结构化参数。</p>
+     * 复杂对象（DTO / record）展开为 {@code object} 并递归其字段，让模型能构造出结构化参数。
      */
     private static String jsonType(Class<?> type) {
         if (type == null) {
@@ -431,11 +417,11 @@ public final class ParamSchemaResolver {
     /**
      * {@link ToolAdvanced} 按参数名索引后的形态：查名字即可拿到示例 / 白名单 / 是否敏感。
      *
-     * <p>公开出来是给<b>工具实例侧</b>复用的 —— 两侧必须用同一套解析与同一段说明文本，
-     * 否则同一段工具代码搬到另一侧就会得到不同的 schema（这正是本类要消除的问题）。</p>
+     * 公开出来是给工具实例侧复用的 —— 两侧必须用同一套解析与同一段说明文本，
+     * 否则同一段工具代码搬到另一侧就会得到不同的 schema（这正是本类要消除的问题）。
      *
-     * <p>写在 {@code 参数名=值} 里的格式错误（缺 {@code =}、参数名为空）会被<b>忽略并 WARN</b> ——
-     * 静默丢弃会让"写了但没生效"变成一个查不出来的问题。</p>
+     * 写在 {@code 参数名=值} 里的格式错误（缺 {@code =}、参数名为空）会被忽略并 WARN ——
+     * 静默丢弃会让"写了但没生效"变成一个查不出来的问题。
      *
      * @param examples    参数名 → 示例值
      * @param allowValues 参数名 → 枚举白名单
@@ -491,9 +477,9 @@ public final class ParamSchemaResolver {
         /**
          * 参数说明的最终形态：留空 → {@code （未描述）}；有示例则追加到末尾。
          *
-         * <p>示例之所以并进说明而不是单独占一个字段：底层模型 schema（langchain4j 的
+         * 示例之所以并进说明而不是单独占一个字段：底层模型 schema（langchain4j 的
          * {@code JsonXxxSchema}）只有 {@code description} 一个自由文本位，额外字段会被丢掉 ——
-         * 也就到不了模型眼前。已是"未描述"时改用分号连写，避免出现两对括号。</p>
+         * 也就到不了模型眼前。已是"未描述"时改用分号连写，避免出现两对括号。
          */
         public String describe(String name, String rawDescription) {
             String base = rawDescription == null || rawDescription.isBlank()

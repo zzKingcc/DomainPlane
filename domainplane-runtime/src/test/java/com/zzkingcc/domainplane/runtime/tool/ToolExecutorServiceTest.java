@@ -1,6 +1,5 @@
 package com.zzkingcc.domainplane.runtime.tool;
 
-import com.zzkingcc.domainplane.api.agent.CallerContext;
 import com.zzkingcc.domainplane.api.annotation.Tool;
 import com.zzkingcc.domainplane.api.support.RetrievalScope;
 import com.zzkingcc.domainplane.api.support.TraceId;
@@ -160,20 +159,16 @@ class ToolExecutorServiceTest {
     // ==================== 上下文传播（本类的核心） ====================
 
     @Test
-    @DisplayName("三个上下文都要搬到隔离线程上")
+    @DisplayName("上下文都要搬到隔离线程上")
     void contextIsCarriedToToolThread() throws Exception {
         try (ToolExecutorService service = ToolExecutorService.create(2, 5_000)) {
-            AtomicReference<String> tenant = new AtomicReference<>();
-            AtomicReference<String> user = new AtomicReference<>();
             AtomicReference<String> domain = new AtomicReference<>();
             AtomicReference<String> traceId = new AtomicReference<>();
 
-            ToolInvocationContext.bind(CallerContext.of(null, "t-1", "u-1"), "trace-xyz");
+            ToolInvocationContext.bind("trace-xyz");
             RetrievalScope.bind("sales.order");
             try {
                 service.call("probe", () -> {
-                    tenant.set(ToolInvocationContext.tenantId());
-                    user.set(ToolInvocationContext.userId());
                     traceId.set(ToolInvocationContext.traceId());
                     domain.set(RetrievalScope.current());
                     return "ok";
@@ -183,8 +178,6 @@ class ToolExecutorServiceTest {
                 RetrievalScope.clear();
             }
 
-            assertEquals("t-1", tenant.get(), "审计租户丢失，工具侧查不到是谁发的");
-            assertEquals("u-1", user.get(), "审计用户丢失");
             assertEquals("trace-xyz", traceId.get(), "traceId 丢失会让工具侧日志与这次调用对不上");
             assertEquals("sales.order", domain.get(),
                     "检索域丢失会让知识库从「本轮域 + 祖先链」退化成全库检索（越权读）");
@@ -196,7 +189,7 @@ class ToolExecutorServiceTest {
     void traceIdThreadLocalIsCarried() throws Exception {
         try (ToolExecutorService service = ToolExecutorService.create(2, 5_000)) {
             AtomicReference<String> fromThreadLocal = new AtomicReference<>();
-            ToolInvocationContext.bind(CallerContext.of(null, "t", "u"), "trace-mdc");
+            ToolInvocationContext.bind("trace-mdc");
             try {
                 service.call("probe", () -> {
                     fromThreadLocal.set(TraceId.current());
@@ -222,7 +215,7 @@ class ToolExecutorServiceTest {
 
         try (ToolExecutorService service = ToolExecutorService.create(2, 5_000)) {
             AtomicReference<String> fromMdc = new AtomicReference<>();
-            ToolInvocationContext.bind(CallerContext.of(null, "t", "u"), "trace-mdc");
+            ToolInvocationContext.bind("trace-mdc");
             try {
                 service.call("probe", () -> {
                     fromMdc.set(MDC.get(TraceId.MDC_KEY));
@@ -240,24 +233,21 @@ class ToolExecutorServiceTest {
     @DisplayName("执行结束后隔离线程被清干净，不把这一轮的上下文留给下一轮")
     void contextIsClearedAfterExecution() throws Exception {
         try (ToolExecutorService service = ToolExecutorService.create(1, 5_000)) {
-            ToolInvocationContext.bind(CallerContext.of(null, "tenant-A", "user-A"), "trace-A");
+            ToolInvocationContext.bind("trace-A");
             RetrievalScope.bind("domain.a");
             service.call("first", () -> "ok");
             ToolInvocationContext.clear();
             RetrievalScope.clear();
 
             // 单线程池：第二次一定复用同一个线程。上下文若没清，这里就会读到 A 的值
-            AtomicReference<String> tenant = new AtomicReference<>("sentinel");
             AtomicReference<String> domain = new AtomicReference<>("sentinel");
             AtomicReference<String> traceId = new AtomicReference<>("sentinel");
             service.call("second", () -> {
-                tenant.set(ToolInvocationContext.tenantId());
                 domain.set(RetrievalScope.current());
                 traceId.set(ToolInvocationContext.traceId());
                 return "ok";
             });
 
-            assertNull(tenant.get(), "上一轮租户被带进了这一轮 —— 审计会记成错误的人");
             assertNull(domain.get(), "上一轮检索域残留会让本轮读到不属于它的知识库");
             assertNull(traceId.get(), "上一轮 traceId 残留会让两轮日志混成一条链路");
         }
@@ -267,14 +257,14 @@ class ToolExecutorServiceTest {
     @DisplayName("调用线程没绑上下文时，隔离线程上就是干净的全空")
     void noContextStaysClean() throws Exception {
         try (ToolExecutorService service = ToolExecutorService.create(1, 5_000)) {
-            AtomicReference<String> tenant = new AtomicReference<>("sentinel");
+            AtomicReference<String> traceId = new AtomicReference<>("sentinel");
             AtomicReference<String> domain = new AtomicReference<>("sentinel");
             service.call("probe", () -> {
-                tenant.set(ToolInvocationContext.tenantId());
+                traceId.set(ToolInvocationContext.traceId());
                 domain.set(RetrievalScope.current());
                 return "ok";
             });
-            assertNull(tenant.get());
+            assertNull(traceId.get());
             assertNull(domain.get());
         }
     }

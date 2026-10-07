@@ -15,11 +15,11 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 系统提示词解析器：管控台（{@code config/prompts.json}）优先，yaml 兜底。
  *
- * <p>生效提示词是<b>沿链拼接</b>的：从根域到当前域，依次取出每段配置的片段，按由根向下拼成一段。
- * 祖先的内容做后代的基底 —— 与工具可见性、知识库、模型绑定同一套累加语义。</p>
+ * 生效提示词是沿链拼接的：从根域到当前域，依次取出每段配置的片段，按由根向下拼成一段。
+ * 祖先的内容做后代的基底 —— 与工具可见性、知识库、模型绑定同一套累加语义。
  *
- * <p>拼接不加任何边界标记：链上每一段都是平台自己配置的提示词，
- * 不存在"把外部数据降级成非指令"的必要，加标记反而会削弱根域内容的权威性。</p>
+ * 拼接不加任何边界标记：链上每一段都是平台自己配置的提示词，
+ * 不存在"把外部数据降级成非指令"的必要，加标记反而会削弱根域内容的权威性。
  *
  * @author zzkingcc
  */
@@ -48,7 +48,7 @@ public class DomainSystemPromptResolver implements SystemPromptResolver {
     }
 
     /**
-     * 用<b>已读到的</b>设置拼提示词（并在整条链都为空时提示，每域一次）。
+     * 用已读到的设置拼提示词（并在整条链都为空时提示，每域一次）。
      */
     public String resolve(String domainId, DomainSettings console) {
         String prompt = compose(domainId, console);
@@ -62,7 +62,7 @@ public class DomainSystemPromptResolver implements SystemPromptResolver {
     }
 
     /**
-     * 只拼文本，<b>不发任何日志</b>。
+     * 只拼文本，不发任何日志。
      */
     public String preview(String domainId, DomainSettings console) {
         return compose(domainId, console);

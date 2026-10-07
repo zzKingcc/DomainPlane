@@ -24,9 +24,9 @@ public class AccountSettings {
     /**
      * 凭证签名主密钥（Base64，随机 32 字节，持久化）。
      *
-     * <p>它不能直接用来签名：实际签名密钥由 {@code HMAC(主密钥, passwordHash)} 派生，
+     * 它不能直接用来签名：实际签名密钥由 {@code HMAC(主密钥, passwordHash)} 派生，
      * 这样改密码就自动让所有旧凭证失效（零存储实现"改密即踢人"）。若直接用它签名，
-     * 改密码将不会使旧凭证失效。</p>
+     * 改密码将不会使旧凭证失效。
      */
     private String signingKey;
 
@@ -42,9 +42,9 @@ public class AccountSettings {
     /**
      * 复制一份。
      *
-     * <p>{@code AccountStore} 返回的是内存缓存对象本身，就地修改会连带改掉缓存；一旦随后的落盘
+     * {@code AccountStore} 返回的是内存缓存对象本身，就地修改会连带改掉缓存；一旦随后的落盘
      * 失败，内存与磁盘就不一致（内存里已是新密码、磁盘上还是旧的，重启即"密码改回去"）。
-     * 因此所有改写路径都先复制、改副本、再整体落盘。</p>
+     * 因此所有改写路径都先复制、改副本、再整体落盘。
      */
     public AccountSettings copy() {
         AccountSettings copy = new AccountSettings();

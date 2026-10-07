@@ -20,19 +20,19 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 按<b>当前检索域</b>解析召回通道：一域一索引 → 每个「域链上的索引 × 两路模态」各一条通道。
+ * 按当前检索域解析召回通道：一域一索引 → 每个「域链上的索引 × 两路模态」各一条通道。
  *
- * <p>域链 = {@code Domains.chainOf(当前域)}，即<b>自身 + 全部祖先</b>（含根域），
- * 与工具可见性、提示词的同构语义一致：挂在父域的内容，子域天然可用。</p>
+ * 域链 = {@code Domains.chainOf(当前域)}，即自身 + 全部祖先（含根域），
+ * 与工具可见性、提示词的同构语义一致：挂在父域的内容，子域天然可用。
  *
- * <p>不预判索引是否存在 —— 某条祖先域还没上传过任何文档时它没有索引，此时通道安静地返回空
- * （检索器开了 {@code ignoreUnavailable / allowNoIndices}），比先探测一遍省掉 N 次往返。</p>
+ * 不预判索引是否存在 —— 某条祖先域还没上传过任何文档时它没有索引，此时通道安静地返回空
+ * （检索器开了 {@code ignoreUnavailable / allowNoIndices}），比先探测一遍省掉 N 次往返。
  *
- * <p>每条通道带 <b>depth</b>（距查询域的距离，0 = 自身），供融合阶段做层级衰减：
- * 本域自有知识优先于从祖先继承来的知识。</p>
+ * 每条通道带 depth（距查询域的距离，0 = 自身），供融合阶段做层级衰减：
+ * 本域自有知识优先于从祖先继承来的知识。
  *
- * <p>未绑定域（非对话路径：管控台预览、诊断等）走<b>通配</b>：对全部知识库索引做一次检索，
- * 保持升级前"全库检索"的行为，避免这些调用凭空查不到东西。</p>
+ * 未绑定域（非对话路径：管控台预览、诊断等）走通配：对全部知识库索引做一次检索，
+ * 保持升级前"全库检索"的行为，避免这些调用凭空查不到东西。
  *
  * @author zzkingcc
  */
@@ -90,8 +90,8 @@ public class DomainChannelProvider implements CompositeRetriever.ChannelProvider
     /**
      * 删域时清理：失效这些索引对应的检索器缓存。
      *
-     * <p>不失效的话，删除的索引还会被缓存里的旧检索器继续命中（ES 层报索引缺失），
-     * 且同路径域将来重建时会复用指向旧 mapping 的检索器。</p>
+     * 不失效的话，删除的索引还会被缓存里的旧检索器继续命中（ES 层报索引缺失），
+     * 且同路径域将来重建时会复用指向旧 mapping 的检索器。
      */
     public void evictIndices(Collection<String> indexNames) {
         if (indexNames == null || indexNames.isEmpty()) {

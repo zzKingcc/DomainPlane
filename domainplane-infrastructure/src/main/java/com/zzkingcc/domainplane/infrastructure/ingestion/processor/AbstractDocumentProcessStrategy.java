@@ -31,8 +31,8 @@ import java.util.Set;
 /**
  * 文档处理策略抽象基类（模板方法模式）
  *
- * <p>封装分片后的通用处理流程：content_hash 生成 → 批次内去重 → ES 去重 → 分批向量化写入。
- * 子类只需实现 {@link #splitDocuments(List)} 提供差异化的分片逻辑。</p>
+ * 封装分片后的通用处理流程：content_hash 生成 → 批次内去重 → ES 去重 → 分批向量化写入。
+ * 子类只需实现 {@link #splitDocuments(List)} 提供差异化的分片逻辑。
  * @author zzkingcc
  */
 @Slf4j
@@ -168,8 +168,8 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
     /**
      * 单文件切片数上限（防雪崩，不是限制功能）。
      *
-     * <p>几百页的 PDF / 超长 docx 一次就能产出几千片，向量化要分批请求模型 ——
-     * 一次上传就能把导入队列堵死。超限直接拒绝，并告诉用户怎么做（拆成几个小文件）。</p>
+     * 几百页的 PDF / 超长 docx 一次就能产出几千片，向量化要分批请求模型 ——
+     * 一次上传就能把导入队列堵死。超限直接拒绝，并告诉用户怎么做（拆成几个小文件）。
      */
     protected void guardChunkLimit(List<IngestSource> documents, List<TextSegment> segments) {
         int limit = IngestLimits.maxChunksPerDocument();
@@ -185,8 +185,8 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
     /**
      * 计算 content_hash：SHA-256(切片正文)。
      *
-     * <p><b>只算正文，不含文件名与标题</b> —— 正文里已经带了 section_path，所以重复内容一定同哈希；
-     * 而"改了文件名重传"不会因此变成新内容，去重才有意义。</p>
+     * 只算正文，不含文件名与标题 —— 正文里已经带了 section_path，所以重复内容一定同哈希；
+     * 而"改了文件名重传"不会因此变成新内容，去重才有意义。
      */
     protected String computeContentHash(String text) {
         try {
@@ -201,9 +201,9 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
     /**
      * 去重键 = 正文哈希 + 文件名。
      *
-     * <p>加文件名是为了把去重限制在「同一份文档内」：同一文档里的重复段落仍会被去掉
+     * 加文件名是为了把去重限制在「同一份文档内」：同一文档里的重复段落仍会被去掉
      * （这是去重本来要解决的问题），但不会把另一个文件里相同的句子误判成重复内容。
-     * 分隔符用 {@code \n} —— 文件名在入库时已被规范化，不含控制字符，不会与内容混淆。</p>
+     * 分隔符用 {@code \n} —— 文件名在入库时已被规范化，不含控制字符，不会与内容混淆。
      */
     protected static String computeDedupKey(String contentHash, String fileName) {
         return (contentHash == null ? "" : contentHash) + "\n" + (fileName == null ? "" : fileName);
@@ -277,8 +277,8 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
     /**
      * 文本类策略用：把 {@link IngestSource} 还原成 langchain4j 的 {@code Document}。
      *
-     * <p>只有文本类能走这一步 —— 二进制载体 {@link IngestSource#text()} 为 {@code null}，
-     * 这里会跳过并告警（二进制策略应该取 {@link IngestSource#content()}）。</p>
+     * 只有文本类能走这一步 —— 二进制载体 {@link IngestSource#text()} 为 {@code null}，
+     * 这里会跳过并告警（二进制策略应该取 {@link IngestSource#content()}）。
      */
     protected static List<Document> asDocuments(List<IngestSource> sources) {
         List<Document> documents = new ArrayList<>(sources.size());

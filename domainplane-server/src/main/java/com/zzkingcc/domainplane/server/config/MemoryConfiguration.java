@@ -21,9 +21,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 /**
  * 会话记忆配置
  *
- * <p>上限与保留期取自 {@code domainplane.memory.*}。一期语义：记忆<b>只增不淘汰</b>、默认<b>永久不过期</b>
+ * 上限与保留期取自 {@code domainplane.memory.*}。一期语义：记忆只增不淘汰、默认永久不过期
  * ——到上限后由入口拒绝新一轮（{@code 30004}），调用方必须换 {@code sessionId}；Redis 侧靠 RDB+AOF
- * 保住（启动期由 {@code RedisPersistenceAudit} 自检并告警）。</p>
+ * 保住（启动期由 {@code RedisPersistenceAudit} 自检并告警）。
  *
  * @author zzkingcc
  */

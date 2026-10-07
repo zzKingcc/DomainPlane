@@ -5,30 +5,30 @@ import dev.langchain4j.data.document.Metadata;
 import java.util.Objects;
 
 /**
- * 入库来源：一份待导入文件的「<b>原始字节</b> + 文件名 + metadata（+ 文本类的解码结果）」。
+ * 入库来源：一份待导入文件的「原始字节 + 文件名 + metadata（+ 文本类的解码结果）」。
  *
- * <p>本包的词根约定（三个词根各管一段，别混用）：
- * <ul>
- *   <li>{@code Ingest*} —— <b>导入过程</b>：本类（来源）、{@code IngestReport}（结果）、
- *       {@code IngestLimits}（限额）。</li>
- *   <li>{@code Document*} —— <b>文档实体</b>：{@code DocumentProcessStrategy}（处理策略）、
- *       {@code DocumentItem}（已入库条目）。</li>
- *   <li>{@code Doc*} —— <b>具体文件格式</b>：{@code DocReader} / {@code DocxReader}，
- *       与 {@code ExcelReader} / {@code PdfReader} 同列。</li>
- * </ul>
+ * 本包的词根约定（三个词根各管一段，别混用）：
+ *
+ *   • {@code Ingest*} —— 导入过程：本类（来源）、{@code IngestReport}（结果）、
+ *       {@code IngestLimits}（限额）。
+ *   • {@code Document*} —— 文档实体：{@code DocumentProcessStrategy}（处理策略）、
+ *       {@code DocumentItem}（已入库条目）。
+ *   • {@code Doc*} —— 具体文件格式：{@code DocReader} / {@code DocxReader}，
+ *       与 {@code ExcelReader} / {@code PdfReader} 同列。
+ *
  * 驱动导入的组件叫 {@code DocumentIngestor}（"导入文档的组件"），与本类
- * （"待导入的来源"）是同一组词但<b>相反顺序</b>，因此本类不叫 {@code IngestDocument} ——
- * 那会让两种顺序同时存在，读代码时分不清谁是谁。</p>
+ * （"待导入的来源"）是同一组词但相反顺序，因此本类不叫 {@code IngestDocument} ——
+ * 那会让两种顺序同时存在，读代码时分不清谁是谁。
  *
- * <p>为什么不用 langchain4j 的 {@code Document}：docx / pdf 是<b>二进制</b>，而 {@code Document}
- * 只有 {@code text()}。把二进制塞进"统一字符集"那一步会有两种结果 ——</p>
- * <ol>
- *   <li>二进制恰好能通过严格 UTF-8 → <b>乱码入库</b>。这是最糟的一种：<b>静默成功</b>，
- *       检索出来全是垃圾，日志里一条警告都没有。</li>
- *   <li>过不了 UTF-8 也过不了 GB18030 → 报"编码判不出"。用户按提示另存为 UTF-8 <b>永远解决不了</b>。</li>
- * </ol>
- * <p>所以入口必须<b>按类型分叉</b>：文本类（txt / md）在入口一次性解码成 UTF-8 文本，
- * 二进制类（docx / pdf）<b>绝不解码</b>，原字节交给对应的解析器。</p>
+ * 为什么不用 langchain4j 的 {@code Document}：docx / pdf 是二进制，而 {@code Document}
+ * 只有 {@code text()}。把二进制塞进"统一字符集"那一步会有两种结果 ——
+ *
+ *   • 二进制恰好能通过严格 UTF-8 → 乱码入库。这是最糟的一种：静默成功，
+ *       检索出来全是垃圾，日志里一条警告都没有。
+ *   • 过不了 UTF-8 也过不了 GB18030 → 报"编码判不出"。用户按提示另存为 UTF-8 永远解决不了。
+ *
+ * 所以入口必须按类型分叉：文本类（txt / md）在入口一次性解码成 UTF-8 文本，
+ * 二进制类（docx / pdf）绝不解码，原字节交给对应的解析器。
  *
  * @author zzkingcc
  */
@@ -64,7 +64,7 @@ public final class IngestSource {
     }
 
     /**
-     * 二进制类：<b>不解码</b>，字节原样留给格式的解析器。
+     * 二进制类：不解码，字节原样留给格式的解析器。
      */
     public static IngestSource ofBinary(byte[] content, String fileName, Metadata metadata) {
         return new IngestSource(content, fileName, metadata, null, BINARY_ENCODING);
@@ -78,8 +78,8 @@ public final class IngestSource {
     /**
      * 已解码文本；二进制类返回 {@code null}。
      *
-     * <p>返回 {@code null} 而不是空串，是为了让"这个格式不该有文本"变成显式状态 ——
-     * 二进制策略要是误取了它，立刻 NPE 而不是静默导入一堆空切片。</p>
+     * 返回 {@code null} 而不是空串，是为了让"这个格式不该有文本"变成显式状态 ——
+     * 二进制策略要是误取了它，立刻 NPE 而不是静默导入一堆空切片。
      */
     public String text() {
         return text;

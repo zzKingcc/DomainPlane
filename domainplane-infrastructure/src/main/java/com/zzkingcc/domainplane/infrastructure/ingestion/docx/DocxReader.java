@@ -24,22 +24,22 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * docx 解析器（docx 入库的<b>格式适配层</b>）：{@code byte[] → List<Block>}。
+ * docx 解析器（docx 入库的格式适配层）：{@code byte[] → List<Block>}。
  *
- * <p><b>为什么不用 Tika</b>（实测结论，不是偏好）：Tika 的 XHTML 把 docx 的标题降级成了普通
- * {@code <p>} —— 它保留了表格结构，但<b>丢掉了标题层级</b>。而标题层级正是我们要的核心信息，
+ * 为什么不用 Tika：Tika 的 XHTML 把 docx 的标题降级成了普通
+ * {@code } —— 它保留了表格结构，但丢掉了标题层级。而标题层级正是我们要的核心信息，
  * POI 直读 {@code 段落样式}（{@code Heading1} / {@code 标题 1}）和
- * {@code 大纲级别}（{@code outlineLvl}）本来就拿得到。</p>
+ * {@code 大纲级别}（{@code outlineLvl}）本来就拿得到。
  *
- * <p>三条刻意的取舍：</p>
- * <ul>
- *   <li><b>页眉页脚根本不读</b>：这里只遍历 {@link XWPFDocument#getBodyElements()}，
- *       它们压根进不来 —— 比事后按"是否重复"删除干净得多。</li>
- *   <li><b>表格与段落按文档顺序穿插</b>：正文里"一段话 → 一张表 → 又一段话"很常见，
- *       先全段落再全部表格会把表和它的说明文字拆到两处。</li>
- *   <li><b>图片只留占位</b>：不做 OCR（见 MULTI-FORMAT 设计 §五）；
- *       占位取自 Word 里的"可选文字"，没有就是 {@code [图片]}。</li>
- * </ul>
+ * 三条刻意的取舍：
+ *
+ *   • 页眉页脚根本不读：这里只遍历 {@link XWPFDocument#getBodyElements()}，
+ *       它们压根进不来 —— 比事后按"是否重复"删除干净得多。
+ *   • 表格与段落按文档顺序穿插：正文里"一段话 → 一张表 → 又一段话"很常见，
+ *       先全段落再全部表格会把表和它的说明文字拆到两处。
+ *   • 图片只留占位：不做 OCR（见 MULTI-FORMAT 设计 §五）；
+ *       占位取自 Word 里的"可选文字"，没有就是 {@code [图片]}。
+ *
  *
  * @author zzkingcc
  */
@@ -98,11 +98,11 @@ public final class DocxReader {
     }
 
     /**
-     * 段落的标题层级：先看<b>样式</b>（{@code Heading2} / {@code 标题 2}），再看<b>大纲级别</b>。
+     * 段落的标题层级：先看样式（{@code Heading2} / {@code 标题 2}），再看大纲级别。
      *
-     * <p>两个都要：中文版 Word 的内置标题样式 ID 常常只是 {@code 1} {@code 2}（没有 heading 字样），
+     * 两个都要：中文版 Word 的内置标题样式 ID 常常只是 {@code 1} {@code 2}（没有 heading 字样），
      * 这时候只有 {@code outlineLvl} 能说明它是标题；反过来有些文档的样式名写了
-     * {@code Heading 3} 却不落 {@code outlineLvl}。</p>
+     * {@code Heading 3} 却不落 {@code outlineLvl}。
      */
     private static Integer headingLevel(XWPFParagraph paragraph) {
         Integer fromId = levelOfStyleName(paragraph.getStyleID());
@@ -176,8 +176,8 @@ public final class DocxReader {
     /**
      * 表格 → {@link MarkdownTable}。
      *
-     * <p>渲染细节（列齐平、单元格转义、截断）与旧版 doc、excel 共用同一份实现 ——
-     * 三个格式的表在检索侧必须长得一样，不然 BM25 的字段权重就没法统一。</p>
+     * 渲染细节（列齐平、单元格转义、截断）与旧版 doc、excel 共用同一份实现 ——
+     * 三个格式的表在检索侧必须长得一样，不然 BM25 的字段权重就没法统一。
      */
     private static Block tableBlock(XWPFTable table) {
         List<List<String>> rows = new ArrayList<>();

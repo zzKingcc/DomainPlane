@@ -1,6 +1,5 @@
 package com.zzkingcc.domainplane.runtime.stream;
 
-import com.zzkingcc.domainplane.api.agent.CallerContext;
 import com.zzkingcc.domainplane.api.event.AgentEvent;
 import com.zzkingcc.domainplane.api.support.TraceId;
 
@@ -15,22 +14,23 @@ public final class StreamContext {
 
     private final String sessionId;
     private final reactor.core.publisher.FluxSink<AgentEvent> sink;
-    private final CallerContext caller;
+    /** 本轮所处的域（入口已归一化） */
+    private final String domain;
     /** 本轮排障标识：随 ERROR 事件下发，便于用 traceId 串起一次完整调用 */
     private final String traceId;
     private final StringBuilder partialOutput = new StringBuilder();
 
     public StreamContext(String sessionId, reactor.core.publisher.FluxSink<AgentEvent> sink,
-                         CallerContext caller) {
-        this(sessionId, sink, caller, TraceId.generate());
+                         String domain) {
+        this(sessionId, sink, domain, TraceId.generate());
     }
 
     public StreamContext(String sessionId, reactor.core.publisher.FluxSink<AgentEvent> sink,
-                         CallerContext caller, String traceId) {
+                         String domain, String traceId) {
         this.sessionId = Objects.requireNonNull(sessionId, "sessionId");
         this.sink = Objects.requireNonNull(sink, "sink");
-        // 域是必填字段：没有域就无法决定"哪些工具可见"，因此这里不允许回落到匿名身份
-        this.caller = Objects.requireNonNull(caller, "caller（CallerContext 必须携带 profile）");
+        // 域是必填字段：没有域就无法决定"哪些工具可见"，不能回落到匿名身份
+        this.domain = Objects.requireNonNull(domain, "domain（本轮所处的域必填）");
         this.traceId = (traceId == null || traceId.isBlank()) ? TraceId.generate() : traceId;
     }
 
@@ -43,14 +43,9 @@ public final class StreamContext {
         return traceId;
     }
 
-    /** 本轮调用方身份（域 / 租户 / 用户） */
-    public CallerContext caller() {
-        return caller;
-    }
-
-    /** 本轮所处的域（去空白）；未指定时为 {@code null} */
+    /** 本轮所处的域 */
     public String domainId() {
-        return caller.normalizedProfile();
+        return domain;
     }
 
     /** 下发一个事件;流已被取消时 Reactor 会静默丢弃 */

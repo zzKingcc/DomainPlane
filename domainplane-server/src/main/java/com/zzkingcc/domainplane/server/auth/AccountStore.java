@@ -13,7 +13,6 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.Base64;
 
@@ -197,7 +196,7 @@ public class AccountStore {
     /**
      * 种子里的默认账号 / 密码（供管控台提示"仍是默认密码，建议修改"）。
      *
-     * <p>只读种子、不做任何持久化：一旦用户改过密码，比对自然不成立。</p>
+     * 只读种子、不做任何持久化：一旦用户改过密码，比对自然不成立。
      */
     public static String defaultUsername() {
         Seed seed = cachedSeed();

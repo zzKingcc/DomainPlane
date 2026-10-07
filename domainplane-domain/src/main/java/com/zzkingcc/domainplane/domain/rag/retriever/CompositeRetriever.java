@@ -22,13 +22,13 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 混合检索编排器：对「多个索引 × 两路模态」的<b>通道集合</b>做召回编排
+ * 混合检索编排器：对「多个索引 × 两路模态」的通道集合做召回编排
  * （串行 / 并行 + 超时，失败互不影响），把每路结果组成排名表，融合重排交给
  * {@link FusionStrategy}。
  *
- * <p>本类只负责「召回编排 + 失败处理」，不内联融合算法，也不知道 ES ——
- * 通道由 {@link ChannelProvider} 按<b>当前域</b>解析给出（多索引时 = 域链上各域的索引 × 2）。
- * 这样融合策略（分数制 / RRF）可以自由替换而不动编排。</p>
+ * 本类只负责「召回编排 + 失败处理」，不内联融合算法，也不知道 ES ——
+ * 通道由 {@link ChannelProvider} 按当前域解析给出（多索引时 = 域链上各域的索引 × 2）。
+ * 这样融合策略（分数制 / RRF）可以自由替换而不动编排。
  *
  * @author zzkingcc
  */
@@ -52,7 +52,7 @@ public class CompositeRetriever implements ContentRetriever {
      * @param sourceId  来源标识（索引名）
      * @param modality  模态
      * @param retriever 该通道的检索器
-     * @param depth     该来源距<b>查询域</b>的距离（0 = 查询域自身）；融合阶段据此做层级衰减
+     * @param depth     该来源距查询域的距离（0 = 查询域自身）；融合阶段据此做层级衰减
      */
     public record Channel(String sourceId, Modality modality, ContentRetriever retriever, int depth) {
 
@@ -63,9 +63,9 @@ public class CompositeRetriever implements ContentRetriever {
     }
 
     /**
-     * 通道提供者：按<b>当前检索域</b>解析出本轮要召回的通道集合。
+     * 通道提供者：按当前检索域解析出本轮要召回的通道集合。
      *
-     * <p>未绑定域或该域链上没有任何索引时返回空集合，检索即"未命中"。</p>
+     * 未绑定域或该域链上没有任何索引时返回空集合，检索即"未命中"。
      */
     public interface ChannelProvider {
         List<Channel> channels();
@@ -76,7 +76,7 @@ public class CompositeRetriever implements ContentRetriever {
     private final FusionStrategy fusionStrategy;
     /** 并行召回线程池;null 表示串行执行 */
     private final Executor executor;
-    /** 单通道召回超时(毫秒);&lt;=0 表示取默认兜底值 */
+    /** 单通道召回超时(毫秒);<=0 表示取默认兜底值 */
     private final long timeoutMs;
 
     public CompositeRetriever(ChannelProvider channelProvider,
@@ -188,8 +188,8 @@ public class CompositeRetriever implements ContentRetriever {
     /**
      * 在调用线程上直接召回，仅做异常隔离。
      *
-     * <p>用于并行分支 —— 那里每条通道已经提交到 {@code executor}，超时由
-     * {@link #await} 按整轮 deadline 控制，不需要再包一层线程。</p>
+     * 用于并行分支 —— 那里每条通道已经提交到 {@code executor}，超时由
+     * {@link #await} 按整轮 deadline 控制，不需要再包一层线程。
      */
     private ChannelResult retrieveDirectly(Channel channel, Query query) {
         try {
@@ -204,9 +204,9 @@ public class CompositeRetriever implements ContentRetriever {
     /**
      * 串行模式下的安全召回：单通道异常不影响其它通道，且受整轮 deadline 约束。
      *
-     * <p>通道提交到 {@code pool}（一个临时单线程池）而不是在调用线程上直接跑 ——
-     * 直接跑的话调用线程会被阻塞在通道上，超时无从生效，那正是串行模式此前
-     * 完全没有超时保护的根因。</p>
+     * 通道提交到 {@code pool}（一个临时单线程池）而不是在调用线程上直接跑 ——
+     * 直接跑的话调用线程会被阻塞在通道上，超时无从生效，那正是串行模式
+     * 完全没有超时保护的根因。
      */
     private ChannelResult retrieveSafely(Channel channel, Query query, long deadline, ExecutorService pool) {
         Future<ChannelResult> task = null;
@@ -226,7 +226,7 @@ public class CompositeRetriever implements ContentRetriever {
     /**
      * 并行模式下等待单通道结果：超时或异常都记为"该路失败"，并取消该路任务。
      *
-     * <p>传进来的是整轮 deadline 剩下的预算，不是配置的完整超时值。</p>
+     * 传进来的是整轮 deadline 剩下的预算，不是配置的完整超时值。
      */
     private ChannelResult await(CompletableFuture<ChannelResult> future, Channel channel, long deadline) {
         try {

@@ -3,7 +3,6 @@ package com.zzkingcc.domainplane.runtime.tool;
 import com.zzkingcc.domainplane.api.agent.Domains;
 import com.zzkingcc.domainplane.api.annotation.Tool;
 import com.zzkingcc.domainplane.api.annotation.ToolDomains;
-import com.zzkingcc.domainplane.api.annotation.ToolParam;
 import com.zzkingcc.domainplane.api.tool.ParamSchemaResolver;
 import com.zzkingcc.domainplane.api.tool.ToolDescriptor;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -32,9 +31,9 @@ import java.util.Set;
  * 本地 Bean 工具的注解扫描器：扫 {@code @Tool} 方法，产出 {@code ToolDescriptor}
  * 注册进 {@link ToolRegistry}，工具就在本进程内执行。
  *
- * <p>与 {@code toolprovider} 模块的 {@code ToolProviderScanner} 是<b>两侧</b>：
+ * 与 {@code toolprovider} 模块的 {@code ToolProviderScanner} 是两侧：
  * 那侧扫的是"要注册到远端服务端的工具"，产出 {@code ToolSpec} 上报，本地不留副本。
- * 两边职责不同、产物不同，故类名不同，不要当成同一个概念的两份实现。</p>
+ * 两边职责不同、产物不同，故类名不同，不要当成同一个概念的两份实现。
  *
  * @author zzkingcc
  */
@@ -48,13 +47,13 @@ public final class AnnotatedToolScanner {
     /**
      * 扫描一个工具提供者实例。
      *
-     * <p>方法上有 {@code @Tool} 即算工具。</p>
+     * 方法上有 {@code @Tool} 即算工具。
      *
-     * <p><b>注解从「用户类」取，执行走「代理类」</b>：Spring 的 CGLIB / JDK 代理会重写方法，
+     * 注解从「用户类」取，执行走「代理类」：Spring 的 CGLIB / JDK 代理会重写方法，
      * 而方法注解不随重写继承 —— 直接扫 {@code provider.getClass()} 会让
      * {@code @Transactional} / {@code @Async} 切过的 Service 上的 {@code @Tool} 全部扫不到
      * （工具凭空消失，且只留一行 WARN）。反过来若拿用户类的 {@code Method} 去反射调用，
-     * 又会绕过代理链、让切面失效。两件事必须分开：<b>元数据查用户类，invoke 用代理类的方法</b>。</p>
+     * 又会绕过代理链、让切面失效。两件事必须分开：元数据查用户类，invoke 用代理类的方法。
      *
      * @param provider 工具提供者 Bean（可能是代理实例）
      * @return 该 Bean 上所有工具方法的注册项（可能为空）
@@ -107,8 +106,8 @@ public final class AnnotatedToolScanner {
     /**
      * 剥掉 Spring 生成的代理类，回到用户类 —— CGLIB 代理的类名形如 {@code Xxx$$SpringCGLIB$$0}。
      *
-     * <p>JDK 动态代理（{@code com.sun.proxy.$ProxyN}）的父类是 {@code java.lang.reflect.Proxy}，
-     * 类名里没有 {@code $$}，这里剥不掉 —— 那种情况由 {@link #annotatedMethods} 扫接口兜住。</p>
+     * JDK 动态代理（{@code com.sun.proxy.$ProxyN}）的父类是 {@code java.lang.reflect.Proxy}，
+     * 类名里没有 {@code $$}，这里剥不掉 —— 那种情况由 {@link #annotatedMethods} 扫接口兜住。
      */
     private static Class<?> userClassOf(Class<?> candidate) {
         Class<?> current = candidate;
@@ -125,7 +124,7 @@ public final class AnnotatedToolScanner {
     /**
      * 收集带 {@link Tool} 的方法：用户类自己的 + 各接口上的，按签名去重。
      *
-     * <p>接口必须一起扫：JDK 动态代理下注解只写在接口方法上，实现类的方法拿不到。</p>
+     * 接口必须一起扫：JDK 动态代理下注解只写在接口方法上，实现类的方法拿不到。
      */
     private static List<Method> annotatedMethods(Class<?> userClass) {
         List<Method> candidates = new ArrayList<>(List.of(userClass.getMethods()));
@@ -168,10 +167,10 @@ public final class AnnotatedToolScanner {
     /**
      * 找到「真正会被调用」的那个方法：代理类上同签名的那一份。
      *
-     * <p>CGLIB 代理重写了方法，拿到它才能让调用经过代理链（切面生效）；
+     * CGLIB 代理重写了方法，拿到它才能让调用经过代理链（切面生效）；
      * JDK 代理的代理类上没有实现类的方法，{@code getMethod} 会抛
      * {@link NoSuchMethodException}，此时退回用户类/接口方法 —— 对 JDK 代理而言
-     * 接口方法 invoke 同样会经过代理。</p>
+     * 接口方法 invoke 同样会经过代理。
      */
     private static Method executableMethod(Object provider, Class<?> proxyClass, Method declared) {
         try {
@@ -193,8 +192,8 @@ public final class AnnotatedToolScanner {
     /**
      * 由方法上的注解解析出工具描述；不是工具方法时返回 {@code null}。
      *
-     * <p>参数结构一律交给 {@link ParamSchemaResolver} —— 与工具实例 SDK 共用同一份实现，
-     * 避免"同一段工具代码搬到另一侧得到不同 schema"。</p>
+     * 参数结构一律交给 {@link ParamSchemaResolver} —— 与工具实例 SDK 共用同一份实现，
+     * 避免"同一段工具代码搬到另一侧得到不同 schema"。
      */
     private static ToolDescriptor describe(Class<?> declaringClass, Method method) {
         Tool tool = method.getAnnotation(Tool.class);
@@ -234,11 +233,11 @@ public final class AnnotatedToolScanner {
     /**
      * 可用域：方法级 {@code @Tool#domains()} → 类级 {@code @ToolDomains} → 留空。
      *
-     * <p>这里<b>不</b>在留空时回填根域：留空本身有语义（挂根域、全树可见），由
-     * {@link ToolDescriptor#declaredDomains()} 统一解释，避免两处判断各说各话。</p>
+     * 这里不在留空时回填根域：留空本身有语义（挂根域、全树可见），由
+     * {@link ToolDescriptor#declaredDomains()} 统一解释，避免两处判断各说各话。
      *
-     * <p>声明了就必须是<b>合法完整路径</b>：非法直接中断启动。放过它的话，
-     * 这个字符串会照样进"已声明域"集合、让入口放行，等于凭空造出一个可用的域。</p>
+     * 声明了就必须是合法完整路径：非法直接中断启动。放过它的话，
+     * 这个字符串会照样进"已声明域"集合、让入口放行，等于凭空造出一个可用的域。
      */
     private static List<String> resolveDomains(Class<?> declaringClass, Tool tool) {
         String[] raw = tool.domains().length > 0 ? tool.domains() : null;

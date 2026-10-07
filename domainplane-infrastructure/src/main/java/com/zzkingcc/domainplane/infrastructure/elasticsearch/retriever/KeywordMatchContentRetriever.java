@@ -20,8 +20,8 @@ import java.util.Map;
 /**
  * 关键词精准匹配检索器（BM25）
  *
- * <p>多字段权重一次性表达"哪里命中更重要"，而不是把字段拆成多张排名表 ——
- * 表数保持 = 索引 × 模态，融合阶段的按模态均摊权重才不会被字段数稀释。</p>
+ * 多字段权重一次性表达"哪里命中更重要"，而不是把字段拆成多张排名表 ——
+ * 表数保持 = 索引 × 模态，融合阶段的按模态均摊权重才不会被字段数稀释。
  *
  * @author zzkingcc
  */
@@ -32,12 +32,12 @@ public class KeywordMatchContentRetriever implements ContentRetriever {
     /**
      * 参与 BM25 的字段与权重。
      *
-     * <ul>
-     *   <li>{@code text} —— 正文（切片时已把 section_path 前置进正文，标题词天然在内）；</li>
-     *   <li>{@code text.standard} —— 标准分词，救英文/数字/标识符（ik 会把它们切碎）；</li>
-     *   <li>{@code metadata.section_path} —— 完整层级路径，命中说明整条上下文相关；</li>
-     *   <li>{@code metadata.section_title} —— 末级标题，最直接的"这条讲的就是这个"。</li>
-     * </ul>
+     *
+     *   • {@code text} —— 正文（切片时已把 section_path 前置进正文，标题词天然在内）；
+     *   • {@code text.standard} —— 标准分词，救英文/数字/标识符（ik 会把它们切碎）；
+     *   • {@code metadata.section_path} —— 完整层级路径，命中说明整条上下文相关；
+     *   • {@code metadata.section_title} —— 末级标题，最直接的"这条讲的就是这个"。
+     *
      */
     private static final List<String> SEARCH_FIELDS = List.of(
             "text^1.0",

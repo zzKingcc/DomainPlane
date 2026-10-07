@@ -19,26 +19,26 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /**
- * RRF（Reciprocal Rank Fusion）融合策略 —— <b>多索引</b>召回时使用。
+ * RRF（Reciprocal Rank Fusion）融合策略 —— 多索引召回时使用。
  *
- * <p>为什么多索引必须换它：BM25 的 idf 用<b>本索引（本分片）</b>的文档频率计算，
+ * 为什么多索引必须换它：BM25 的 idf 用本索引（本分片）的文档频率计算，
  * 同一个词在不同索引里量纲不同 —— 把多索引的 BM25 分池化后做 min-max 只会把
  * 「小索引里稀有词被抬高的分」当成 max，把其余结果压扁。向量分虽可比，但同一轮里
- * 两路量纲也不同。RRF 只看<b>名次</b>，天然免疫这一切。</p>
+ * 两路量纲也不同。RRF 只看名次，天然免疫这一切。
  *
- * <p>公式：{@code score(d) = Σ_L (w_L / (k + rank_L(d)))}。其中：</p>
- * <ul>
- *   <li><b>权重按模态均摊</b>：每张向量表的基准 {@code w = vectorWeight / 向量表个数}，
+ * 公式：{@code score(d) = Σ_L (w_L / (k + rank_L(d)))}。其中：
+ *
+ *   • 权重按模态均摊：每张向量表的基准 {@code w = vectorWeight / 向量表个数}，
  *       每张关键词表 {@code w = keywordWeight / 关键词表个数} —— 这样 向量:关键词 的比例
  *       不随域链长度（索引个数）漂移，否则祖先越多、向量表越多，BM25 会被越压越扁。
- *       分摊只统计<b>有命中</b>的表，空表不占份额。</li>
- *   <li><b>层级衰减</b>：表的基准权重再乘 {@code ancestorDecay ^ depth}（depth = 距查询域的距离，
+ *       分摊只统计有命中的表，空表不占份额。
+ *   • 层级衰减：表的基准权重再乘 {@code ancestorDecay ^ depth}（depth = 距查询域的距离，
  *       见 {@link RankedList#depth()}），同模态内重新归一化 → 总量守恒，但本域自有知识优先于
- *       从祖先继承来的知识。{@code ancestorDecay=1.0} 即等权。</li>
- *   <li><b>标题 / 文件名增益是乘法</b>：{@code 分 × (1 + boost)}。RRF 的值域是
+ *       从祖先继承来的知识。{@code ancestorDecay=1.0} 即等权。
+ *   • 标题 / 文件名增益是乘法：{@code 分 × (1 + boost)}。RRF 的值域是
  *       {@code w/(k+rank)}（单表名次 1 约 0.01 量级），若沿用加法，"0.15 分" 会变成它的十几倍，
- *       排序直接被 boost 统治、且域链越长越严重。乘法在分数制与排名制下语义一致。</li>
- * </ul>
+ *       排序直接被 boost 统治、且域链越长越严重。乘法在分数制与排名制下语义一致。
+ *
  *
  * @author zzkingcc
  */

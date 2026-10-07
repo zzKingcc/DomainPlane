@@ -3,17 +3,7 @@ package com.zzkingcc.domainplane.api.support;
 import com.zzkingcc.domainplane.api.agent.Domains;
 
 /**
- * 会话状态键：把<b>域</b>编进所有"按会话索引"的状态里。
- *
- * <p>记忆、图检查点、取消登记、流注册都按会话索引，若只用裸 {@code sessionId}，同一个 sessionId
- * 在两个域下会互相踩：A 域的会话能 resume 出 B 域的断点，记忆与流注册互相顶掉，
- * "同会话串行"也会误伤另一个域。</p>
- *
- * <p>键 = {@code 域 + '|' + sessionId} 之后，隔离由键本身保证，无需再维护一张
- * "这个会话属于哪个域"的进程内映射表（那种表重启即丢，丢了校验就静默失效）。</p>
- *
- * <p>分隔符 {@code |} 不会出现在域路径里（单段只允许 {@code [A-Za-z0-9_-]}）；
- * sessionId 由调用方给出，因此入口会校验它不含该字符。</p>
+ * 会话状态键：把域编进所有"按会话索引"的状态里。
  *
  * @author zzkingcc
  */
@@ -22,8 +12,7 @@ public final class SessionKeys {
     /** 域与 sessionId 的分隔符 */
     public static final char SEPARATOR = '|';
 
-    private SessionKeys() {
-    }
+    private SessionKeys() {}
 
     /**
      * 拼出会话状态键。
@@ -62,9 +51,6 @@ public final class SessionKeys {
 
     /**
      * 状态键里的 sessionId 部分。
-     *
-     * <p>不含分隔符时原样返回 —— 这样历史上按裸 sessionId 存的检查点仍能被识别出会话标识
-     * （虽然它的域信息已经无从得知，域隔离升级后也读不出来）。</p>
      */
     public static String sessionIdOf(String key) {
         if (key == null) {

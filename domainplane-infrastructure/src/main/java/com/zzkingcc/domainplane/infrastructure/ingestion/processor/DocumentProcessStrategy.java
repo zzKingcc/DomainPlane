@@ -17,10 +17,10 @@ public interface DocumentProcessStrategy {
      * 流程：解析 → 分片 → 去重 → 向量化写入。
      *
      * @param documents      待处理的文档列表（已按文件类型分组，全部匹配本策略）
-     * @param esClient       
-     * @param indexName      
-     * @param embeddingStore 
-     * @param embeddingModel 
+     * @param esClient
+     * @param indexName
+     * @param embeddingStore
+     * @param embeddingModel
      * @param sourceTag      来源标签（"本地"/"外部"）
      * @return 处理报告（文档数 + 切片诊断计数）
      */
@@ -37,10 +37,10 @@ public interface DocumentProcessStrategy {
     List<String> supportedExtensions();
 
     /**
-     * 是否为<b>二进制格式</b>（docx / pdf）。
+     * 是否为二进制格式（docx / pdf）。
      *
-     * <p>决定上传入口的分叉：{@code true} 时<b>不解码</b>，原始字节交给 {@link IngestSource#content()}；
-     * {@code false} 时入口先统一字符集，策略取 {@link IngestSource#text()}。</p>
+     * 决定上传入口的分叉：{@code true} 时不解码，原始字节交给 {@link IngestSource#content()}；
+     * {@code false} 时入口先统一字符集，策略取 {@link IngestSource#text()}。
      */
     default boolean binary() {
         return false;

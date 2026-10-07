@@ -8,13 +8,6 @@ import java.util.Set;
 /**
  * 域标识的约定与工具方法。
  *
- * <p>域是一棵树，标识是<b>完整路径</b>（点分，从根域 {@link #DEFAULT} 出发），例如
- * {@code default.sales.order}。主键与展示同形，因此不存在"同名不同父"的歧义：
- * {@code default.a.x} 与 {@code default.b.x} 是两个不同的域。</p>
- *
- * <p>路径运算是<b>纯字符串运算</b>，不依赖任何注册表状态，因此放在本类供所有模块共用 ——
- * 包括拿不到运行时容器的基础设施层。</p>
- *
  * @author zzkingcc
  */
 public final class Domains {
@@ -22,7 +15,7 @@ public final class Domains {
     /**
      * 根域（基层域）：整棵域树的起点，启动即存在、不可删除。
      *
-     * <p>工具声明留空、调用未指定域都归一化为它 —— 即"挂在根上"，按累加语义对全树可见。</p>
+     * 工具声明留空、调用未指定域都归一化为它 —— 即"挂在根上"，按累加语义对全树可见。
      */
     public static final String DEFAULT = "default";
 
@@ -68,9 +61,9 @@ public final class Domains {
     }
 
     /**
-     * 从根到自身的完整链（<b>含自身</b>），按由根向下的顺序。
+     * 从根到自身的完整链（含自身），按由根向下的顺序。
      *
-     * <p>{@code default.a.b} → {@code [default, default.a, default.a.b]}。</p>
+     * {@code default.a.b} → {@code [default, default.a, default.a.b]}。
      */
     public static List<String> chainOf(String domainId) {
         if (domainId == null || domainId.isBlank()) {
@@ -90,9 +83,9 @@ public final class Domains {
     }
 
     /**
-     * 祖先链（<b>不含自身</b>），按由根向下的顺序。
+     * 祖先链（不含自身），按由根向下的顺序。
      *
-     * <p>{@code default.a.b} → {@code [default, default.a]}；根域 → 空列表。</p>
+     * {@code default.a.b} → {@code [default, default.a]}；根域 → 空列表。
      */
     public static List<String> ancestorsOf(String domainId) {
         List<String> chain = chainOf(domainId);
@@ -101,12 +94,12 @@ public final class Domains {
 
     /**
      * 校验完整域路径。规则（顺序即报错优先级）：
-     * <ol>
-     *   <li>非空、总长 ≤ {@link #MAX_PATH_LENGTH}；</li>
-     *   <li><b>必须从根域 {@link #DEFAULT} 出发</b> —— 不允许悬空节点；</li>
-     *   <li>单段非空、长度 ≤ {@link #MAX_SEGMENT_LENGTH}、字符集 {@code [A-Za-z0-9_-]}；</li>
-     *   <li>自身链上不得重复段 —— 同名不同父允许，同一条链上重复不允许。</li>
-     * </ol>
+     *
+     *   • 非空、总长 ≤ {@link #MAX_PATH_LENGTH}；
+     *   • 必须从根域 {@link #DEFAULT} 出发 —— 不允许悬空节点；
+     *   • 单段非空、长度 ≤ {@link #MAX_SEGMENT_LENGTH}、字符集 {@code [A-Za-z0-9_-]}；
+     *   • 自身链上不得重复段 —— 同名不同父允许，同一条链上重复不允许。
+     *
      *
      * @return {@code null} 表示合法；否则返回不合法原因
      */

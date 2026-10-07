@@ -1,11 +1,14 @@
 package com.zzkingcc.domainplane.api.code;
 
+import lombok.Getter;
+
 /**
- * DomainPlane 统一状态码契约
+ * DomainPlane 统一状态码
  *
  * @author zzkingcc
- * @see <a href="file:../../../docs/API.md">错误码总表</a>
+ * @see 错误码总表
  */
+@Getter
 public enum ErrorCode {
 
     // ===== 成功 =====
@@ -16,14 +19,13 @@ public enum ErrorCode {
     TOOL_PERMISSION_DENIED(10001, "该工具不在当前域内", 403, false, "提示该能力未对当前场景开放"),
     AUTH_REQUIRED(10002, "未登录或凭证已失效", 401, false, "重新登录以获取新凭证"),
     AUTH_FAILED(10003, "账号或密码错误", 401, false, "确认账号与密码后重试"),
-    PROFILE_NOT_FOUND(10004, "指定的域不存在", 400, false,
-            "检查请求携带的 profile 与工具声明的 profiles 是否一致"),
+    DOMAIN_NOT_FOUND(10004, "指定的域不存在", 400, false,
+            "检查请求携带的 domain 与工具声明的 domains 是否一致"),
     AUTH_NOT_INITIALIZED(10005, "服务端账号尚未初始化", 409, false, "打开管控台完成首次初始化"),
     AUTH_ALREADY_INITIALIZED(10006, "账号已存在，初始化入口已关闭", 409, false, "直接登录管控台"),
     AUTH_STORE_CORRUPTED(10007, "账号文件损坏，无法读取", 503, false,
             "检查或删除 config/accounts.json 后重启服务"),
-    CALLER_CONTEXT_REQUIRED(10008, "缺少调用方身份", 400, false, "在请求中携带 tenantId / userId / profile"),
-    PROFILE_REQUIRED(10009, "未指定本轮所处的域", 400, false, "显式指定 profile"),
+    DOMAIN_REQUIRED(10009, "未指定本轮所处的域", 400, false, "显式指定 domain"),
     DOMAIN_NOT_CALLABLE(10010, "该域不是可调用单元", 400, false,
             "改用可调用的叶子域，或在管控台「域空间」把该域标记为可调用"),
 
@@ -85,10 +87,15 @@ public enum ErrorCode {
     STORAGE_UNAVAILABLE(90004, "存储服务不可用", 503, true, "联系管理员"),
     DEPENDENCY_NOT_CONFIGURED(90005, "服务依赖尚未配置", 503, false, "联系管理员在管控台完成配置");
 
+    /** 面向调用方 / 前端的稳定状态码 */
     private final int code;
+    /** 默认可读文案，可直接展示给终端用户 */
     private final String message;
+    /** 建议的 HTTP 响应状态码 */
     private final int httpStatus;
+    /** 是否可重试：前端据此决定"退避重试"还是"直接提示" */
     private final boolean retryable;
+    /** 建议前端采取的动作（人读，用于文档与排查） */
     private final String action;
 
     ErrorCode(int code, String message, int httpStatus, boolean retryable, String action) {
@@ -97,31 +104,6 @@ public enum ErrorCode {
         this.httpStatus = httpStatus;
         this.retryable = retryable;
         this.action = action;
-    }
-
-    /** 面向调用方 / 前端的稳定状态码 */
-    public int getCode() {
-        return code;
-    }
-
-    /** 默认可读文案，可直接展示给终端用户 */
-    public String getMessage() {
-        return message;
-    }
-
-    /** 建议的 HTTP 响应状态码。*/
-    public int getHttpStatus() {
-        return httpStatus;
-    }
-
-    /** 是否可重试：前端据此决定"退避重试"还是"直接提示" */
-    public boolean isRetryable() {
-        return retryable;
-    }
-
-    /** 建议前端采取的动作（人读，用于文档与排查） */
-    public String getAction() {
-        return action;
     }
 
     /** 按数字码查找，未定义时返回 null（调用方自行决定兜底） */

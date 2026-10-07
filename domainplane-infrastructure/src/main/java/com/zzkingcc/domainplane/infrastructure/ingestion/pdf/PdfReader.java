@@ -20,24 +20,24 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * pdf 解析器（pdf 入库的<b>格式适配层</b>）：{@code byte[] → List<Block>}。
+ * pdf 解析器（pdf 入库的格式适配层）：{@code byte[] → List<Block>}。
  *
- * <p><b>pdf 与 md/docx 的根本差别：它没有结构，只有「文字 + 坐标 + 字号」。</b>
+ * pdf 与 md/docx 的根本差别：它没有结构，只有「文字 + 坐标 + 字号」。
  * md 的 {@code #} 和 docx 的 {@code Heading 1} 是文档里写明的；pdf 里连「这是一行」都是靠 y 坐标推出来的。
- * 所以这里比 {@link com.zzkingcc.domainplane.infrastructure.ingestion.docx.DocxReader} 多做三件事：</p>
+ * 所以这里比 {@link com.zzkingcc.domainplane.infrastructure.ingestion.docx.DocxReader} 多做三件事：
  *
- * <ol>
- *   <li><b>抽行</b>：{@link PDFTextStripper} 按坐标把字符聚成行，顺带拿到 y 与字号。</li>
- *   <li><b>删页眉页脚</b>：它们<b>混在正文里</b>（docx 的页眉页脚是独立部件，压根读不到），
- *       不去掉就是每一页都往库里灌一遍噪音。</li>
- *   <li><b>跨页拼接</b>：实测页边界几乎总是断在半句上，不拼回来就会切出一堆半截句子。</li>
- * </ol>
  *
- * <p><b>本轮不做字号推断标题</b>（设计里的阶段 5）：没有可信的标题时，分节退回「页」——
- * {@code section_path = 文件名 > 第N页}。页是 pdf 天然的结构边界，也是最适合引用回原文的锚点。</p>
+ *   • 抽行：{@link PDFTextStripper} 按坐标把字符聚成行，顺带拿到 y 与字号。
+ *   • 删页眉页脚：它们混在正文里（docx 的页眉页脚是独立部件，压根读不到），
+ *       不去掉就是每一页都往库里灌一遍噪音。
+ *   • 跨页拼接：页边界几乎总是断在半句上，不拼回来就会切出一堆半截句子。
  *
- * <p>明确不做：表格还原（只有文本流，硬做必然错）、双栏顺序还原（要坐标聚类，失败是静默的）、
- * 扫描件（抽不出文字时<b>明确报错</b>，不静默成功）。</p>
+ *
+ * 本轮不做字号推断标题（设计里的阶段 5）：没有可信的标题时，分节退回「页」——
+ * {@code section_path = 文件名 > 第N页}。页是 pdf 天然的结构边界，也是最适合引用回原文的锚点。
+ *
+ * 明确不做：表格还原（只有文本流，硬做必然错）、双栏顺序还原（要坐标聚类，失败是静默的）、
+ * 扫描件（抽不出文字时明确报错，不静默成功）。
  *
  * @author zzkingcc
  */
@@ -49,9 +49,9 @@ public final class PdfReader {
     /**
      * 页眉页脚候选的最大行长。
      *
-     * <p>比 txt 那条 40 字宽松得多：pdf 的页眉常写着"产品名 - 机密 - 第 N 页"这种，动辄四五十字。
+     * 比 txt 那条 40 字宽松得多：pdf 的页眉常写着"产品名 - 机密 - 第 N 页"这种，动辄四五十字。
      * 敢放宽是因为这里还有两道更硬的约束（在页面边缘 + 两页以上同位置重复），长度只作兜底 ——
-     * 真有一整段正文挤在页面边缘、还每页一字不差地重复，那它就是版式噪音。</p>
+     * 真有一整段正文挤在页面边缘、还每页一字不差地重复，那它就是版式噪音。
      */
     private static final int MAX_EDGE_CHARS = 120;
 
@@ -83,7 +83,7 @@ public final class PdfReader {
     /**
      * @param blocks     Block 流：{@code TITLE(1, 文件名)} → 每页 {@code TITLE(2, 第N页)} + 若干 PARAGRAPH
      * @param dropped    删掉的页眉页脚 / 页码行数
-     * @param paragraphs 正文段落数（<b>不含</b>页码标题）—— 为 0 就是抽不出文字的扫描件
+     * @param paragraphs 正文段落数（不含页码标题）—— 为 0 就是抽不出文字的扫描件
      * @param pages      pdf 页数
      */
     public record PdfParseResult(List<Block> blocks, int dropped, int paragraphs, int pages) {
@@ -159,8 +159,8 @@ public final class PdfReader {
     /**
      * 按行回调的 TextStripper。
      *
-     * <p>{@link PDFTextStripper#writeString(String, List)} 是「一行」的落点（开 {@code sortByPosition} 后
-     * 行是它自己聚出来的），覆写它并<b>不调用 super</b>，就不再往字符串里写，只收我们需要的行。</p>
+     * {@link PDFTextStripper#writeString(String, List)} 是「一行」的落点（开 {@code sortByPosition} 后
+     * 行是它自己聚出来的），覆写它并不调用 super，就不再往字符串里写，只收我们需要的行。
      */
     private static final class LineStripper extends PDFTextStripper {
 
@@ -201,15 +201,15 @@ public final class PdfReader {
     /**
      * 找出页眉页脚行的序号。
      *
-     * <p>判定要三条<b>同时</b>成立 —— 误删一行正文的代价远大于留下一行噪音：</p>
-     * <ol>
-     *   <li>是所在页最前 / 最后的 1~2 行（页眉页脚天然在页面边缘）；</li>
-     *   <li>短（&lt; {@value #MAX_EDGE_CHARS} 字）且不以句末标点结尾、不是列表项；</li>
-     *   <li><b>把数字归一化后</b>，同一位置在 ≥ 2 个页面出现。</li>
-     * </ol>
+     * 判定要三条同时成立 —— 误删一行正文的代价远大于留下一行噪音：
      *
-     * <p>第 3 条里的"归一化"是实测踩出来的：页眉写着 {@code ... Page 1} / {@code ... Page 2}，
-     * 直接比文本永远不相等 —— 归掉数字才认得出是同一个页眉。</p>
+     *   • 是所在页最前 / 最后的 1~2 行（页眉页脚天然在页面边缘）；
+     *   • 短（< {@value #MAX_EDGE_CHARS} 字）且不以句末标点结尾、不是列表项；
+     *   • 把数字归一化后，同一位置在 ≥ 2 个页面出现。
+     *
+     *
+     * 第 3 条里的"归一化"是实测踩出来的：页眉写着 {@code ... Page 1} / {@code ... Page 2}，
+     * 直接比文本永远不相等 —— 归掉数字才认得出是同一个页眉。
      */
     private static Set<Integer> noiseIndexes(List<Line> lines) {
         Map<Integer, List<Line>> byPage = new LinkedHashMap<>();
@@ -290,7 +290,7 @@ public final class PdfReader {
      * 把行聚成段落：行距明显变大、或行首出现列表标记 → 换段；
      * 跨页时若上一段断在半句上、下一页首行又不像标题 → 拼回同一段。
      *
-     * <p>拼接后的段落归属<b>起始页</b>：这样它仍排在"上一页"的位置，页码锚点不会错位。</p>
+     * 拼接后的段落归属起始页：这样它仍排在"上一页"的位置，页码锚点不会错位。
      */
     private static List<Paragraph> paragraphs(List<Line> lines) {
         List<Paragraph> out = new ArrayList<>();
@@ -360,9 +360,9 @@ public final class PdfReader {
     /**
      * 正文的"正常行距"参考值。
      *
-     * <p>不能直接取中位数：页内还夹着"页眉→正文""正文→页脚"这两个大跳变（能到几百磅），
-     * 页数少的文档里它们会把中位数整个带偏。做法是先用<b>最小行距</b>圈出候选区间（≤ 最小行距的 2.5 倍），
-     * 再在候选里取中位数 —— 最小行距就是正文的行距，大跳变会被这个区间挡在外面。</p>
+     * 不能直接取中位数：页内还夹着"页眉→正文""正文→页脚"这两个大跳变（能到几百磅），
+     * 页数少的文档里它们会把中位数整个带偏。做法是先用最小行距圈出候选区间（≤ 最小行距的 2.5 倍），
+     * 再在候选里取中位数 —— 最小行距就是正文的行距，大跳变会被这个区间挡在外面。
      */
     private static float referenceGap(List<Line> lines) {
         List<Float> gaps = new ArrayList<>();

@@ -12,6 +12,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
 import java.util.Map;
@@ -19,8 +20,10 @@ import java.util.Map;
 /**
  * 知识库客户端：文档的上传 / 列表 / 删除。
  *
- * <p>只管"把内容放进去"与"拿出来"——<b>检索是服务端的事</b>：模型通过检索工具自动取用，
- * SDK 侧没有检索入口，也没有"检索参数"要配。这里声明的域决定<b>哪些对话能检索到这份文档</b>。</p>
+ * 只管"把内容放进去"与"拿出来"——检索是服务端的事：模型通过检索工具自动取用，
+ * SDK 侧没有检索入口，也没有"检索参数"要配。这里声明的域决定哪些对话能检索到这份文档。
+ *
+ * 不在启动期连接服务端：远端不可达由首次调用暴露，带码的异常与对话 SDK 完全一致。
  *
  * @author zzkingcc
  */
@@ -58,9 +61,9 @@ public class KnowledgeBaseClient {
     /**
      * 上传一个文档，并指定它归属的域（即落到该域的索引里）。
      *
-     * <p>域决定<b>哪些对话能检索到这份文档</b>，与 {@code @Tool(domains = {...})} 同构：
-     * 必须是<b>从根域出发的完整路径</b>，挂在该域即其<b>全部后代域</b>都能检索到；
-     * 留空 = 挂根域 = 全域可见。没有通配写法，路径非法会被服务端直接拒绝。</p>
+     * 域决定哪些对话能检索到这份文档，与 {@code @Tool(domains = {...})} 同构：
+     * 必须是从根域出发的完整路径，挂在该域即其全部后代域都能检索到；
+     * 留空 = 挂根域 = 全域可见。没有通配写法，路径非法会被服务端直接拒绝。
      */
     public UploadResult upload(byte[] content, String fileName, boolean replace, String domain) {
         if (content == null || content.length == 0) {
@@ -82,7 +85,9 @@ public class KnowledgeBaseClient {
 
         String effectiveDomain = domain == null ? null : domain.trim();
 
-        Map<String, Object> resp = webClient.post()
+        // defer：凭证在首次调用时才换取。放在链外同步 get() 的话，换凭证失败会直接抛在
+        // 本方法调用处，onErrorMap 拦不到，接入方拿到的就不是带码的业务异常。
+        Map<String, Object> resp = Mono.defer(() -> webClient.post()
                 .uri(uri -> {
                     uri.path("/admin/kb/documents").queryParam("replace", replace);
                     if (effectiveDomain != null && !effectiveDomain.isEmpty()) {
@@ -94,7 +99,7 @@ public class KnowledgeBaseClient {
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .body(BodyInserters.fromMultipartData(builder.build()))
                 .retrieve()
-                .bodyToMono(Map.class)
+                .bodyToMono(Map.class))
                 .onErrorMap(DomainPlaneErrors::fromTransport)
                 .block(properties.getReadTimeout());
 
@@ -116,11 +121,11 @@ public class KnowledgeBaseClient {
     /** 已入库文档列表 */
     @SuppressWarnings("unchecked")
     public List<DocumentItem> list() {
-        Map<String, Object> resp = webClient.get()
+        Map<String, Object> resp = Mono.defer(() -> webClient.get()
                 .uri("/admin/kb/documents")
                 .header(ClientCredential.CREDENTIAL_HEADER, credential.get())
                 .retrieve()
-                .bodyToMono(Map.class)
+                .bodyToMono(Map.class))
                 .onErrorMap(DomainPlaneErrors::fromTransport)
                 .block(properties.getReadTimeout());
         if (resp == null) {
@@ -147,11 +152,11 @@ public class KnowledgeBaseClient {
         if (docId == null || docId.isBlank()) {
             throw new DomainPlaneException(ErrorCode.INVALID_PARAMETER, "docId 不能为空");
         }
-        Map<String, Object> resp = webClient.delete()
+        Map<String, Object> resp = Mono.defer(() -> webClient.delete()
                 .uri("/admin/kb/documents/{docId}", docId)
                 .header(ClientCredential.CREDENTIAL_HEADER, credential.get())
                 .retrieve()
-                .bodyToMono(Map.class)
+                .bodyToMono(Map.class))
                 .onErrorMap(DomainPlaneErrors::fromTransport)
                 .block(properties.getReadTimeout());
         return resp != null && Boolean.TRUE.equals(resp.get("deleted"));

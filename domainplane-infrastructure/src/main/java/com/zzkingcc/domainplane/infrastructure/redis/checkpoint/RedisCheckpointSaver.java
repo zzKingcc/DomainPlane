@@ -146,18 +146,18 @@ public class RedisCheckpointSaver implements BaseCheckpointSaver {
     }
 
     /**
-     * 删除某个<b>域</b>下的全部检查点（删域级联清理用）。
+     * 删除某个域下的全部检查点（删域级联清理用）。
      *
-     * <p>断点里存着"即将执行但还没执行"的工具调用。域被删后若不清，24 小时内同路径域重建
+     * 断点里存着"即将执行但还没执行"的工具调用。域被删后若不清，24 小时内同路径域重建
      * 就能 {@code resume(approved=true)} 把当初那个破坏性动作补执行掉 —— 域的删除没有撤销授权。
-     * 因此这里<b>失败直接抛</b>：静默跳过等于"删除成功"却把授权留在了原地。</p>
+     * 因此这里失败直接抛：静默跳过等于"删除成功"却把授权留在了原地。
      *
      * @return 删除的键数
      * @throws ChatMemoryException 清理失败或域为空
      */
     public int deleteByDomain(String domain) {
         String normalized = domain == null ? "" : domain.trim();
-        // 守卫必须先于 pattern 拼接：空域会让 pattern 匹配到**全部域**的断点
+        // 守卫必须先于 pattern 拼接：空域会让 pattern 匹配到全部域的断点
         if (normalized.isEmpty()) {
             throw new ChatMemoryException(ErrorCode.INVALID_PARAMETER,
                     "deleteByDomain 收到空域，已拒绝执行（否则会清空全部域的检查点）");
@@ -216,15 +216,15 @@ public class RedisCheckpointSaver implements BaseCheckpointSaver {
     }
 
     /**
-     * 断点读不出来时<b>必须报错，不能当空列表</b>。
+     * 断点读不出来时必须报错，不能当空列表。
      *
-     * <p>当成空的代价是灾难性的且不可逆：{@link #put} 走的是"读全部 → 加一条 → 写回整份"，
-     * 它读到一个空列表就会把<b>原有整段会话历史覆盖成一条</b>，且全程无任何异常。
+     * 当成空的代价是灾难性的且不可逆：{@link #put} 走的是"读全部 → 加一条 → 写回整份"，
+     * 它读到一个空列表就会把原有整段会话历史覆盖成一条，且全程无任何异常。
      * 紧接着 {@code get/list} 会报"无检查点"，用户收到的是"会话不存在，请新建会话"——
-     * 一个与真实原因（数据损坏）毫无关系的错误信息。</p>
+     * 一个与真实原因（数据损坏）毫无关系的错误信息。
      *
-     * <p>fail-closed 与记忆侧一致：{@code RedisChatMemoryStore.getMessages} 读失败同样抛异常。
-     * 数据存疑时宁可不提供，也不能提供一份被清空过的"正确答案"。</p>
+     * fail-closed 与记忆侧一致：{@code RedisChatMemoryStore.getMessages} 读失败同样抛异常。
+     * 数据存疑时宁可不提供，也不能提供一份被清空过的"正确答案"。
      */
     private ChatMemoryException corrupt(String key, Exception cause) {
         log.error("[检查点] 反序列化失败（键 {}），按损坏处理并中止本轮读写：{}", key, cause.getMessage(), cause);

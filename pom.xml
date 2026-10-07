@@ -30,6 +30,10 @@
         <module>domainplane-kb-client</module>
         <module>domainplane-tool-provider</module>
         <module>domainplane-server</module>
+
+        <!-- 示例：进主构建，例子不会悄悄编不过。
+             每个示例是一个独立的 Spring Boot 应用，坐标仍是 DomainPlane 的。 -->
+        <module>examples/chat-window</module>
     </modules>
 
     <properties>
