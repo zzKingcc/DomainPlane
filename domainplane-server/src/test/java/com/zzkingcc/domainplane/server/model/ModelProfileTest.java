@@ -20,9 +20,7 @@ class ModelProfileTest {
     private static ModelProfile profile(List<String> endpoints, List<String> input,
                                         List<String> output, List<String> capabilities,
                                         Integer dimensions) {
-        return new ModelProfile("a", endpoints, input, output,
-                "https://api.example.com/v1", "sk-test", "m", null, null, null, null, dimensions,
-                capabilities, null);
+        return new ModelProfile("a",endpoints,input,output,"https://api.example.com/v1","sk-test", null,"m",null,null,null,null,dimensions,capabilities,null);
     }
 
     @Test
@@ -70,13 +68,7 @@ class ModelProfileTest {
 
     @Test
     void 与配置文件互转时三个维度都不丢() {
-        ModelProfile p = new ModelProfile("gpt4o",
-                List.of(ModelProfile.EP_CHAT, ModelProfile.EP_TTS),
-                List.of(ModelProfile.MOD_TEXT),
-                List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_AUDIO),
-                "https://api.example.com/v1", "sk-test", "gpt-4o", 0.5, 100,
-                Boolean.FALSE, Boolean.TRUE, null,
-                List.of(ModelProfile.CAP_STREAMING, ModelProfile.CAP_REASONING), List.of("backup"));
+        ModelProfile p = new ModelProfile("gpt4o",List.of(ModelProfile.EP_CHAT, ModelProfile.EP_TTS),List.of(ModelProfile.MOD_TEXT),List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_AUDIO),"https://api.example.com/v1","sk-test", null,"gpt-4o",0.5,100,Boolean.FALSE,Boolean.TRUE,null,List.of(ModelProfile.CAP_STREAMING, ModelProfile.CAP_REASONING),List.of("backup"));
 
         ModelProfile back = ProfileData.from(p).toProfile(p.alias());
         assert back.endpoints().equals(p.endpoints()) : "端点族应往返一致： " + back.endpoints();
@@ -93,9 +85,7 @@ class ModelProfileTest {
     @Test
     void 思考开关参与指纹() {
         ModelProfile on = profile(List.of(ModelProfile.EP_CHAT), null, null, null, null);
-        ModelProfile off = new ModelProfile(on.alias(), on.endpoints(), on.input(), on.output(),
-                on.baseUrl(), on.apiKey(), on.modelName(), null, null,
-                Boolean.FALSE, null, null, null, null);
+        ModelProfile off = new ModelProfile(on.alias(),on.endpoints(),on.input(),on.output(),on.baseUrl(),on.apiKey(), null,on.modelName(),null,null,Boolean.FALSE,null,null,null,null);
 
         assert !on.fingerprint().equals(off.fingerprint())
                 : "思考开关变了指纹就必须变，否则缓存里那份旧客户端照旧在用 —— "
@@ -129,8 +119,7 @@ class ModelProfileTest {
 
     @Test
     void 声明了温度就以声明值为准() {
-        ModelProfile p = new ModelProfile("a", List.of(ModelProfile.EP_CHAT), null, null,
-                "https://api.example.com/v1", "sk", "m", 0.1, null, null, null, null, null, null);
+        ModelProfile p = new ModelProfile("a",List.of(ModelProfile.EP_CHAT),null,null,"https://api.example.com/v1","sk", null,"m",0.1,null,null,null,null,null,null);
 
         assert p.effectiveTemperature() == 0.1 : "显式声明不该被默认值盖掉，实际 " + p.effectiveTemperature();
     }
@@ -146,8 +135,7 @@ class ModelProfileTest {
 
     @Test
     void 声明了最大token就以声明值为准() {
-        ModelProfile p = new ModelProfile("a", List.of(ModelProfile.EP_CHAT), null, null,
-                "https://api.example.com/v1", "sk", "m", null, 2048, null, null, null, null, null);
+        ModelProfile p = new ModelProfile("a",List.of(ModelProfile.EP_CHAT),null,null,"https://api.example.com/v1","sk", null,"m",null,2048,null,null,null,null,null);
 
         assert p.effectiveMaxTokens() == 2048 : "显式声明就该设限，实际 " + p.effectiveMaxTokens();
     }

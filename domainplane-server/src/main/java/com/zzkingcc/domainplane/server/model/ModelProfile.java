@@ -27,6 +27,7 @@ import java.util.Locale;
  * @param output       输出模态（可多选）
  * @param baseUrl      服务商地址（OpenAI 兼容，通常带 {@code /v1}）
  * @param apiKey       API Key
+ * @param providerType 服务商协议类型（决定交给哪个 langchain4j 适配器；{@code null} 按 OpenAI 兼容处理）
  * @param modelName    模型名
  * @param temperature  温度（可空 = 用服务商默认）
  * @param maxTokens    单次最大输出 token（可空 = 不限制，由模型上下文决定）
@@ -43,6 +44,7 @@ public record ModelProfile(String alias,
                            List<String> output,
                            String baseUrl,
                            String apiKey,
+                           ProviderType providerType,
                            String modelName,
                            Double temperature,
                            Integer maxTokens,
@@ -119,6 +121,9 @@ public record ModelProfile(String alias,
     public static final double DEFAULT_TEMPERATURE = 0.5;
 
     public ModelProfile {
+        /* 空值归一成OpenAI 兼容：老档案没有这个字段，改造后行为与改造前一致 */
+        providerType = providerType == null ? ProviderType.OPENAI_COMPATIBLE : providerType;
+
         /* 端点族为空不再默认补 chat：类型只能来自提供商元数据或用户声明。
            猜成 chat 会让向量 / 生图模型被当成对话模型 —— 能绑到域、却当不了向量模型，
            而且全程没有任何报错。空就是"未声明"，由 isChat() / isEmbedding() 如实返回 false。 */
@@ -189,6 +194,9 @@ public record ModelProfile(String alias,
     public String fingerprint() {
         String raw = String.join("|",
                 nz(baseUrl), nz(modelName),
+                /* providerType 必须进指纹：同一个地址换协议类型就是换了一整套客户端实现，
+                   漏掉它会让"改了协议但仍复用旧实例"，表现为保存成功、实际还在走老协议。 */
+                String.valueOf(providerType),
                 String.valueOf(temperature), String.valueOf(maxTokens),
                 String.valueOf(thinking), String.valueOf(returnThinking),
                 sha256(nz(apiKey)));

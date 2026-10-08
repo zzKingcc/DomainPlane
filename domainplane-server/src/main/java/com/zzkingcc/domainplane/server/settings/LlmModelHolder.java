@@ -6,7 +6,6 @@ import com.zzkingcc.domainplane.server.model.ModelProfile;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.ModelProvider;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -16,6 +15,11 @@ import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.embedding.request.EmbeddingRequest;
 import dev.langchain4j.model.embedding.response.EmbeddingResponse;
+import dev.langchain4j.model.ModelProvider;
+import dev.langchain4j.model.anthropic.AnthropicChatModel;
+import dev.langchain4j.model.anthropic.AnthropicStreamingChatModel;
+import dev.langchain4j.model.ollama.OllamaChatModel;
+import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
@@ -61,6 +65,7 @@ public class LlmModelHolder {
     private volatile EmbeddingModel embeddingModel;
     /** 实际生效的向量模型描述（档案别名或 "yaml"），仅供日志与排障 */
     private volatile String embeddingSource;
+
 
     /**
      * "尚未配置"的统一文案
@@ -374,31 +379,84 @@ public class LlmModelHolder {
     // 由 default 实现回调到 doXxx —— 因此无需逐个人工转发。
 
     /**
-     * 把携带通用 {@link ChatRequestParameters} 的请求提升为 {@link OpenAiChatRequestParameters}。
+     * 把携带通用 {@link ChatRequestParameters} 的请求提升为当前模型协议所需的参数类型。
      *
-     * 提升必须以模型的默认参数为基线：OpenAI 模型在 doChat 里只认 request.parameters()，
-     * 不兜自己的默认值；凭空新建一份参数会把 modelName 丢掉。
+     * 为什么必须做这次提升：各家模型的 {@code doChat} 都把 {@code request.parameters()}
+     * 强转成自家类型（Anthropic 是 {@code (AnthropicChatRequestParameters) chatRequest.parameters()}），
+     * 塞一份通用参数进去会直接 ClassCastException；塞错家的类型同样如此。
+     * 而报错发生在框架内部，从异常里看不出是"配置选错了协议"。
+     *
+     * 提升必须以模型自己的默认参数为基线：模型在 doChat 里只认 request.parameters()，
+     * 不兜自己的默认值；凭空新建一份参数会把 modelName 丢掉，表现为"模型名没传进去"。
+     *
+     * 已经是对应类型时原样返回：重复提升会丢掉各家特有的参数
+     * （OpenAI 的 stopSequences、Anthropic 的 thinkingBudgetTokens等）。
      */
-    // package-private：保留给同包单元测试直接校验"通用参数 → OpenAI 参数"的提升逻辑
+    // package-private：保留给同包单元测试直接校验"通用参数 → 协议参数"的提升逻辑
     ChatRequest promote(ChatRequest request) {
         ChatRequestParameters p = request.parameters();
-        if (p instanceof OpenAiChatRequestParameters) {
+        if (matchesCurrentProtocol(p)) {
             return request;
         }
-        OpenAiChatRequestParameters defaults = openAiDefaults();
+        ChatRequestParameters defaults = currentDefaults();
         return ChatRequest.builder()
                 .messages(request.messages())
-                .parameters(p == null ? defaults : defaults.overrideWith(p))
+                .parameters(p == null ? defaults : override(defaults, p))
                 .build();
     }
 
-    /** 当前模型的默认请求参数（modelName 等必填项在上面）；未配置时给空壳，调用点已在 target() 先失败 */
-    private OpenAiChatRequestParameters openAiDefaults() {
+    /**
+     * 这份参数是否已经是当前协议要的类型。
+     *
+     * 用"模型自己的类型"作为判据而不是逐家枚举：模型能给出的默认参数必然是它自己那套，
+     * 拿它当基准做 {@code instanceof}，天然覆盖各家新增的类型。
+     */
+    private boolean matchesCurrentProtocol(ChatRequestParameters p) {
+        if (p == null) {
+            return false;
+        }
+        Class<?> expected = expectedParameterType();
+        return expected != null && expected.isInstance(p);
+    }
+
+    /** 当前模型期望的参数类型；取不到时返回 {@code null}（按"未配置"处理） */
+    private Class<?> expectedParameterType() {
+        ChatRequestParameters defaults = currentDefaults();
+        return defaults == null ? null : defaults.getClass();
+    }
+
+    /** 当前模型的默认请求参数（modelName 等必填项在上面） */
+    private ChatRequestParameters currentDefaults() {
         ChatRequestParameters defaults = chatModel != null ? chatModel.defaultRequestParameters() : null;
         if (defaults == null && streamingChatModel != null) {
             defaults = streamingChatModel.defaultRequestParameters();
         }
-        return defaults instanceof OpenAiChatRequestParameters openAi ? openAi : OpenAiChatRequestParameters.EMPTY;
+        return defaults;
+    }
+
+    /**
+     * 用默认参数作基线叠加调用方的参数。
+     *
+     * 各家参数类型都提供 {@code overrideWith}，但签名不同（接收各自的类型），
+     * 无法用一份lambda 统一，因此按协议分派。
+     * 走不到的分支不会编译失败：它们只是运行时用不到的方法体。
+     */
+    private static ChatRequestParameters override(ChatRequestParameters defaults, ChatRequestParameters p) {
+        if (defaults instanceof OpenAiChatRequestParameters openAi) {
+            return openAi.overrideWith(p);
+        }
+        if (defaults instanceof dev.langchain4j.model.anthropic.AnthropicChatRequestParameters anthropic) {
+            return anthropic.overrideWith(p);
+        }
+        if (defaults instanceof dev.langchain4j.model.ollama.OllamaChatRequestParameters ollama) {
+            return ollama.overrideWith(p);
+        }
+        /* 出现还没接协议的模型实现时如实退回调用方给的参数：
+           强转一个错的类型必然抛 ClassCastException，而原样透传至少
+           还有default 实现兜底，不至于让整条链路断在这里。 */
+        log.warn("[模型设置] 遇到未登记协议的模型参数类型 {}，按原样透传（可能丢失该协议的参数合并）",
+                defaults.getClass().getName());
+        return p;
     }
 
     /** 委派 ChatModel */

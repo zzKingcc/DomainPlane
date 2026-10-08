@@ -67,15 +67,46 @@
                     <button type="button" class="modal-close" id="profileModalClose"
                             aria-label="关闭">×</button>
                 </div>
+                <div class="field" id="fProviderType" style="margin:0 0 14px;">
+                    <label>服务商协议</label>
+                    <div class="combo" id="pfProviderTypeCombo">
+                        <input id="pfProviderType" class="mono" placeholder="OpenAI 兼容"
+                               autocomplete="off" role="combobox" aria-expanded="false"
+                               aria-controls="pfProviderTypeMenu">
+                        <button type="button" class="combo-btn" id="pfProviderTypeBtn"
+                                title="选择服务商协议" aria-label="展开服务商协议">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                        </button>
+                        <div class="combo-menu" id="pfProviderTypeMenu" role="listbox"
+                             aria-label="服务商协议" style="display:none;"></div>
+                    </div>
+                    <div class="help">
+                        决定用哪套协议发请求：除「OpenAI 兼容」外的协议在鉴权头与请求体上都不同，
+                        选错会直接跑不通。DeepSeek / 硅基流动 / OpenRouter / 百炼兼容模式 / vLLM /
+                        LM Studio 都选「OpenAI 兼容」。
+                    </div>
+                </div>
 
-                <div class="hint" style="margin:0 0 14px;">
-                    <b>本地 Ollama</b>：地址填 <span class="mono">http://localhost:11434/v1</span>（<b>必带 /v1</b>）；
-                    API Key 随便填个非空占位（如 <span class="mono">ollama</span>）；模型名取
-                    <span class="mono">ollama list</span> 里的名字（带 tag，如 <span class="mono">qwen2.5:7b</span>）。
+                <div class="field" id="fPreset" style="margin:0 0 14px;">
+                    <label>快速填充（内置预设）</label>
+                    <div class="combo" id="pfPresetCombo">
+                        <input id="pfPreset" placeholder="选择常见服务商…"
+                               autocomplete="off" role="combobox" aria-expanded="false"
+                               aria-controls="pfPresetMenu">
+                        <button type="button" class="combo-btn" id="pfPresetBtn"
+                                title="从内置预设选择" aria-label="展开内置预设">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                        </button>
+                        <div class="combo-menu" id="pfPresetMenu" role="listbox"
+                             aria-label="内置预设" style="display:none;"></div>
+                    </div>
+                    <div class="help">选中后自动填好下方「服务商协议」与「服务商地址」，密钥仍需自己填。</div>
                 </div>
 
                 <div class="field" id="fBaseUrl">
-                    <label>服务商地址（OpenAI 兼容 baseUrl）</label>
+                    <label>服务商地址（baseUrl）</label>
                     <div class="combo" id="pfBaseUrlCombo">
                         <input id="pfBaseUrl" class="mono" placeholder="https://api.example.com/v1"
                                autocomplete="off" aria-haspopup="listbox" aria-expanded="false"
@@ -91,6 +122,11 @@
                     <div class="help">
                         点右侧按钮从「连接库」选用 —— 一条连接＝服务商地址 +（可选）密钥，选中后两项一起填入
                         （页面右上角可维护）；也可直接手填。
+                        <br><b>本地 Ollama</b>：协议选「Ollama」时地址填
+                        <span class="mono">http://localhost:11434</span>（<b>不要带 /v1</b>，
+                        程序会自己拼 <span class="mono">/api/chat</span>），无需密钥，
+                        模型名取 <span class="mono">ollama list</span> 里的名字（带 tag，如
+                        <span class="mono">qwen2.5:7b</span>）。
                     </div>
                 </div>
 
@@ -680,10 +716,149 @@ Console.renderSidebar('models');
         /* 密钥库弹窗可能还开着：只在自己是最后一道遮罩时才解锁滚动 */
         if (pfEl('connModal').hidden) { document.body.style.overflow = ''; }
     }
+    /* ---------- 服务商协议与内置预设 ----------
+       协议决定后端用哪套 langchain4j 适配器发请求：除「OpenAI 兼容」外的协议
+       （Anthropic 的 /v1/messages、Ollama 的 /api/chat）在鉴权头与请求体上都不同，
+       选错会直接跑不通。它是唯一一个"填错就报错"的必选项，所以预填成覆盖率最高的那一个。
+       预设则是"平台默认值 + 协议类型"的快捷填充；密钥永远不代填。 */
+    var DEFAULT_PROVIDER_TYPE = 'OPENAI_COMPATIBLE';
+
+    var PROVIDER_TYPES = null;   /* null = 还没拉过；[] = 服务端一个都没给 */
+    var PRESETS = null;          /* 同上 */
+
+    /* 协议显示名：拉不到列表时的兜底，保证编辑老档案也能正常显示 */
+    var PROVIDER_TYPE_FALLBACK = {
+        OPENAI_COMPATIBLE: 'OpenAI 兼容',
+        ANTHROPIC: 'Anthropic',
+        OLLAMA: 'Ollama',
+        DASHSCOPE: '阿里云百炼'
+    };
+
+    function providerTypeLabel(id) {
+        if (!id) { return PROVIDER_TYPE_FALLBACK[DEFAULT_PROVIDER_TYPE]; }
+        if (PROVIDER_TYPES) {
+            for (var i = 0; i < PROVIDER_TYPES.length; i++) {
+                if (PROVIDER_TYPES[i].id === id) { return PROVIDER_TYPES[i].label; }
+            }
+        }
+        return PROVIDER_TYPE_FALLBACK[id] || id;
+    }
+
+    function loadProviderTypes() {
+        if (PROVIDER_TYPES !== null) { return Promise.resolve(PROVIDER_TYPES); }
+        return Console.jsonRequest('/admin/provider-presets/types', 'GET')
+            .then(function (r) {
+                PROVIDER_TYPES = (r && r.types) || [];
+                return PROVIDER_TYPES;
+            });
+    }
+
+    function loadPresets() {
+        if (PRESETS !== null) { return Promise.resolve(PRESETS); }
+        return Console.jsonRequest('/admin/provider-presets', 'GET')
+            .then(function (r) {
+                PRESETS = (r && r.presets) || [];
+                return PRESETS;
+            });
+    }
+
+    /* ---------- 协议下拉 ---------- */
+    function ptMenu() { return pfEl('pfProviderTypeMenu'); }
+    function ptMenuOpen() {
+        ptMenu().style.display = 'block';
+        pfEl('pfProviderType').setAttribute('aria-expanded', 'true');
+    }
+    function ptMenuClose() {
+        ptMenu().style.display = 'none';
+        pfEl('pfProviderType').setAttribute('aria-expanded', 'false');
+    }
+    function ptMenuState(text) {
+        ptMenu().innerHTML = '<div class="combo-state">' + Console.escapeHtml(text) + '</div>';
+    }
+    function renderPtMenu() {
+        if (!PROVIDER_TYPES || !PROVIDER_TYPES.length) {
+            ptMenuState('没有可选协议');
+            return;
+        }
+        var cur = (pfEl('pfProviderType').value || '').trim();
+        ptMenu().innerHTML = PROVIDER_TYPES.map(function (t) {
+            return '<div class="combo-item" role="option" data-pt="' + Console.escapeHtml(t.id) + '"'
+                + (t.id === cur ? ' aria-selected="true"' : '') + '>'
+                + Console.escapeHtml(t.label) + '</div>';
+        }).join('');
+    }
+    function openPtMenu() {
+        ptMenuOpen();
+        renderPtMenu();
+        loadProviderTypes().then(function () { renderPtMenu(); ptMenuOpen(); })
+            .catch(function (e) { ptMenuState('读取失败：' + Console.sanitizeError(e.message)); ptMenuOpen(); });
+    }
+    function pickProviderType(id, label) {
+        pfEl('pfProviderType').value = label || id;
+        /* 输入框存的是显示名，保存时需要的是枚举 id —— 单独记一份映射，
+           免得靠字符串反推（"OpenAI 兼容" 推不出枚举名）。 */
+        pfEl('pfProviderType').dataset.id = id;
+    }
+
+    /* ---------- 预设下拉 ---------- */
+    function psMenu() { return pfEl('pfPresetMenu'); }
+    function psMenuOpen() {
+        psMenu().style.display = 'block';
+        pfEl('pfPreset').setAttribute('aria-expanded', 'true');
+    }
+    function psMenuClose() {
+        psMenu().style.display = 'none';
+        pfEl('pfPreset').setAttribute('aria-expanded', 'false');
+    }
+    function psMenuState(text) {
+        psMenu().innerHTML = '<div class="combo-state">' + Console.escapeHtml(text) + '</div>';
+    }
+    function renderPsMenu() {
+        if (!PRESETS || !PRESETS.length) {
+            psMenuState('没有可用预设');
+            return;
+        }
+        psMenu().innerHTML = PRESETS.map(function (p, i) {
+            var tip = p.note ? p.note : p.baseUrl;
+            return '<div class="combo-item" role="option" data-ps="' + i + '"'
+                + ' title="' + Console.escapeHtml(tip) + '">'
+                + Console.escapeHtml(p.label) + '</div>';
+        }).join('');
+    }
+    function openPsMenu() {
+        psMenuOpen();
+        renderPsMenu();
+        loadPresets().then(function () { renderPsMenu(); psMenuOpen(); })
+            .catch(function (e) { psMenuState('读取失败：' + Console.sanitizeError(e.message)); psMenuOpen(); });
+    }
+
+    /* 选中预设：填协议类型 + 地址，并提示密钥仍需自己填。
+       地址为空的自定义预设只改协议类型，不去覆盖用户已填的地址。 */
+    function applyPreset(idx) {
+        var p = PRESETS[idx];
+        if (!p) { return; }
+        pickProviderType(p.id, providerTypeLabel(p.id));
+        if (p.baseUrl) {
+            pfEl('pfBaseUrl').value = p.baseUrl;
+        }
+        var msg = '已填入预设「' + p.label + '」的协议与地址';
+        if (p.baseUrl) { msg += '（' + p.baseUrl + '）'; }
+        if (p.note) { msg += '。' + p.note; }
+        if (p.needApiKey) {
+            msg += '\n请填写 API Key —— 预设不代填密钥。';
+        } else {
+            msg += '\n该预设无需密钥，可留空。';
+        }
+        readSay(true, msg);
+    }
+
     function resetForm() {
         ['pfBaseUrl', 'pfApiKey', 'pfModelName',
-         'pfTemperature', 'pfMaxTokens', 'pfDimensions']
+         'pfTemperature', 'pfMaxTokens', 'pfDimensions', 'pfPreset']
             .forEach(function (id) { pfEl(id).value = ''; });
+        /* 协议默认「OpenAI 兼容」：覆盖绝大多数服务商，且是唯一"填错就跑不通"的必选项。
+           预填成它等于把"要不要改"变成"什么情况下才改"，而不是留空让人猜。 */
+        pfEl('pfProviderType').value = DEFAULT_PROVIDER_TYPE;
         /* 温度预填服务端下发的默认值：让"不填会发生什么"看得见，而不是藏成一段文案。
            最大 token 则刻意留空 —— 留空就是"不限制"，没有需要预填的默认值。 */
         pfEl('pfTemperature').value = DEFAULT_TEMPERATURE;
@@ -975,6 +1150,11 @@ Console.renderSidebar('models');
            不回填的话，编辑时"打开就保存"会把端点族 / 模态 / 能力整块清空 —— 静默丢配置。 */
         seedDetectedFrom(p);
         pfEl('pfBaseUrl').value = p.baseUrl || '';
+        /* 协议类型原样回填：resetForm 刚把它清成默认值，不种回来的话，
+           编辑一个 Anthropic 档案直接保存就会被悄悄改成 OpenAI 兼容 ——
+           卡片上看不出任何变化，直到某次调用报 ClassCastException。 */
+        pickProviderType(p.providerType || DEFAULT_PROVIDER_TYPE,
+                         providerTypeLabel(p.providerType));
         pfEl('pfModelName').value = p.modelName || '';
         pfEl('pfTemperature').value = (p.temperature == null ? DEFAULT_TEMPERATURE : p.temperature);
         pfEl('pfMaxTokens').value = (p.maxTokens == null ? '' : p.maxTokens);
@@ -990,6 +1170,24 @@ Console.renderSidebar('models');
     /* 别名已从表单移除：按模型名自动派生，重名加数字后缀（别名仍是绑定/删除用的键）。
        查重必须跨两处（findProfile）：纯向量档案不在 PROFILES 里，只看 PROFILES 会派生出
        一个与已有向量档案同名的别名，保存时把那份向量档案整个覆盖掉。 */
+    /* 按显示名反查协议 id：输入框可以被直接打字改动（没走下拉），
+       这时 dataset.id 是空的，只能按显示名反查。查不到就交由调用方兜默认值。 */
+    function typeIdFromLabel(label) {
+        var v = (label || '').trim();
+        if (!v) { return null; }
+        if (PROVIDER_TYPES) {
+            for (var i = 0; i < PROVIDER_TYPES.length; i++) {
+                if (PROVIDER_TYPES[i].label === v || PROVIDER_TYPES[i].id === v) {
+                    return PROVIDER_TYPES[i].id;
+                }
+            }
+        }
+        for (var key in PROVIDER_TYPE_FALLBACK) {
+            if (PROVIDER_TYPE_FALLBACK[key] === v) { return key; }
+        }
+        return null;
+    }
+
     function deriveAlias(modelName) {
         var base = aliasBase(modelName);
         function taken(a) {
@@ -1036,6 +1234,10 @@ Console.renderSidebar('models');
            没显示时一律传 null（不声明），绝不落一个来路不明的 false 进档案 ——
            那会让"没探测出来"变成"明确关闭"，而用户在页面上根本看不到自己关了什么。 */
         var hasReasoning = (DET.caps || []).indexOf('reasoning') >= 0;
+        /* 协议 id 优先取下拉选中的那一份；用户直接在输入框里打字时
+           （比如只改了显示名、没走下拉）退回按显示名反查，再兜底默认。 */
+        var ptEl = pfEl('pfProviderType');
+        var providerType = ptEl.dataset.id || typeIdFromLabel(ptEl.value) || DEFAULT_PROVIDER_TYPE;
         var body = {
             alias: alias,
             endpoints: eps,
@@ -1043,6 +1245,7 @@ Console.renderSidebar('models');
             output: DET.out || [],
             baseUrl: pfEl('pfBaseUrl').value.trim(),
             apiKey: pfEl('pfApiKey').value,
+            providerType: providerType,
             modelName: modelName,
             temperature: num('pfTemperature'),
             maxTokens: num('pfMaxTokens'),
@@ -1317,6 +1520,38 @@ Console.renderSidebar('models');
            在 document 上的监听收掉 —— 下拉一开就被关，用户只会看到"点了没反应"。 */
         document.addEventListener('click', function (ev) {
             if (!ev.target.closest || !ev.target.closest('#pfBaseUrlCombo')) { cnMenuClose(); }
+        });
+    })();
+
+    /* ---------- 协议 / 预设下拉的事件绑定 ----------
+       与连接库同一套判定：收起要判 .combo 容器，不能只判输入框，
+       否则点按钮会"刚打开就被收掉"。三个下拉的收起互不干扰 —— 各判各的容器。 */
+    (function () {
+        pfEl('pfProviderTypeBtn').addEventListener('click', openPtMenu);
+        ptMenu().addEventListener('click', function (ev) {
+            var item = ev.target.closest ? ev.target.closest('[data-pt]') : null;
+            if (item) {
+                ptMenuClose();
+                pickProviderType(item.getAttribute('data-pt'),
+                                 providerTypeLabel(item.getAttribute('data-pt')));
+            }
+        });
+
+        pfEl('pfPresetBtn').addEventListener('click', openPsMenu);
+        psMenu().addEventListener('click', function (ev) {
+            var item = ev.target.closest ? ev.target.closest('[data-ps]') : null;
+            if (item) {
+                psMenuClose();
+                pfEl('pfPreset').value = '';
+                applyPreset(parseInt(item.getAttribute('data-ps'), 10));
+            }
+        });
+
+        document.addEventListener('click', function (ev) {
+            if (!ev.target.closest || !ev.target.closest('#pfProviderTypeCombo')) { ptMenuClose(); }
+        });
+        document.addEventListener('click', function (ev) {
+            if (!ev.target.closest || !ev.target.closest('#pfPresetCombo')) { psMenuClose(); }
         });
     })();
 

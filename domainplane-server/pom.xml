@@ -68,6 +68,23 @@
             <artifactId>langchain4j-open-ai</artifactId>
             <version>${langchain4j.version}</version>
         </dependency>
+        <!-- Anthropic 官方：/v1/messages，协议与鉴权头均与 OpenAI 不同，
+             不能用 OpenAI 兼容适配器代劳。 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-anthropic</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+        <!-- Ollama：本地部署（/api/chat，无密钥概念），思考开关有原生 think 入口 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-ollama</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+        <!-- langchain4j-dashscope 刻意不引：官方停更在 0.36.2（2024-11），
+             与本项目的 1.18.x 不在同一依赖世代，引入会拖进一整套旧 core 并破坏依赖树。
+             阿里云百炼走它自带的 OpenAI 兼容入口（compatible-mode/v1）即可，
+             代价是拿不到原生模块才有的 audio 模态。等 1.x 出稳定版再补。 -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j</artifactId>

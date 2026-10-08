@@ -169,6 +169,14 @@ public class ModelProfileSettings {
         private java.util.List<String> output = new java.util.ArrayList<>();
         private String baseUrl;
         private String apiKey;
+        /**
+         * 服务商协议类型名（存枚举 {@code name()}）。
+         *
+         * 存字符串而不是枚举本身：{@code models.json} 允许手工编辑，
+         * 出现认不出来的值时 {@link ProviderType#parse} 会退回归 OpenAI 兼容，
+         * 而不会让整个反序列化过程炸掉。
+         */
+        private String providerType;
         private String modelName;
         private Double temperature;
         private Integer maxTokens;
@@ -184,7 +192,8 @@ public class ModelProfileSettings {
         private java.util.List<String> fallbacks = new java.util.ArrayList<>();
 
         public ModelProfile toProfile(String alias) {
-            return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey, modelName,
+            return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey,
+                    ProviderType.parse(providerType), modelName,
                     temperature, maxTokens, thinking, returnThinking, dimensions, capabilities, fallbacks);
         }
 
@@ -195,6 +204,7 @@ public class ModelProfileSettings {
             data.setOutput(new java.util.ArrayList<>(profile.output()));
             data.setBaseUrl(profile.baseUrl());
             data.setApiKey(profile.apiKey());
+            data.setProviderType(profile.providerType().name());
             data.setModelName(profile.modelName());
             data.setTemperature(profile.temperature());
             data.setMaxTokens(profile.maxTokens());

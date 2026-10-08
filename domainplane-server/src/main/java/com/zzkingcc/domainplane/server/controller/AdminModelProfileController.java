@@ -7,6 +7,7 @@ import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
 import com.zzkingcc.domainplane.server.knowledge.KnowledgeBaseService;
 import com.zzkingcc.domainplane.server.model.ModelCatalog;
 import com.zzkingcc.domainplane.server.model.ModelProfile;
+import com.zzkingcc.domainplane.server.model.ProviderType;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
 import com.zzkingcc.domainplane.server.model.ModelProfileSettings;
 import com.zzkingcc.domainplane.server.model.ModelProfileStore;
@@ -145,7 +146,8 @@ public class AdminModelProfileController {
         String apiKey = body.getApiKey().trim();
 
         ModelProfile profile = new ModelProfile(alias, body.getEndpoints(), body.getInput(), body.getOutput(),
-                body.getBaseUrl(), apiKey, body.getModelName(), body.getTemperature(), body.getMaxTokens(),
+                body.getBaseUrl(), apiKey, ProviderType.parse(body.getProviderType()), body.getModelName(),
+                body.getTemperature(), body.getMaxTokens(),
                 body.getThinking(), body.getReturnThinking(),
                 body.getDimensions(), body.getCapabilities(), body.getFallbacks());
 
@@ -202,7 +204,11 @@ public class AdminModelProfileController {
                 prefer(read.endpoints(), existing.endpoints()),
                 mergeModalities(read, read.input(), existing.input()),
                 mergeModalities(read, read.output(), existing.output()),
-                existing.baseUrl(), existing.apiKey(), existing.modelName(),
+                existing.baseUrl(), existing.apiKey(),
+                /* 协议类型原样保留：它不是探测得到的（GET /models 只讲模型清单、不讲协议），
+                   一次「读取」把它抹掉会让档案退回归 OpenAI 兼容 —— 用户选的 Anthropic
+                   会被悄悄改成走 api.anthropic.com 之外的地址去请求。 */
+                existing.providerType(), existing.modelName(),
                 existing.temperature(), existing.maxTokens(),
                 /* 思考开关原样保留：它不是探测得到的，只有用户在表单里点过才算数 ——
                    一次「读取」把它抹掉，等于用户精心关掉的思考又自己打开了，而且卡片上
@@ -618,6 +624,10 @@ public class AdminModelProfileController {
         item.put("input", profile.input());
         item.put("output", profile.output());
         item.put("baseUrl", profile.baseUrl());
+        /* 协议类型原样下发（枚举名，不是 null）：管控台编辑时据此回填协议下拉。
+           不下发的话，编辑一个 Anthropic 档案会被默认值覆盖成 OpenAI 兼容，
+           而卡片上看不出任何变化，直到某次调用报 ClassCastException。 */
+        item.put("providerType", profile.providerType().name());
         item.put("modelName", profile.modelName());
         item.put("apiKeyMasked", profile.maskedApiKey());
         item.put("temperature", profile.temperature());
@@ -655,6 +665,13 @@ public class AdminModelProfileController {
         private List<String> output;
         private String baseUrl;
         private String apiKey;
+        /**
+         * 服务商协议类型名（留空 = OpenAI 兼容）。
+         *
+         * 用字符串接收而非枚举：认不出来的值由 {@code ProviderType.parse} 退回归兼容，
+         * 不会让整个请求体反序列化失败。
+         */
+        private String providerType;
         private String modelName;
         private Double temperature;
         private Integer maxTokens;
