@@ -694,12 +694,17 @@ public class AgentOrchestrationService implements AgentService {
 
             TokenUsageRecorder.begin();
 
-            // 先拍快照再写提问：停止时要把记忆恢复到这一刻（快照一定在写入之前拍，
-            // 所以"没有快照"= 本轮没往记忆里写过东西 = 无需回滚）。
-            memoryBefore = List.copyOf(memory.messages());
+            /* 读一次历史，既拍快照又组装请求体 —— 原先这里是两次 messages()：
+               一次为快照（List.copyOf）、一次为拼请求体（addAll），两次都是
+               "Redis 拉全量 → 逐条反序列化"，在长会话上是纯粹的白跑一趟。
+
+               顺序上仍严格是"先拍快照、后写提问"：快照必须落在写入之前，
+               否则"没有快照"就不再等于"本轮没写过记忆"，停止时回滚会多回滚一条。 */
+            List<ChatMessage> historyBefore = memory.messages();
+            memoryBefore = List.copyOf(historyBefore);
             memory.add(UserMessage.from(message));
 
-            List<ChatMessage> messages = new ArrayList<>();
+            List<ChatMessage> messages = new ArrayList<>(historyBefore.size() + 2);
             // 系统提示词按本轮所处的域解析：公共基线 + 域差异。
             // 执行单元内冻结、单元之间用最新 —— resume 不重跑本方法（它从检查点恢复），
             // 因此这里读到的就是本次执行单元开始时的提示词，天然满足该语义。
@@ -707,7 +712,10 @@ public class AgentOrchestrationService implements AgentService {
             if (systemMessage != null && !systemMessage.isBlank()) {
                 messages.add(SystemMessage.from(systemMessage));
             }
-            messages.addAll(memory.messages());
+            // 刚写入的那条提问要补进请求体：历史快照里还没有它，
+            // 而 memory.add() 走的是增量落盘、不再回写这份本地列表。
+            messages.addAll(historyBefore);
+            messages.add(UserMessage.from(message));
 
             RunnableConfig config = RunnableConfig.builder()
                     .threadId(key)
