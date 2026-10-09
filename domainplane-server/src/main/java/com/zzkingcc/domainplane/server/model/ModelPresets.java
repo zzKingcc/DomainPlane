@@ -46,45 +46,44 @@ public final class ModelPresets {
     /**
      * 全部预设。
      *
-     * 顺序按"最常用在前"排：前四项覆盖了绝大多数部署。
-     * 末项「自定义」必须有 —— 私有部署（中转网关、内网 vLLM）用户不该被预设堵死，
-     * 且它不带默认地址，选中后地址栏留空由用户填。
+     * 除 Anthropic 与 Ollama 外，其余厂商都提供 OpenAI 兼容入口，因此协议一律
+     * {@code OPENAI_COMPATIBLE}，预设之间只差默认地址。
+     *
+     * 末项 vLLM 不带默认地址，承担"自定义"的角色 —— 私有部署（中转网关、内网 vLLM）
+     * 用户不该被预设堵死，选中后地址栏留空由用户填。
      */
     private static final List<Preset> ALL = List.of(
-            new Preset("OPENAI_COMPATIBLE", "DeepSeek（官方）",
+            new Preset("OPENAI_COMPATIBLE", "OpenAI 官方",
+                    "https://api.openai.com/v1", true, null),
+            new Preset("ANTHROPIC", "Anthropic 官方（Claude）",
+                    "https://api.anthropic.com", true, "原生 /v1/messages 协议"),
+            new Preset("OPENAI_COMPATIBLE", "Google Gemini",
+                    "https://generativelanguage.googleapis.com/v1beta/openai", true,
+                    "走 Google 的 OpenAI 兼容入口"),
+            new Preset("OPENAI_COMPATIBLE", "xAI Grok",
+                    "https://api.x.ai/v1", true, null),
+            new Preset("OPENAI_COMPATIBLE", "DeepSeek 官方",
                     "https://api.deepseek.com/v1", true, null),
+            new Preset("OPENAI_COMPATIBLE", "Kimi（Moonshot）",
+                    "https://api.moonshot.cn/v1", true, null),
+            new Preset("OPENAI_COMPATIBLE", "阿里云百炼（通义千问）",
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1", true,
+                    "百炼同时提供多种模型；此入口按 OpenAI 协议调用"),
+            new Preset("OPENAI_COMPATIBLE", "小米 MiMo",
+                    "https://api.xiaomimimo.com/v1", true, null),
+            new Preset("OPENAI_COMPATIBLE", "智谱 GLM",
+                    "https://open.bigmodel.cn/api/paas/v4", true, null),
+            new Preset("OLLAMA", "Ollama（本地）",
+                    "http://localhost:11434", false, "本地部署，无需密钥；地址按实际部署调整"),
+            new Preset("OPENAI_COMPATIBLE", "vLLM（自建）",
+                    "", true, "自建服务，地址与模型名自行填写"),
             new Preset("OPENAI_COMPATIBLE", "硅基流动 SiliconFlow",
                     "https://api.siliconflow.cn/v1", true, "支持 Qwen / DeepSeek / GLM 等，开源模型较多"),
             new Preset("OPENAI_COMPATIBLE", "OpenRouter",
-                    "https://openrouter.ai/api/v1", true, "一个 Key 访问多家模型"),
-            new Preset("OPENAI_COMPATIBLE", "阿里云百炼（兼容模式）",
-                    "https://dashscope.aliyuncs.com/compatible-mode/v1", true,
-                    "百炼同时提供多种模型；此入口按 OpenAI 协议调用"),
-            new Preset("ANTHROPIC", "Anthropic 官方（Claude）",
-                    "https://api.anthropic.com", true, "原生 /v1/messages 协议"),
-            new Preset("OLLAMA", "Ollama（本地）",
-                    "http://localhost:11434", false, "本地部署，无需密钥；地址按实际部署调整"),
-            new Preset("OPENAI_COMPATIBLE", "LM Studio（本地）",
-                    "http://localhost:1234/v1", false, "本地部署"),
-            new Preset("OPENAI_COMPATIBLE", "OpenAI 官方",
-                    "https://api.openai.com/v1", true, null),
-            new Preset("OPENAI_COMPATIBLE", "自定义（OpenAI 兼容）",
-                    "", true, "适用于各类中转网关：地址与模型名自行填写"));
+                    "https://openrouter.ai/api/v1", true, "一个 Key 访问多家模型"));
 
     /** 全部预设（不可变） */
     public static List<Preset> all() {
         return ALL;
-    }
-
-    /**
-     * 当前可用的协议类型，供界面渲染"协议类型"下拉。
-     *
-     * 过滤掉 {@link ProviderType#isSupported()} 为 false 的类型：
-     * 让用户选一个跑了才知道不通，不如根本不列出来。
-     */
-    public static List<ProviderType> supportedProviderTypes() {
-        return java.util.Arrays.stream(ProviderType.values())
-                .filter(ProviderType::isSupported)
-                .toList();
     }
 }

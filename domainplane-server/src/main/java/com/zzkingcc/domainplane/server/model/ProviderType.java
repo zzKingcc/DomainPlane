@@ -19,55 +19,33 @@ public enum ProviderType {
     /**
      * OpenAI 兼容协议（默认）。
      *
-     * 覆盖 DeepSeek、硅基流动、OpenRouter、Moonshot、百炼兼容模式、vLLM、
+     * 覆盖 DeepSeek、Kimi、Grok、MiMo、vLLM、硅基流动、OpenRouter、百炼兼容模式、
      * LM Studio、OneAPI / NewAPI 等各类中转网关 —— 只要对方暴露
      * {@code /v1/chat/completions}，就走这一个。
      *
      * 这是默认值而非唯一值：老档案没有这个字段时按这里处理，
      * 保证改造前后行为一致。
      */
-    OPENAI_COMPATIBLE("OpenAI 兼容"),
+    OPENAI_COMPATIBLE,
 
     /** Anthropic 官方：{@code /v1/messages}，鉴权头与请求体结构均不同。 */
-    ANTHROPIC("Anthropic"),
+    ANTHROPIC,
 
     /** Ollama 本地：{@code /api/chat}，无需密钥，思考开关走 {@code think} 字段。 */
-    OLLAMA("Ollama"),
+    OLLAMA,
 
     /**
      * 阿里云百炼 / 通义原生：走 DashScope 模块。
      *
      * 暂不可用 —— langchain4j 的 dashscope 模块停更在 0.36.2（2024-11），
      * 与本项目的 1.18.x 不在同一依赖世代，强行引入会拖进一整套旧 core 并破坏依赖树。
-     * 因此 {@link #isSupported()} 返回 false，工厂不注册该分支。
+     * 工厂不注册该分支，选中即抛异常；管控台的协议下拉已移除，也没有预设用它。
      *
      * 百炼本身提供了 OpenAI 兼容入口（{@code /compatible-mode/v1}），
      * 现阶段把百炼配成 {@link #OPENAI_COMPATIBLE} 即可拿到对话与向量能力，
      * 代价是拿不到原生模块才有的 audio 模态。等 1.x 官方出稳定版再补这个分支。
      */
-    DASHSCOPE("阿里云百炼");
-
-    private final String label;
-
-    ProviderType(String label) {
-        this.label = label;
-    }
-
-    /** 人话标签（管控台展示） */
-    public String label() {
-        return label;
-    }
-
-    /**
-     * 这一类型当前是否真的接了适配器。
-     *
-     * 与 {@link #parse} 的"认不出来就退回兼容"不同：这里回答的是
-     * "这个枚举值有没有对应实现"，管控台据此把不可用的选项标出来，
-     * 避免用户选了才发现跑不通。
-     */
-    public boolean isSupported() {
-        return this != DASHSCOPE;
-    }
+    DASHSCOPE;
 
     /**
      * 宽松解析：空值 / 认不出来的值一律归 {@link #OPENAI_COMPATIBLE}。

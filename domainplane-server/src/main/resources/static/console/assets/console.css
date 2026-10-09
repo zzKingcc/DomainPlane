@@ -205,12 +205,89 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 
 .field { margin-bottom: 14px; }
-.field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
+.field label:not(.switch) { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
 .field .help { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.6; }
 
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 /* .row 是 grid、[hidden] 是 UA 低优先级样式会被盖掉，隐藏时需显式覆盖 */
 .row[hidden], .field[hidden] { display: none; }
+
+/* ===== 模型参数面板 =====
+   本模型的调优参数整体成组：绿框 + 淡绿底，与上方的「识别结果」区分开。
+   里面一项都不显示时整块收起（见 models.html 的 updateParamPanel）。 */
+.param-panel {
+    border: 1px solid var(--green);
+    background: rgba(22, 163, 74, .07);
+    border-radius: 8px;
+    padding: 14px 14px 0;
+    margin-bottom: 14px;
+}
+.param-panel[hidden] { display: none; }
+
+/* 卡片右侧的参数面板：与弹窗同一套绿框。一行四列 —— 面板因此要占卡片的大头，
+   meta 让成左侧窄栏。四列需要面板 ≥ 626px（4×140 + 间距 + 内边距），
+   换算下来视口 < 1212px 就放不下：先退 2 列，再退 1 列。 */
+.card-body { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+.card-body > .model-meta { flex: 1 1 220px; min-width: 0; }
+.card-params { flex: 3 1 560px; max-width: none; padding: 12px; margin-bottom: 0; }
+.card-params .param-grid {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 14px;
+}
+.card-params .field { margin-bottom: 0; min-width: 0; }
+/* 标签最多两行、与输入框底对齐 —— 长短不一时四列的输入框仍落在同一水平线上 */
+.card-params .field label:not(.switch) {
+    display: flex; align-items: flex-end; min-height: 28px;
+    font-size: 11px; line-height: 1.25; margin-bottom: 4px;
+}
+.card-params input:not([type="checkbox"]), .card-params select {
+    width: 100%; height: 26px; padding: 3px 6px; font-size: 12px;
+}
+.card-params .switch-wrap { min-height: 26px; gap: 6px; }
+@media (max-width: 1211px) {
+    .card-params .param-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 903px) {
+    .card-params .param-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ===== 三态开关 =====
+   拨动 = 开 / 关；右侧的「默认」把值清回"不声明"。
+   复选框只有两态，承载不了"不声明"，所以真值放在容器的 data-raw 上。
+
+   选择器一律带 .switch-wrap 前缀，并显式复位 display / min-height / margin：
+   开关里的 <label class="switch"> 也是 .field 的后代，只写 .switch 会被
+   .field label / .card-params .field label 那两条通用规则盖掉 ——
+   display 变成 flex、min-height 变成 28px，轨道就被拉成竖长条（看着就是"变形"）。 */
+.switch-wrap { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+.switch-wrap .switch {
+    position: relative; display: inline-block; flex: 0 0 auto;
+    width: 34px; height: 18px; min-height: 0; margin: 0;
+}
+.switch-wrap .switch input[type="checkbox"] {
+    position: absolute; width: 1px; height: 1px; min-height: 0;
+    opacity: 0; margin: 0; padding: 0;
+}
+.switch-track {
+    position: absolute; inset: 0; border-radius: 999px;
+    background: #d1d5db; transition: background .15s;
+}
+.switch-knob {
+    position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+    border-radius: 50%; background: #fff; transition: transform .15s;
+}
+.switch-wrap .switch input[type="checkbox"]:checked + .switch-track { background: var(--green); }
+.switch-wrap .switch input[type="checkbox"]:checked + .switch-track .switch-knob {
+    transform: translateX(16px);
+}
+.switch-wrap .switch input[type="checkbox"]:focus-visible + .switch-track {
+    outline: 2px solid var(--primary); outline-offset: 1px;
+}
+.switch-clear {
+    border: none; background: none; padding: 0;
+    font-size: 12px; font-family: inherit; color: var(--muted); cursor: pointer;
+}
+.switch-clear:hover { color: var(--primary); text-decoration: underline; }
+.switch-clear[hidden] { display: none; }
 
 /* ===== 状态行 ===== */
 .status-line {
@@ -359,6 +436,12 @@ input:disabled { background: #f8fafc; color: var(--muted); }
     max-height: 240px; overflow-y: auto; padding: 4px;
 }
 .combo-state { font-size: 12px; color: var(--muted); padding: 8px 10px; }
+/* 预设下拉里的分区头（内置配置项 / 自定义配置项）：只做视觉分隔，不可点 */
+.combo-group {
+    font-size: 12px; color: var(--muted);
+    padding: 8px 10px 3px; border-top: 1px solid var(--border);
+}
+.combo-group:first-child { border-top: none; }
 .combo-item {
     padding: 6px 10px; border-radius: 4px; cursor: pointer;
     font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;

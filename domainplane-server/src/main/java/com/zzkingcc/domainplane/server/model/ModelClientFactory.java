@@ -105,6 +105,11 @@ public class ModelClientFactory {
                 applyTemperature(b::temperature, profile);
                 applyMaxTokens(b::maxTokens, profile);
                 applyReturnThinking(b::returnThinking, profile);
+                numParam(b::topP, profile, "chat.topP");
+                intParam(b::topK, profile, "chat.topK");
+                intParam(b::thinkingBudgetTokens, profile, "chat.thinkingBudgetTokens");
+                listParam(b::stopSequences, profile, "chat.stop");
+                applySendThinking(b::sendThinking, profile);
                 yield b.build();
             }
             case OLLAMA -> {
@@ -123,6 +128,12 @@ public class ModelClientFactory {
                     b.think(profile.thinking());
                 }
                 applyReturnThinking(b::returnThinking, profile);
+                numParam(b::topP, profile, "chat.topP");
+                intParam(b::topK, profile, "chat.topK");
+                intParam(b::numCtx, profile, "chat.numCtx");
+                numParam(b::repeatPenalty, profile, "chat.repeatPenalty");
+                intParam(b::seed, profile, "chat.seed");
+                listParam(b::stop, profile, "chat.stop");
                 yield b.build();
             }
             case OPENAI_COMPATIBLE -> {
@@ -133,6 +144,13 @@ public class ModelClientFactory {
                 applyTemperature(b::temperature, profile);
                 applyMaxTokens(b::maxTokens, profile);
                 applyOpenAiThinking(b::customParameters, b::returnThinking, profile);
+                numParam(b::topP, profile, "chat.topP");
+                numParam(b::presencePenalty, profile, "chat.presencePenalty");
+                numParam(b::frequencyPenalty, profile, "chat.frequencyPenalty");
+                intParam(b::seed, profile, "chat.seed");
+                flagParam(b::parallelToolCalls, profile, "chat.parallelToolCalls");
+                textParam(b::reasoningEffort, profile, "chat.reasoningEffort");
+                listParam(b::stop, profile, "chat.stop");
                 yield b.build();
             }
             case DASHSCOPE -> throw new IllegalStateException(dashscopeUnsupported());
@@ -153,6 +171,11 @@ public class ModelClientFactory {
                 applyTemperature(b::temperature, profile);
                 applyMaxTokens(b::maxTokens, profile);
                 applyReturnThinking(b::returnThinking, profile);
+                numParam(b::topP, profile, "chat.topP");
+                intParam(b::topK, profile, "chat.topK");
+                intParam(b::thinkingBudgetTokens, profile, "chat.thinkingBudgetTokens");
+                listParam(b::stopSequences, profile, "chat.stop");
+                applySendThinking(b::sendThinking, profile);
                 yield b.build();
             }
             case OLLAMA -> {
@@ -168,6 +191,12 @@ public class ModelClientFactory {
                     b.think(profile.thinking());
                 }
                 applyReturnThinking(b::returnThinking, profile);
+                numParam(b::topP, profile, "chat.topP");
+                intParam(b::topK, profile, "chat.topK");
+                intParam(b::numCtx, profile, "chat.numCtx");
+                numParam(b::repeatPenalty, profile, "chat.repeatPenalty");
+                intParam(b::seed, profile, "chat.seed");
+                listParam(b::stop, profile, "chat.stop");
                 yield b.build();
             }
             case OPENAI_COMPATIBLE -> {
@@ -178,6 +207,13 @@ public class ModelClientFactory {
                 applyTemperature(b::temperature, profile);
                 applyMaxTokens(b::maxTokens, profile);
                 applyOpenAiThinking(b::customParameters, b::returnThinking, profile);
+                numParam(b::topP, profile, "chat.topP");
+                numParam(b::presencePenalty, profile, "chat.presencePenalty");
+                numParam(b::frequencyPenalty, profile, "chat.frequencyPenalty");
+                intParam(b::seed, profile, "chat.seed");
+                flagParam(b::parallelToolCalls, profile, "chat.parallelToolCalls");
+                textParam(b::reasoningEffort, profile, "chat.reasoningEffort");
+                listParam(b::stop, profile, "chat.stop");
                 yield b.build();
             }
             case DASHSCOPE -> throw new IllegalStateException(dashscopeUnsupported());
@@ -187,15 +223,70 @@ public class ModelClientFactory {
     // ==================== 参数施加 ====================
 
     /**
-     * 温度：走 {@link ModelProfile#effectiveTemperature()}，没声明时按 0.5 发出去。
+     * 温度：留空就不发送，由服务商默认决定。
      *
-     * 不交给服务商默认是不设 {@code temperature} 时各家各给各的（常见 0.7 / 1.0），
-     * 同一个档案换一家服务商行为就变了，且没有任何提示。
-     * 取 0.5 而非 0：0 接近贪心解码，工具调用与结构化输出时重复与卡死概率明显更高，
-     * 而这类场景正是本平台的主用途。
+     * 不再注入平台自造的默认值 —— 那会让"没填"实际等于"被平台改成了某个数"，
+     * 而用户界面上看不到这个数；换个服务商，行为还会跟着变。
      */
     private static void applyTemperature(java.util.function.Consumer<Double> setter, ModelProfile profile) {
-        setter.accept(profile.effectiveTemperature());
+        if (profile.temperature() != null) {
+            setter.accept(profile.temperature());
+        }
+    }
+
+    // ==================== 调优参数（前缀键，留空即不发） ====================
+
+    /** 数值参数 */
+    private static void numParam(java.util.function.Consumer<Double> setter, ModelProfile profile, String key) {
+        Double value = profile.numParam(key);
+        if (value != null) {
+            setter.accept(value);
+        }
+    }
+
+    /** 整数参数 */
+    private static void intParam(java.util.function.Consumer<Integer> setter, ModelProfile profile, String key) {
+        Integer value = profile.intParam(key);
+        if (value != null) {
+            setter.accept(value);
+        }
+    }
+
+    /** 文本参数 */
+    private static void textParam(java.util.function.Consumer<String> setter, ModelProfile profile, String key) {
+        String value = profile.strParam(key);
+        if (value != null) {
+            setter.accept(value);
+        }
+    }
+
+    /** 布尔参数 */
+    private static void flagParam(java.util.function.Consumer<Boolean> setter, ModelProfile profile, String key) {
+        Boolean value = profile.boolParam(key);
+        if (value != null) {
+            setter.accept(value);
+        }
+    }
+
+    /** 字符串数组参数（停止序列） */
+    private static void listParam(java.util.function.Consumer<java.util.List<String>> setter,
+                                  ModelProfile profile, String key) {
+        java.util.List<String> value = profile.listParam(key);
+        if (value != null) {
+            setter.accept(value);
+        }
+    }
+
+    /**
+     * Anthropic 的思考开关。
+     *
+     * 与 OpenAI 兼容的 {@code enable_thinking} 不同：Anthropic 的开关走 {@code sendThinking}，
+     * 预算另有 {@code thinkingBudgetTokens} 入口（见 chat.thinkingBudgetTokens 参数）。
+     */
+    private static void applySendThinking(java.util.function.Consumer<Boolean> setter, ModelProfile profile) {
+        if (profile.thinking() != null) {
+            setter.accept(profile.thinking());
+        }
     }
 
     /**

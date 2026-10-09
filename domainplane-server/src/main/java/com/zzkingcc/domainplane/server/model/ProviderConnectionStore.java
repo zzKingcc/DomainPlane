@@ -83,16 +83,21 @@ public class ProviderConnectionStore {
     /**
      * 库中的一条连接。
      *
-     * @param name    唯一名称（下拉里的标识）
-     * @param baseUrl 服务商地址（OpenAI 兼容 baseUrl）
-     * @param apiKey  密钥，可为空（自建端点没有真密钥）；不要写进日志
+     * @param name     唯一名称（预设下拉里的标识）
+     * @param baseUrl  服务商地址
+     * @param apiKey   密钥，可为空（自建端点没有真密钥）；不要写进日志
+     * @param protocol 协议类型名（{@link ProviderType#name()}）；空 = OpenAI 兼容
      */
-    public record ProviderConnection(String name, String baseUrl, String apiKey) {
+    public record ProviderConnection(String name, String baseUrl, String apiKey, String protocol) {
 
         public ProviderConnection {
             name = name == null ? "" : name.trim();
             baseUrl = baseUrl == null ? "" : baseUrl.trim();
             apiKey = apiKey == null ? "" : apiKey.trim();
+            /* 老文件里没有这个字段。缺省即 OpenAI 兼容 —— 与只有这一种协议时行为一致 */
+            protocol = protocol == null || protocol.isBlank()
+                    ? ProviderType.OPENAI_COMPATIBLE.name()
+                    : protocol.trim();
         }
 
         /** 这条连接是否带密钥（决定下拉里要不要显示脱敏值） */
@@ -151,7 +156,7 @@ public class ProviderConnectionStore {
      *
      * @return 失败原因；{@code null} 表示成功
      */
-    public synchronized String add(String name, String baseUrl, String apiKey) {
+    public synchronized String add(String name, String baseUrl, String apiKey, String protocol) {
         String key = normalize(name);
         if (key.isEmpty()) {
             return "名称不能为空";
@@ -179,11 +184,14 @@ public class ProviderConnectionStore {
                     + "名称用来标识是哪一条，不允许重复；想改地址或密钥请先删除同名项再添加。";
         }
 
+        /* 认不出来的协议名退回归 OpenAI 兼容 —— 与档案侧同一个 parse，口径一致 */
+        String proto = ProviderType.parse(protocol).name();
+
         List<ProviderConnection> next = new ArrayList<>(connections.connections());
-        next.add(new ProviderConnection(key, url, secret));
+        next.add(new ProviderConnection(key, url, secret, proto));
         persist(new Connections(next));
-        log.info("[服务商连接库] 已添加「{}」→ {}（{}）", key, url,
-                new ProviderConnection(key, url, secret).maskedApiKey());
+        log.info("[服务商连接库] 已添加「{}」→ {}（协议 {}，{}）", key, url, proto,
+                new ProviderConnection(key, url, secret, proto).maskedApiKey());
         return null;
     }
 

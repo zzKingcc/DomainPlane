@@ -190,11 +190,14 @@ public class ModelProfileSettings {
         private java.util.List<String> capabilities = new java.util.ArrayList<>();
         /** 降级链（暂只存不生效） */
         private java.util.List<String> fallbacks = new java.util.ArrayList<>();
+        /** 调优参数（前缀键，如 chat.topP）；只存用户显式填过的项 */
+        private Map<String, Object> params = new LinkedHashMap<>();
 
         public ModelProfile toProfile(String alias) {
             return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey,
                     ProviderType.parse(providerType), modelName,
-                    temperature, maxTokens, thinking, returnThinking, dimensions, capabilities, fallbacks);
+                    temperature, maxTokens, thinking, returnThinking, dimensions, capabilities, fallbacks,
+                    params);
         }
 
         public static ProfileData from(ModelProfile profile) {
@@ -213,6 +216,7 @@ public class ModelProfileSettings {
             data.setDimensions(profile.dimensions());
             data.setCapabilities(new java.util.ArrayList<>(profile.capabilities()));
             data.setFallbacks(new java.util.ArrayList<>(profile.fallbacks()));
+            data.setParams(new LinkedHashMap<>(profile.params()));
             return data;
         }
     }

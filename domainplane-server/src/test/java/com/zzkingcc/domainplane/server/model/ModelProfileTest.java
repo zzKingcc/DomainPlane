@@ -20,7 +20,7 @@ class ModelProfileTest {
     private static ModelProfile profile(List<String> endpoints, List<String> input,
                                         List<String> output, List<String> capabilities,
                                         Integer dimensions) {
-        return new ModelProfile("a",endpoints,input,output,"https://api.example.com/v1","sk-test", null,"m",null,null,null,null,dimensions,capabilities,null);
+        return new ModelProfile("a",endpoints,input,output,"https://api.example.com/v1","sk-test", null,"m",null,null,null,null,dimensions,capabilities,null,null);
     }
 
     @Test
@@ -68,7 +68,7 @@ class ModelProfileTest {
 
     @Test
     void 与配置文件互转时三个维度都不丢() {
-        ModelProfile p = new ModelProfile("gpt4o",List.of(ModelProfile.EP_CHAT, ModelProfile.EP_TTS),List.of(ModelProfile.MOD_TEXT),List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_AUDIO),"https://api.example.com/v1","sk-test", null,"gpt-4o",0.5,100,Boolean.FALSE,Boolean.TRUE,null,List.of(ModelProfile.CAP_STREAMING, ModelProfile.CAP_REASONING),List.of("backup"));
+        ModelProfile p = new ModelProfile("gpt4o",List.of(ModelProfile.EP_CHAT, ModelProfile.EP_TTS),List.of(ModelProfile.MOD_TEXT),List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_AUDIO),"https://api.example.com/v1","sk-test", null,"gpt-4o",0.5,100,Boolean.FALSE,Boolean.TRUE,null,List.of(ModelProfile.CAP_STREAMING, ModelProfile.CAP_REASONING),List.of("backup"),null);
 
         ModelProfile back = ProfileData.from(p).toProfile(p.alias());
         assert back.endpoints().equals(p.endpoints()) : "端点族应往返一致： " + back.endpoints();
@@ -85,7 +85,7 @@ class ModelProfileTest {
     @Test
     void 思考开关参与指纹() {
         ModelProfile on = profile(List.of(ModelProfile.EP_CHAT), null, null, null, null);
-        ModelProfile off = new ModelProfile(on.alias(),on.endpoints(),on.input(),on.output(),on.baseUrl(),on.apiKey(), null,on.modelName(),null,null,Boolean.FALSE,null,null,null,null);
+        ModelProfile off = new ModelProfile(on.alias(),on.endpoints(),on.input(),on.output(),on.baseUrl(),on.apiKey(), null,on.modelName(),null,null,Boolean.FALSE,null,null,null,null,null);
 
         assert !on.fingerprint().equals(off.fingerprint())
                 : "思考开关变了指纹就必须变，否则缓存里那份旧客户端照旧在用 —— "
@@ -102,26 +102,45 @@ class ModelProfileTest {
                         + "而不是显示成「已关闭」让用户以为关掉了、实际每轮还在烧思考 token";
     }
 
-    // ==================== 采样参数默认值 ====================
+    // ==================== 采样参数 ====================
 
-    /** 变异验证点：把 {@code effectiveTemperature} 改回直接返回 {@code temperature}（即 null），
-     *  {@link #未声明温度时按0_5而不是交给服务商默认()} 就会变红。 */
     @Test
-    void 未声明温度时按0_5而不是交给服务商默认() {
+    void 未声明温度时保持null而不是替服务商决定() {
         ModelProfile p = profile(List.of(ModelProfile.EP_CHAT), null, null, null, null);
 
-        assert p.temperature() == null : "原始声明值应保持 null（未声明），实际 " + p.temperature();
-        assert p.effectiveTemperature() == ModelProfile.DEFAULT_TEMPERATURE
-                : "未声明时必须落到固定默认值；不设 temperature 的话各家端点各给各的"
-                + "（常见 0.7 / 1.0），换个服务商行为就变了且没有提示，实际 " + p.effectiveTemperature();
-        assert ModelProfile.DEFAULT_TEMPERATURE == 0.5 : "默认温度应为 0.5，实际 " + ModelProfile.DEFAULT_TEMPERATURE;
+        assert p.temperature() == null
+                : "未声明就保持 null：调用方据此不发送 temperature，由服务商默认决定，实际 " + p.temperature();
     }
 
     @Test
     void 声明了温度就以声明值为准() {
-        ModelProfile p = new ModelProfile("a",List.of(ModelProfile.EP_CHAT),null,null,"https://api.example.com/v1","sk", null,"m",0.1,null,null,null,null,null,null);
+        ModelProfile p = new ModelProfile("a",List.of(ModelProfile.EP_CHAT),null,null,"https://api.example.com/v1","sk", null,"m",0.1,null,null,null,null,null,null,null);
 
-        assert p.effectiveTemperature() == 0.1 : "显式声明不该被默认值盖掉，实际 " + p.effectiveTemperature();
+        assert p.temperature() == 0.1 : "声明值应原样保留，实际 " + p.temperature();
+    }
+
+    @Test
+    void 调优参数丢掉空值只留填过的项() {
+        ModelProfile p = new ModelProfile("a",List.of(ModelProfile.EP_CHAT),null,null,
+                "https://api.example.com/v1","sk", null,"m",null,null,null,null,null,null,null,
+                java.util.Map.of("chat.topP", 0.9, "chat.seed", 7));
+
+        assert p.numParam("chat.topP") == 0.9 : "填过的项应保留，实际 " + p.numParam("chat.topP");
+        assert p.intParam("chat.seed") == 7 : "整数项应按 Number 读出，实际 " + p.intParam("chat.seed");
+        assert p.param("chat.stop") == null : "没填过的项不该凭空出现";
+        assert p.params().size() == 2 : "只应留下填过的两项，实际 " + p.params();
+    }
+
+    @Test
+    void 调优参数里的空串与空数组视为未填() {
+        java.util.Map<String, Object> raw = new java.util.HashMap<>();
+        raw.put("chat.topP", "");
+        raw.put("chat.stop", java.util.List.of("", "  "));
+        ModelProfile p = new ModelProfile("a",List.of(ModelProfile.EP_CHAT),null,null,
+                "https://api.example.com/v1","sk", null,"m",null,null,null,null,null,null,null, raw);
+
+        assert p.params().isEmpty()
+                : "空白值等于没填 —— 不能把「不发这个字段」变成「发个空值」，实际 " + p.params();
     }
 
     @Test
@@ -135,7 +154,7 @@ class ModelProfileTest {
 
     @Test
     void 声明了最大token就以声明值为准() {
-        ModelProfile p = new ModelProfile("a",List.of(ModelProfile.EP_CHAT),null,null,"https://api.example.com/v1","sk", null,"m",null,2048,null,null,null,null,null);
+        ModelProfile p = new ModelProfile("a",List.of(ModelProfile.EP_CHAT),null,null,"https://api.example.com/v1","sk", null,"m",null,2048,null,null,null,null,null,null);
 
         assert p.effectiveMaxTokens() == 2048 : "显式声明就该设限，实际 " + p.effectiveMaxTokens();
     }

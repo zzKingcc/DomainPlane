@@ -55,8 +55,8 @@ class ProviderConnectionStoreTest {
     @Test
     void 新增后可按名称取到整条连接并按名称排序() {
         ProviderConnectionStore store = store();
-        assertNull(store.add("beta", SF, "sk-beta-1111"));
-        assertNull(store.add("alpha", OLLAMA, ""));
+        assertNull(store.add("beta", SF, "sk-beta-1111", null));
+        assertNull(store.add("alpha", OLLAMA, "", null));
 
         assertEquals(List.of("alpha", "beta"),
                 store.entries().stream().map(ProviderConnectionStore.ProviderConnection::name).toList());
@@ -69,9 +69,9 @@ class ProviderConnectionStoreTest {
     @Test
     void 名称重复必须被拒绝且报错点名是哪一条() {
         ProviderConnectionStore store = store();
-        assertNull(store.add("主连接", SF, "sk-first-3333"));
+        assertNull(store.add("主连接", SF, "sk-first-3333", null));
 
-        String failure = store.add("主连接", OLLAMA, "sk-second-4444");
+        String failure = store.add("主连接", OLLAMA, "sk-second-4444", null);
         assertTrue(failure != null && failure.contains("名称已存在"), "重名必须拦下来，实际：" + failure);
         assertTrue(failure.contains("主连接"), "要点名是哪个名字撞了，实际：" + failure);
         assertTrue(failure.contains(SF), "要说是哪条地址那一条，避免用户以为库里是空的重名，实际：" + failure);
@@ -84,8 +84,8 @@ class ProviderConnectionStoreTest {
     @Test
     void 名称去首尾空白后算同一个名字() {
         ProviderConnectionStore store = store();
-        assertNull(store.add("主连接", SF, "sk-1"));
-        assertNotNull(store.add("  主连接  ", OLLAMA, "sk-2"),
+        assertNull(store.add("主连接", SF, "sk-1", null));
+        assertNotNull(store.add("  主连接  ", OLLAMA, "sk-2", null),
                 "两边都 trim 过，空格差异不该成为两个同名项");
         assertEquals(1, store.entries().size());
     }
@@ -94,8 +94,8 @@ class ProviderConnectionStoreTest {
     void 名称大小写不同视为不同名字且不互相覆盖() {
         /* 不折叠大小写：OpenRouter / openrouter 可能是用户真想区分的两条 */
         ProviderConnectionStore store = store();
-        assertNull(store.add("OpenRouter", "https://openrouter.ai/api/v1", "sk-A"));
-        assertNull(store.add("openrouter", "https://openrouter.ai/api/v1", "sk-B"));
+        assertNull(store.add("OpenRouter", "https://openrouter.ai/api/v1", "sk-A", null));
+        assertNull(store.add("openrouter", "https://openrouter.ai/api/v1", "sk-B", null));
         assertEquals(2, store.entries().size());
         assertEquals("sk-A", store.resolve("OpenRouter").orElseThrow().apiKey());
         assertEquals("sk-B", store.resolve("openrouter").orElseThrow().apiKey());
@@ -104,12 +104,12 @@ class ProviderConnectionStoreTest {
     @Test
     void 密钥可空但名称与地址不行() {
         ProviderConnectionStore store = store();
-        assertNull(store.add("本地 Ollama", OLLAMA, null),
+        assertNull(store.add("本地 Ollama", OLLAMA, null, null),
                 "自建端点没有真密钥，空密钥必须合法 —— 误判成必填就逼用户编一个假值");
 
-        assertNotNull(store.add("", SF, "sk-1"), "名称不能为空");
-        assertNotNull(store.add("  ", SF, "sk-1"), "全空白的名称同样不行");
-        assertNotNull(store.add("某家", "", "sk-1"), "服务商地址不能为空");
+        assertNotNull(store.add("", SF, "sk-1", null), "名称不能为空");
+        assertNotNull(store.add("  ", SF, "sk-1", null), "全空白的名称同样不行");
+        assertNotNull(store.add("某家", "", "sk-1", null), "服务商地址不能为空");
 
         ProviderConnectionStore.ProviderConnection ollama = store.resolve("本地 Ollama").orElseThrow();
         assertFalse(ollama.hasApiKey());
@@ -133,14 +133,14 @@ class ProviderConnectionStoreTest {
     @Test
     void 地址不强制补v1而是留给探测兜底() {
         /* 少写 /v1 要能存：探测环节会按 404 补一次，库这一层强改反而会把合法地址改坏 */
-        assertNull(store().add("漏了版本段", "https://api.example.com", "sk-1"));
+        assertNull(store().add("漏了版本段", "https://api.example.com", "sk-1", null));
     }
 
     @Test
     void 删除只影响库里那一条() {
         ProviderConnectionStore store = store();
-        store.add("keep", SF, "sk-keep");
-        store.add("drop", OLLAMA, "");
+        store.add("keep", SF, "sk-keep", null);
+        store.add("drop", OLLAMA, "", null);
 
         assertTrue(store.delete("drop"));
         assertFalse(store.delete("drop"), "删第二次应如实说没删掉，而不是悄悄再删一条别的");
@@ -160,7 +160,7 @@ class ProviderConnectionStoreTest {
     @Test
     void 落盘可往返即重启后连接还在() throws IOException {
         ProviderConnectionStore store = store();
-        store.add("主连接", SF, "sk-secret-value-1234567890");
+        store.add("主连接", SF, "sk-secret-value-1234567890", null);
 
         String json = Files.readString(file(), StandardCharsets.UTF_8);
         assertTrue(json.contains("sk-secret-value-1234567890"), "库里就是明文落盘，否则选中时无从取回");

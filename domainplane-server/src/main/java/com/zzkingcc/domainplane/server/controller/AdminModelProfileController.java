@@ -91,40 +91,30 @@ public class AdminModelProfileController {
         body.put("code", 0);
         body.put("profiles", profiles);
         body.put("domainBindings", registry.domainBindings());
-        /* 向量模型是全局单选：当前选中哪个、是否可用、以及有哪些档案可选（都带在向量段里） */
-        ModelProfile selected = registry.embeddingProfile().orElse(null);
+        /* 向量模型：当前启用的是哪一个（alias），以及全部向量档案。
+           向量模型不参与域绑定、全局只启用一个，所以它单独成段并列展示 ——
+           每张卡片自己带「启用」，而不是"新建即占用槽位"。 */
         body.put("embeddingAlias", registry.embeddingAlias());
-        body.put("embeddingConfigured", holder.isEmbeddingConfigured());
-        body.put("embeddingModelName", selected == null ? null : selected.modelName());
-        body.put("embeddingDimensions", selected == null ? null : selected.dimensions());
-        body.put("embeddingSource", holder.embeddingSource());
-        body.put("embeddingCandidates", embeddingCandidates());
-        /* 档案总数（模型桶 + 向量桶）：页头计数不能靠前端把两个列表相加得出 ——
-           未被选中的向量档案不在 profiles 里、又可能因不可用而不进 candidates，
-           前端怎么加都会少报。 */
-        body.put("profileCount", registry.allProfiles().size());
-        /* 采样参数默认值由服务端下发：页面预填的数必须与实际生效的数是同一个来源，
-           否则改了 DEFAULT_TEMPERATURE 就会出现"表单写着 A、实际跑 B"。 */
-        body.put("defaultTemperature", ModelProfile.DEFAULT_TEMPERATURE);
+        body.put("embeddingProfiles", embeddingProfiles());
         body.put("settingsFile", store.filePath());
         return body;
     }
 
     /**
-     * 可选作向量模型的档案（必须是向量档案且必填齐备），供页面直接渲染单选列表。
+     * 全部向量档案，供向量段逐张成卡。
      *
      * 遍历的是全部档案而非 {@code registry.profiles()}：纯向量档案已单独存放，
-     * 不在那一侧；只看 profiles 会让下拉里一个候选都没有。
+     * 不在那一侧；只看 profiles 会让向量段一张卡片都出不来。
+     *
+     * 刻意不按"可用"过滤：不可用的向量档案也要能被看到并删除，
+     * 过滤掉等于留下一份谁也管不着的档案。能不能启用由卡片上的按钮把关。
      */
-    private List<Map<String, Object>> embeddingCandidates() {
+    private List<Map<String, Object>> embeddingProfiles() {
         List<Map<String, Object>> out = new ArrayList<>();
         for (ModelProfile p : registry.allProfiles()) {
-            if (!p.isEmbedding() || !p.isUsable()) {
-                continue;
+            if (p.isEmbedding()) {
+                out.add(profileView(p));
             }
-            Map<String, Object> item = profileView(p);
-            item.put("dimensionsKnown", p.dimensions() != null);
-            out.add(item);
         }
         return out;
     }
@@ -149,13 +139,98 @@ public class AdminModelProfileController {
                 body.getBaseUrl(), apiKey, ProviderType.parse(body.getProviderType()), body.getModelName(),
                 body.getTemperature(), body.getMaxTokens(),
                 body.getThinking(), body.getReturnThinking(),
-                body.getDimensions(), body.getCapabilities(), body.getFallbacks());
+                body.getDimensions(), body.getCapabilities(), body.getFallbacks(),
+                body.getParams());
+
+        /* 建档案时若声明了向量维度，同样先探测模型是否接纳该维度，拒绝「填了但不被支持」的值 */
+        String dimError = validateDimension(null, profile);
+        if (dimError != null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, dimError);
+        }
 
         String failure = registry.save(profile);
         if (failure != null) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, failure);
         }
         return result("saved", alias);
+    }
+
+    /**
+     * 只改参数 —— 卡片右侧那块的「更改」走这里。
+     *
+     * 刻意不复用 {@link #save}：那条是整档覆盖、且 apiKey 必填，而卡片上根本没有可信的 Key ——
+     * 模型列表只回脱敏值，拿它回写会把真 Key 覆盖成 {@code sk-a1****z9} 这种假串。
+     * 所以这里按别名取出原档案，只替换参数，Key / 地址 / 协议 / 类型 / 模态一律原样写回。
+     *
+     * 参数留空即"不发送该字段"，与表单口径一致（{@link ModelProfile} 会把空值剔掉）。
+     */
+    @PostMapping("/model-profiles/params")
+    public Map<String, Object> saveParams(@RequestBody(required = false) ProfileParamsBody body) {
+        if (body == null || body.getAlias() == null || body.getAlias().isBlank()) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "别名不能为空");
+        }
+        String alias = body.getAlias().trim();
+        ModelProfile existing = registry.profile(alias)
+                .orElseThrow(() -> new BaseException(ErrorCode.INVALID_PARAMETER, "档案不存在：" + alias));
+
+        ModelProfile updated = withParams(existing, body.getTemperature(), body.getMaxTokens(),
+                body.getThinking(), body.getReturnThinking(), body.getDimensions(), body.getParams());
+
+        /* 维度是 ES 索引 mapping 的不可变契约：存错一个值 = 已灌库向量全部静默作废，且页面上看不出任何异常。
+           保存前先用「读取」同款短请求探测模型是否真按该维度返回向量，不支持就直接拒绝，
+           而不是等运行时在灌库时才炸 —— 这正是「先探测模型支持、再放行」的把关。 */
+        String dimError = validateDimension(existing, updated);
+        if (dimError != null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, dimError);
+        }
+
+        /* 改的若是「当前启用向量模型」的维度，效果等同于换了一个向量模型：
+           已灌库的向量长度对不上，ES 写入会被拒。所以必须和切换模型走同一条二次确认，
+           绝不能静默存下去 —— 存了之后运行期用新维度、索引还是旧维度，检索直接失效，
+           而且页面上看不出任何异常。 */
+        String mode = body.getMode() == null ? "" : body.getMode().trim();
+        boolean confirmed = "rebuild".equals(mode) || "purge".equals(mode);
+        boolean dimensionChanged = updated.isEmbedding()
+                && alias.equals(registry.embeddingAlias())
+                && !java.util.Objects.equals(existing.dimensions(), updated.dimensions());
+        int affectedIndices = existingIndexCount();
+        boolean hasVectors = affectedIndices > 0 && hasAnyIndexedContent();
+        if (dimensionChanged && hasVectors && !confirmed) {
+            Map<String, Object> ask = new LinkedHashMap<>();
+            ask.put("code", ErrorCode.INVALID_PARAMETER.getCode());
+            ask.put("requiresConfirmation", true);
+            ask.put("affectedIndices", affectedIndices);
+            ask.put("documentCount", countIndexedDocuments());
+            ask.put("previousDimensions", existing.dimensions());
+            ask.put("nextDimensions", updated.dimensions());
+            ask.put("message", "向量维度由 " + dimOf(existing) + " 改为 " + dimOf(updated)
+                    + "，已灌库的向量会因长度不符而作废。");
+            return ask;
+        }
+
+        String failure = registry.save(updated);
+        if (failure != null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, failure);
+        }
+        Map<String, Object> out = result("params-saved", alias);
+        if (dimensionChanged) {
+            /* 先让运行期用上新维度，再重灌 —— 顺序反了会拿老模型重算一遍 */
+            holder.refreshEmbedding();
+            if (hasVectors && "purge".equals(mode)) {
+                out.put("removedIndices", knowledgeBaseService.purgeAll());
+            } else if (hasVectors) {
+                out.put("reindexed",
+                        knowledgeBaseService.rebuildPreservingText(holder.effectiveEmbeddingDimension()));
+            }
+        }
+        out.put("message", dimensionChanged ? "向量维度已更新" : "参数已更新");
+        out.put("profile", profileView(updated));
+        return out;
+    }
+
+    /** 维度的展示文案：未声明时说"按模型默认"，别把 null 直接拼进字符串 */
+    private static String dimOf(ModelProfile profile) {
+        return profile.dimensions() == null ? "按模型默认" : String.valueOf(profile.dimensions());
     }
 
     /**
@@ -179,95 +254,101 @@ public class AdminModelProfileController {
     }
 
     /**
-     * 对已保存的档案重新读取元数据，并把读到的部分写回档案。
+     * 把参数覆盖到原档案上（卡片「更改」用）。
      *
-     * 管控台卡片上的「读取」走这里 —— 读完卡片上的标签即刷新。
-     *
-     * 读不到的字段一律保留档案里原有的声明：类型判定现在由"提供商元数据 + 手工声明"
-     * 共同决定，若用空值覆盖，一次「读取」就会把用户手选的端点族 / 模态 / 能力全部抹掉。
-     *
-     * 别名走查询参数，不做路径变量：别名由模型名派生，而模型名常含 {@code /}
-     * （如 OpenRouter 的 {@code nvidia/nemotron-3-embed-1b:free}）。前端把这种别名放进路径段
-     * 只能编码成 {@code %2F}，而 Tomcat 默认 {@code ALLOW_ENCODED_SLASH=false}，会在 URI 解码
-     * 阶段直接回 400 —— 且返回的是 Tomcat 自己的 HTML 错误页，请求压根到不了这里。
-     * 查询串不受该限制。
+     * Key / 地址 / 协议 / 类型 / 模态 / 降级链一律取原值 —— 卡片只能动参数，
+     * 这份构造就是"只动参数"这条约束本身，所以单独拎出来便于直接断言。
      */
-    @PostMapping("/model-profiles/inspect-saved")
-    public Map<String, Object> inspectSaved(@RequestParam("alias") String alias) {
-        ModelProfile existing = registry.profile(alias)
-                .orElseThrow(() -> new BaseException(ErrorCode.INVALID_PARAMETER, "档案不存在：" + alias));
-
-        ModelCatalog.CatalogResult read = runInspect(existing.baseUrl(), existing.apiKey(), existing.modelName(),
-                existing.dimensions());
-
-        ModelProfile updated = new ModelProfile(existing.alias(),
-                prefer(read.endpoints(), existing.endpoints()),
-                mergeModalities(read, read.input(), existing.input()),
-                mergeModalities(read, read.output(), existing.output()),
-                existing.baseUrl(), existing.apiKey(),
-                /* 协议类型原样保留：它不是探测得到的（GET /models 只讲模型清单、不讲协议），
-                   一次「读取」把它抹掉会让档案退回归 OpenAI 兼容 —— 用户选的 Anthropic
-                   会被悄悄改成走 api.anthropic.com 之外的地址去请求。 */
-                existing.providerType(), existing.modelName(),
-                existing.temperature(), existing.maxTokens(),
-                /* 思考开关原样保留：它不是探测得到的，只有用户在表单里点过才算数 ——
-                   一次「读取」把它抹掉，等于用户精心关掉的思考又自己打开了，而且卡片上
-                   只显示能力、不显示开关，看不出变化。 */
-                existing.thinking(), existing.returnThinking(),
-                read.dimension() != null ? read.dimension() : existing.dimensions(),
-                union(read.capabilities(), existing.capabilities()),
-                existing.fallbacks());
-        String failure = registry.save(updated);
-        if (failure != null) {
-            throw new BaseException(ErrorCode.INVALID_PARAMETER, failure);
-        }
-
-        Map<String, Object> out = inspectBody(read);
-        out.put("alias", alias);
-        out.put("profile", profileView(updated));
-        return out;
+    static ModelProfile withParams(ModelProfile existing, Double temperature, Integer maxTokens,
+                                   Boolean thinking, Boolean returnThinking, Integer dimensions,
+                                   Map<String, Object> params) {
+        return new ModelProfile(existing.alias(), existing.endpoints(), existing.input(),
+                existing.output(), existing.baseUrl(), existing.apiKey(), existing.providerType(),
+                existing.modelName(), temperature, maxTokens, thinking, returnThinking, dimensions,
+                existing.capabilities(), existing.fallbacks(), params);
     }
 
     /**
-     * 端点族 / 输入模态 / 输出模态：元数据读到了就用它，读不到（空）才保留原有声明。
+     * 探测「改后的向量维度」是否被模型真接受 —— 存之前的最后一道把关。
      *
-     * 这三项提供商的声明是完整的（{@code input_modalities} 列全了它能吃什么），
-     * 所以"读到了"就应当覆盖，否则改过的模型会留着陈旧的旧模态。
+     * 只在维度被显式声明、且相对原档案有变化时才探测：避免对"沿用模型默认（null）"或
+     * 未变动的值反复发请求。探测用「读取」同款短请求（{@link LlmModelHolder#testEmbeddingConnection}），
+     * 以模型实际返回的向量长度为唯一可信判据 —— 声明 10 却返回 1024，说明上游忽略了
+     * {@code dimensions} 参数，该维度不被支持，必须拒绝，否则存进一个 ES 索引无法匹配的长度，
+     * 灌库时静默作废全部旧向量、检索直接失效。
+     *
+     * 探测异常分两种：模型明确拒绝该维度（报错体含 dimensions）才视为"不支持"并拒绝；
+     * 网络抖动 / 鉴权过期等"只是没探成"的情况不挡保存，避免把正常的保存也卡死，
+     * 由运行期在灌库时暴露真实情况。
+     *
+     * @param existing  改之前的档案（未变动则跳过探测）；新建档案传 {@code null}
+     * @param candidate 改之后的档案
+     * @return 不支持 / 探测失败的原因；{@code null} 表示通过
      */
-    static <T> List<T> prefer(List<T> fromMetadata, List<T> declared) {
-        return fromMetadata == null || fromMetadata.isEmpty() ? declared : fromMetadata;
+    private String validateDimension(ModelProfile existing, ModelProfile candidate) {
+        if (!candidate.isEmbedding() || candidate.dimensions() == null) {
+            return null;
+        }
+        if (existing != null && java.util.Objects.equals(candidate.dimensions(), existing.dimensions())) {
+            return null; // 维度没变，跳过探测
+        }
+        Integer want = candidate.dimensions();
+        /* 先测模型原生维度（不带 dimensions 参数）：固定维度模型（如 bge-m3）会直接拒绝
+           dimensions 参数，哪怕给的就是它自己的 1024。所以"声明值 == 原生维度"就视为支持，
+           绝不再发一次带参数的探测去自找 4xx —— 否则"用默认维度、检测后回填 1024"这种正常流程
+           反而会被当成"不支持"拒掉。 */
+        Integer nativeDim = measureNativeDimension(candidate);
+        if (nativeDim != null && nativeDim.equals(want)) {
+            return null;
+        }
+        /* 声明值 ≠ 原生维度 —— 试探模型是否支持自定义维度 */
+        LlmSettings probe = new LlmSettings();
+        probe.setEmbeddingBaseUrl(candidate.baseUrl());
+        probe.setEmbeddingApiKey(candidate.apiKey());
+        probe.setEmbeddingModelName(candidate.modelName());
+        probe.setEmbeddingDimensions(want);
+        try {
+            LlmModelHolder.EmbeddingProbe result = holder.testEmbeddingConnection(probe);
+            if (result.mismatched()) {
+                return "向量维度 " + want + " 不被模型支持：模型原生维度为 " + result.actualDimension()
+                        + " 维，声明 " + want + " 维时它仍返回 " + result.actualDimension()
+                        + " 维（忽略了 dimensions 参数）。请留空用模型默认，或改用其原生维度（"
+                        + result.actualDimension() + " 维）。";
+            }
+            return null;
+        } catch (Exception e) {
+            /* 探测异常分两种，处置不同：
+               • 模型明确拒绝该维度（HTTP 4xx，报错体里带 "dimensions"）—— 是"不支持"的硬证据，拒绝保存；
+               • 网络抖动 / 鉴权过期 / 网关 5xx 等——只是"这次没探成"，无法据此判定不支持，
+                 绝不能因此把正常的保存也挡掉（否则用户会看到"什么都存不上"）。放行保存，
+                 由运行期在灌库时暴露真实情况；这里只记一条告警。 */
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+            if (msg.toLowerCase(java.util.Locale.ROOT).contains("dimension")) {
+                return "向量维度 " + want + " 不被模型支持：" + msg;
+            }
+            log.warn("[模型档案] 向量维度 {} 探测异常（无法确认模型是否支持，已放行保存）: {}", want, msg);
+            return null;
+        }
     }
 
     /**
-     * 输入 / 输出模态：完整枚举就覆盖，基线值就并集。
+     * 不带 {@code dimensions} 参数发一次极短请求，取模型原生向量维度。
      *
-     * 只有 OpenRouter 的 {@code input_modalities} 是完整枚举，"读到了就覆盖"成立
-     * （否则改过的模型会留着陈旧的旧模态）。sub_type 路径读到的只是端点规范基线值 ——
-     * {@code /chat/completions} 按规范就是 text→text，而能吃图片的对话模型在清单里同样是
-     * {@code chat}。拿基线值去覆盖，用户为 VLM 手填的 {@code image} 会被一次「读取」抹掉，
-     * 且卡片标签不显示变化 —— 属于"操作成功但悄悄改错了配置"。
+     * 固定维度模型（bge-m3 等）压根不认 {@code dimensions} 参数，发带参数的请求会被 4xx 拒绝；
+     * 这里刻意不带参数，拿到模型「出厂」维度，供 {@link #validateDimension} 判断"声明值是否等于原生维度"。
+     * 探测失败返回 {@code null}（不抛），让上层按"无法确认"走兜底逻辑，而不是把正常保存卡死。
      */
-    static <T> List<T> mergeModalities(ModelCatalog.CatalogResult read,
-                                            List<T> fromMetadata, List<T> declared) {
-        return read.modalitiesAuthoritative() ? prefer(fromMetadata, declared) : union(fromMetadata, declared);
-    }
-
-    /**
-     * 布尔能力：并集。
-     *
-     * 不能用 {@link #prefer} —— {@code supported_parameters} 不列某项只代表提供商没声明，
-     * 不代表不支持（OpenRouter 就不列 {@code stream}，因为人人都支持）。用元数据覆盖会把
-     * 用户已声明的 {@code streaming} 悄悄抹掉 —— 这是"没读到"被当成了"没有"。
-     */
-    static <T> List<T> union(List<T> fromMetadata, List<T> declared) {
-        java.util.LinkedHashSet<T> out = new java.util.LinkedHashSet<>();
-        if (declared != null) {
-            out.addAll(declared);
+    private Integer measureNativeDimension(ModelProfile candidate) {
+        LlmSettings probe = new LlmSettings();
+        probe.setEmbeddingBaseUrl(candidate.baseUrl());
+        probe.setEmbeddingApiKey(candidate.apiKey());
+        probe.setEmbeddingModelName(candidate.modelName());
+        try {
+            return holder.testEmbeddingConnection(probe).actualDimension();
+        } catch (Exception e) {
+            log.debug("[模型档案] 测量原生维度失败（不影响放行判断）: {}", e.getMessage());
+            return null;
         }
-        if (fromMetadata != null) {
-            out.addAll(fromMetadata);
-        }
-        return List.copyOf(out);
     }
 
     private ModelCatalog.CatalogResult runInspect(String baseUrl, String apiKey, String modelName,
@@ -308,19 +389,35 @@ public class AdminModelProfileController {
         candidate.setEmbeddingBaseUrl(baseUrl);
         candidate.setEmbeddingApiKey(apiKey);
         candidate.setEmbeddingModelName(modelName);
-        candidate.setEmbeddingDimensions(declaredDimension);
+        /* 先测原生维度（不带 dimensions 参数）：固定维度模型（bge-m3 等）会直接拒绝
+           dimensions 参数，带参探测会被 4xx 误伤。先拿到原生维度，声明值恰好等于它时无需再探。 */
+        Integer nativeDim;
         try {
-            LlmModelHolder.EmbeddingProbe probe = holder.testEmbeddingConnection(candidate);
-            return ModelCatalog.withDimension(read, probe.actualDimension(),
-                    "\n向量维度已实测：" + probe.actualDimension() + " 维"
-                            + (probe.mismatched()
-                                ? "（注意：档案声明为 " + probe.declaredDimension() + " 维，上游没按声明返回。"
-                                  + "改模型不改维度时向量空间一样会变，已灌库的向量会全部作废，切换前需先重建索引）"
-                                : "。"));
+            nativeDim = holder.testEmbeddingConnection(candidate).actualDimension();
         } catch (Exception e) {
             log.info("[模型档案] 向量维度实测失败，档案维度保持未声明: {}", e.getMessage());
             return ModelCatalog.withNote(read, "\n向量维度实测失败，需手工填写：" + e.getMessage());
         }
+        String note = "\n向量维度已实测：" + nativeDim + " 维";
+        if (declaredDimension != null && !declaredDimension.equals(nativeDim)) {
+            /* 声明值与原生不同 → 试探模型是否支持自定义维度；失败只并进说明，不连坐整条读取 */
+            candidate.setEmbeddingDimensions(declaredDimension);
+            try {
+                LlmModelHolder.EmbeddingProbe probe = holder.testEmbeddingConnection(candidate);
+                if (probe.mismatched()) {
+                    note += "（注意：档案声明为 " + declaredDimension + " 维，上游没按声明返回，仍返回 "
+                            + probe.actualDimension() + " 维。改模型不改维度时向量空间一样会变，"
+                            + "已灌库的向量会全部作废，切换前需先重建索引）";
+                } else {
+                    note += "（声明 " + declaredDimension + " 维也受支持）";
+                }
+            } catch (Exception e) {
+                note += "（声明 " + declaredDimension + " 维探测失败：" + e.getMessage() + "）";
+            }
+        } else {
+            note += "。";
+        }
+        return ModelCatalog.withDimension(read, nativeDim, note);
     }
 
     private static Map<String, Object> inspectBody(ModelCatalog.CatalogResult result) {
@@ -624,9 +721,8 @@ public class AdminModelProfileController {
         item.put("input", profile.input());
         item.put("output", profile.output());
         item.put("baseUrl", profile.baseUrl());
-        /* 协议类型原样下发（枚举名，不是 null）：管控台编辑时据此回填协议下拉。
-           不下发的话，编辑一个 Anthropic 档案会被默认值覆盖成 OpenAI 兼容，
-           而卡片上看不出任何变化，直到某次调用报 ClassCastException。 */
+        /* 协议类型原样下发（枚举名，不是 null）：卡片按它决定哪些参数适用
+           （top_k 只有 Anthropic / Ollama 认，惩罚项只有 OpenAI 兼容认）。 */
         item.put("providerType", profile.providerType().name());
         item.put("modelName", profile.modelName());
         item.put("apiKeyMasked", profile.maskedApiKey());
@@ -637,8 +733,11 @@ public class AdminModelProfileController {
         item.put("thinking", profile.thinking());
         item.put("returnThinking", profile.returnThinking());
         item.put("dimensions", profile.dimensions());
+        item.put("usable", profile.isUsable());
         item.put("capabilities", profile.capabilities());
         item.put("fallbacks", profile.fallbacks());
+        /* 调优参数原样下发：管控台据此回填参数区；留空表示"不发这个字段" */
+        item.put("params", profile.params());
         item.put("capabilityHint", profile.capabilityHint());
         item.put("usedByDomains", registry.domainsUsing(profile.alias()));
         return item;
@@ -689,6 +788,31 @@ public class AdminModelProfileController {
         private Integer dimensions;
         private List<String> capabilities;
         private List<String> fallbacks;
+        /** 调优参数（前缀键，如 chat.topP）；未填的项不要下发 */
+        private Map<String, Object> params;
+    }
+
+    /**
+     * 只改参数的请求体（卡片内联编辑用）。
+     *
+     * 刻意不含 apiKey / baseUrl / providerType / endpoints —— 卡片上只能动参数，
+     * 其余字段要靠这里"不接收"来保证不被误改。
+     */
+    @Data
+    public static class ProfileParamsBody {
+        private String alias;
+        private Double temperature;
+        private Integer maxTokens;
+        private Integer dimensions;
+        /** 三态：null = 不声明（由服务商默认决定） */
+        private Boolean thinking;
+        private Boolean returnThinking;
+        private Map<String, Object> params;
+        /**
+         * 仅"改了当前启用向量模型的维度"时才有意义：{@code rebuild}（重灌）/ {@code purge}（丢弃）。
+         * 缺省表示用户尚未表态，接口会回"需要确认"而不是真的改。
+         */
+        private String mode;
     }
 
     /** 绑定请求体（aliases 空 = 解绑；顺序即优先级） */

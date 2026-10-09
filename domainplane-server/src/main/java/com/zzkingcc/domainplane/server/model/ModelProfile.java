@@ -2,8 +2,12 @@ package com.zzkingcc.domainplane.server.model;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * 模型档案 —— 一个 OpenAI 兼容端点的一份配置。
@@ -36,6 +40,8 @@ import java.util.Locale;
  * @param dimensions   向量维度（仅 embedding 用；可空 = 按模型默认，探测可得）
  * @param capabilities 布尔能力：{@code streaming} / {@code tools} / {@code reasoning}
  * @param fallbacks    降级链：本档案不可用时依次尝试的别名（M3 生效，先只存）
+ * @param params       调优参数（前缀键，如 {@code chat.topP} / {@code images.size}）。
+ *                     只放用户显式填过的值 —— 留空即"不发这个字段"，由服务商默认决定。
  * @author zzkingcc
  */
 public record ModelProfile(String alias,
@@ -52,7 +58,8 @@ public record ModelProfile(String alias,
                            Boolean returnThinking,
                            Integer dimensions,
                            List<String> capabilities,
-                           List<String> fallbacks) {
+                           List<String> fallbacks,
+                           Map<String, Object> params) {
 
     /** 端点族：对话（/chat/completions） */
     public static final String EP_CHAT = "chat";
@@ -108,18 +115,6 @@ public record ModelProfile(String alias,
      */
     public static final String CAP_REASONING = "reasoning";
 
-    /**
-     * 采样温度的默认值：档案未声明时按这个值发出去。
-     *
-     * 为什么不交给服务商默认：不设 {@code temperature} 时各家 OpenAI 兼容端点各给各的
-     * （常见 0.7 / 1.0），同一个档案换一家服务商行为就变了，且没有任何提示。固定成 0.5 至少让
-     * "没填"等同于一个可预期的值。
-     *
-     * 取值 0.5 而非 0：0 接近贪心解码，工具调用与结构化输出时的重复与卡死概率明显更高，
-     * 而这类场景正是本平台的主用途。
-     */
-    public static final double DEFAULT_TEMPERATURE = 0.5;
-
     public ModelProfile {
         /* 空值归一成OpenAI 兼容：老档案没有这个字段，改造后行为与改造前一致 */
         providerType = providerType == null ? ProviderType.OPENAI_COMPATIBLE : providerType;
@@ -132,6 +127,9 @@ public record ModelProfile(String alias,
         output = output == null ? List.of() : List.copyOf(output);
         capabilities = capabilities == null ? List.of() : List.copyOf(capabilities);
         fallbacks = fallbacks == null ? List.of() : List.copyOf(fallbacks);
+        /* 调优参数只保留"用户真的填过"的项：表单里留空的语义就是"不发这个字段"，
+           让 null / 空串留在 map 里既会让指纹无谓变化，也会被适配器误读成一次显式选择。 */
+        params = normalizeParams(params);
     }
 
     /**
@@ -162,16 +160,6 @@ public record ModelProfile(String alias,
     }
 
     /**
-     * 实际生效的采样温度：未声明时取 {@link #DEFAULT_TEMPERATURE}。
-     *
-     * 建客户端时只认这个方法（{@code ModelClientFactory}），别再直接读
-     * {@link #temperature()} —— 那样"没填"就变成了"由服务商随意决定"。
-     */
-    public double effectiveTemperature() {
-        return temperature != null ? temperature : DEFAULT_TEMPERATURE;
-    }
-
-    /**
      * 实际生效的单次最大输出 token：未声明时为 {@code null}，即不限制。
      *
      * "不限制"是刻意保留的默认而不是遗漏：由模型与服务商上下文决定，
@@ -179,6 +167,46 @@ public record ModelProfile(String alias,
      */
     public Integer effectiveMaxTokens() {
         return maxTokens;
+    }
+
+    /** 取一个调优参数原值（不存在时返回 null） */
+    public Object param(String key) {
+        return params.get(key);
+    }
+
+    /** 数字参数（Double） */
+    public Double numParam(String key) {
+        return params.get(key) instanceof Number n ? n.doubleValue() : null;
+    }
+
+    /** 整数参数 */
+    public Integer intParam(String key) {
+        return params.get(key) instanceof Number n ? n.intValue() : null;
+    }
+
+    /** 文本参数（空白视为未填） */
+    public String strParam(String key) {
+        Object value = params.get(key);
+        return value instanceof String s && !s.isBlank() ? s : null;
+    }
+
+    /** 布尔参数 */
+    public Boolean boolParam(String key) {
+        return params.get(key) instanceof Boolean b ? b : null;
+    }
+
+    /** 字符串数组参数（空数组视为未填） */
+    public List<String> listParam(String key) {
+        if (!(params.get(key) instanceof List<?> raw)) {
+            return null;
+        }
+        List<String> out = new ArrayList<>();
+        for (Object item : raw) {
+            if (item != null && !String.valueOf(item).isBlank()) {
+                out.add(String.valueOf(item).trim());
+            }
+        }
+        return out.isEmpty() ? null : List.copyOf(out);
     }
 
     /**
@@ -199,6 +227,7 @@ public record ModelProfile(String alias,
                 String.valueOf(providerType),
                 String.valueOf(temperature), String.valueOf(maxTokens),
                 String.valueOf(thinking), String.valueOf(returnThinking),
+                paramsCanonical(),
                 sha256(nz(apiKey)));
         return sha256(raw).substring(0, 16);
     }
@@ -224,6 +253,54 @@ public record ModelProfile(String alias,
             return "未声明 " + CAP_TOOLS + "：模型将不会调用任何工具";
         }
         return "";
+    }
+
+    /**
+     * 调优参数的规范化：丢掉空值，只留下用户真的填过的项。
+     *
+     * 文本空白一律剔除而不是留成 ""：留空在表单里明确表示"不发这个字段"，
+     * 保存成空串会让适配器把"没填"当成"填了个空值"。
+     */
+    private static Map<String, Object> normalizeParams(Map<String, Object> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : raw.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            if (key == null || key.isBlank() || value == null) {
+                continue;
+            }
+            if (value instanceof String s) {
+                if (!s.isBlank()) {
+                    out.put(key, s.trim());
+                }
+            } else if (value instanceof List<?> list) {
+                List<String> kept = new ArrayList<>();
+                for (Object item : list) {
+                    if (item != null && !String.valueOf(item).isBlank()) {
+                        kept.add(String.valueOf(item).trim());
+                    }
+                }
+                if (!kept.isEmpty()) {
+                    out.put(key, List.copyOf(kept));
+                }
+            } else {
+                out.put(key, value);
+            }
+        }
+        return Map.copyOf(out);
+    }
+
+    /** 参数按 key 排序后拼成一串 —— 指纹要求稳定，不能受 map 迭代顺序影响 */
+    private String paramsCanonical() {
+        if (params.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        new TreeMap<>(params).forEach((k, v) -> sb.append(k).append('=').append(v).append(';'));
+        return sb.toString();
     }
 
     private static String nz(String s) {
