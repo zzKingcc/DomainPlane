@@ -203,8 +203,8 @@ public class AdminModelProfileController {
             ask.put("documentCount", countIndexedDocuments());
             ask.put("previousDimensions", existing.dimensions());
             ask.put("nextDimensions", updated.dimensions());
-            ask.put("message", "向量维度由 " + dimOf(existing) + " 改为 " + dimOf(updated)
-                    + "，已灌库的向量会因长度不符而作废。");
+            ask.put("message", "向量维度要从 " + dimOf(existing) + " 改成 " + dimOf(updated)
+                    + "，知识库里已经存好的向量对不上，检索会失效。");
             return ask;
         }
 
@@ -277,17 +277,21 @@ public class AdminModelProfileController {
      * {@code dimensions} 参数，该维度不被支持，必须拒绝，否则存进一个 ES 索引无法匹配的长度，
      * 灌库时静默作废全部旧向量、检索直接失效。
      *
-     * 探测异常分两种：模型明确拒绝该维度（报错体含 dimensions）才视为"不支持"并拒绝；
-     * 网络抖动 / 鉴权过期等"只是没探成"的情况不挡保存，避免把正常的保存也卡死，
-     * 由运行期在灌库时暴露真实情况。
+     * 探测没跑完一律不算"确认支持"：服务商不认 dimensions、鉴权失败、地址写错、网络不通，
+     * 全都拒绝保存并把原因回给用户。理由是拿不到实测维度就存下去，等于把一个没人验证过的
+     * 长度写进 ES 索引契约 —— 灌库时静默作废全部旧向量，而页面上看不出任何异常。
      *
      * @param existing  改之前的档案（未变动则跳过探测）；新建档案传 {@code null}
      * @param candidate 改之后的档案
      * @return 不支持 / 探测失败的原因；{@code null} 表示通过
      */
     private String validateDimension(ModelProfile existing, ModelProfile candidate) {
-        if (!candidate.isEmbedding() || candidate.dimensions() == null) {
+        if (candidate.dimensions() == null) {
             return null;
+        }
+        if (!candidate.isEmbedding()) {
+            return "只有向量模型（endpoints 含 embedding）才能设置 dimensions，当前模型是："
+                    + (candidate.isChat() ? "对话" : "未声明") + " 类型";
         }
         if (existing != null && java.util.Objects.equals(candidate.dimensions(), existing.dimensions())) {
             return null; // 维度没变，跳过探测
@@ -309,25 +313,20 @@ public class AdminModelProfileController {
         probe.setEmbeddingDimensions(want);
         try {
             LlmModelHolder.EmbeddingProbe result = holder.testEmbeddingConnection(probe);
-            if (result.mismatched()) {
-                return "向量维度 " + want + " 不被模型支持：模型原生维度为 " + result.actualDimension()
-                        + " 维，声明 " + want + " 维时它仍返回 " + result.actualDimension()
-                        + " 维（忽略了 dimensions 参数）。请留空用模型默认，或改用其原生维度（"
-                        + result.actualDimension() + " 维）。";
+            if (!result.success()) {
+                return "向量维度 " + want + " 不被模型支持：该模型固定输出 "
+                        + result.actualDimension() + " 维。";
             }
             return null;
         } catch (Exception e) {
-            /* 探测异常分两种，处置不同：
-               • 模型明确拒绝该维度（HTTP 4xx，报错体里带 "dimensions"）—— 是"不支持"的硬证据，拒绝保存；
-               • 网络抖动 / 鉴权过期 / 网关 5xx 等——只是"这次没探成"，无法据此判定不支持，
-                 绝不能因此把正常的保存也挡掉（否则用户会看到"什么都存不上"）。放行保存，
-                 由运行期在灌库时暴露真实情况；这里只记一条告警。 */
-            String msg = e.getMessage() == null ? "" : e.getMessage();
-            if (msg.toLowerCase(java.util.Locale.ROOT).contains("dimension")) {
-                return "向量维度 " + want + " 不被模型支持：" + msg;
-            }
-            log.warn("[模型档案] 向量维度 {} 探测异常（无法确认模型是否支持，已放行保存）: {}", want, msg);
-            return null;
+            /* 探测没跑完就不能算"确认支持"：拿不到实测维度就把值存下去，
+               等于把一个没人验证过的长度写进 ES 索引契约，灌库时会静默作废全部旧向量。
+               所以这里一律拒绝，并把真实原因回给用户 —— 地址写错、Key 失效、服务商不认
+               dimensions 参数都表现为探测失败，光看异常文案无法区分"只是没探成"和"确实不支持"，
+               与其猜，不如让用户先把连通性确认掉。 */
+            String detail = LlmFailureDescriber.describe(e);
+            log.warn("[模型档案] 向量维度 {} 探测失败，拒绝保存: {}", want, detail);
+            return "向量维度 " + want + " 设置失败：" + detail;
         }
     }
 
@@ -336,7 +335,7 @@ public class AdminModelProfileController {
      *
      * 固定维度模型（bge-m3 等）压根不认 {@code dimensions} 参数，发带参数的请求会被 4xx 拒绝；
      * 这里刻意不带参数，拿到模型「出厂」维度，供 {@link #validateDimension} 判断"声明值是否等于原生维度"。
-     * 探测失败返回 {@code null}（不抛），让上层按"无法确认"走兜底逻辑，而不是把正常保存卡死。
+     * 探测失败返回 {@code null}（不抛）：上层据此跳过与原生维度的比对，改由带参探测决定放行与否。
      */
     private Integer measureNativeDimension(ModelProfile candidate) {
         LlmSettings probe = new LlmSettings();
@@ -346,7 +345,7 @@ public class AdminModelProfileController {
         try {
             return holder.testEmbeddingConnection(probe).actualDimension();
         } catch (Exception e) {
-            log.debug("[模型档案] 测量原生维度失败（不影响放行判断）: {}", e.getMessage());
+            log.info("[模型档案] 测量原生维度失败，跳过与原生维度的比对: {}", e.getMessage());
             return null;
         }
     }
@@ -690,10 +689,10 @@ public class AdminModelProfileController {
     private static String describeSwitchImpact(ModelProfile from, ModelProfile to, int indices) {
         String oldName = from == null ? "（未配置）" : from.modelName();
         String newName = to == null ? "（取消配置）" : to.modelName();
-        return "向量模型将由 " + oldName + " 变为 " + newName + "，知识库中已灌库的向量会全部作废。\n\n"
-                + "当前有 " + indices + " 个知识库索引存有内容。换模型后有两种处理方式：\n"
-                + "· 用新向量重灌 —— 原文保留，不需要重新上传文档（耗时与文档量成正比）\n"
-                + "· 直接丢弃 —— 全部知识库内容删除，之后需自行重新上传";
+        return "向量模型要从 " + oldName + " 换成 " + newName + "。\n\n"
+                + "两个模型算出来的向量不是一回事，知识库里已经存好的向量会对不上，"
+                + "继续用检索结果会不准。\n"
+                + "当前有 " + indices + " 个索引存着内容。";
     }
 
     private static String describeResult(boolean changed, ModelProfile previous, ModelProfile selected,

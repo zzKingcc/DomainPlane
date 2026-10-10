@@ -650,8 +650,9 @@ public class LlmModelHolder {
 
         log.info("[模型设置] 向量连通性测试: baseUrl={} model={} 声明维度={}", baseUrl, modelName, declared);
         Response<Embedding> resp = probe.embed("连通性测试");
-        // 只认返回向量的实际长度——这是"维度是否被采纳"的唯一可信证据
-        return new EmbeddingProbe(resp.content().dimension(), declared);
+        int actualDimension = resp.content().dimension();
+        boolean success = declared == null || declared == actualDimension;
+        return new EmbeddingProbe(actualDimension, declared, success);
     }
 
     /**
@@ -660,13 +661,23 @@ public class LlmModelHolder {
      * @param actualDimension   上游实际返回的向量长度（唯一可信判据）
      * @param declaredDimension 用户声明的维度；未声明（留空）为 {@code null}
      */
-    public record EmbeddingProbe(int actualDimension, Integer declaredDimension) {
+    public record EmbeddingProbe(
+            int actualDimension,
+            Integer declaredDimension,
+            boolean success) {
 
         /**
          * 声明了维度、但上游没按该维度返回（参数被静默忽略）。
          */
         public boolean mismatched() {
-            return declaredDimension != null && declaredDimension != actualDimension;
+            return !success && declaredDimension != null && declaredDimension != actualDimension;
+        }
+
+        /**
+         * 建议用户使用的维度。
+         */
+        public int suggestedDimension() {
+            return actualDimension;
         }
     }
 

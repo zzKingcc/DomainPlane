@@ -47,9 +47,12 @@
                         throw new Error('登录态已失效，正在跳转登录页…');
                     }
                     if (!resp.ok) {
-                        throw new Error('接口 ' + url + ' 返回 ' + resp.status
-                            + '：' + sanitizeError(data.detail || data.error || raw.slice(0, 120))
-                            + (data.code ? '（' + data.code + '）' : ''));
+                        /* 服务端给了业务原因就直接用它：再套一层"接口 X 返回 N"、
+                           再缀一个错误码，只会把结论淹在包装里。真的一点原因都没有时，
+                           才退回状态码 + 原始报文片段。 */
+                        var reason = data ? sanitizeError(data.detail || data.error) : '';
+                        throw new Error(reason || ('接口 ' + url + ' 返回 ' + resp.status
+                            + '：' + sanitizeError(raw.slice(0, 120))));
                     }
                     return data;
                 });

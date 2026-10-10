@@ -536,15 +536,12 @@ Console.renderSidebar('models');
     /* 换向量模型 / 改向量维度共用的二次确认。
        返回 'rebuild'（保留原文重灌）、'purge'（丢弃旧内容）或 null（本次不做任何改动）。 */
     function askRebuildOrPurge(message) {
-        var useRebuild = window.confirm(message
-            + '\n\n点【确定】= 用新向量重灌（推荐，文档无需重新上传）'
-            + '\n点【取消】= 丢弃全部知识库内容（之后需自行重新上传）'
-            + '\n\n若想先不动，请直接关掉本页面。');
-        if (useRebuild) { return 'rebuild'; }
+        var rebuild = window.confirm(message
+            + '\n\n现在用新的向量把知识库重新算一遍吗？文档都还在，不用重新上传。');
+        if (rebuild) { return 'rebuild'; }
         var purge = window.confirm(
-            '请确认：是否丢弃全部知识库内容？\n\n'
-            + '点【确定】= 全部删除，之后需重新上传文档\n'
-            + '点【取消】= 本次不做任何改动，向量模型保持原样');
+            '清空知识库？\n\n'
+            + '里面的文档和向量会被全部删除，以后要重新上传。');
         return purge ? 'purge' : null;
     }
 
@@ -556,7 +553,7 @@ Console.renderSidebar('models');
             .then(function (r) {
                 if (r && r.requiresConfirmation) {
                     var choice = askRebuildOrPurge(r.message
-                        || '知识库已有内容，换向量模型需要选择处理方式。');
+                        || '知识库已有内容。');
                     if (!choice) {
                         loadProfiles();
                         return;
@@ -1165,14 +1162,16 @@ Console.renderSidebar('models');
     var CARD_BASE_SPEC = [
         { pkey: 'temperature', label: '采样温度', type: 'number', step: '0.1', min: '0', max: '2',
           ep: 'chat' },
-        { pkey: 'maxTokens', label: '单次最大 Token', type: 'number', min: '1', ep: 'chat' },
+        { pkey: 'maxTokens', label: '单次最大 Token', type: 'number', min: '1', ep: 'chat',
+          ph: '不限制' },
         /* 思考两项对对话模型常显（不再等 reasoning 能力探测结果 —— 那字段多数服务商不给），
            默认停在"不声明"，所以显示出来不会误导。 */
         { pkey: 'thinking', label: '思考模式', type: 'tristate', ep: 'chat',
           on: '开启', off: '关闭' },
         { pkey: 'returnThinking', label: '思考内容', type: 'tristate', ep: 'chat',
           on: '输出', off: '不输出' },
-        { pkey: 'dimensions', label: '向量维度', type: 'number', min: '1', ep: 'embedding' }
+        { pkey: 'dimensions', label: '向量维度', type: 'number', min: '1', ep: 'embedding',
+          ph: '模型默认' }
     ];
 
     /* 参数键 → 规格：提交时按键反查类型（数字 / 数组 / 文本） */
@@ -1220,11 +1219,13 @@ Console.renderSidebar('models');
                 }).join('') + '</select>';
         } else if (spec.type === 'number') {
             body = '<input type="number"' + key + ' value="' + value + '"'
+                + ' placeholder="' + (spec.ph || '服务商默认') + '"'
                 + ' step="' + (spec.step || '1') + '"'
                 + (spec.min ? ' min="' + spec.min + '"' : '')
                 + (spec.max ? ' max="' + spec.max + '"' : '') + '>';
         } else {
-            body = '<input type="text"' + key + ' value="' + value + '">';
+            body = '<input type="text"' + key + ' value="' + value + '"'
+                + ' placeholder="' + (spec.ph || '服务商默认') + '">';
         }
         return '<div class="field"><label>' + Console.escapeHtml(spec.label) + '</label>'
             + body + '</div>';
@@ -1275,6 +1276,28 @@ Console.renderSidebar('models');
         var alias = panel.getAttribute('data-params-for');
         btn.disabled = JSON.stringify(cardPanelValues(panel))
             === JSON.stringify(CARD_BASELINE[alias] || {});
+    }
+
+    /* 面板的值退回渲染时的基线。更改失败、或用户在确认框上放弃时调用：
+       否则输入框里留着一个没生效的值，看着像已经改好了。 */
+    function restoreCardValues(panel) {
+        if (!panel) { return; }
+        var base = CARD_BASELINE[panel.getAttribute('data-params-for')] || {};
+        panel.querySelectorAll('[data-pkey]').forEach(function (el) {
+            var key = el.getAttribute('data-pkey');
+            var want = base[key] == null ? '' : base[key];
+            if (el.hasAttribute('data-raw')) {
+                el.setAttribute('data-raw', want);
+                var box = el.querySelector('input[type="checkbox"]');
+                if (box) { box.checked = want === 'true'; }
+                var clear = el.querySelector('.switch-clear');
+                if (clear) { clear.hidden = want === ''; }
+                return;
+            }
+            el.value = want;
+        });
+        /* 值回到基线后，「更改」自己会变回不可点 */
+        onCardParamChanged(panel);
     }
 
     /* 组装只改参数的请求体：卡片没画出来的项原样透传，别把没画的一并清空 */
@@ -1337,9 +1360,9 @@ Console.renderSidebar('models');
                 /* 改的是当前启用向量模型的维度 → 服务端要用户先表态，然后带 mode 重发一次 */
                 if (r && r.requiresConfirmation) {
                     var choice = askRebuildOrPurge(r.message
-                        || '向量维度的变化会影响已灌库的向量。');
+                        || '知识库已有内容。');
                     if (!choice) {
-                        if (btn) { btn.disabled = false; }
+                        restoreCardValues(panel);
                         return;
                     }
                     return saveCardParams(panel, choice);
@@ -1352,7 +1375,7 @@ Console.renderSidebar('models');
             })
             .catch(function (e) {
                 alert('更改失败：' + e.message);
-                if (btn) { btn.disabled = false; }
+                restoreCardValues(panel);
             });
     }
 

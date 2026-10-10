@@ -52,7 +52,13 @@ public final class LlmFailureDescriber {
         return cur.getMessage();
     }
 
-    /** 解析上游报文里的 {@code error.code} / {@code error.message} */
+    /**
+     * 解析上游报文里的错误码与说明。
+     *
+     * 错误结构有两种：{@code {"error":{"code":..,"message":..}}}（OpenAI 系）与
+     * {@code {"code":..,"message":..}}（国内服务商常见，如硅基流动的 20015）。
+     * 只认前者时，后者会连 JSON 花括号一起被当成原因吐给用户。
+     */
     private static String describeBody(String raw) {
         if (raw == null) {
             return null;
@@ -62,15 +68,14 @@ public final class LlmFailureDescriber {
             return null;
         }
         try {
-            JsonNode error = MAPPER.readTree(raw.substring(start)).path("error");
-            if (error.isMissingNode() || error.isNull()) {
-                return null;
-            }
-            String mapped = mapCode(text(error, "code"));
+            JsonNode body = MAPPER.readTree(raw.substring(start));
+            JsonNode error = body.path("error");
+            JsonNode node = (error.isMissingNode() || error.isNull()) ? body : error;
+            String mapped = mapCode(text(node, "code"));
             if (mapped != null) {
                 return mapped;
             }
-            String message = text(error, "message");
+            String message = text(node, "message");
             return message == null ? null : abbreviate(message);
         } catch (Exception ignore) {
             // 不是 JSON / 结构不符 → 交给后面的网络层判断与原文兜底
