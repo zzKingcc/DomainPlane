@@ -87,4 +87,33 @@ class DomainSettingsStoreTest {
 
         assertEquals("根提示词", store().load().getPrompts().get("default"));
     }
+
+    @Test
+    void removeToolCallEchoDropsOnlyTheDeletedDomains() throws IOException {
+        writePrompts("""
+                {"prompts":{"default":"根"},"toolCallEcho":{"default.sales":true,"default.hr":false,"default.it":true}}
+                """);
+
+        store().removeToolCallEcho(List.of("default.sales"));
+
+        DomainSettings reloaded = store().load();
+        assertFalse(reloaded.getToolCallEcho().containsKey("default.sales"), "被删域的开关必须清掉");
+        assertEquals(Boolean.TRUE, reloaded.getToolCallEcho().get("default.it"), "没被删的域原样保留");
+        assertEquals(Boolean.FALSE, reloaded.getToolCallEcho().get("default.hr"), "显式关也是值，同样保留");
+        assertEquals("根", reloaded.getPrompts().get("default"), "提示词不受影响");
+    }
+
+    @Test
+    void removeToolCallEchoDropsTheWholeDeletedSubtree() throws IOException {
+        writePrompts("""
+                {"toolCallEcho":{"default.sales":true,"default.sales.order":true,"default.hr":true}}
+                """);
+
+        store().removeToolCallEcho(List.of("default.sales", "default.sales.order"));
+
+        DomainSettings reloaded = store().load();
+        assertTrue(reloaded.getToolCallEcho().keySet().stream()
+                .noneMatch(k -> k.startsWith("default.sales")), "整棵子树都要清掉");
+        assertEquals(Boolean.TRUE, reloaded.getToolCallEcho().get("default.hr"));
+    }
 }

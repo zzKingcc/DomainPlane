@@ -19,6 +19,7 @@ import com.zzkingcc.domainplane.runtime.prompt.SystemPromptResolver;
 import com.zzkingcc.domainplane.runtime.stream.StreamContext;
 import com.zzkingcc.domainplane.runtime.stream.StreamSinkRegistry;
 import com.zzkingcc.domainplane.runtime.tool.SensitiveMasker;
+import com.zzkingcc.domainplane.runtime.tool.ToolCallEchoResolver;
 import com.zzkingcc.domainplane.runtime.tool.ToolInvocationContext;
 import com.zzkingcc.domainplane.runtime.tool.ToolRouter;
 import com.zzkingcc.domainplane.runtime.usage.TokenUsageRecorder;
@@ -116,6 +117,11 @@ public class AgentOrchestrationService implements AgentService {
     private final ModelResolver modelResolver;
 
     /**
+     * 按域解析「工具执行信息回写」开关；为 {@code null} 时按不回写处理（行为与"全局关"一致）。
+     */
+    private final ToolCallEchoResolver toolCallEchoResolver;
+
+    /**
      * 单模型构造：不传 {@link ModelResolver}，所有域共用构造期注入的那个模型。
      */
     public AgentOrchestrationService(
@@ -128,7 +134,7 @@ public class AgentOrchestrationService implements AgentService {
             CancellationRegistry cancellationRegistry,
             Executor executor) {
         this(streamingChatModel, chatMemoryProvider, toolRouter, promptResolver, checkpointSaver,
-                stateSerializer, cancellationRegistry, executor, null);
+                stateSerializer, cancellationRegistry, executor, null, null);
     }
 
     public AgentOrchestrationService(
@@ -140,7 +146,8 @@ public class AgentOrchestrationService implements AgentService {
             ObjectStreamStateSerializer<MessagesState<ChatMessage>> stateSerializer,
             CancellationRegistry cancellationRegistry,
             Executor executor,
-            ModelResolver modelResolver) {
+            ModelResolver modelResolver,
+            ToolCallEchoResolver toolCallEchoResolver) {
 
         this.streamingChatModel = streamingChatModel;
         this.chatMemoryProvider = chatMemoryProvider;
@@ -151,6 +158,7 @@ public class AgentOrchestrationService implements AgentService {
         this.streamSinks = new StreamSinkRegistry();
         this.executor = Objects.requireNonNull(executor, "executor");
         this.modelResolver = modelResolver;
+        this.toolCallEchoResolver = toolCallEchoResolver;
 
         // 工具规格不在构造期固化：域是按请求变化的，工具集必须在 agent 节点运行时
         // 用 toolRouter.toolSpecifications(domainId) 按本轮所处的域过滤。
@@ -397,6 +405,10 @@ public class AgentOrchestrationService implements AgentService {
         // 域取自本轮 StreamContext：resume 时会用它重新校验待执行的工具调用，
         // 这是"执行单元内不换提示词"之下唯一能拦住陈旧上下文放行危险动作的机制。
         String domainId = context == null ? null : context.domainId();
+        // 工具执行信息回写开关：域级、默认关。关掉后 TOOL_CALL / TOOL_RESULT 不下发，
+        // 调用方只收到最终答复。审批挂起（INTERRUPT，含待授权工具清单）不归它管 ——
+        // 那是功能骨架，缺了它调用方无法审批，会话会永久挂起。
+        boolean echoToolCalls = toolCallEchoResolver != null && toolCallEchoResolver.echoOn(domainId);
         for (ToolExecutionRequest request : aiMessage.toolExecutionRequests()) {
             // 停止检查:每个工具执行前检查标志,避免停止后继续执行后续工具
             if (cancellationRegistry.isCancelled(key)) {
@@ -422,7 +434,7 @@ public class AgentOrchestrationService implements AgentService {
                 log.warn("[Agent编排] 会话[{}] traceId={} 拦截{}的工具调用: {}（domain={}）",
                         sessionId, TraceId.current(), exists ? "域外" : "已下线",
                         request.name(), domainId);
-                if (context != null) {
+                if (context != null && echoToolCalls) {
                     context.emit(AgentEvent.toolCall(sessionId, request.name(),
                             displayArguments(request.name(), request.arguments())));
                     context.emit(AgentEvent.toolResult(sessionId, request.name(), denied));
@@ -431,7 +443,7 @@ public class AgentOrchestrationService implements AgentService {
                 continue;
             }
 
-            if (context != null) {
+            if (context != null && echoToolCalls) {
                 context.emit(AgentEvent.toolCall(sessionId, request.name(),
                         displayArguments(request.name(), request.arguments())));
             }
@@ -452,7 +464,7 @@ public class AgentOrchestrationService implements AgentService {
                 ToolInvocationContext.clear();
             }
 
-            if (context != null) {
+            if (context != null && echoToolCalls) {
                 context.emit(AgentEvent.toolResult(sessionId, request.name(), result));
             }
             results.add(ToolExecutionResultMessage.from(request, result));

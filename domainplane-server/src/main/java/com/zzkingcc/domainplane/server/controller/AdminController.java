@@ -641,6 +641,8 @@ public class AdminController {
             d.put("sideEffects", bySideEffect);
             d.put("hasPrompt", hasPrompt);
             d.put("promptLength", hasPrompt ? diff.trim().length() : 0);
+            // 工具执行信息回写开关现值（默认关）；管控台只给可调用单元显示，这里全量带回
+            d.put("toolCallEcho", console.toolCallEcho(domain));
             // 该域实际生效的 SystemMessage 预览（preview 不打日志，见 DomainSystemPromptResolver）
             d.put("promptPreview", resolver.preview(domain, console));
             d.put("tools", tools);
@@ -1173,6 +1175,9 @@ public class AdminController {
     @PostMapping("/prompts")
     public Map<String, Object> savePrompts(@RequestBody(required = false) DomainSettings incoming) {
         DomainSettings toSave = normalize(incoming);
+        // toolCallEcho 不归提示词页管：那页不发这个字段，而保存是整份覆盖写 ——
+        // 不合并的话，在提示词页点一次保存就会把各域的工具执行信息回写开关冲回默认（关）。
+        toSave.setToolCallEcho(domainSettingsStore.load().getToolCallEcho());
         // 域必须已登记：提示词是域的属性，给树里不存在的域存片段只会变成永远不生效的孤儿
         List<String> unknown = toSave.getPrompts().keySet().stream()
                 .filter(domain -> !domainRegistry.contains(domain))

@@ -15,6 +15,7 @@ import com.zzkingcc.domainplane.runtime.tool.ToolRegistry;
 import com.zzkingcc.domainplane.server.knowledge.DomainChannelProvider;
 import com.zzkingcc.domainplane.server.knowledge.KnowledgeBaseService;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
+import com.zzkingcc.domainplane.server.settings.DomainSettings;
 import com.zzkingcc.domainplane.server.settings.DomainSettingsStore;
 import com.zzkingcc.domainplane.server.settings.DomainStore;
 import lombok.Data;
@@ -144,6 +145,41 @@ public class AdminDomainController {
     }
 
     /**
+     * 切换某个域的「工具执行信息回写」开关（管控台「域空间」页卡片头部那颗开关）。
+     *
+     * 语义边界（与前端那颗开关一一对应）：
+     *   • 关（默认）= 调用方只收到最终答复，收不到工具调用请求与执行结果；
+     *   • 审批挂起（待授权工具清单）不归它管 —— 那是功能骨架，恒下发；
+     *   • 只对可调用单元（叶子域）有意义：装配节点不能作为入口，给它设了也永远读不到。
+     *     因此这里按可调用性校验，非叶子直接拒绝（前端同样只给可调用单元渲染开关）。
+     *     装配节点上已存在的设置信息不清除 —— 域将来变回叶子时自动恢复生效。
+     *
+     * @param body {@code echo} 目标值；true=回写，false=不回写
+     */
+    @PutMapping("/admin/domains/{id}/tool-call-echo")
+    public Map<String, Object> setToolCallEcho(@PathVariable("id") String id,
+                                               @RequestBody(required = false) ToolCallEchoBody body) {
+        if (body == null || body.getEcho() == null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER,
+                    "缺少 echo（true=回写工具执行信息，false=不回写）");
+        }
+        String normalized = Domains.normalize(id);
+        if (!domainRegistry.contains(normalized)) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "域不存在：" + normalized);
+        }
+        if (!domainRegistry.isCallable(normalized)) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER,
+                    "域 " + normalized + " 不是可调用单元：本平台只有叶子域可以作为可调用单元，"
+                            + "工具执行信息回写只对入口域有意义");
+        }
+        DomainSettings settings = domainSettingsStore.load();
+        settings.getToolCallEcho().put(normalized, body.getEcho());
+        domainSettingsStore.save(settings);
+        log.info("[域管理] 域 {} 的工具执行信息回写改为 {}", normalized, body.getEcho());
+        return view("tool-call-echo", normalized, List.of());
+    }
+
+    /**
      * 删除域及其全部子孙（递归）。只有根域拒绝删除。
      *
      * 顺序是硬要求，且调整过一次：现在的顺序是
@@ -233,9 +269,10 @@ public class AdminDomainController {
         List<String> affectedIndices = affected.stream().map(KbIndexes::nameOf).toList();
         domainChannelProvider.evictIndices(affectedIndices);
 
-        // 5) 域属性一并清理：提示词 / 模型绑定 / 工具声明派生记录。
+        // 5) 域属性一并清理：提示词 / 工具执行信息回写开关 / 模型绑定 / 工具声明派生记录。
         //    不清理的话，同路径域将来重建时会"静默复活"旧配置。
         domainSettingsStore.removePrompts(affected);
+        domainSettingsStore.removeToolCallEcho(affected);
         modelProfileRegistry.unbindDomains(affected);
         toolRegistry.forgetDomains(affected);
 
@@ -288,5 +325,12 @@ public class AdminDomainController {
     public static class CallableBody {
         /** true=可调用单元，false=装配节点 */
         private Boolean callable;
+    }
+
+    /** 工具执行信息回写开关请求体 */
+    @Data
+    public static class ToolCallEchoBody {
+        /** true=回写工具调用请求与执行结果，false=只回最终答复 */
+        private Boolean echo;
     }
 }

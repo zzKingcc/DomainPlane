@@ -173,6 +173,20 @@
         return out;
     }
 
+    /* 卡片头部的「是否回写工具执行信息」开关：只渲染在可调用单元（叶子域）上 ——
+       装配节点不能作为入口，开关对它没有意义。结构上内层套一个 .tune-switch，
+       藏起来的 input 与轨道 / 滑块的样式都挂在那个类上，这里只借它的视觉。 */
+    function echoSwitch(d) {
+        return '<label class="echo-switch" title="关闭后调用方只收到最终答复，不收到工具调用与执行结果">'
+            + '<span class="tune-switch">'
+            + '<input type="checkbox" data-echo="' + esc(d.name) + '"'
+            + (d.toolCallEcho === true ? ' checked' : '') + '>'
+            + '<span class="tune-switch-track"><span class="tune-switch-knob"></span></span>'
+            + '</span>'
+            + '<span class="echo-switch-label">是否回写工具执行信息</span>'
+            + '</label>';
+    }
+
     /* 沿链回落到最近一份绑定（与服务端 resolveAlong 同构）：自身没绑就用祖先的 */
     function resolveBinding(domain) {
         var chain = chainOf(domain);
@@ -221,6 +235,7 @@
                         ? '<span class="tag read" title="可调用单元：能作为入口被调用">可调用</span>'
                         : '<span class="tag approval" title="装配节点：只把工具 / 提示词 / 模型 / 知识传给后代，不能直接当入口">装配节点</span>')
                 +   '<span class="spacer"></span>'
+                +   (d.callable ? echoSwitch(d) : '')
                 +   '<span class="card-note">工具 ' + num(d.toolCount) + ' · 需确认 '
                 +     num(d.approvalCount) + '</span>'
                 +   (d.hasChildren
@@ -263,6 +278,26 @@
         box.querySelectorAll('button[data-del]').forEach(function (b) {
             b.addEventListener('click', function () { deleteDomain(b.getAttribute('data-del')); });
         });
+        box.querySelectorAll('input[data-echo]').forEach(function (input) {
+            input.addEventListener('change', function () { saveEcho(input); });
+        });
+    }
+
+    /* 拨「是否回写工具执行信息」：PUT 落盘，失败把开关弹回原值 */
+    function saveEcho(input) {
+        var domain = input.getAttribute('data-echo');
+        var on = input.checked;
+        input.disabled = true;
+        Console.jsonRequest('/admin/domains/' + encodeURIComponent(domain) + '/tool-call-echo', 'PUT',
+                            { echo: on })
+            .then(function (r) {
+                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '保存失败'); }
+            })
+            .catch(function (e) {
+                input.checked = !on;
+                alert('保存失败：' + Console.sanitizeError(e.message));
+            })
+            .then(function () { input.disabled = false; });
     }
 
     /* ===== 遮罩层：点卡片选模型 ===== */

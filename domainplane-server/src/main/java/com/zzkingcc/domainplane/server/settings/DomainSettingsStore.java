@@ -87,6 +87,25 @@ public class DomainSettingsStore {
         }
     }
 
+    /**
+     * 删域时清理：移除这些域的工具执行信息回写开关。
+     *
+     * 与 {@link #removePrompts} 同一理由：不清理会同路径域重建时复活旧开关。
+     * 装配节点只是不显示开关、值原样保留；删域才是彻底移除。
+     */
+    public void removeToolCallEcho(java.util.Collection<String> domains) {
+        if (domains == null || domains.isEmpty()) {
+            return;
+        }
+        DomainSettings settings = load();
+        boolean changed = settings.getToolCallEcho().keySet()
+                .removeIf(domain -> domains.contains(domain));
+        if (changed) {
+            save(settings);
+            log.info("[域设置] 已清理 {} 个被删域的工具执行信息回写开关", domains.size());
+        }
+    }
+
     /** 设置文件路径（供管控台展示，便于运维确认落盘位置） */
     public String filePath() {
         return settingsFile.toAbsolutePath().toString();

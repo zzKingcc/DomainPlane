@@ -607,6 +607,11 @@ tbody tr:hover { background: #fcfcfd; }
    说明文字压成 12px 弱化色：卡片头部是徽标与按钮的地盘，不能抢视线。 */
 .think-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; }
 .think-switch-label { color: var(--muted); white-space: nowrap; }
+/* ---------- 卡片头部的「是否回写工具执行信息」开关（域空间页） ----------
+   与 .think-switch 同一副面孔：轨道复用 .tune-switch，这里只补说明文字。
+   只渲染在可调用单元（叶子域）卡片上 —— 装配节点不能作为入口，开关无意义。 */
+.echo-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; }
+.echo-switch-label { color: var(--muted); white-space: nowrap; }
 /* 中文参数名后的英文（wire = 实际发给服务商的字段名）：弱化、等宽，
    与中文名同一行，但字号与颜色都压下去，不与中文标题抢视线 */
 .tune-en {

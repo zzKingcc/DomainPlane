@@ -5,10 +5,12 @@ import com.zzkingcc.domainplane.runtime.cancellation.CancellationRegistry;
 import com.zzkingcc.domainplane.runtime.model.ModelResolver;
 import com.zzkingcc.domainplane.runtime.orchestration.AgentOrchestrationService;
 import com.zzkingcc.domainplane.runtime.prompt.SystemPromptResolver;
+import com.zzkingcc.domainplane.runtime.tool.ToolCallEchoResolver;
 import com.zzkingcc.domainplane.runtime.tool.ToolRouter;
 import com.zzkingcc.domainplane.infrastructure.redis.checkpoint.RedisCheckpointSaver;
 import com.zzkingcc.domainplane.server.prompt.DomainSystemPromptResolver;
 import com.zzkingcc.domainplane.server.settings.DomainSettingsStore;
+import com.zzkingcc.domainplane.server.tool.DomainToolCallEchoResolver;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -84,17 +86,20 @@ public class GraphConfiguration {
             ObjectStreamStateSerializer<MessagesState<ChatMessage>> graphStateSerializer,
             CancellationRegistry cancellationRegistry,
             @Qualifier("agentExecutor") ExecutorService agentExecutor,
-            ModelResolver modelResolver) {
+            ModelResolver modelResolver,
+            ToolCallEchoResolver toolCallEchoResolver) {
 
         log.info("[Agent编排配置] 创建 AgentOrchestrationService，默认模型={}，会话记忆=Redis持久化，"
-                        + "检查点=Redis(支持 interrupt/resume)，系统提示词解析器={}，模型解析器={}",
+                        + "检查点=Redis(支持 interrupt/resume)，系统提示词解析器={}，模型解析器={}，"
+                        + "工具执行信息回写解析器={}",
                 streamingChatModel == null ? "unknown" : streamingChatModel.getClass().getSimpleName(),
                 promptResolver.getClass().getSimpleName(),
-                modelResolver.getClass().getSimpleName());
+                modelResolver.getClass().getSimpleName(),
+                toolCallEchoResolver.getClass().getSimpleName());
 
         return new AgentOrchestrationService(streamingChatModel, chatMemoryProvider, toolRouter,
                 promptResolver, checkpointSaver, graphStateSerializer, cancellationRegistry, agentExecutor,
-                modelResolver);
+                modelResolver, toolCallEchoResolver);
     }
 
     /**
@@ -105,5 +110,14 @@ public class GraphConfiguration {
     public SystemPromptResolver systemPromptResolver(DomainSettingsStore domainSettingsStore,
                                                      PromptProperties promptProperties) {
         return new DomainSystemPromptResolver(domainSettingsStore, promptProperties);
+    }
+
+    /**
+     * 工具执行信息回写开关解析器（域级，默认关）
+     */
+    @Bean
+    @ConditionalOnMissingBean(ToolCallEchoResolver.class)
+    public ToolCallEchoResolver toolCallEchoResolver(DomainSettingsStore domainSettingsStore) {
+        return new DomainToolCallEchoResolver(domainSettingsStore);
     }
 }
