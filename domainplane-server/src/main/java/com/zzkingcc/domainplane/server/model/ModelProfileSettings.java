@@ -1,5 +1,6 @@
 package com.zzkingcc.domainplane.server.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.zzkingcc.domainplane.api.agent.Domains;
 import lombok.Data;
 
@@ -158,6 +159,8 @@ public class ModelProfileSettings {
     /**
      * 一条档案的落盘形态（与 {@link ModelProfile} 一一对应）。
      */
+    /** 旧版 models.json 里带 capabilities / params / supportedParams 字段，读盘时忽略而不是炸掉 */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     @Data
     public static class ProfileData {
 
@@ -169,14 +172,6 @@ public class ModelProfileSettings {
         private java.util.List<String> output = new java.util.ArrayList<>();
         private String baseUrl;
         private String apiKey;
-        /**
-         * 服务商协议类型名（存枚举 {@code name()}）。
-         *
-         * 存字符串而不是枚举本身：{@code models.json} 允许手工编辑，
-         * 出现认不出来的值时 {@link ProviderType#parse} 会退回归 OpenAI 兼容，
-         * 而不会让整个反序列化过程炸掉。
-         */
-        private String providerType;
         private String modelName;
         private Double temperature;
         private Integer maxTokens;
@@ -186,18 +181,18 @@ public class ModelProfileSettings {
         private Boolean returnThinking;
         /** 向量维度（仅 embedding 用） */
         private Integer dimensions;
-        /** 布尔能力：streaming / tools / reasoning */
-        private java.util.List<String> capabilities = new java.util.ArrayList<>();
         /** 降级链（暂只存不生效） */
         private java.util.List<String> fallbacks = new java.util.ArrayList<>();
-        /** 调优参数（前缀键，如 chat.topP）；只存用户显式填过的项 */
-        private Map<String, Object> params = new LinkedHashMap<>();
+        /**
+         * 服务商适配的私有调优参数（如 {@code enable_thinking}）。
+         *
+         * 老文件没有这一字段 → 反序列化为 null → {@link ModelProfile} 归一为空 map，行为零变化。
+         */
+        private Map<String, Object> params;
 
         public ModelProfile toProfile(String alias) {
             return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey,
-                    ProviderType.parse(providerType), modelName,
-                    temperature, maxTokens, thinking, returnThinking, dimensions, capabilities, fallbacks,
-                    params);
+                    modelName, temperature, maxTokens, thinking, returnThinking, dimensions, fallbacks, params);
         }
 
         public static ProfileData from(ModelProfile profile) {
@@ -207,16 +202,15 @@ public class ModelProfileSettings {
             data.setOutput(new java.util.ArrayList<>(profile.output()));
             data.setBaseUrl(profile.baseUrl());
             data.setApiKey(profile.apiKey());
-            data.setProviderType(profile.providerType().name());
             data.setModelName(profile.modelName());
             data.setTemperature(profile.temperature());
             data.setMaxTokens(profile.maxTokens());
             data.setThinking(profile.thinking());
             data.setReturnThinking(profile.returnThinking());
             data.setDimensions(profile.dimensions());
-            data.setCapabilities(new java.util.ArrayList<>(profile.capabilities()));
             data.setFallbacks(new java.util.ArrayList<>(profile.fallbacks()));
-            data.setParams(new LinkedHashMap<>(profile.params()));
+            /* 空 map 写 null：不在 models.json 里留 params:{} 噪声 */
+            data.setParams(profile.params().isEmpty() ? null : new LinkedHashMap<>(profile.params()));
             return data;
         }
     }

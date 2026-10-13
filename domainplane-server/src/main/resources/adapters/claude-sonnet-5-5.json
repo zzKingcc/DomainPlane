@@ -1,0 +1,68 @@
+{
+  "id": "anthropic-claude-sonnet-5-5",
+  "provider": "anthropic",
+  "label": "Claude Sonnet 5.5（官方原生）",
+  "docUrl": "https://docs.anthropic.com/en/docs/about-claude/models",
+  "input": ["text"],
+  "output": ["text"],
+  "match": {
+    "hosts": ["api.anthropic.com"],
+    "models": ["Claude Sonnet 5.5"]
+  },
+  "families": {
+    "chat": {
+      "params": [
+        {
+          "key": "temperature",
+          "label": "温度",
+          "type": "number",
+          "wire": "temperature",
+          "std": true,
+          "min": 0,
+          "max": 1,
+          "step": 0.1,
+          "default": 1
+        },
+        {
+          "key": "maxTokens",
+          "label": "单次最大输出",
+          "type": "int",
+          "wire": "max_tokens",
+          "std": true,
+          "min": 1,
+          "max": 64000
+        },
+        {
+          "key": "topP",
+          "label": "核采样",
+          "type": "number",
+          "wire": "top_p",
+          "std": false,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 1
+        },
+        {
+          "key": "topK",
+          "label": "Top-K",
+          "type": "int",
+          "wire": "top_k",
+          "std": false,
+          "min": 0,
+          "max": 40,
+          "step": 1,
+          "default": 40
+        },
+        {
+          "key": "stop",
+          "label": "停止序列",
+          "type": "stringList",
+          "wire": "stop_sequences",
+          "std": false,
+          "max": 4
+        }
+      ]
+    }
+  }
+}

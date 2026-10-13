@@ -46,18 +46,16 @@ public class DefaultModelResolver implements ModelResolver {
                     domain, binding.sourceDomain(), aliases);
         }
 
-        /* 可调用列表按顺序试：首个可用即用（列表只有一个时行为与"单值绑定"一致） */
+        /* 可调用列表按顺序试：首个可用即用（列表只有一个时行为与"单值绑定"一致）。
+           判据是 mayBeChat() 不是 isChat()：元数据读不出类型的档案端点族为空，那是"不知道"
+           而不是"确定不是对话模型"，按 isChat() 判会把 OpenAI / DeepSeek 官方这类档案整条链
+           都筛掉，域永远解析不出模型。 */
         for (String alias : aliases) {
             ModelProfile profile = registry.profile(alias).orElse(null);
-            if (profile == null || !profile.isUsable() || !profile.isChat()) {
+            if (profile == null || !profile.isUsable() || !profile.mayBeChat()) {
                 log.warn("[模型档案] 域 {} 的可调用模型 {} 不存在 / 不可用 / 非对话类型，尝试列表中的下一个（档案列表：{}）",
                         domain, alias, registry.allProfiles().stream().map(ModelProfile::alias).toList());
                 continue;
-            }
-            if (!profile.supportsTools()) {
-                // 只告警不拒绝：先用便宜模型把链路跑通是合理诉求，但必须让人看见
-                log.warn("[模型档案] 域 {} 使用的档案 {} 未声明 {} 能力：模型将不会调用任何工具",
-                        domain, alias, ModelProfile.CAP_TOOLS);
             }
             return factory.streamingChat(profile);
         }

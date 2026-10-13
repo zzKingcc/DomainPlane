@@ -1,0 +1,70 @@
+{
+  "id": "openai-gpt-5.6-luna",
+  "provider": "openai",
+  "label": "OpenAI GPT-5.6 Luna（低成本）",
+  "docUrl": "https://platform.openai.com/docs/models/gpt-5.6-luna",
+  "input": ["text"],
+  "output": ["text"],
+  "match": {
+    "hosts": ["api.openai.com"],
+    "models": ["gpt-5.6-luna"]
+  },
+  "families": {
+    "chat": {
+      "params": [
+        {
+          "key": "reasoningEffort",
+          "label": "思考强度",
+          "type": "enum",
+          "wire": "reasoning_effort",
+          "std": false,
+          "display": "bar",
+          "default": "medium",
+          "options": [
+            {"value": "none", "label": "none"},
+            {"value": "low", "label": "low"},
+            {"value": "medium", "label": "medium"},
+            {"value": "high", "label": "high"},
+            {"value": "xhigh", "label": "xhigh"}
+          ]
+        },
+        {
+          "key": "verbosity",
+          "label": "输出冗长度",
+          "type": "enum",
+          "wire": "verbosity",
+          "std": false,
+          "default": "medium",
+          "options": [
+            {"value": "low", "label": "low"},
+            {"value": "medium", "label": "medium"},
+            {"value": "high", "label": "high"}
+          ]
+        },
+        {
+          "key": "temperature",
+          "label": "温度",
+          "type": "number",
+          "wire": "temperature",
+          "std": true,
+          "min": 0,
+          "max": 2,
+          "step": 0.1,
+          "default": 1,
+          "enabledWhen": {
+            "key": "reasoningEffort",
+            "values": ["none"]
+          }
+        },
+        {
+          "key": "maxTokens",
+          "label": "单次最大输出",
+          "type": "int",
+          "wire": "max_tokens",
+          "std": true,
+          "min": 1
+        }
+      ]
+    }
+  }
+}

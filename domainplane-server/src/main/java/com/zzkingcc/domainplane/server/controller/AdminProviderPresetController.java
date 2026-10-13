@@ -16,9 +16,8 @@ import java.util.Map;
  * 与 {@code /admin/provider-connections} 的分工：那边是用户自己的连接（可增删改、落盘），
  * 这边是系统内置的平台清单（只读、不落盘）。两者不重叠，预设也不代替连接库。
  *
- * 预设真正不可替代的一点是携带 {@code providerType}：地址用户能查，
- * "这份档案该交给哪个适配器"没有记忆成本。表单已不再单独提供协议下拉，
- * 协议一律随预设带出；漏填就只能走 OpenAI 兼容，对 Anthropic / Ollama 会直接跑不通。
+ * 连接基底统一为 OpenAI 兼容，预设只携带默认地址：选一条预设等于把该厂商的
+ * OpenAI 兼容入口填进表单，密钥仍由用户自己填。
  *
  * @author zzkingcc
  */
@@ -26,13 +25,12 @@ import java.util.Map;
 @RequestMapping("/admin/provider-presets")
 public class AdminProviderPresetController {
 
-    /** 全部预设项：协议类型 + 名称 + 默认地址 + 是否需要密钥 + 备注 */
+    /** 全部预设项：名称 + 默认地址 + 是否需要密钥 + 备注 */
     @GetMapping
     public Map<String, Object> list() {
         List<Map<String, Object>> items = new ArrayList<>();
         for (ModelPresets.Preset preset : ModelPresets.all()) {
             Map<String, Object> item = new LinkedHashMap<>();
-            item.put("id", preset.id());
             item.put("label", preset.label());
             item.put("baseUrl", preset.baseUrl());
             item.put("needApiKey", preset.needApiKey());

@@ -1,5 +1,6 @@
 package com.zzkingcc.domainplane.server.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.zzkingcc.domainplane.common.util.AtomicFiles;
@@ -44,8 +45,7 @@ import java.util.Set;
  *
  * 地址不做强制规范化：只校验"是 http/https 的合法 URL 且有主机"，
  * 不要求也不追加 {@code /v1} —— 各家网关的路径段五花八门（{@code /v1}、
- * {@code /openai/v1}、{@code /compatible-mode/v1}），由探测环节按 404 兜底补全更合适
- * （见 {@link ModelCatalog}）。
+ * {@code /openai/v1}、{@code /compatible-mode/v1}），按各家的文档填写即可。
  *
  * 单独一个文件而不是并进 models.json：这里可能有明文凭据，与档案配置的生命周期不同
  * —— 备份、授权、轮换都该能单独处理，不必连带整个档案表一起搬走。
@@ -84,20 +84,17 @@ public class ProviderConnectionStore {
      * 库中的一条连接。
      *
      * @param name     唯一名称（预设下拉里的标识）
-     * @param baseUrl  服务商地址
+     * @param baseUrl  服务商地址（OpenAI 兼容入口）
      * @param apiKey   密钥，可为空（自建端点没有真密钥）；不要写进日志
-     * @param protocol 协议类型名（{@link ProviderType#name()}）；空 = OpenAI 兼容
      */
-    public record ProviderConnection(String name, String baseUrl, String apiKey, String protocol) {
+    /* 老文件里带 protocol 字段：连接基底收敛为 OpenAI 兼容后已废弃，读盘时忽略而不是炸掉 */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ProviderConnection(String name, String baseUrl, String apiKey) {
 
         public ProviderConnection {
             name = name == null ? "" : name.trim();
             baseUrl = baseUrl == null ? "" : baseUrl.trim();
             apiKey = apiKey == null ? "" : apiKey.trim();
-            /* 老文件里没有这个字段。缺省即 OpenAI 兼容 —— 与只有这一种协议时行为一致 */
-            protocol = protocol == null || protocol.isBlank()
-                    ? ProviderType.OPENAI_COMPATIBLE.name()
-                    : protocol.trim();
         }
 
         /** 这条连接是否带密钥（决定下拉里要不要显示脱敏值） */
@@ -156,7 +153,7 @@ public class ProviderConnectionStore {
      *
      * @return 失败原因；{@code null} 表示成功
      */
-    public synchronized String add(String name, String baseUrl, String apiKey, String protocol) {
+    public synchronized String add(String name, String baseUrl, String apiKey) {
         String key = normalize(name);
         if (key.isEmpty()) {
             return "名称不能为空";
@@ -184,14 +181,11 @@ public class ProviderConnectionStore {
                     + "名称用来标识是哪一条，不允许重复；想改地址或密钥请先删除同名项再添加。";
         }
 
-        /* 认不出来的协议名退回归 OpenAI 兼容 —— 与档案侧同一个 parse，口径一致 */
-        String proto = ProviderType.parse(protocol).name();
-
         List<ProviderConnection> next = new ArrayList<>(connections.connections());
-        next.add(new ProviderConnection(key, url, secret, proto));
+        next.add(new ProviderConnection(key, url, secret));
         persist(new Connections(next));
-        log.info("[服务商连接库] 已添加「{}」→ {}（协议 {}，{}）", key, url, proto,
-                new ProviderConnection(key, url, secret, proto).maskedApiKey());
+        log.info("[服务商连接库] 已添加「{}」→ {}（{}）", key, url,
+                new ProviderConnection(key, url, secret).maskedApiKey());
         return null;
     }
 

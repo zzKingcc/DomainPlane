@@ -55,20 +55,20 @@ class ModelProfileVectorSplitTest {
     }
 
     private static ModelProfile chat(String alias) {
-        return new ModelProfile(alias,List.of("chat"),List.of("text"),List.of("text"),"https://x/v1","k", null,alias,null,null,null,null,null,List.of(),List.of(),null);
+        return new ModelProfile(alias,List.of("chat"),List.of("text"),List.of("text"),"https://x/v1","k",alias,null,null,null,null,null,List.of(),null);
     }
 
     private static ModelProfile images(String alias) {
-        return new ModelProfile(alias,List.of("images"),List.of("text"),List.of("image"),"https://x/v1","k", null,alias,null,null,null,null,null,List.of(),List.of(),null);
+        return new ModelProfile(alias,List.of("images"),List.of("text"),List.of("image"),"https://x/v1","k",alias,null,null,null,null,null,List.of(),null);
     }
 
     private static ModelProfile vector(String alias) {
-        return new ModelProfile(alias,List.of("embedding"),List.of("text"),List.of("embedding"),"https://x/v1","k", null,alias,null,null,null,null,2048,List.of(),List.of(),null);
+        return new ModelProfile(alias,List.of("embedding"),List.of("text"),List.of("embedding"),"https://x/v1","k",alias,null,null,null,null,2048,List.of(),null);
     }
 
     /** 同时支持对话与向量 —— 它必须留在模型桶，否则既不能绑域、也从「模型」段消失 */
     private static ModelProfile dual(String alias) {
-        return new ModelProfile(alias,List.of("chat", "embedding"),List.of("text"),List.of("text"),"https://x/v1","k", null,alias,null,null,null,null,1024,List.of(),List.of(),null);
+        return new ModelProfile(alias,List.of("chat", "embedding"),List.of("text"),List.of("text"),"https://x/v1","k",alias,null,null,null,null,1024,List.of(),null);
     }
 
     private static ModelProfileSettings.ProfileData data(ModelProfile p) {
@@ -154,6 +154,8 @@ class ModelProfileVectorSplitTest {
         assertTrue(loaded.getEmbeddingProfiles().containsKey("vec"), "旧布局里的向量档案要迁到独立存放");
         assertFalse(loaded.getProfiles().containsKey("vec"));
         assertEquals("vec", loaded.getEmbeddingAlias(), "迁移不能丢掉当前向量模型的选择");
+        assertTrue(loaded.find("chat-a").toProfile("chat-a").params().isEmpty(),
+                "老文件没有 params 字段：读入后应为空 map，行为零变化");
 
         String rewritten = Files.readString(settingsFile(), StandardCharsets.UTF_8);
         assertTrue(rewritten.contains("embeddingProfiles"),

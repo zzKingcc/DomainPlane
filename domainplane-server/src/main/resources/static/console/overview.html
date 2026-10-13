@@ -89,7 +89,7 @@
             chat.textContent = s.chatConfigured ? '已就绪' : '未配置';
             chat.className = 'v ' + (s.chatConfigured ? 'ok' : 'warn');
             document.getElementById('statChatNote').textContent =
-                s.chatConfigured ? (s.chatModelName || '') : '请到「模型设置」填写';
+                s.chatConfigured ? (s.chatModelName || '') : '请到「模型设置」添加模型档案';
 
             emb.textContent = s.embeddingConfigured ? '已就绪' : '未配置';
             emb.className = 'v ' + (s.embeddingConfigured ? 'ok' : 'warn');

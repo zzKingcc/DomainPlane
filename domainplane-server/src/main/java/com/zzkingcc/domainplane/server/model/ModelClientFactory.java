@@ -1,16 +1,15 @@
 package com.zzkingcc.domainplane.server.model;
 
-import dev.langchain4j.model.anthropic.AnthropicChatModel;
-import dev.langchain4j.model.anthropic.AnthropicStreamingChatModel;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.ollama.OllamaChatModel;
-import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -18,29 +17,32 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * 缓存设计的两个要点：
  *
- *   • 键是档案指纹（含 Key 哈希与协议类型）—— 改了 Key、端点或协议类型，指纹变，
+ *   • 键是档案指纹（含 Key 哈希）—— 改了 Key 或端点，指纹变，
  *     自然拿到新实例，不需要手工清缓存；
  *   • 每个别名只保留当前指纹那一个实例：旧实例在下次取用时被清掉，
  *     避免反复改配置堆实例。
  *
- * 协议分派：档案的 {@link ModelProfile#providerType()} 决定交给哪个适配器。
- * 这里只做"选谁"，不做协议转换 —— URL、鉴权头、请求体结构这些差异
- * 是 langchain4j 各适配模块自己的职责；硬写一遍等于重造 HTTP 客户端，
- * 且必然漏字段（每个服务商的私有参数都在持续增加）。
+ * 连接基底只有 OpenAI 兼容一种格式：所有档案都走 OpenAi(Streaming)ChatModel。
+ * 服务商差异由对方暴露的 OpenAI 兼容入口吸收，本项目不做协议分派 ——
+ * 后续要接新能力，在这个格式上扩，而不是按服务商开分支。
+ *
+ * 服务商适配（{@link ModelAdapterRegistry}）落在两个地方：
+ *
+ *   • 标准参数（temperature / maxTokens）—— 档案老字段 → builder setter；
+ *   • 私有参数（如 {@code enable_thinking}）—— 档案 {@code params} → builder
+ *     {@code customParameters}（langchain4j 1.18.1 起支持，与标准字段并列合并进请求体），
+ *     适配 schema 里声明了 {@code default} 而用户没填的，在此补缺。
  *
  * @author zzkingcc
  */
 @Slf4j
 public class ModelClientFactory {
 
-    /**
-     * 思考开关的请求体字段名（仅 OpenAI 兼容协议）。
-     *
-     * {@code enable_thinking} 是硅基流动 / 百炼这条线（Qwen 系）实际认的顶层字段，
-     * 实测能关掉思考。只在档案显式声明时才发：未声明就不发这个字段，
-     * 由服务商默认决定 —— 给不认识的端点塞扩展字段轻则被忽略、重则被拒，不该替用户赌。
-     */
-    private static final String THINKING_FIELD = "enable_thinking";
+    private final ModelAdapterRegistry adapterRegistry;
+
+    public ModelClientFactory(ModelAdapterRegistry adapterRegistry) {
+        this.adapterRegistry = adapterRegistry;
+    }
 
     /** 别名 → （指纹 → 实例） */
     private final Map<String, Map<String, StreamingChatModel>> streamingByAlias = new ConcurrentHashMap<>();
@@ -63,8 +65,8 @@ public class ModelClientFactory {
         StreamingChatModel built = buildStreaming(profile);
         evictOthers(versions, fingerprint);
         versions.put(fingerprint, built);
-        log.info("[模型档案] 构建流式客户端：alias={} provider={} model={} baseUrl={}（指纹 {}）",
-                profile.alias(), profile.providerType(), profile.modelName(), profile.baseUrl(), fingerprint);
+        log.info("[模型档案] 构建流式客户端：alias={} model={} baseUrl={}（指纹 {}）",
+                profile.alias(), profile.modelName(), profile.baseUrl(), fingerprint);
         return built;
     }
 
@@ -91,136 +93,59 @@ public class ModelClientFactory {
         versions.keySet().removeIf(fp -> !fp.equals(keepFingerprint));
     }
 
-    // ==================== 流式 ====================
+    // ==================== 构建 ====================
 
     private StreamingChatModel buildStreaming(ModelProfile profile) {
-        return switch (profile.providerType()) {
-            case ANTHROPIC -> {
-                var b = AnthropicStreamingChatModel.builder()
-                        .apiKey(profile.apiKey())
-                        .modelName(profile.modelName());
-                if (hasText(profile.baseUrl())) {
-                    b.baseUrl(profile.baseUrl());
-                }
-                applyTemperature(b::temperature, profile);
-                applyMaxTokens(b::maxTokens, profile);
-                applyReturnThinking(b::returnThinking, profile);
-                numParam(b::topP, profile, "chat.topP");
-                intParam(b::topK, profile, "chat.topK");
-                intParam(b::thinkingBudgetTokens, profile, "chat.thinkingBudgetTokens");
-                listParam(b::stopSequences, profile, "chat.stop");
-                applySendThinking(b::sendThinking, profile);
-                yield b.build();
-            }
-            case OLLAMA -> {
-                var b = OllamaStreamingChatModel.builder()
-                        /* Ollama 的 baseUrl 不带尾斜杠：带上了会被拼成 http://host//api/chat */
-                        .baseUrl(trimTrailingSlash(profile.baseUrl()))
-                        .modelName(profile.modelName());
-                applyTemperature(b::temperature, profile);
-                /* Ollama 没有 maxTokens，对应参数叫 numPredict —— 名字不同但语义一致 */
-                Integer maxTokens = profile.effectiveMaxTokens();
-                if (maxTokens != null) {
-                    b.numPredict(maxTokens);
-                }
-                /* Ollama 的思考开关有原生入口 think(Boolean)，不需要 customParameters */
-                if (profile.thinking() != null) {
-                    b.think(profile.thinking());
-                }
-                applyReturnThinking(b::returnThinking, profile);
-                numParam(b::topP, profile, "chat.topP");
-                intParam(b::topK, profile, "chat.topK");
-                intParam(b::numCtx, profile, "chat.numCtx");
-                numParam(b::repeatPenalty, profile, "chat.repeatPenalty");
-                intParam(b::seed, profile, "chat.seed");
-                listParam(b::stop, profile, "chat.stop");
-                yield b.build();
-            }
-            case OPENAI_COMPATIBLE -> {
-                var b = OpenAiStreamingChatModel.builder()
-                        .baseUrl(profile.baseUrl())
-                        .apiKey(profile.apiKey())
-                        .modelName(profile.modelName());
-                applyTemperature(b::temperature, profile);
-                applyMaxTokens(b::maxTokens, profile);
-                applyOpenAiThinking(b::customParameters, b::returnThinking, profile);
-                numParam(b::topP, profile, "chat.topP");
-                numParam(b::presencePenalty, profile, "chat.presencePenalty");
-                numParam(b::frequencyPenalty, profile, "chat.frequencyPenalty");
-                intParam(b::seed, profile, "chat.seed");
-                flagParam(b::parallelToolCalls, profile, "chat.parallelToolCalls");
-                textParam(b::reasoningEffort, profile, "chat.reasoningEffort");
-                listParam(b::stop, profile, "chat.stop");
-                yield b.build();
-            }
-            case DASHSCOPE -> throw new IllegalStateException(dashscopeUnsupported());
-        };
+        var b = OpenAiStreamingChatModel.builder()
+                .baseUrl(profile.baseUrl())
+                .apiKey(profile.apiKey())
+                .modelName(profile.modelName());
+        Set<String> stdWires = allowedStdWires(profile);
+        applyTemperature(b::temperature, profile, stdWires);
+        applyMaxTokens(b::maxTokens, profile, stdWires);
+        applyReturnThinking(b::returnThinking, profile);
+        applyCustomParameters(b::customParameters, profile);
+        return b.build();
     }
 
-    // ==================== 非流式 ====================
-
     private ChatModel buildChat(ModelProfile profile) {
-        return switch (profile.providerType()) {
-            case ANTHROPIC -> {
-                var b = AnthropicChatModel.builder()
-                        .apiKey(profile.apiKey())
-                        .modelName(profile.modelName());
-                if (hasText(profile.baseUrl())) {
-                    b.baseUrl(profile.baseUrl());
-                }
-                applyTemperature(b::temperature, profile);
-                applyMaxTokens(b::maxTokens, profile);
-                applyReturnThinking(b::returnThinking, profile);
-                numParam(b::topP, profile, "chat.topP");
-                intParam(b::topK, profile, "chat.topK");
-                intParam(b::thinkingBudgetTokens, profile, "chat.thinkingBudgetTokens");
-                listParam(b::stopSequences, profile, "chat.stop");
-                applySendThinking(b::sendThinking, profile);
-                yield b.build();
-            }
-            case OLLAMA -> {
-                var b = OllamaChatModel.builder()
-                        .baseUrl(trimTrailingSlash(profile.baseUrl()))
-                        .modelName(profile.modelName());
-                applyTemperature(b::temperature, profile);
-                Integer maxTokens = profile.effectiveMaxTokens();
-                if (maxTokens != null) {
-                    b.numPredict(maxTokens);
-                }
-                if (profile.thinking() != null) {
-                    b.think(profile.thinking());
-                }
-                applyReturnThinking(b::returnThinking, profile);
-                numParam(b::topP, profile, "chat.topP");
-                intParam(b::topK, profile, "chat.topK");
-                intParam(b::numCtx, profile, "chat.numCtx");
-                numParam(b::repeatPenalty, profile, "chat.repeatPenalty");
-                intParam(b::seed, profile, "chat.seed");
-                listParam(b::stop, profile, "chat.stop");
-                yield b.build();
-            }
-            case OPENAI_COMPATIBLE -> {
-                var b = OpenAiChatModel.builder()
-                        .baseUrl(profile.baseUrl())
-                        .apiKey(profile.apiKey())
-                        .modelName(profile.modelName());
-                applyTemperature(b::temperature, profile);
-                applyMaxTokens(b::maxTokens, profile);
-                applyOpenAiThinking(b::customParameters, b::returnThinking, profile);
-                numParam(b::topP, profile, "chat.topP");
-                numParam(b::presencePenalty, profile, "chat.presencePenalty");
-                numParam(b::frequencyPenalty, profile, "chat.frequencyPenalty");
-                intParam(b::seed, profile, "chat.seed");
-                flagParam(b::parallelToolCalls, profile, "chat.parallelToolCalls");
-                textParam(b::reasoningEffort, profile, "chat.reasoningEffort");
-                listParam(b::stop, profile, "chat.stop");
-                yield b.build();
-            }
-            case DASHSCOPE -> throw new IllegalStateException(dashscopeUnsupported());
-        };
+        var b = OpenAiChatModel.builder()
+                .baseUrl(profile.baseUrl())
+                .apiKey(profile.apiKey())
+                .modelName(profile.modelName());
+        Set<String> stdWires = allowedStdWires(profile);
+        applyTemperature(b::temperature, profile, stdWires);
+        applyMaxTokens(b::maxTokens, profile, stdWires);
+        applyReturnThinking(b::returnThinking, profile);
+        applyCustomParameters(b::customParameters, profile);
+        return b.build();
     }
 
     // ==================== 参数施加 ====================
+
+    /**
+     * 此刻允许下发的**标准参数** wire 集合。
+     *
+     * 私有参数的过滤在 {@link #effectiveParams} 里做；标准参数走的是框架 setter，不经那条路，
+     * 所以单独算一遍 —— 两处都读同一份 enabledWhen，口径不会分叉。
+     *
+     * 口径是"默认放行、条件不成立才拦"：没登记条件的标准参数一律放行，未命中适配也一律放行
+     * （与 {@code effectiveParams} 的"原样下发"一致），于是新逻辑只可能收窄条件参数这一个点，
+     * 老档案的行为分毫不动。
+     */
+    private Set<String> allowedStdWires(ModelProfile profile) {
+        Set<String> out = new HashSet<>();
+        out.add("temperature");
+        out.add("max_tokens");
+        ModelAdapterRegistry.MatchResult matched = adapterRegistry.match(profile.baseUrl(), profile.modelName());
+        for (ModelAdapterRegistry.ParamSpec spec : matched.chatParams()) {
+            if (spec.std() && spec.enabledWhen() != null
+                    && !ModelAdapterRegistry.enabled(spec, profile.params())) {
+                out.remove(spec.wire());
+            }
+        }
+        return out;
+    }
 
     /**
      * 温度：留空就不发送，由服务商默认决定。
@@ -228,64 +153,10 @@ public class ModelClientFactory {
      * 不再注入平台自造的默认值 —— 那会让"没填"实际等于"被平台改成了某个数"，
      * 而用户界面上看不到这个数；换个服务商，行为还会跟着变。
      */
-    private static void applyTemperature(java.util.function.Consumer<Double> setter, ModelProfile profile) {
-        if (profile.temperature() != null) {
+    private static void applyTemperature(java.util.function.Consumer<Double> setter, ModelProfile profile,
+                                         Set<String> stdWires) {
+        if (profile.temperature() != null && stdWires.contains("temperature")) {
             setter.accept(profile.temperature());
-        }
-    }
-
-    // ==================== 调优参数（前缀键，留空即不发） ====================
-
-    /** 数值参数 */
-    private static void numParam(java.util.function.Consumer<Double> setter, ModelProfile profile, String key) {
-        Double value = profile.numParam(key);
-        if (value != null) {
-            setter.accept(value);
-        }
-    }
-
-    /** 整数参数 */
-    private static void intParam(java.util.function.Consumer<Integer> setter, ModelProfile profile, String key) {
-        Integer value = profile.intParam(key);
-        if (value != null) {
-            setter.accept(value);
-        }
-    }
-
-    /** 文本参数 */
-    private static void textParam(java.util.function.Consumer<String> setter, ModelProfile profile, String key) {
-        String value = profile.strParam(key);
-        if (value != null) {
-            setter.accept(value);
-        }
-    }
-
-    /** 布尔参数 */
-    private static void flagParam(java.util.function.Consumer<Boolean> setter, ModelProfile profile, String key) {
-        Boolean value = profile.boolParam(key);
-        if (value != null) {
-            setter.accept(value);
-        }
-    }
-
-    /** 字符串数组参数（停止序列） */
-    private static void listParam(java.util.function.Consumer<java.util.List<String>> setter,
-                                  ModelProfile profile, String key) {
-        java.util.List<String> value = profile.listParam(key);
-        if (value != null) {
-            setter.accept(value);
-        }
-    }
-
-    /**
-     * Anthropic 的思考开关。
-     *
-     * 与 OpenAI 兼容的 {@code enable_thinking} 不同：Anthropic 的开关走 {@code sendThinking}，
-     * 预算另有 {@code thinkingBudgetTokens} 入口（见 chat.thinkingBudgetTokens 参数）。
-     */
-    private static void applySendThinking(java.util.function.Consumer<Boolean> setter, ModelProfile profile) {
-        if (profile.thinking() != null) {
-            setter.accept(profile.thinking());
         }
     }
 
@@ -294,15 +165,16 @@ public class ModelClientFactory {
      *
      * "不限制"是刻意保留的默认而不是遗漏，只有显式填了值才会设限。
      */
-    private static void applyMaxTokens(java.util.function.Consumer<Integer> setter, ModelProfile profile) {
+    private static void applyMaxTokens(java.util.function.Consumer<Integer> setter, ModelProfile profile,
+                                       Set<String> stdWires) {
         Integer value = profile.effectiveMaxTokens();
-        if (value != null) {
+        if (value != null && stdWires.contains("max_tokens")) {
             setter.accept(value);
         }
     }
 
     /**
-     * 是否把思考内容回传给平台 —— 落在框架侧，三家都有这个开关。
+     * 是否把思考内容回传给平台 —— 落在框架侧。
      *
      * 它与 {@link ModelProfile#thinking()} 作用层不同：后者决定模型跑不跑思考（发给服务商），
      * 这个决定思考内容要不要解析出来交给调用方（框架行为）。默认不解析，思考直接丢弃。
@@ -316,48 +188,69 @@ public class ModelClientFactory {
     }
 
     /**
-     * OpenAI 兼容协议的思考开关。
+     * 私有调优参数 → 请求体（builder 的 {@code customParameters}）。
      *
-     * 这里的 {@code thinking} 与 {@code returnThinking} 都是发给服务商的字段，
-     * 其中 {@code enable_thinking} 是硅基流动 / 百炼这条线（Qwen 系）实际认的顶层字段。
+     * 与标准参数同路并列：langchain4j 把 customParameters 与 temperature 等字段
+     * 合并进同一个 ChatCompletionRequest，服务商看到的是一个完整请求体。
      *
-     * 为什么只有 OpenAI 兼容走customParameters：另两家的开关形态不同 ——
-     * Anthropic 用带 budget_tokens 的 {@code thinking} 对象（塞布尔会被拒），
-     * Ollama 有独立的 {@code think} 入口。两者都在各自分支里单独处理，不走这里。
-     *
-     * OpenRouter 是个已知缺口：它走 {@code reasoning} 对象且分 effort 档位，
-     * 与 {@code enable_thinking} 不同构，因此当前在 OpenAI 兼容协议下也不生效。
+     * 补缺规则：适配 schema 声明了 {@code default} 而用户没填的键，在此填上 ——
+     * "没填"对用户是不发送，对适配是"按适配登记的默认走"，两者在 default 存在时重合。
+     * 未命中适配的档案原样下发（正常应为空，保存时已被拒绝非空）。
      */
-    private static void applyOpenAiThinking(java.util.function.Consumer<Map<String, Object>> customParameters,
-                                            java.util.function.Consumer<Boolean> returnThinking,
-                                            ModelProfile profile) {
-        if (profile.thinking() != null) {
-            customParameters.accept(Map.of(THINKING_FIELD, profile.thinking()));
+    private void applyCustomParameters(java.util.function.Consumer<Map<String, Object>> setter,
+                                       ModelProfile profile) {
+        Map<String, Object> wire = effectiveParams(profile);
+        if (!wire.isEmpty()) {
+            setter.accept(wire);
         }
-        applyReturnThinking(returnThinking, profile);
     }
 
-    // ==================== 小工具 ====================
-
-    /** Ollama 专用：去掉尾部斜杠，避免拼出 {@code //api/chat} */
-    private static String trimTrailingSlash(String url) {
-        if (url == null) {
-            return null;
+    /**
+     * 档案 params → 请求体字段：适配 default 补缺 + 档案键翻译成线上字段名（key → wire）。
+     *
+     * 档案 params 的键是适配 {@code key}（UI 侧标识，如 {@code reasoningEffort}），
+     * 请求体要的是 {@code wire}（OpenAI 字段名，如 {@code reasoning_effort}）。
+     * 翻译只此一处：存储 / 校验 / 视图全用 key，注入前才换成 wire。
+     *
+     * 补缺规则：适配 schema 声明了 {@code default} 而用户没填的键，在此填上 ——
+     * "没填"对用户是不发送，对适配是"按适配登记的默认走"，两者在 default 存在时重合。
+     * 条件参数也参与补缺，但补出来的值**同样要过下面那道条件门**：条件不成立时连默认值
+     * 都不发射。
+     *
+     * 标准参数（{@code std=true}）**不走这里**：它的值在 {@link ModelProfile} 的老字段上，
+     * 由 {@link #allowedStdWires} + setter 那条路专管（见 {@link #applyTemperature} /
+     * {@link #applyMaxTokens}）。default 对标准参数只用于界面空态提示，不参与注入 ——
+     * 否则同一个 {@code temperature} 会既进 customParameters、又进 builder setter，发两遍。
+     *
+     * 过滤规则：条件不成立的值不发射 —— 正常路径下这种值在保存时就被
+     * {@code validateParams} 拒了，这里只兜住绕过控制器写入的档案（改配置文件、旧版本残留）。
+     * 发给服务商一个它不看的字段，比不发更糟：看起来配了，实际没生效。
+     *
+     * 包装规则：{@code wireWrap} 非空的值包一层单键对象（{@code {wireWrap: value}}），
+     * 用于厂商把标量塞进子对象的标准写法，如 {@code response_format: {type: "json_object"}}。
+     * 未命中适配的档案原样下发（正常应为空，保存时已被拒绝非空）。
+     */
+    private Map<String, Object> effectiveParams(ModelProfile profile) {
+        ModelAdapterRegistry.MatchResult matched = adapterRegistry.match(profile.baseUrl(), profile.modelName());
+        if (!matched.matched()) {
+            return profile.params();
         }
-        String s = url.trim();
-        while (s.endsWith("/")) {
-            s = s.substring(0, s.length() - 1);
+        Map<String, Object> declared = profile.params();
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (ModelAdapterRegistry.ParamSpec spec : matched.chatParams()) {
+            /* 标准参数不进 customParameters：值由 applyTemperature / applyMaxTokens 走 builder setter，
+               它登记的 default 只用于界面空态提示 */
+            if (spec.std()) {
+                continue;
+            }
+            Object value = declared.containsKey(spec.key()) ? declared.get(spec.key()) : spec.defaultValue();
+            if (value == null || !ModelAdapterRegistry.enabled(spec, declared)) {
+                continue;
+            }
+            out.put(spec.wire(), spec.wireWrap() == null ? value : Map.of(spec.wireWrap(), value));
         }
-        return s;
-    }
-
-    private static String dashscopeUnsupported() {
-        return "阿里云百炼的原生适配暂不可用：langchain4j 的 dashscope 模块停更在 0.36.2，"
-                + "与当前 1.18.x 不在同一依赖世代。请把该档案的协议类型改成"
-                + "「OpenAI 兼容」（百炼的 compatible-mode/v1 入口可直接使用）。";
-    }
-
-    private static boolean hasText(String s) {
-        return s != null && !s.isBlank();
+        /* 不在 chatParams 里的键直接不发射：保存时 validateParams 已按 chatParams 拦过，
+           能走到这里的只可能是内存态被绕过硬造；发一个服务商不认的字段比不发更糟 */
+        return out;
     }
 }

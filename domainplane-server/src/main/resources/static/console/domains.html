@@ -95,7 +95,7 @@
                      tts: '语音合成', asr: '语音识别', video: '视频' };
     var MOD_LABEL = { text: '文本', image: '图片', audio: '音频', video: '视频',
                       file: '文件', embedding: '向量' };
-    var CAP_LABEL = { streaming: '流式', tools: '工具调用' };
+
 
     function num(n) { return (n == null ? 0 : n); }
 
@@ -143,18 +143,19 @@
         return '<span class="tag ' + cls + '" title="' + tip + '">' + esc(t.name) + '</span>';
     }
 
-    /* 候选：全部「对话」类档案（向量类不能拿去对话；不再有内置 default 这一项） */
+    /* 候选：全部「可能走对话」的档案（向量类不能拿去对话；不再有内置 default 这一项）。
+       端点族未声明的也要留下 —— 元数据读不出类型的服务商（OpenAI / DeepSeek 官方）就停在这一格，
+       滤掉等于一个模型都选不出来。注意 [] 在 JS 里是真值，"有没有声明"必须判长度而不是判真假。 */
     function candidates() {
         var list = [];
         PROFILES.forEach(function (p) {
-            if (p.endpoints && p.endpoints.indexOf('chat') < 0) { return; }
+            if ((p.endpoints || []).length && p.endpoints.indexOf('chat') < 0) { return; }
             var n = dupNo(p);
             list.push({
                 alias: p.alias,
                 label: modelLabel(p),
                 note: p.baseUrl || '',
                 tags: tagList(p.endpoints, EP_LABEL) + tagList(p.input, MOD_LABEL)
-                    + tagList(p.capabilities, CAP_LABEL)
             });
         });
         return list;

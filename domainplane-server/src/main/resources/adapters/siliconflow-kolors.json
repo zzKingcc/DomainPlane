@@ -1,0 +1,82 @@
+{
+  "id": "siliconflow-kolors",
+  "provider": "siliconflow",
+  "label": "Kwai-Kolors / Kolors（硅基流动·文生图）",
+  "docUrl": "https://docs.siliconflow.cn/docs/api/images-generations-post",
+  "input": ["text"],
+  "output": ["image"],
+  "match": {
+    "hosts": ["api.siliconflow.cn"],
+    "models": ["Kwai-Kolors/Kolors"]
+  },
+  "families": {
+    "images": {
+      "params": [
+        {
+          "key": "imageSize",
+          "label": "分辨率",
+          "type": "enum",
+          "wire": "image_size",
+          "std": false,
+          "default": "1024x1024",
+          "options": [
+            {"value": "1024x1024"},
+            {"value": "960x1280"},
+            {"value": "768x1024"},
+            {"value": "720x1440"},
+            {"value": "720x1280"}
+          ]
+        },
+        {
+          "key": "numInferenceSteps",
+          "label": "推理步数",
+          "type": "int",
+          "wire": "num_inference_steps",
+          "std": false,
+          "min": 1,
+          "max": 50,
+          "step": 1,
+          "default": 20
+        },
+        {
+          "key": "guidanceScale",
+          "label": "引导系数",
+          "type": "number",
+          "wire": "guidance_scale",
+          "std": false,
+          "min": 0,
+          "max": 20,
+          "step": 0.1,
+          "default": 7.5
+        },
+        {
+          "key": "batchSize",
+          "label": "生成张数",
+          "type": "int",
+          "wire": "batch_size",
+          "std": false,
+          "min": 1,
+          "max": 4,
+          "step": 1,
+          "default": 1
+        },
+        {
+          "key": "negativePrompt",
+          "label": "负向提示词",
+          "type": "string",
+          "wire": "negative_prompt",
+          "std": false
+        },
+        {
+          "key": "seed",
+          "label": "随机种子",
+          "type": "int",
+          "wire": "seed",
+          "std": false,
+          "min": 0,
+          "max": 9999999999
+        }
+      ]
+    }
+  }
+}

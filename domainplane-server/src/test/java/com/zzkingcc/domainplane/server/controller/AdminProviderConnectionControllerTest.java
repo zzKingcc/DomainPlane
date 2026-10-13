@@ -157,21 +157,4 @@ class AdminProviderConnectionControllerTest {
         assertTrue(e.getMessage().contains("内置配置项"),
                 "内置与自定义共用同一个预设下拉，重名就分不清点的是哪一条；实际：" + e.getMessage());
     }
-
-    @Test
-    void 协议随配置一起存取没填时退回OpenAI兼容() {
-        AdminProviderConnectionController controller = controller();
-        AdminProviderConnectionController.ConnectionBody withProtocol = body("内网 Anthropic 网关", SF, "sk-1");
-        withProtocol.setProtocol("ANTHROPIC");
-        controller.add(withProtocol);
-        controller.add(body("没填协议", SF, "sk-2"));
-
-        assertEquals("ANTHROPIC", controller.resolve("内网 Anthropic 网关").get("protocol"),
-                "协议必须随配置带出去 —— 模型表单里已经没有协议入口，漏了就只能错走 OpenAI 兼容");
-        assertEquals("OPENAI_COMPATIBLE", controller.resolve("没填协议").get("protocol"),
-                "没填 / 老配置退回 OpenAI 兼容，与档案侧的 parse 口径一致");
-
-        assertTrue(controller.list().toString().contains("ANTHROPIC"),
-                "列表也要回协议，管控台据此在自定义段里标明每条走哪套协议");
-    }
 }

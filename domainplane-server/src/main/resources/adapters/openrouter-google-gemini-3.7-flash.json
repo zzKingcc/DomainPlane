@@ -1,0 +1,96 @@
+{
+  "id": "openrouter-google-gemini-3.7-flash",
+  "provider": "openrouter",
+  "label": "Gemini 3.7 Flash（OpenRouter）",
+  "docUrl": "https://openrouter.ai/models/google/gemini-3.7-flash",
+  "input": ["text"],
+  "output": ["text"],
+  "match": {
+    "hosts": ["openrouter.ai"],
+    "models": ["google/gemini-3.7-flash"]
+  },
+  "families": {
+    "chat": {
+      "params": [
+        {
+          "key": "reasoningEffort",
+          "label": "思考强度",
+          "type": "enum",
+          "wire": "reasoning_effort",
+          "std": false,
+          "display": "bar",
+          "default": "medium",
+          "options": [
+            {"value": "minimal", "label": "minimal"},
+            {"value": "low", "label": "low"},
+            {"value": "medium", "label": "medium"},
+            {"value": "high", "label": "high"}
+          ]
+        },
+        {
+          "key": "temperature",
+          "label": "温度",
+          "type": "number",
+          "wire": "temperature",
+          "std": true,
+          "min": 0,
+          "max": 2,
+          "step": 0.1,
+          "default": 1
+        },
+        {
+          "key": "maxTokens",
+          "label": "单次最大输出",
+          "type": "int",
+          "wire": "max_tokens",
+          "std": true,
+          "min": 1,
+          "max": 65536
+        },
+        {
+          "key": "topP",
+          "label": "核采样",
+          "type": "number",
+          "wire": "top_p",
+          "std": false,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 1
+        },
+        {
+          "key": "topK",
+          "label": "Top-K",
+          "type": "int",
+          "wire": "top_k",
+          "std": false,
+          "min": 0,
+          "max": 40,
+          "step": 1,
+          "default": 40
+        },
+        {
+          "key": "stop",
+          "label": "停止序列",
+          "type": "stringList",
+          "wire": "stop",
+          "std": false,
+          "max": 16
+        },
+        {
+          "key": "responseFormat",
+          "label": "返回格式",
+          "type": "enum",
+          "wire": "response_format",
+          "std": false,
+          "wireWrap": "type",
+          "default": "text",
+          "options": [
+            {"value": "text"},
+            {"value": "json_object"}
+          ]
+        }
+      ]
+    }
+  }
+}

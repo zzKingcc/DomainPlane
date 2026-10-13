@@ -85,7 +85,11 @@ public enum ErrorCode {
     SERVER_UNREACHABLE(90002, "无法连接 DomainPlane 服务端", 503, true, "确认服务端已启动且地址正确"),
     LLM_UNAVAILABLE(90003, "AI 服务暂时不可用", 503, true, "稍后重试"),
     STORAGE_UNAVAILABLE(90004, "存储服务不可用", 503, true, "联系管理员"),
-    DEPENDENCY_NOT_CONFIGURED(90005, "服务依赖尚未配置", 503, false, "联系管理员在管控台完成配置");
+    DEPENDENCY_NOT_CONFIGURED(90005, "服务依赖尚未配置", 503, false, "联系管理员在管控台完成配置"),
+
+    // ===== 91xxx 多模态端点（生图 / 重排 / 语音合成 / 语音识别） =====
+    MODEL_ENDPOINT_UNSUPPORTED(91000, "该模型档案不支持此模态调用", 400, false,
+            "该协议类型暂未适配此端点，或档案未声明对应端点族（请在「读取」结果里确认含该端点族）");
 
     /** 面向调用方 / 前端的稳定状态码 */
     private final int code;

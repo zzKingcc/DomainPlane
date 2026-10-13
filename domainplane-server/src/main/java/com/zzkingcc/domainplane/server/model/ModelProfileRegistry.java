@@ -105,7 +105,7 @@ public class ModelProfileRegistry {
 
     /** 是否存在任意可用的对话类模型（供「对话模型是否就绪」这类全局判据使用） */
     public boolean hasChatModel() {
-        return allProfiles().stream().anyMatch(p -> p.isChat() && p.isUsable());
+        return allProfiles().stream().anyMatch(p -> p.mayBeChat() && p.isUsable());
     }
 
     /** 是否存在任意可用的向量档案（仅供管控台提示"有档案可选"，不代表已启用） */
@@ -280,11 +280,13 @@ public class ModelProfileRegistry {
             if (data == null) {
                 return "档案不存在：" + target + "（请先到「模型设置」创建该档案）";
             }
-            /* 域绑定只管对话模型。向量模型是全局单选（embeddingAlias），不参与域绑定 ——
-               否则同一个索引里会混入不同模型的向量，维度对不上，检索结果没有意义。 */
-            if (!data.toProfile(target).isChat()) {
-                return "档案 " + target + "（" + data.toProfile(target).modelName()
-                        + "）不是对话模型，不能绑到域上。向量模型请在页面上单独选用（全局唯一）";
+            /* 域绑定管"能不能当对话模型用"。已确认非对话（声明了向量 / 生图 / 语音…）拒绝；
+               端点族未声明放行 —— 元数据读不出类型的服务商（OpenAI / DeepSeek 官方）就停在这一格，
+               按"已确认"来判会让它们连绑都绑不上，整个平台用不了（见 ModelProfile#mayBeChat）。 */
+            ModelProfile candidate = data.toProfile(target);
+            if (!candidate.mayBeChat()) {
+                return "档案 " + target + "（" + candidate.modelName() + "）是 " + candidate.endpoints()
+                        + " 端点族，不是对话模型，不能绑到域上。向量模型请在页面上单独选用（全局唯一）";
             }
         }
         List<String> previous = next.getDomainBindings().put(key, cleaned);

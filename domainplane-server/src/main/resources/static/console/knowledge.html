@@ -122,7 +122,8 @@
             el.innerHTML = ok
                 ? '<span>向量模型已就绪' + (name ? '：' + name : '') + '</span>'
                     + '<span class="pill">' + esc(s.embeddingBaseUrl || s.chatBaseUrl || '复用对话地址') + '</span>'
-                : '<span>向量模型未配置，上传与重建会失败。请先到「模型设置」填写向量模型的<b>模型名</b>。</span>';
+                : '<span>向量模型未配置，上传与重建会失败。请先到「模型设置」的「向量模型」段，'
+                    + '点击向量档案卡片上的<b>启用</b>。</span>';
             Console.setModelsWarn(!s.chatConfigured);
         }).catch(function (e) {
             el.className = 'status-line warn';

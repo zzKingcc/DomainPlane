@@ -1,0 +1,27 @@
+{
+  "id": "siliconflow-bge-m3",
+  "provider": "siliconflow",
+  "label": "硅基流动 BAAI/bge-m3",
+  "docUrl": "https://docs.siliconflow.cn/cn/api-reference/embeddings/create-embeddings",
+  "input": ["text"],
+  "output": ["embedding"],
+  "match": {
+    "models": ["BAAI/bge-m3"]
+  },
+  "families": {
+    "embedding": {
+      "params": [
+        {
+          "key": "dimensions",
+          "label": "向量维度",
+          "type": "int",
+          "wire": "dimensions",
+          "std": true,
+          "min": 256,
+          "max": 4096,
+          "step": 1
+        }
+      ]
+    }
+  }
+}

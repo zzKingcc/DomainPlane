@@ -21,9 +21,9 @@ import java.util.Map;
 /**
  * 管理面：自定义配置项 —— 模型设置页「预设配置信息」按钮背后的四个接口。
  *
- * 一条自定义配置 = 名称 + 协议 + 服务商地址 +（可选）密钥。它与内置配置项一起出现在
+ * 一条自定义配置 = 名称 + 服务商地址 +（可选）密钥。它与内置配置项一起出现在
  * 模型表单顶部的预设下拉里，分两段展示：上「内置配置项」、下「自定义配置项」。
- * 选中一条即把协议、地址、密钥一起填好 —— 不用自己对齐"这条地址配哪把 Key、走哪套协议"。
+ * 选中一条即把地址、密钥一起填好 —— 不用自己对齐"这条地址配哪把 Key"。
  *
  * 名称在「内置 + 自定义」整体内唯一：两段共用一个选择框，重名就分不清点的是哪一条。
  * 内置名由 {@link ModelPresets} 固定，所以这里在写之前先做一次跨段查重。
@@ -59,7 +59,6 @@ public class AdminProviderConnectionController {
             /* 地址不是机密，原样回显：排障时要能一眼看到真实地址，
                而不是把它当成凭据一样遮起来。 */
             item.put("baseUrl", connection.baseUrl());
-            item.put("protocol", connection.protocol());
             item.put("hasApiKey", connection.hasApiKey());
             item.put("maskedApiKey", connection.maskedApiKey());
             connections.add(item);
@@ -90,7 +89,7 @@ public class AdminProviderConnectionController {
                         "「" + name + "」是内置配置项的名字，自定义配置项不能与它重名");
             }
         }
-        String failure = store.add(name, body.getBaseUrl(), body.getApiKey(), body.getProtocol());
+        String failure = store.add(name, body.getBaseUrl(), body.getApiKey());
         if (failure != null) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, failure);
         }
@@ -142,7 +141,6 @@ public class AdminProviderConnectionController {
         out.put("success", true);
         out.put("name", connection.name());
         out.put("baseUrl", connection.baseUrl());
-        out.put("protocol", connection.protocol());
         out.put("apiKey", connection.apiKey());
         out.put("hasApiKey", connection.hasApiKey());
         return out;
@@ -152,8 +150,6 @@ public class AdminProviderConnectionController {
     @Data
     public static class ConnectionBody {
         private String name;
-        /** 协议类型名；留空 = OpenAI 兼容 */
-        private String protocol;
         private String baseUrl;
         private String apiKey;
     }

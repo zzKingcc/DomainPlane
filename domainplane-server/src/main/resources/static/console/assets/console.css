@@ -205,89 +205,15 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 
 .field { margin-bottom: 14px; }
-.field label:not(.switch) { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
+.field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
 .field .help { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.6; }
 
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 /* .row 是 grid、[hidden] 是 UA 低优先级样式会被盖掉，隐藏时需显式覆盖 */
 .row[hidden], .field[hidden] { display: none; }
 
-/* ===== 模型参数面板 =====
-   本模型的调优参数整体成组：绿框 + 淡绿底，与上方的「识别结果」区分开。
-   里面一项都不显示时整块收起（见 models.html 的 updateParamPanel）。 */
-.param-panel {
-    border: 1px solid var(--green);
-    background: rgba(22, 163, 74, .07);
-    border-radius: 8px;
-    padding: 14px 14px 0;
-    margin-bottom: 14px;
-}
-.param-panel[hidden] { display: none; }
-
-/* 卡片右侧的参数面板：与弹窗同一套绿框。一行四列 —— 面板因此要占卡片的大头，
-   meta 让成左侧窄栏。四列需要面板 ≥ 626px（4×140 + 间距 + 内边距），
-   换算下来视口 < 1212px 就放不下：先退 2 列，再退 1 列。 */
 .card-body { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
 .card-body > .model-meta { flex: 1 1 220px; min-width: 0; }
-.card-params { flex: 3 1 560px; max-width: none; padding: 12px; margin-bottom: 0; }
-.card-params .param-grid {
-    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 14px;
-}
-.card-params .field { margin-bottom: 0; min-width: 0; }
-/* 标签最多两行、与输入框底对齐 —— 长短不一时四列的输入框仍落在同一水平线上 */
-.card-params .field label:not(.switch) {
-    display: flex; align-items: flex-end; min-height: 28px;
-    font-size: 11px; line-height: 1.25; margin-bottom: 4px;
-}
-.card-params input:not([type="checkbox"]), .card-params select {
-    width: 100%; height: 26px; padding: 3px 6px; font-size: 12px;
-}
-.card-params .switch-wrap { min-height: 26px; gap: 6px; }
-@media (max-width: 1211px) {
-    .card-params .param-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (max-width: 903px) {
-    .card-params .param-grid { grid-template-columns: minmax(0, 1fr); }
-}
-
-/* ===== 三态开关 =====
-   拨动 = 开 / 关；右侧的「默认」把值清回"不声明"。
-   复选框只有两态，承载不了"不声明"，所以真值放在容器的 data-raw 上。
-
-   选择器一律带 .switch-wrap 前缀，并显式复位 display / min-height / margin：
-   开关里的 <label class="switch"> 也是 .field 的后代，只写 .switch 会被
-   .field label / .card-params .field label 那两条通用规则盖掉 ——
-   display 变成 flex、min-height 变成 28px，轨道就被拉成竖长条（看着就是"变形"）。 */
-.switch-wrap { display: flex; align-items: center; gap: 8px; min-height: 26px; }
-.switch-wrap .switch {
-    position: relative; display: inline-block; flex: 0 0 auto;
-    width: 34px; height: 18px; min-height: 0; margin: 0;
-}
-.switch-wrap .switch input[type="checkbox"] {
-    position: absolute; width: 1px; height: 1px; min-height: 0;
-    opacity: 0; margin: 0; padding: 0;
-}
-.switch-track {
-    position: absolute; inset: 0; border-radius: 999px;
-    background: #d1d5db; transition: background .15s;
-}
-.switch-knob {
-    position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
-    border-radius: 50%; background: #fff; transition: transform .15s;
-}
-.switch-wrap .switch input[type="checkbox"]:checked + .switch-track { background: var(--green); }
-.switch-wrap .switch input[type="checkbox"]:checked + .switch-track .switch-knob {
-    transform: translateX(16px);
-}
-.switch-wrap .switch input[type="checkbox"]:focus-visible + .switch-track {
-    outline: 2px solid var(--primary); outline-offset: 1px;
-}
-.switch-clear {
-    border: none; background: none; padding: 0;
-    font-size: 12px; font-family: inherit; color: var(--muted); cursor: pointer;
-}
-.switch-clear:hover { color: var(--primary); text-decoration: underline; }
-.switch-clear[hidden] { display: none; }
 
 /* ===== 状态行 ===== */
 .status-line {
@@ -528,33 +454,7 @@ tbody tr:hover { background: #fcfcfd; }
     color: var(--primary); font-weight: 600;
 }
 
-/* ===== 模型档案表单：识别结果（只读） =====
-   类型 / 模态 / 能力只能来自「读取提供商信息」，所以这里只有只读标签，没有可点的 chip。
-   "未读到"必须与"确实没有"分开说：两者在挑模型这件事上完全是两回事。 */
-.detected-box {
-    border: 1px dashed var(--border); border-radius: 6px;
-    padding: 10px 12px; background: #f9fafb; margin-bottom: 12px;
-}
-.detected-title {
-    font-size: 12px; color: var(--text); font-weight: 600;
-    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
-}
-.detected-note { font-weight: 400; color: var(--muted); font-size: 12px; }
-/* 只读标签：刻意不用 .chip —— 那个带 hover / cursor:pointer，点不动却像能点 */
-.detected-tag {
-    padding: 3px 10px; border-radius: 10px; font-size: 12px; line-height: 1.6;
-    border: 1px solid var(--border); background: #fff; color: var(--text);
-}
-.detected-tag.dim { color: var(--muted); border-style: dashed; }
-.detected-rows { margin-top: 8px; }
-.detected-row {
-    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
-    padding: 3px 0; font-size: 12px;
-}
-.detected-row > .k {
-    color: var(--muted); flex: 0 0 68px; text-align: right;
-}
-.detected-row .tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
 
 /* ===== 非同源访问警示（见 console.js warnIfCrossOrigin） =====
    页面不在服务端地址上打开时，登录 Cookie 存不下也带不上，受保护接口会一律 401。
@@ -632,3 +532,140 @@ tbody tr:hover { background: #fcfcfd; }
     .modal-mask { padding: 24px 12px; }
     .modal-panel { padding: 16px 16px 14px; }
 }
+
+/* ===== 服务商适配调优框 —— 绿色工具框（console/models.html）=====
+   出现条件：模态里「服务商地址 + API Key + 模型名」三项填全且命中适配；卡片上只要命中适配。
+   视觉刻意与页面其它面板拉开：绿边框 + 半透明绿底（透明绿，不遮卡片本色），
+   一眼认出"这是这家服务商专属的可调参数"，而不是又一个普通表单区。
+   [hidden] 显式压 display：本文件里 .modal-mask 已经踩过"display:flex 压住 hidden 属性"的坑。 */
+.tune-box {
+    border: 1px solid var(--green);
+    border-radius: 8px;
+    background: rgba(22, 163, 74, .07);
+    padding: 8px 12px;
+    margin-bottom: 14px;
+    /* 一框横排多个参数：窄列自动折行，参数多也不至于拉成一长条 */
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+    gap: 8px 14px;
+    align-items: start;
+}
+.tune-box[hidden] { display: none; }
+.tune-status { font-size: 12px; }
+.tune-status.ok { color: var(--green); }
+.tune-status.err { color: var(--red); }
+/* 「更新」按钮：无改动 → disabled（全局 button:disabled 就是灰的），有改动才亮起来。
+   它挂在卡片头部（删除左侧），不再是绿框里单独的一行。 */
+.tune-save { font-size: 12px; padding: 4px 12px; }
+/* 参数行：网格里的一格，比通用 .field 更紧凑 —— 框内是密集参数区，不是主表单。
+   label 只指「参数名」那一层，故用 > 限定直接子元素：bool 的开关本身也是 label，
+   不限定的话会被这条规则染上参数名的字号与下距，开关就浮起来了。 */
+.tune-field { margin-bottom: 0; }
+.tune-field > label { margin-bottom: 3px; font-size: 12px; }
+/* 分档进度条要横排 4–5 档，窄列会把档名截断 —— 让它独占一整行 */
+.tune-field-wide { grid-column: 1 / -1; }
+/* 绿框里的输入控件比页面其它表单再小一档：框内是密集参数区，不是主表单 */
+.tune-box input:not([type="checkbox"]):not([type="radio"]), .tune-box select {
+    padding: 5px 8px;
+    font-size: 12px;
+}
+/* ---------- bool 参数的开关（滑块）----------
+   原生复选框藏起来但留在 DOM 与 Tab 序里：键盘仍可聚焦、可空格切换，
+   :checked / :disabled 靠相邻兄弟选择器把状态画到轨道上 —— 不改任何 JS。 */
+.tune-switch { position: relative; display: inline-flex; align-items: center; }
+.tune-switch input[type="checkbox"] {
+    position: absolute;
+    width: 1px; height: 1px;
+    margin: 0; padding: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+.tune-switch-track {
+    display: inline-block;
+    width: 34px; height: 18px;
+    border-radius: 9px;
+    background: #cbd5e1;
+    transition: background .15s;
+}
+.tune-switch-knob {
+    display: block;
+    width: 14px; height: 14px;
+    margin: 2px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .25);
+    transition: transform .15s;
+}
+.tune-switch input:checked + .tune-switch-track { background: var(--green); }
+.tune-switch input:checked + .tune-switch-track .tune-switch-knob { transform: translateX(16px); }
+.tune-switch input:disabled + .tune-switch-track { opacity: .4; cursor: not-allowed; }
+.tune-switch input:focus-visible + .tune-switch-track { outline: 2px solid var(--primary-dim); }
+/* ---------- 卡片头部的「是否回写思考内容」开关 ----------
+   轨道与滑块复用 .tune-switch（同一副面孔），这里只补两样它没有的：
+   ① 外挂一行说明文字（.tune-switch 本身只画轨道）；
+   ② 保存瞬间的禁用态由 JS 置上（input:disabled 已由上面那条画成半透明）。
+   说明文字压成 12px 弱化色：卡片头部是徽标与按钮的地盘，不能抢视线。 */
+.think-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; }
+.think-switch-label { color: var(--muted); white-space: nowrap; }
+/* 中文参数名后的英文（wire = 实际发给服务商的字段名）：弱化、等宽，
+   与中文名同一行，但字号与颜色都压下去，不与中文标题抢视线 */
+.tune-en {
+    margin-left: 5px;
+    font-size: 11px;
+    font-weight: 400;
+    color: #94a3b8;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+/* 多行参数（停止序列）：补上全局只给 input / select 的边框与内边距 ——
+   否则吃浏览器默认样式，文字贴着边框，且与本页其它输入框不一致。 */
+.tune-field textarea {
+    width: 100%;
+    min-height: 34px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    resize: vertical;
+    color: var(--text);
+    background: #fff;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+}
+.tune-field textarea:focus { outline: 2px solid var(--primary-dim); border-color: var(--primary); }
+.tune-field textarea:disabled { background: #f8fafc; color: var(--muted); }
+/* ---------- 分档进度条（display:"bar" 的有序枚举，如「思考强度」）----------
+   一排等宽档位 = 把"有哪几档、现在在哪一档"一次摊平。左侧档位算已点亮（浅绿），
+   当前档实绿加重，档位说明另起一行 —— 档位名短（none/low/high）、说明长（含"默认 X"），
+   挤在同一行必然被截断，分两行才都读得全。轨道底色让它读起来是"一条条"，不是一个下拉框。 */
+.tune-bar { display: flex; flex-direction: column; gap: 4px; }
+.tune-bar-track { display: flex; gap: 4px; padding: 3px; background: #f1f5f9; border-radius: 8px; }
+.tune-bar-seg {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 4px 3px;
+    font-size: 11px;
+    line-height: 1.2;
+    font-family: inherit;
+    color: var(--slate);
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tune-bar-seg:hover:not(:disabled) { border-color: var(--green); color: var(--green); }
+.tune-bar-seg.on { background: #ecfdf5; border-color: var(--green); color: var(--green); }
+.tune-bar-seg.active { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
+.tune-bar-seg:disabled {
+    cursor: not-allowed;
+    opacity: .45;
+    background: #fff;
+    border-color: var(--border);
+    color: var(--muted);
+}
+.tune-bar-cap { font-size: 11px; color: var(--muted); min-height: 14px; }
+.tune-bar-cap[hidden] { display: none; }
+/* 卡片右侧的绿框：占住 meta 右侧的空白区，就地改值，不必重开弹窗 */
+.card-tune { flex: 1 1 340px; min-width: 0; margin-bottom: 0; }
