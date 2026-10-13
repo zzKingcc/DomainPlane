@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DomainPlane 对话测试台</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --border: #e3e6ec; --text: #1f2329;
+    --muted: #8a9099; --primary: #3b6cf6; --primary-d: #2f57c9;
+    --user: #e8f0ff; --assistant: #f3f5f9; --think: #fff7e6;
+    --tool: #eef9f0; --err: #fdecec; --err-t: #c0392b; --ok: #1a9c5b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 18px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { margin: 0 0 12px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .grid { display: grid; grid-template-columns: 110px 1fr; gap: 10px 12px; align-items: center; }
+  label { color: var(--muted); text-align: right; }
+  input, textarea, button, select {
+    font: inherit; color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 8px 10px; background: #fff; width: 100%;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+  button { cursor: pointer; background: var(--primary); color: #fff; border: none; width: auto; padding: 8px 16px; }
+  button:hover { background: var(--primary-d); }
+  button:disabled { background: #c5ccd6; cursor: not-allowed; }
+  button.ghost { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+  button.ghost:hover { background: #f0f4ff; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .status { font-size: 12px; padding: 3px 9px; border-radius: 12px; background: #eee; color: var(--muted); }
+  .status.ok { background: #e6f7ee; color: var(--ok); }
+  .status.bad { background: var(--err); color: var(--err-t); }
+  #chat { min-height: 260px; max-height: 520px; overflow-y: auto; padding: 6px; }
+  .msg { margin: 10px 0; display: flex; }
+  .msg.user { justify-content: flex-end; }
+  .bubble { max-width: 82%; padding: 10px 13px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+  .msg.user .bubble { background: var(--user); border-top-right-radius: 3px; }
+  .msg.assistant .bubble { background: var(--assistant); border-top-left-radius: 3px; width: 100%; }
+  .think { background: var(--think); border-left: 3px solid #f0c14b; padding: 8px 10px; margin: 6px 0; border-radius: 6px; color: #7a5b00; font-size: 13px; }
+  .think .tag { font-weight: 600; color: #9a6b00; }
+  .tool { background: var(--tool); border-left: 3px solid #2e9e54; padding: 8px 10px; margin: 6px 0; border-radius: 6px; font-size: 13px; }
+  .tool .tag { font-weight: 600; color: #1c7a3e; }
+  .tool .body { color: #444; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; margin-top: 4px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  .tool .row { margin-top: 8px; }
+  .err { background: var(--err); border-left: 3px solid var(--err-t); color: var(--err-t); padding: 8px 10px; margin: 6px 0; border-radius: 6px; font-size: 13px; }
+  .done { text-align: center; color: var(--muted); font-size: 12px; margin: 8px 0; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  #rawlog { background: #0f1115; color: #d6e2ff; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; padding: 10px; border-radius: 6px; max-height: 240px; overflow: auto; white-space: pre-wrap; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .pill { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="panel">
+    <h2>① 连接与凭证</h2>
+    <div class="grid">
+      <label>服务地址</label>
+      <input id="baseUrl" value="http://localhost:9527" placeholder="http://host:port">
+      <label>账号</label>
+      <input id="username" placeholder="管控台账号（初始化后必填）">
+      <label>密码</label>
+      <input id="password" type="password" placeholder="管控台密码">
+      <label></label>
+      <div class="row">
+        <button id="loginBtn">登录获取凭证</button>
+        <span id="credStatus" class="status">未设置凭证</span>
+        <span class="pill">未初始化过的服务端可跳过登录</span>
+      </div>
+      <label>或粘贴凭证</label>
+      <input id="credential" placeholder="X-DomainPlane-Credential，留空则用登录获取的">
+      <label>域 (domain)</label>
+      <input id="domain" value="default" placeholder="你绑定的域，默认 default">
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>② 对话测试</h2>
+    <textarea id="message" placeholder="输入消息，回车发送（Shift+Enter 换行）">你好，请用一句话介绍你自己。</textarea>
+    <div class="row" style="margin-top:10px;">
+      <button id="sendBtn">发送</button>
+      <button id="stopBtn" class="ghost" disabled>停止</button>
+      <button id="newBtn" class="ghost">新建会话</button>
+      <span id="convStatus" class="pill"></span>
+    </div>
+    <div class="hint">sessionId：<span id="sidLabel" class="pill">—</span>（多轮对话沿用同一会话，点"新建会话"重置）</div>
+  </div>
+
+  <div class="panel">
+    <h2>③ 对话内容</h2>
+    <div id="chat"></div>
+    <details>
+      <summary>原始事件流（排障用）</summary>
+      <div id="rawlog"></div>
+    </details>
+  </div>
+
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const base = () => ($('baseUrl').value || '').replace(/\/+$/, '');
+const getCred = () => ($('credential').value || '').trim()
+  || sessionStorage.getItem('dp_cred') || '';
+const setCred = (c) => { sessionStorage.setItem('dp_cred', c); };
+
+let sessionId = 'dp-test-' + Math.random().toString(36).slice(2, 10);
+$('sidLabel').textContent = sessionId;
+let streaming = false;
+/** 本轮流是否见过终止事件（DONE/STOPPED/ERROR/INTERRUPT）——没有它就是被掐断的半截答案 */
+let sawTerminal = false;
+
+// ==================== 对话区只呈现治理后的内容 ====================
+// 约定：界面上的错误只呈现服务端治理后的字段（error / codeName / action / traceId）。
+// 原始错误报文与浏览器异常原文一律不进对话区；排障靠 rawlog 里的码 + traceId 关联服务端日志。
+
+/** 服务端错误报文 → 对话区一行治理后错误 */
+function showGovernedError(body) {
+  let e = null;
+  try { e = (typeof body === 'string' ? JSON.parse(body) : body) || null; } catch (_) { e = null; }
+  const d = document.createElement('div');
+  d.className = 'err';
+  if (e && typeof e === 'object' && e.code) {
+    let text = '⚠️ ' + (e.error || '服务端错误') + (e.codeName ? '（' + e.codeName + '）' : '');
+    if (e.action) text += '\n' + e.action;
+    if (e.traceId) text += '\ntraceId=' + e.traceId;
+    d.textContent = text;
+    appendRaw('[服务端错误] code=' + e.code + ' codeName=' + (e.codeName || '-') + ' traceId=' + (e.traceId || '-'));
+  } else {
+    d.textContent = '⚠️ 服务端返回了无法识别的响应，请稍后重试';
+    appendRaw('[服务端错误] 响应体不是可识别的错误报文');
+  }
+  ensureBlock().appendChild(d); scroll();
+}
+
+/** 网络层失败（连接被拒 / 流被重置）：不呈现浏览器异常原文 */
+function showNetworkFailure() {
+  const d = document.createElement('div');
+  d.className = 'err';
+  d.textContent = '⚠️ 连接中断：本轮回复可能不完整，请重新发送';
+  ensureBlock().appendChild(d); scroll();
+  appendRaw('[网络异常] 请求未能完成');
+}
+
+/** 流未收到终止事件即结束 = 半截答案，必须显式呈现（与服务端 SDK 同一判据） */
+function showTruncated() {
+  const d = document.createElement('div');
+  d.className = 'err';
+  d.textContent = '⚠️ 本轮未正常结束（缺少终止事件），以上内容可能不完整';
+  ensureBlock().appendChild(d); scroll();
+  appendRaw('[流截断] 未收到 DONE/STOPPED/ERROR 即结束');
+}
+
+async function login() {
+  const u = $('username').value.trim();
+  const p = $('password').value;
+  const btn = $('loginBtn');
+  btn.disabled = true;
+  try {
+    const res = await fetch(base() + '/api/agent/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p })
+    });
+    const j = await res.json().catch(() => null);
+    if (res.ok && j && j.credential) {
+      setCred(j.credential);
+      $('credStatus').textContent = '已获取凭证 ✓';
+      $('credStatus').className = 'status ok';
+    } else {
+      // 只呈现治理后的 error / codeName / action / traceId；detail 与原始报文不进界面
+      let text = '登录失败';
+      if (j && j.error) {
+        text += '：' + j.error + (j.codeName ? '（' + j.codeName + '）' : '');
+        if (j.action) text += '，' + j.action;
+        if (j.traceId) text += '（traceId=' + j.traceId + '）';
+      } else {
+        text += '：HTTP ' + res.status;
+      }
+      $('credStatus').textContent = text;
+      $('credStatus').className = 'status bad';
+    }
+  } catch (e) {
+    $('credStatus').textContent = '登录失败：无法连接服务端';
+    $('credStatus').className = 'status bad';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function headers(extra = {}) {
+  const h = { 'Content-Type': 'application/json', ...extra };
+  const c = getCred();
+  if (c) h['X-DomainPlane-Credential'] = c;
+  return h;
+}
+
+function addUserBubble(text) {
+  const d = document.createElement('div');
+  d.className = 'msg user';
+  const b = document.createElement('div');
+  b.className = 'bubble'; b.textContent = text;
+  d.appendChild(b); $('chat').appendChild(d); scroll();
+}
+
+function addAssistantBlock() {
+  const d = document.createElement('div');
+  d.className = 'msg assistant';
+  const b = document.createElement('div');
+  b.className = 'bubble';
+  d.appendChild(b); $('chat').appendChild(d); scroll();
+  return b;
+}
+
+function scroll() { const c = $('chat'); c.scrollTop = c.scrollHeight; }
+
+function appendRaw(text) {
+  $('rawlog').textContent += text + '\n';
+  $('rawlog').scrollTop = $('rawlog').scrollHeight;
+}
+
+// 把单个 AgentEvent 渲染到当前助手气泡
+let curBlock = null;        // 当前助手 bubble
+let curThink = null;        // 当前思考块
+let curThinkText = null;
+let curTool = null;
+
+function ensureBlock() {
+  if (!curBlock) curBlock = addAssistantBlock();
+  return curBlock;
+}
+
+function renderEvent(ev) {
+  const type = ev.type;
+  if (type === 'TOKEN') {
+    const b = ensureBlock();
+    b.appendChild(document.createTextNode(ev.content || ''));
+    scroll();
+  } else if (type === 'THINKING') {
+    if (!curThink) {
+      curThink = document.createElement('div');
+      curThink.className = 'think';
+      const tag = document.createElement('div');
+      tag.className = 'tag'; tag.textContent = '🤔 思考过程';
+      curThinkText = document.createElement('div');
+      curThink.appendChild(tag); curThink.appendChild(curThinkText);
+      ensureBlock().appendChild(curThink);
+    }
+    curThinkText.appendChild(document.createTextNode(ev.content || ''));
+    scroll();
+  } else if (type === 'TOOL_CALL') {
+    curTool = document.createElement('div');
+    curTool.className = 'tool';
+    const tag = document.createElement('div');
+    tag.className = 'tag'; tag.textContent = '🔧 调用工具：' + (ev.content || '');
+    const body = document.createElement('div');
+    body.className = 'body';
+    body.textContent = ev.payload || '';
+    curTool.appendChild(tag); curTool.appendChild(body);
+    ensureBlock().appendChild(curTool); scroll();
+  } else if (type === 'TOOL_RESULT') {
+    if (!curTool) {
+      curTool = document.createElement('div');
+      curTool.className = 'tool';
+      ensureBlock().appendChild(curTool);
+    }
+    const tag = document.createElement('div');
+    tag.className = 'tag'; tag.textContent = '✅ 工具结果：' + (ev.content || '');
+    const body = document.createElement('div');
+    body.className = 'body';
+    body.textContent = ev.payload || '';
+    curTool.appendChild(tag); curTool.appendChild(body); scroll();
+    curTool = null;
+  } else if (type === 'ERROR') {
+    sawTerminal = true;
+    const d = document.createElement('div');
+    d.className = 'err';
+    d.textContent = '⚠️ 错误' + (ev.codeName ? '（' + ev.codeName + '）' : '')
+      + '：' + (ev.content || '未知错误') + (ev.traceId ? '  traceId=' + ev.traceId : '');
+    ensureBlock().appendChild(d); scroll();
+  } else if (type === 'INTERRUPT') {
+    sawTerminal = true;
+    renderApproval(ev);
+  } else if (type === 'STOPPED') {
+    sawTerminal = true;
+    const d = document.createElement('div');
+    d.className = 'done'; d.textContent = '— 已停止 —';
+    $('chat').appendChild(d); scroll();
+  } else if (type === 'DONE') {
+    sawTerminal = true;
+    const d = document.createElement('div');
+    d.className = 'done'; d.textContent = '— 本轮结束 —';
+    $('chat').appendChild(d); scroll();
+  }
+}
+
+function resetBlock() { curBlock = null; curThink = null; curThinkText = null; curTool = null; }
+
+/** 审批中断：列出服务端给出的待授权工具 + 批准/拒绝，点击后回传 resume 并续收事件流 */
+function renderApproval(ev) {
+  const box = document.createElement('div');
+  box.className = 'tool';
+  const tag = document.createElement('div');
+  tag.className = 'tag'; tag.textContent = '⏸ 需要人工授权';
+  box.appendChild(tag);
+
+  let tools = [];
+  try {
+    const parsed = JSON.parse(ev.payload || '{}');
+    tools = Array.isArray(parsed.tools) ? parsed.tools : [];
+  } catch (_) { tools = []; }
+
+  if (tools.length === 0) {
+    const none = document.createElement('div');
+    none.className = 'body';
+    none.textContent = '（未解析到待授权清单）';
+    box.appendChild(none);
+  }
+  for (const t of tools) {
+    const item = document.createElement('div');
+    item.className = 'body';
+    let text = '• ' + (t.name || '未命名工具');
+    if (t.arguments) text += '\n' + prettyJson(t.arguments);
+    item.textContent = text;
+    box.appendChild(item);
+  }
+
+  const bar = document.createElement('div');
+  bar.className = 'row';
+  const approve = document.createElement('button');
+  approve.textContent = '批准执行';
+  const reject = document.createElement('button');
+  reject.textContent = '拒绝';
+  reject.className = 'ghost';
+  const settle = (label) => {
+    approve.disabled = true;
+    reject.disabled = true;
+    const st = document.createElement('span');
+    st.className = 'pill';
+    st.textContent = label;
+    bar.replaceWith(st);
+  };
+  approve.onclick = () => { settle('已批准，执行中…'); resumeSession(true); };
+  reject.onclick = () => { settle('已拒绝，处理中…'); resumeSession(false); };
+  bar.appendChild(approve); bar.appendChild(reject);
+  box.appendChild(bar);
+
+  ensureBlock().appendChild(box); scroll();
+}
+
+function prettyJson(v) {
+  try { return JSON.stringify(typeof v === 'string' ? JSON.parse(v) : v, null, 2); }
+  catch (_) { return String(v); }
+}
+
+/** 读完整条 SSE 流；结束仍未见过终止事件即按截断呈现 */
+async function pump(res) {
+  sawTerminal = false;
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const raw = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      processRawEvent(raw);
+    }
+  }
+  if (buf.trim()) processRawEvent(buf);
+  if (!sawTerminal) showTruncated();
+}
+
+async function send() {
+  if (streaming) return;
+  const msg = $('message').value.trim();
+  if (!msg) return;
+  const domain = ($('domain').value || 'default').trim();
+  if (!domain) { alert('domain 不能为空'); return; }
+
+  addUserBubble(msg);
+  resetBlock();
+  $('message').value = '';
+  streaming = true;
+  $('sendBtn').disabled = true;
+  $('stopBtn').disabled = false;
+  $('convStatus').textContent = '对话中…';
+
+  const body = JSON.stringify({ sessionId, message: msg, domain });
+
+  try {
+    const res = await fetch(base() + '/api/agent/chat', {
+      method: 'POST', headers: headers(), body
+    });
+    if (!res.ok) {
+      showGovernedError(await res.text().catch(() => ''));
+      return;
+    }
+    await pump(res);
+  } catch (e) {
+    showNetworkFailure();
+  } finally {
+    streaming = false;
+    $('sendBtn').disabled = false;
+    $('stopBtn').disabled = true;
+    $('convStatus').textContent = '空闲';
+  }
+}
+
+/** 审批结果回传：批准 / 拒绝后继续同一会话，事件续进当前对话块 */
+async function resumeSession(approved) {
+  if (streaming) return;
+  const domain = ($('domain').value || 'default').trim();
+  streaming = true;
+  $('sendBtn').disabled = true;
+  $('stopBtn').disabled = false;
+  $('convStatus').textContent = approved ? '批准执行中…' : '拒绝处理中…';
+  try {
+    const res = await fetch(base() + '/api/agent/resume'
+      + '?sessionId=' + encodeURIComponent(sessionId)
+      + '&approved=' + approved
+      + '&domain=' + encodeURIComponent(domain),
+      { method: 'POST', headers: headers() });
+    if (!res.ok) {
+      showGovernedError(await res.text().catch(() => ''));
+      return;
+    }
+    await pump(res);
+  } catch (e) {
+    showNetworkFailure();
+  } finally {
+    streaming = false;
+    $('sendBtn').disabled = false;
+    $('stopBtn').disabled = true;
+    $('convStatus').textContent = '空闲';
+  }
+}
+
+function processRawEvent(raw) {
+  // 每行可能是 "data: {...}"，提取 JSON
+  const lines = raw.split('\n').filter(l => l.startsWith('data:'));
+  const jsonLine = lines.map(l => l.slice(5).trim()).join('');
+  if (!jsonLine) { if (raw.trim()) appendRaw('[非数据行] ' + raw); return; }
+  let ev;
+  try { ev = JSON.parse(jsonLine); }
+  catch (e) { appendRaw('[解析失败] ' + jsonLine); return; }
+  appendRaw(JSON.stringify(ev));
+  renderEvent(ev);
+}
+
+async function stop() {
+  if (!streaming) return;
+  const domain = ($('domain').value || 'default').trim();
+  try {
+    await fetch(base() + '/api/agent/stop/' + encodeURIComponent(sessionId)
+      + '?domain=' + encodeURIComponent(domain), { method: 'POST', headers: headers() });
+  } catch (e) { /* 错误会以 STOPPED 事件体现在对话流里 */ }
+}
+
+function newSession() {
+  sessionId = 'dp-test-' + Math.random().toString(36).slice(2, 10);
+  $('sidLabel').textContent = sessionId;
+  $('chat').innerHTML = '';
+  resetBlock();
+}
+
+$('loginBtn').onclick = login;
+$('sendBtn').onclick = send;
+$('stopBtn').onclick = stop;
+$('newBtn').onclick = newSession;
+$('message').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+</script>
+</body>
+</html>

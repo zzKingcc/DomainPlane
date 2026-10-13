@@ -52,6 +52,16 @@ public class ServerAgentController {
     }
 
     /**
+     * 注入命中时返回给调用方的固定话术。
+     *
+     * 三条约束：不确认身份（对"你是什么模型"不回答本身就是原则）、
+     * 不解释拦截原因（不告诉输入方哪条规则命中，避免被用来绕）、
+     * 引导继续对话。对攻击者与对普通用户是同一副面孔 —— 调用方无感知差异。
+     */
+    private static final String REJECTED_REPLY =
+            "抱歉，这个问题我无法回答。你可以换个说法，或继续问我其他问题。";
+
+    /**
      * 发起一轮对话（事件流）
      *
      * @param request 请求体，sessionId 与 message 必填
@@ -61,21 +71,40 @@ public class ServerAgentController {
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.TEXT_EVENT_STREAM_VALUE + ";charset=UTF-8")
     public Flux<AgentEvent> chat(@RequestBody AgentRequest request) {
+        // 先过参数校验（sessionId / message / domain 必填），与改造前一致：
+        // 缺参仍是 400 JSON，不会被后面的拦截分支掩盖
         AgentRequest safeRequest = AgentRequest.builder()
                 .sessionId(request.getSessionId())
-                .message(InputSanitizer.validate(request.getMessage()))
-                // 域必须原样透传：Builder.build() 对空 domain 直接抛异常（→ 400），
-                // 不会把它归一化成根域。这与"漏传 permissions 静默降级 public"是同一类错误形态，
-                // 且后果更直接。注意"空域归一化为根域"只发生在编排层拿到域之后，
-                // 走 HTTP 时根本到不了那一步。
+                .message(request.getMessage())
                 .domain(request.getDomain())
+                .build();
+
+        // 注入命中：不进编排、不写记忆、不调模型、不建断点，以固定话术走完一轮
+        // 正常事件序列（TOKEN + DONE）。对调用方与普通回答完全同构（HTTP 200 + SSE），
+        // 前端按增量文本渲染，SDK 累积成 answer 后照常收到 DONE。
+        // 判定细节（命中哪条规则）只进日志，不下发给调用方。
+        if (InputSanitizer.isMalicious(request.getMessage())) {
+            log.info("[输入拦截] 已返回固定话术 session={}, domain={}, 命中={}",
+                    safeRequest.getSessionId(), safeRequest.getDomain(),
+                    InputSanitizer.detectDetails(request.getMessage()));
+            return Flux.just(
+                    AgentEvent.token(safeRequest.getSessionId(), REJECTED_REPLY),
+                    AgentEvent.done(safeRequest.getSessionId()));
+        }
+
+        AgentRequest validated = AgentRequest.builder()
+                .sessionId(safeRequest.getSessionId())
+                .message(InputSanitizer.validate(request.getMessage()))
+                // 域原样透传（空域在前面那次 build 就已 400）："空域归一化为根域"
+                // 只发生在编排层拿到域之后，走 HTTP 根本到不了那一步
+                .domain(safeRequest.getDomain())
                 .build();
         // 记消息长度而不是全文：用户内容属隐私，且全文会显著膨胀日志体积；
         // 确需排查时用 DEBUG 级别单独输出（此处不输出，避免敏感内容落盘）
         log.info("[Agent入口] 会话[{}] chat 请求, domain={}, 消息长度={}",
-                safeRequest.getSessionId(), safeRequest.getDomain(),
-                safeRequest.getMessage().length());
-        return agentService.chat(safeRequest);
+                validated.getSessionId(), validated.getDomain(),
+                validated.getMessage().length());
+        return agentService.chat(validated);
     }
 
     /**
