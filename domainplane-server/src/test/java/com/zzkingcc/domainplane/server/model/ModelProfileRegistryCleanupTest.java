@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 删域时清理模型绑定。
  *
- * <p>不清理的话，绑定会变成孤儿键 —— 同路径域将来重建时会沿链<b>静默继承</b>旧绑定。</p>
+ * <p>不清理的话，绑定会变成孤儿键：同路径域将来重建时会沿链<b>静默继承</b>旧绑定。</p>
  */
 class ModelProfileRegistryCleanupTest {
 

@@ -30,7 +30,7 @@
                 选择文件上传（<b>同步导入</b>：切片 + 向量化完成后才返回，大文件耗时较久）。
                 同名文档<b>不区分大小写</b>，默认拒绝；勾选「覆盖更新」则先删旧再写入。
             </p>
-            <!-- 主操作一行：选文件 + 上传 —— 按钮紧挨着它所作用的输入框，
+            <!-- 主操作一行：选文件 + 上传，按钮紧挨着它所作用的输入框，
                  不再被「覆盖更新」这类选项文字隔开 -->
             <div class="btn-row">
                 <input type="file" id="fileInput" accept=".txt,.md,.markdown,.docx,.doc,.pdf,.xls,.xlsx">
@@ -89,7 +89,7 @@
     }
 
     /* 域清单走管控台同款 /admin/domains（COOKIE 载具），
-       不能用 /api/agent/domains（HEADER/API-key 载具）—— 管控台只带 Cookie，
+       不能用 /api/agent/domains（HEADER/API-key 载具），管控台只带 Cookie，
        后者会被判 10002 弹回登录页。该端点返回 domains = [{name, source, ...}]，
        根域＝source === 'BUILTIN'（即 default）。 */
     function loadDomainOptions() {

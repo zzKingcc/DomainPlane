@@ -24,7 +24,7 @@ import java.util.Set;
  * 服务商连接库（{@code config/provider-connections.json}）—— 按唯一名称存一条
  * 「服务商地址 + 可选密钥」，供模型档案表单一键选用。
  *
- * 为什么地址与密钥放在一起：这两个字段从来是一起用的 —— 换一家服务商，地址和 Key
+ * 为什么地址与密钥放在一起：这两个字段从来是一起用的，换一家服务商，地址和 Key
  * 同时换。分成两个库就等于让用户配两遍、还要自己对齐哪条地址配哪把 Key；合成一条之后，
  * 下拉里选一次就把表单填好，也避免了"地址是 A、密钥是 B"这种拼错的组合。
  *
@@ -35,23 +35,23 @@ import java.util.Set;
  *
  * 名称必须唯一：名称是下拉里唯一的标识，两个同名条目会让"选哪个"变成猜谜，
  * 而且改名 / 删除时无法指定是哪一条。唯一性在写入层判（不只控制器判），否则将来任何
- * 新的写入入口都可能绕过它。比较时按去首尾空白后的精确匹配，不折叠大小写 ——
+ * 新的写入入口都可能绕过它。比较时按去首尾空白后的精确匹配，不折叠大小写：
  * 折叠大小写会误伤 {@code OpenRouter} / {@code openrouter} 这类确实想区分的名字，
  * 而"重名"这件事在报错文案里点名已有名称就足够说清了。
  *
  * 密钥可空：本地 Ollama / vLLM 这类自建端点随便填个非空占位即可，
  * 不该强迫用户为一条不存在的密钥编一个值。因此空密钥在这里是合法状态（存空串），
- * 但模型档案侧的 {@code apiKey} 仍是必填 —— 那是档案自己的约束，不是本库的。
+ * 但模型档案侧的 {@code apiKey} 仍是必填，那是档案自己的约束，不是本库的。
  *
  * 地址不做强制规范化：只校验"是 http/https 的合法 URL 且有主机"，
- * 不要求也不追加 {@code /v1} —— 各家网关的路径段五花八门（{@code /v1}、
+ * 不要求也不追加 {@code /v1}，各家网关的路径段五花八门（{@code /v1}、
  * {@code /openai/v1}、{@code /compatible-mode/v1}），按各家的文档填写即可。
  *
  * 单独一个文件而不是并进 models.json：这里可能有明文凭据，与档案配置的生命周期不同
- * —— 备份、授权、轮换都该能单独处理，不必连带整个档案表一起搬走。
+ * 备份、授权、轮换都该能单独处理，不必连带整个档案表一起搬走。
  *
  * 明文只在两处出现：磁盘上的本文件，以及调用 {@link #resolve(String)} 那一刻的
- * 响应体。列表接口只给脱敏值（见 {@code AdminProviderConnectionController}）—— 页面每次打开
+ * 响应体。列表接口只给脱敏值（见 {@code AdminProviderConnectionController}），页面每次打开
  * 就把全库明文拉进浏览器内存没有必要，而档案列表里的 Key 本来就是脱敏展示的。
  *
  * @author zzkingcc
@@ -72,6 +72,14 @@ public class ProviderConnectionStore {
 
     /** 当前内容（写操作整体替换，读操作拿不可变副本） */
     private volatile Connections connections;
+
+    /**
+     * 最近一次读盘是否失败（解析出错或结果为 null）。
+     *
+     * 失败时内存态是空库，此时任何写入都会把坏文件"修"成空文件，既有连接与明文密钥
+     * 永久消失。故置位后一律拒绝写入，等人工修复或删除该文件。
+     */
+    private volatile boolean loadFailed;
 
     public ProviderConnectionStore(StorageLocations storage) {
         this.settingsFile = storage.settingsDir().resolve("provider-connections.json");
@@ -172,7 +180,7 @@ public class ProviderConnectionStore {
         if (secret.length() > MAX_KEY) {
             return "API Key 最长 " + MAX_KEY + " 个字符，当前 " + secret.length() + " 个";
         }
-        /* 空密钥合法（自建端点），因此这里不拦空 —— 只拦超长 */
+        /* 空密钥合法（自建端点），因此这里不拦空，只拦超长 */
 
         /* 唯一性在这里判（写入层），而不是只在控制器判：将来多一个写入入口也不会绕过它 */
         Optional<ProviderConnection> existing = find(key);
@@ -192,7 +200,7 @@ public class ProviderConnectionStore {
     /**
      * 按名称删除。
      *
-     * 只删库里这一条：已保存档案里的地址与密钥与本库无关联，不会被牵连 ——
+     * 只删库里这一条：已保存档案里的地址与密钥与本库无关联，不会被牵连，
      * 这是"快捷填充"设计的必然结果，界面要照实说明，别让用户以为删了就等于从档案里撤掉了。
      *
      * @return 是否真的删掉了（名称不存在返回 {@code false}）
@@ -264,16 +272,21 @@ public class ProviderConnectionStore {
     /** 读取；文件不存在或解析失败时按空库继续（不阻断启动，可进管控台修正） */
     private Connections load() {
         if (!Files.exists(settingsFile)) {
+            loadFailed = false;
             return new Connections(List.of());
         }
         try {
             String json = Files.readString(settingsFile, StandardCharsets.UTF_8);
             Connections loaded = MAPPER.readValue(json, Connections.class);
             if (loaded == null) {
+                loadFailed = true;
+                /* 刻意不打印异常原文：解析失败时原文里可能混着密钥片段 */
+                log.error("[服务商连接库] {} 的解析结果为 null，按空库继续（已禁止写入，避免覆盖清空）",
+                        settingsFile.toAbsolutePath());
                 return new Connections(List.of());
             }
             /* 手工改坏过文件时可能留下重名条目：这里按"先出现的赢"去重，
-               并在下次写入时写回干净的文件 —— 否则下拉里会出现两个同名项、删不掉第二个。 */
+               并在下次写入时写回干净的文件，否则下拉里会出现两个同名项、删不掉第二个。 */
             Set<String> seen = new LinkedHashSet<>();
             List<ProviderConnection> deduped = new ArrayList<>();
             for (ProviderConnection connection : loaded.connections()) {
@@ -285,10 +298,12 @@ public class ProviderConnectionStore {
                 log.warn("[服务商连接库] {} 中存在重名条目，已保留每名第一条（共 {} → {}）",
                         settingsFile.toAbsolutePath(), loaded.connections().size(), deduped.size());
             }
+            loadFailed = false;
             return new Connections(deduped);
         } catch (IOException e) {
+            loadFailed = true;
             /* 刻意不打印异常原文：解析失败时原文里可能混着密钥片段 */
-            log.error("[服务商连接库] 读取 {} 失败，按空库继续（可进管控台修正）",
+            log.error("[服务商连接库] 读取 {} 失败，按空库继续（已禁止写入，可进管控台修正）",
                     settingsFile.toAbsolutePath());
             return new Connections(List.of());
         }
@@ -296,6 +311,10 @@ public class ProviderConnectionStore {
 
     /** 写盘成功后整体替换内存态（写失败时抛异常，内存态保持原样） */
     private void persist(Connections next) {
+        if (loadFailed) {
+            throw new IllegalStateException("服务商连接库文件无法解析，拒绝覆盖写入以免把既有配置清空："
+                    + settingsFile.toAbsolutePath() + "；请修复或删除该文件后重启服务");
+        }
         try {
             AtomicFiles.write(settingsFile, MAPPER.writeValueAsBytes(next));
             this.connections = next;

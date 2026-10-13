@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * docx 解析器的回归样例。
  *
- * <p>样例文档是<b>测试里现造的</b>（用 POI 写一份再读回来）—— 不往仓库里塞二进制 fixture，
+ * <p>样例文档是<b>测试里现造的</b>（用 POI 写一份再读回来），不往仓库里塞二进制 fixture，
  * 也就不会因为 Word 版本不同而失准。</p>
  */
 class DocxReaderTest {

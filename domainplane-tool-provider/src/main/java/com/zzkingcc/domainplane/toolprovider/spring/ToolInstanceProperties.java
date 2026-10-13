@@ -19,7 +19,7 @@ public class ToolInstanceProperties {
 
     /**
      * 是否扫描 {@code @Tool} 注解方法并自动注册（默认 true）。
-     * 关掉它就只能用 {@code ToolInstanceContributor} 编程式注册——
+     * 关掉它就只能用 {@code ToolInstanceContributor} 编程式注册：
      * 适合"工具清单要在启动时动态拼装"或"容器里带同名方法不想被扫到"的场景。
      */
     private boolean scanAnnotated = true;
@@ -29,7 +29,7 @@ public class ToolInstanceProperties {
 
     /**
      * 本实例的工具调用回流地址：服务端 POST 到它执行工具，必须服务端可达。
-     * 留空即按 {@code http://localhost:本进程端口/domainplane/invoke} 自动推导——
+     * 留空即按 {@code http://localhost:本进程端口/domainplane/invoke} 自动推导：
      * 只对"服务端与工具实例同机"成立，跨机或前面有网关时必须显式填写。
      * 推导不出来时视为空（不接反向调用），不影响工具注册与心跳，也不阻断启动。
      */

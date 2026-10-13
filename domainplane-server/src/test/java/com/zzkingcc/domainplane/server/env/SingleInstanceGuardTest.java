@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 单实例守卫：抢不到租约就拒绝启动。
  *
- * <p>理由见 {@link SingleInstanceGuard} —— 多实例共用 Redis 的失败方式不是报错，
+ * <p>理由见 {@link SingleInstanceGuard}：多实例共用 Redis 的失败方式不是报错，
  * 而是会话占用、stop、流与工具注册表<b>悄悄错乱</b>。既然当前只支持单体，
  * 就让它在启动期变成一个响亮的失败。</p>
  */

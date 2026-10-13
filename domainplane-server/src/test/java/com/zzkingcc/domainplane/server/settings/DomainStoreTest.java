@@ -97,7 +97,7 @@ class DomainStoreTest {
      * 损坏必须与"文件不存在"区分开。
      *
      * <p>两者都返回空集合时，启动期的一次性迁移会把这份空配置当成权威写回磁盘，
-     * 人工建的域全部消失、迁移标记被置 true 且再也不会重来 —— 一次磁盘故障升级成永久数据丢失。</p>
+     * 人工建的域全部消失、迁移标记被置 true 且再也不会重来：一次磁盘故障升级成永久数据丢失。</p>
      */
     @Test
     void corruptFileIsDistinguishedFromMissingFile() throws IOException {
@@ -116,7 +116,7 @@ class DomainStoreTest {
     }
 
     /**
-     * 损坏时拒绝覆盖写 —— 挡住"把空配置写回磁盘、抹掉人工域"这一不可逆动作。
+     * 损坏时拒绝覆盖写：挡住"把空配置写回磁盘、抹掉人工域"这一不可逆动作。
      */
     @Test
     void corruptFileRefusesToBeOverwritten() throws IOException {

@@ -111,7 +111,7 @@ public class ToolInstanceClient implements ToolRegistrar {
         scheduleNext(0L);
     }
 
-    /** 停止心跳（客户应用关闭时调用；停止后不可再 start——调度器已关闭） */
+    /** 停止心跳（客户应用关闭时调用；停止后不可再 start，调度器已关闭） */
     public void stop() {
         if (stopped) {
             return;
@@ -322,7 +322,12 @@ public class ToolInstanceClient implements ToolRegistrar {
 
     /** 最近一次心跳是否成功过（用于客户应用的健康检查端点） */
     public boolean isRegistered() {
-        return !lastAccepted.isEmpty() || (consecutiveFailures.get() == 0 && lastError == null && !stopped);
+        // "没失败过" 不等于 "已注册"：冷启动、首次心跳还没发出去的窗口里它同样成立，
+        // 健康检查会把一个从没连上过的实例报成可用。已 stop() / 被强制下线同理。
+        if (stopped || forcedOffline || lastAccepted.isEmpty()) {
+            return false;
+        }
+        return consecutiveFailures.get() == 0 && lastError == null;
     }
 
     /** 最近一次失败原因（成功后清空） */

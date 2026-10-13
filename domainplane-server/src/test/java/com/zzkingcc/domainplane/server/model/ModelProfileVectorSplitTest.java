@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>分开的动机：向量模型是全局唯一单选、不参与域绑定，与"可绑到域上按需调用"的
  * 对话 / 生图 / 语音那类档案是两种东西。混在一个 map 里时，管控台「模型」段只能靠
- * endpoints 过滤才不至于把向量模型画进去 —— 漏一处就会冒出"怎么还有一个向量模型"。</p>
+ * endpoints 过滤才不至于把向量模型画进去：漏一处就会冒出"怎么还有一个向量模型"。</p>
  *
  * <p>这里盯住三件最容易出错的事：迁移旧布局、类型变化时清另一侧、
  * 以及<b>任何写入都不能把向量桶整个丢掉</b>（深拷贝漏一个 map 就会）。</p>
@@ -66,7 +66,7 @@ class ModelProfileVectorSplitTest {
         return new ModelProfile(alias,List.of("embedding"),List.of("text"),List.of("embedding"),"https://x/v1","k",alias,null,null,null,null,2048,List.of(),null);
     }
 
-    /** 同时支持对话与向量 —— 它必须留在模型桶，否则既不能绑域、也从「模型」段消失 */
+    /** 同时支持对话与向量：它必须留在模型桶，否则既不能绑域、也从「模型」段消失 */
     private static ModelProfile dual(String alias) {
         return new ModelProfile(alias,List.of("chat", "embedding"),List.of("text"),List.of("text"),"https://x/v1","k",alias,null,null,null,null,1024,List.of(),null);
     }
@@ -183,6 +183,20 @@ class ModelProfileVectorSplitTest {
         assertTrue(registry.profile("vec").isPresent(), "按别名仍要能取到向量档案");
         assertTrue(registry.hasEmbeddingProfile());
         assertTrue(registry.hasChatModel());
+    }
+
+    @Test
+    void embeddingProfileCountMatchesTheVectorSectionSource() {
+        ModelProfileRegistry registry = new ModelProfileRegistry(store());
+        registry.save(vector("vec"));
+        registry.save(chat("chat-a"));
+        registry.save(dual("dual"));
+
+        /* 概览与「模型设置」向量段共用同一个数据源：endpoints 含 embedding 的都算，
+           双类型档案在两个段各出现一次，这里也必须计进去：两处数不一致会让人以为档案丢了。 */
+        assertEquals(2, registry.embeddingProfileCount(), "纯向量与双类型都算，纯对话不算");
+        assertEquals(List.of("vec"), aliases(registry.embeddingProfiles()),
+                "双类型档案不在向量桶里，它留在模型桶（否则没法绑域）");
     }
 
     @Test

@@ -37,7 +37,7 @@ public final class PasswordHasher {
     /**
      * 校验明文与哈希是否匹配。
      *
-     * 哈希为空 / 格式非法一律返回 false，不抛异常——损坏的账号文件不应把登录接口打成 500。
+     * 哈希为空 / 格式非法一律返回 false，不抛异常：损坏的账号文件不应把登录接口打成 500。
      */
     public static boolean matches(String rawPassword, String passwordHash) {
         if (rawPassword == null || passwordHash == null || passwordHash.isBlank()) {

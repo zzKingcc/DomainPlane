@@ -17,11 +17,11 @@ import java.util.List;
 /**
  * 造 pdf 样例（测试专用）。
  *
- * <p>与 {@code DocxReaderTest} 的做法一致：<b>样例在测试里现造</b>，不往仓库塞二进制 fixture ——
+ * <p>与 {@code DocxReaderTest} 的做法一致：<b>样例在测试里现造</b>，不往仓库塞二进制 fixture，
  * 二进制样例一旦失准，没人看得懂它为什么失败。这里用 PDFBox 自己写 pdf，坐标由我们定，
  * 于是"页眉在第 800 磅、正文从 760 磅开始、段间多空一行"这些前提都是显式的。</p>
  *
- * <p>只用 Helvetica（标准 14 字体）—— 它没有中文字形，所以样例一律用英文；
+ * <p>只用 Helvetica（标准 14 字体），它没有中文字形，所以样例一律用英文；
  * 行距/分段的判定与语言无关。</p>
  */
 public final class PdfSamples {
@@ -101,7 +101,7 @@ public final class PdfSamples {
         }
     }
 
-    /** 一页只有图形、没有文字 —— 扫描件的等价物（文本层是空的） */
+    /** 一页只有图形、没有文字，扫描件的等价物（文本层是空的） */
     public static byte[] withoutText() {
         try (PDDocument document = new PDDocument()) {
             PDPage page = new PDPage(new PDRectangle(PAGE_WIDTH, PAGE_HEIGHT));

@@ -95,7 +95,7 @@ public final class TxtCleaner {
     /**
      * 页眉 / 页脚：短于 40 字、不以句末标点结尾、且不是标题形态的行，出现 ≥2 次即视为重复噪声。
      *
-     * 有 {@code \f} 时只统计「每页前 2 行 + 后 2 行」的候选，并额外要求出现次数达到页数一半 ——
+     * 有 {@code \f} 时只统计「每页前 2 行 + 后 2 行」的候选，并额外要求出现次数达到页数一半：
      * 页眉页脚天然出现在每页同一位置。
      */
     private static Set<String> headerFooterLines(List<List<String>> pages, Map<String, Integer> occurrences) {

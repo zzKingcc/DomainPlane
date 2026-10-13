@@ -38,7 +38,7 @@ import java.util.regex.Pattern;
  *  ② {@code match.modelPatterns} 模型名正则（**全串匹配**，语义等同 {@code Pattern.matches}）—— 系列模型在此层表达；
  *  ③ {@code match.hosts} 服务商 host（归一化后）—— 服务商级兜底。
  *
- * 同级多个适配命中按 {@code id} 字典序取第一个 —— 确定性强，不依赖文件列举顺序。
+ * 同级多个适配命中按 {@code id} 字典序取第一个，确定性强，不依赖文件列举顺序。
  *
  * 加载策略：坏文件只记 ERROR 并跳过，**不影响启动与其余文件**；适配文件是 curated 数据，
  * 一个手误不该让整个服务起不来。
@@ -53,7 +53,7 @@ public class ModelAdapterRegistry {
 
     /**
      * 模态词表（与 {@link ModelProfile} 的 {@code MOD_*} 一一对应）。
-     * 适配文件里写错一个词就加载失败 —— curated 文件，宁可炸在启动期，也别让卡片上出现一个
+     * 适配文件里写错一个词就加载失败，curated 文件，宁可炸在启动期，也别让卡片上出现一个
      * 谁也不认识的模态标签。
      */
     private static final Set<String> MODALITIES =
@@ -67,14 +67,14 @@ public class ModelAdapterRegistry {
      * std=true 只允许绑这几个老字段（与 ModelProfile 既有字段一一对应）。
      *
      * {@code dimensions} 也在其列：向量维度落的是 {@link ModelProfile#dimensions()} 专用字段，
-     * 不进 params 通用表 —— 它要参与 ES 索引契约与灌库校验，混进"服务商私有参数"里没人把关。
+     * 不进 params 通用表，它要参与 ES 索引契约与灌库校验，混进"服务商私有参数"里没人把关。
      */
     private static final Set<String> STD_WIRES = Set.of("temperature", "max_tokens", "dimensions");
 
     /**
      * 参数控件的可选呈现方式；缺省（null）= 按 type 走默认控件。
      * {@code bar} = 把有序枚举渲染成分档进度条（如「思考强度」none→low→high→max）。
-     * 只对 enum 成立 —— 分档的前提是取值有序，只有枚举自带这个顺序（options 数组顺序即档位顺序）。
+     * 只对 enum 成立，分档的前提是取值有序，只有枚举自带这个顺序（options 数组顺序即档位顺序）。
      */
     private static final Set<String> PARAM_DISPLAYS = Set.of("bar");
 
@@ -149,11 +149,11 @@ public class ModelAdapterRegistry {
      *
      * 存在的理由：只有 OpenRouter 那类综合提供商才会在接口里说明模型吃什么、产出什么；
      * OpenAI / DeepSeek 官方的清单只有 id/object/created/owned_by，读不出来。而这些内置模型
-     * 我们本来就是**按官方文档登记过**的 —— 端点族就是登记了参数的族名，模态就在同一个文件里。
+     * 我们本来就是**按官方文档登记过**的，端点族就是登记了参数的族名，模态就在同一个文件里。
      * 于是"先看适配文件有没有，再去读元数据"：内置模型一次上游请求都不用发。
      *
      * 只有**按模型名命中**（① 精确 / ② 正则）才返回：host 兜底命中说明"这家服务商我们登记过，
-     * 但这个模型没登记"，拿同 host 另一个模型的声明往它头上套就是张冠李戴 ——
+     * 但这个模型没登记"，拿同 host 另一个模型的声明往它头上套就是张冠李戴，
      * {@code api.openai.com} 上的 {@code text-embedding-3-*} 会被套上 GPT 的 text → text。
      *
      * @return 未按模型名命中时为空
@@ -218,7 +218,7 @@ public class ModelAdapterRegistry {
                 return "调优参数「" + e.getKey() + "」未在适配 " + match.adapter().id()
                         + " 中登记（可用：" + String.join("、", byKey.keySet()) + "）";
             }
-            /* 条件参数只在依赖取到指定值时可填：值存在但条件不成立一律拒绝，不静默丢弃 ——
+            /* 条件参数只在依赖取到指定值时可填：值存在但条件不成立一律拒绝，不静默丢弃，
                丢弃会让用户以为"保存成功了、填的值在生效"，而实际一个字都没发出去 */
             if (!enabled(spec, params)) {
                 return "调优参数「" + spec.key() + "」当前不可填（依赖「" + spec.enabledWhen().key()
@@ -235,7 +235,7 @@ public class ModelAdapterRegistry {
     /**
      * 条件参数此刻是否可填（无条件的参数恒为 true）。
      *
-     * 语义与前端 {@code models.html} 的 {@code tuneParamEnabled} 必须一致 —— 两份实现同一套规则，
+     * 语义与前端 {@code models.html} 的 {@code tuneParamEnabled} 必须一致，两份实现同一套规则，
      * 前端管"控件灰不灰"，这里管"收不收"。判定口径：取依赖参数的当前值，未填则取
      * {@link EnabledWhen#missing()}（再为空即不命中）。
      *
@@ -477,7 +477,7 @@ public class ModelAdapterRegistry {
                 }
                 specs.add(spec);
             }
-            /* 单条参数自身合法不等于整族自洽（条件指向谁、包不包对象都跨参数）—— 解析完再查一遍 */
+            /* 单条参数自身合法不等于整族自洽（条件指向谁、包不包对象都跨参数），解析完再查一遍 */
             crossCheckFamily(specs, filename + ": families." + family);
             families.put(family, List.copyOf(specs));
         });
@@ -489,7 +489,7 @@ public class ModelAdapterRegistry {
     /**
      * 读一个模态列表并校验词表。
      *
-     * 模态写错一个词就加载失败，而不是静默丢弃 —— 丢弃的后果是卡片上少一格标签，
+     * 模态写错一个词就加载失败，而不是静默丢弃，丢弃的后果是卡片上少一格标签，
      * 而没人会去翻日志找"为什么 input 少了一项"。
      */
     private static List<String> modalityList(JsonNode root, String field, String filename) {
@@ -561,7 +561,7 @@ public class ModelAdapterRegistry {
         if (min != null && max != null && min > max) {
             throw new IllegalArgumentException(where + ": 参数 " + key + " 的 min 大于 max");
         }
-        /* default 先转成 Java 标量再存：直接留 JsonNode 会让 checkValue 两头都认不出它 ——
+        /* default 先转成 Java 标量再存：直接留 JsonNode 会让 checkValue 两头都认不出它，
            TextNode.toString() 带引号（枚举比对必然不中），NumberNode 又不是 Number（toDouble 返回 null），
            于是文件里写得好好的默认值会被判成"不合法"。数组 / 对象一律拒：默认值就是单个标量。 */
         Object defaultValue = null;
@@ -788,14 +788,14 @@ public class ModelAdapterRegistry {
      * @param std         true = 标准参数（wire 限 temperature / max_tokens，值存 ModelProfile 老字段）；
      *                    false = 私有参数（值存 params map，注入走 customParameters）
      * @param min / max   数值类型的值域；在 {@code stringList} 上是**元素条数**区间（如 stop 最多 16 条）
-     * @param wireWrap    非空时注入的值要包一层单键对象 {@code {wireWrap: value}} ——
+     * @param wireWrap    非空时注入的值要包一层单键对象 {@code {wireWrap: value}}，
      *                    厂商把标量塞进子对象的标准写法（如 {@code response_format.type}）。
      *                    只对私有参数成立：标准参数的值形状由框架定，没法再套一层
      * @param display     非空时指定控件呈现方式（仅 enum 可用）：{@code bar} = 分档进度条。
-     *                    只是呈现提示，不参与取值与注入 —— 值仍是 options 里那个枚举字符串
+     *                    只是呈现提示，不参与取值与注入，值仍是 options 里那个枚举字符串
      * @param defaultValue 官方文档写明的默认值。用户没填时它同时管两件事：控件空态上显示
      *                    「默认 X」（没写 default 才显示「服务商默认」），以及注入时补缺。
-     *                    条件参数也可以声明 default —— 补缺值同样要过 {@link #enabled} 那道门，
+     *                    条件参数也可以声明 default，补缺值同样要过 {@link #enabled} 那道门，
      *                    条件不成立时连默认值都不发射
      * @param enabledWhen 非空时本参数是**条件参数**：依赖参数取到指定值才可填，见 {@link EnabledWhen}
      */
@@ -813,7 +813,7 @@ public class ModelAdapterRegistry {
     /**
      * 条件可用性：本参数只在调优值 {@code values[key]} 落在 {@code values} 里时才可填。
      *
-     * 存在的理由是"有参数填了不生效"这件事必须被表达出来 —— 与其让用户填完一个
+     * 存在的理由是"有参数填了不生效"这件事必须被表达出来，与其让用户填完一个
      * 服务商根本不看的字段，不如把控件灰掉。
      *
      * @param key     被依赖参数的 key（同族、私有、且自身无条件的参数）
@@ -845,7 +845,7 @@ public class ModelAdapterRegistry {
      * @param input  该模型能吃什么（模态词表，见 {@link #MODALITIES}）；空 = 没登记（不是"只能吃文本"）
      * @param output 该模型产出什么；空 = 没登记
      * @param families 端点族 → 该族暴露的调优参数。族的**键名**同时就是这份模型的端点族
-     *                 （{@link #endpoints()}）—— 登记了 chat 参数，就说明它走对话端点
+     *                 （{@link #endpoints()}），登记了 chat 参数，就说明它走对话端点
      */
     public record Adapter(String id, String provider, String label, String docUrl,
                           List<String> input, List<String> output,
@@ -946,7 +946,7 @@ public class ModelAdapterRegistry {
          * 按档案类型挑出该档案真正可调的那一族参数。
          *
          * 向量档案看 embedding 族（dimensions），其余（含端点族未声明的 OpenAI / DeepSeek 官方）
-         * 看 chat 族 —— 与 {@code AdminModelProfileController} 下发调优框、复核调优值两处共用同一判据，
+         * 看 chat 族，与 {@code AdminModelProfileController} 下发调优框、复核调优值两处共用同一判据，
          * 避免"列表页画出维度框、复核时却不认"的漂移。
          */
         public List<ParamSpec> tuningParams(ModelProfile profile) {

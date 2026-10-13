@@ -7,10 +7,10 @@ import java.util.Set;
  *
  * @author zzkingcc
  * @param instanceId     实例标识（由实例自报，重连需沿用同一个才能覆盖自己的旧副本）
- * @param endpoint       调用回流地址 —— 服务端按此地址 POST 让实例执行工具（Push 模式）
+ * @param endpoint       调用回流地址，服务端按此地址 POST 让实例执行工具（Push 模式）
  * @param lastSeen       最近一次受理心跳的时间戳；超时判定只看它
  * @param toolNames      该实例本次声明提供的工具名（与 {@code ToolRegistry} 反向索引对应）
- * @param manifestDigest manifest 摘要 —— 快路径判等用：相同则"只刷 lastSeen、不进注册表"
+ * @param manifestDigest manifest 摘要，快路径判等用：相同则"只刷 lastSeen、不进注册表"
  * @param state          存活状态
  */
 public record InstanceSession(String instanceId,

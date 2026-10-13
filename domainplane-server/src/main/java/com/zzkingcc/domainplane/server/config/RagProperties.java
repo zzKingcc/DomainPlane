@@ -10,7 +10,7 @@ import java.util.List;
  * 知识库上传配置（平台自有，统一前缀 {@code domainplane.rag}）。
  *
  * 知识库索引是一域一索引，索引名由域路径确定性派生（见 {@code KbIndexes}），
- * 因此这里没有「索引名」配置 —— 索引在首次上传时按需创建。
+ * 因此这里没有「索引名」配置：索引在首次上传时按需创建。
  *
  * @author zzkingcc
  */
@@ -23,7 +23,7 @@ public class RagProperties {
      *
      * 必须与 {@code spring.servlet.multipart.max-file-size} 保持一致：
      * 容器会在请求进入 Controller 之前按 multipart 上限做拦截，两者不一致时
-     * 这个校验形同虚设 —— 1MB~5MB 的文件会被容器挡在门外，用户拿到的是
+     * 这个校验形同虚设：1MB~5MB 的文件会被容器挡在门外，用户拿到的是
      * 一个与"文件太大"毫无关系的 500，而不是这里精心写的 60006 提示。
      *
      * yaml 里刻意没有显式配置本项：与 multipart 上限共用一个真相来源，
@@ -48,7 +48,7 @@ public class RagProperties {
     /**
      * 单文件（单次上传）允许的最大切片数。
      *
-     * 几百页的文档一次就能产出几千片，向量化是分批请求模型的 ——
+     * 几百页的文档一次就能产出几千片，向量化是分批请求模型的：
      * 一次上传就能把导入队列堵死。超限时直接拒绝并提示拆分，不是"切一半留下"。
      */
     private int maxChunksPerDocument = 2000;
@@ -74,7 +74,7 @@ public class RagProperties {
     /**
      * 切片参数。
      *
-     * {@code maxChars} 是长度上限而不是固定长度：切点永远落在标题或句子上 ——
+     * {@code maxChars} 是长度上限而不是固定长度：切点永远落在标题或句子上：
      * 撞到标题立刻断、整段不足上限就是实际字数。想强行凑满只能跨标题拼内容，反而让模型看不出层级。
      */
     @Data

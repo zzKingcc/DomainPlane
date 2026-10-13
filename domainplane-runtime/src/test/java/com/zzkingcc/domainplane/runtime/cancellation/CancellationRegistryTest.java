@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 同会话串行的载体：{@code Set.add} 的原子性即"独占获取"。
  *
- * <p>这条语义错了会同时坏两件事——并发请求没被挡住（记忆与断点是单份资源），
+ * <p>这条语义错了会同时坏两件事：并发请求没被挡住（记忆与断点是单份资源），
  * 或者被挡住之后标记没释放（会话永久锁死，只能重启）。</p>
  * @author zzkingcc
  */
@@ -90,7 +90,7 @@ class CancellationRegistryTest {
      * R-03 的核心契约：<b>排队期间的 stop 必须活到任务真正开始执行</b>。
      *
      * <p>编排任务先进线程池排队，用户可以在排队期间点停止。若清停止标志的动作发生在
-     * "任务出队后"，那次停止就被抹掉了 —— 任务照跑到底，界面上显示"停止中"却什么都没发生。
+     * "任务出队后"，那次停止就被抹掉了，任务照跑到底，界面上显示"停止中"却什么都没发生。
      * 不报错、不留痕，只表现为"停止偶尔不灵"。</p>
      */
     @Test
@@ -106,7 +106,7 @@ class CancellationRegistryTest {
         registry.requestStop("s-1");
         assertTrue(registry.isCancelled("s-1"));
 
-        // ③ 任务出队开始执行 —— 执行期**不再**清标志，停止请求得以生效
+        // ③ 任务出队开始执行：执行期**不再**清标志，停止请求得以生效
         assertTrue(registry.isCancelled("s-1"),
                 "任务开始执行时不得清除停止标志，否则排队期间的停止请求会静默丢失");
     }

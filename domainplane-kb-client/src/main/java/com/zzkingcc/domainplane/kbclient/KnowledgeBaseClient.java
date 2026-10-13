@@ -1,6 +1,6 @@
 package com.zzkingcc.domainplane.kbclient;
 
-import com.zzkingcc.domainplane.api.code.ErrorCode;
+import com.zzkingcc.domainplane.clientcore.exception.ClientErrorCode;
 import com.zzkingcc.domainplane.clientcore.exception.DomainPlaneErrors;
 import com.zzkingcc.domainplane.clientcore.exception.DomainPlaneException;
 import com.zzkingcc.domainplane.clientcore.http.ClientCredential;
@@ -20,7 +20,7 @@ import java.util.Map;
 /**
  * 知识库客户端：文档的上传 / 列表 / 删除。
  *
- * 只管"把内容放进去"与"拿出来"——检索是服务端的事：模型通过检索工具自动取用，
+ * 只管"把内容放进去"与"拿出来"，检索是服务端的事：模型通过检索工具自动取用，
  * SDK 侧没有检索入口，也没有"检索参数"要配。这里声明的域决定哪些对话能检索到这份文档。
  *
  * 不在启动期连接服务端：远端不可达由首次调用暴露，带码的异常与对话 SDK 完全一致。
@@ -67,10 +67,10 @@ public class KnowledgeBaseClient {
      */
     public UploadResult upload(byte[] content, String fileName, boolean replace, String domain) {
         if (content == null || content.length == 0) {
-            throw new DomainPlaneException(ErrorCode.INVALID_PARAMETER, "上传内容为空");
+            throw new DomainPlaneException(ClientErrorCode.INVALID_ARGUMENT, "上传内容为空");
         }
         if (fileName == null || fileName.isBlank()) {
-            throw new DomainPlaneException(ErrorCode.INVALID_PARAMETER, "文件名不能为空");
+            throw new DomainPlaneException(ClientErrorCode.INVALID_ARGUMENT, "文件名不能为空");
         }
         log.info("[DomainPlane客户端] 上传知识库文档：文件={}，大小={} 字节，replace={}",
                 fileName, content.length, replace);
@@ -104,11 +104,12 @@ public class KnowledgeBaseClient {
                 .block(properties.getReadTimeout());
 
         if (resp == null) {
-            throw new DomainPlaneException(ErrorCode.UNEXPECTED_ERROR, "上传知识库文档无响应");
+            throw new DomainPlaneException(ClientErrorCode.RESPONSE_UNREADABLE, "上传知识库文档无响应");
         }
         if (Boolean.FALSE.equals(resp.get("success"))) {
-            // 服务端把业务失败也包成 200 + success=false，这里还原成带码异常，
-            // 接入方才能按"重名 / 类型不支持 / 超限"分别处理
+            // 服务端把业务失败也包成 200 + success=false，这里还原成异常。
+            // 码与文案原样来自服务端（ServerRejectedException），SDK 不替接入方判断
+            // "重名 / 类型不支持 / 超限"分别该怎么办，那是宿主看着服务端码做的事。
             throw DomainPlaneErrors.fromResponseBody(resp);
         }
         return new UploadResult(
@@ -150,7 +151,7 @@ public class KnowledgeBaseClient {
      */
     public boolean delete(String docId) {
         if (docId == null || docId.isBlank()) {
-            throw new DomainPlaneException(ErrorCode.INVALID_PARAMETER, "docId 不能为空");
+            throw new DomainPlaneException(ClientErrorCode.INVALID_ARGUMENT, "docId 不能为空");
         }
         Map<String, Object> resp = Mono.defer(() -> webClient.delete()
                 .uri("/admin/kb/documents/{docId}", docId)

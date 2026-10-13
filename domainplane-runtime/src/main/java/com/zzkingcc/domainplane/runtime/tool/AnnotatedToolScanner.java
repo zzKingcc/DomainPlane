@@ -50,7 +50,7 @@ public final class AnnotatedToolScanner {
      * 方法上有 {@code @Tool} 即算工具。
      *
      * 注解从「用户类」取，执行走「代理类」：Spring 的 CGLIB / JDK 代理会重写方法，
-     * 而方法注解不随重写继承 —— 直接扫 {@code provider.getClass()} 会让
+     * 而方法注解不随重写继承，直接扫 {@code provider.getClass()} 会让
      * {@code @Transactional} / {@code @Async} 切过的 Service 上的 {@code @Tool} 全部扫不到
      * （工具凭空消失，且只留一行 WARN）。反过来若拿用户类的 {@code Method} 去反射调用，
      * 又会绕过代理链、让切面失效。两件事必须分开：元数据查用户类，invoke 用代理类的方法。
@@ -104,10 +104,10 @@ public final class AnnotatedToolScanner {
     }
 
     /**
-     * 剥掉 Spring 生成的代理类，回到用户类 —— CGLIB 代理的类名形如 {@code Xxx$$SpringCGLIB$$0}。
+     * 剥掉 Spring 生成的代理类，回到用户类：CGLIB 代理的类名形如 {@code Xxx$$SpringCGLIB$$0}。
      *
      * JDK 动态代理（{@code com.sun.proxy.$ProxyN}）的父类是 {@code java.lang.reflect.Proxy}，
-     * 类名里没有 {@code $$}，这里剥不掉 —— 那种情况由 {@link #annotatedMethods} 扫接口兜住。
+     * 类名里没有 {@code $$}，这里剥不掉，那种情况由 {@link #annotatedMethods} 扫接口兜住。
      */
     private static Class<?> userClassOf(Class<?> candidate) {
         Class<?> current = candidate;
@@ -169,7 +169,7 @@ public final class AnnotatedToolScanner {
      *
      * CGLIB 代理重写了方法，拿到它才能让调用经过代理链（切面生效）；
      * JDK 代理的代理类上没有实现类的方法，{@code getMethod} 会抛
-     * {@link NoSuchMethodException}，此时退回用户类/接口方法 —— 对 JDK 代理而言
+     * {@link NoSuchMethodException}，此时退回用户类/接口方法，对 JDK 代理而言
      * 接口方法 invoke 同样会经过代理。
      */
     private static Method executableMethod(Object provider, Class<?> proxyClass, Method declared) {
@@ -192,7 +192,7 @@ public final class AnnotatedToolScanner {
     /**
      * 由方法上的注解解析出工具描述；不是工具方法时返回 {@code null}。
      *
-     * 参数结构一律交给 {@link ParamSchemaResolver} —— 与工具实例 SDK 共用同一份实现，
+     * 参数结构一律交给 {@link ParamSchemaResolver}：与工具实例 SDK 共用同一份实现，
      * 避免"同一段工具代码搬到另一侧得到不同 schema"。
      */
     private static ToolDescriptor describe(Class<?> declaringClass, Method method) {
@@ -275,7 +275,7 @@ public final class AnnotatedToolScanner {
     }
 
     // 参数结构（含 DTO 递归展开、深度与循环防护、形参/字段两种注解载体）统一由 ParamSchemaResolver 提供，
-    // 与工具实例 SDK 共用同一份实现 —— 避免同一段工具代码在两侧得到不同的 schema。
+    // 与工具实例 SDK 共用同一份实现：避免同一段工具代码在两侧得到不同的 schema。
 
     /**
      * 由参数描述生成 JSON Schema
@@ -311,7 +311,7 @@ public final class AnnotatedToolScanner {
                     .build();
             case "array" -> {
                 // 数组元素结构：本地工具与远端工具必须用同一套口径展开，否则同样是 List<DTO>，
-                // 本地给模型看"数组套字符串"、远端给"数组套对象" —— 同一段工具代码两种形态不一致
+                // 本地给模型看"数组套字符串"、远端给"数组套对象"，同一段工具代码两种形态不一致
                 JsonSchemaElement item = param.items().isEmpty()
                         ? JsonStringSchema.builder().build()
                         : toSchemaElement(param.items().get(0));
@@ -322,7 +322,7 @@ public final class AnnotatedToolScanner {
     }
 
     /**
-     * 嵌套对象：子字段递归展开；没有子字段时给一个"空对象"而不是退化成字符串 ——
+     * 嵌套对象：子字段递归展开；没有子字段时给一个"空对象"而不是退化成字符串：
      * 退化成字符串会让模型产出字符串，反序列化到 DTO 必然失败。
      */
     private static JsonSchemaElement objectSchema(ToolDescriptor.Param param) {

@@ -22,7 +22,7 @@ public final class CjkWidth {
             0x4E00, 0x9FFF, 0x3400, 0x4DBF, 0xF900, 0xFAFF,
             // 中文标点与全角符号
             0x3000, 0x303F, 0xFF00, 0xFFEF,
-            // 假名：平假名 + 片假名（此前漏掉的就是这一段 —— 注释声称覆盖日文，区间却止于中文标点）
+            // 假名：平假名 + 片假名（此前漏掉的就是这一段，注释声称覆盖日文，区间却止于中文标点）
             0x3040, 0x309F, 0x30A0, 0x30FF,
             // 韩文：音节 + 字母 + 兼容字母
             0xAC00, 0xD7AF, 0x1100, 0x11FF, 0x3130, 0x318F);
@@ -49,7 +49,7 @@ public final class CjkWidth {
     /**
      * 单个 {@code char} 是否按 CJK 宽度计。
      *
-     * 代理对的高位/低位单独看都不算 —— 单个 {@code char} 承载不了一个 code point，
+     * 代理对的高位/低位单独看都不算：单个 {@code char} 承载不了一个 code point，
      * 拿它判定没有意义，用 {@link #isCjk(String, int)}。
      */
     public static boolean isCjk(char c) {
@@ -61,7 +61,7 @@ public final class CjkWidth {
     }
 
     /**
-     * 按 code point 判定 —— 生僻字（扩展 B 及以上）以代理对存储，
+     * 按 code point 判定：生僻字（扩展 B 及以上）以代理对存储，
      * 按 char 看会落进 {@code \uD800-\uDFFF} 而被判成"非 CJK"，导致再度低估。
      */
     public static boolean isCjk(String text, int index) {
@@ -92,7 +92,7 @@ public final class CjkWidth {
     }
 
     /**
-     * 文本的「字符数」，按 code point 计 —— emoji 与生僻字算 1 个而不是 2 个。
+     * 文本的「字符数」，按 code point 计：emoji 与生僻字算 1 个而不是 2 个。
      *
      * 切片长度判断用它才对：{@code String.length()} 会把代理对算成 2。
      */

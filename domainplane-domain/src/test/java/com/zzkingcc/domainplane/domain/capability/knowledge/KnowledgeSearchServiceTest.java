@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 检索结果注入侧的两道收口：条数上限（可配）与正文字符预算。
  *
- * <p>历史问题是注入条数被硬编码成 5 —— 那是唯一不可配的截断，且是二次截断
+ * <p>历史问题是注入条数被硬编码成 5：那是唯一不可配的截断，且是二次截断
  * （融合 topN 已经收过一次）。条数本身不是瓶颈，字符数才是：同样的条数，切片长短能差几倍。</p>
  */
 class KnowledgeSearchServiceTest {
@@ -79,7 +79,7 @@ class KnowledgeSearchServiceTest {
     }
 
     /**
-     * 检索链路本身坏了，必须与"真没命中"区分开 —— 否则调用方会换个问法反复试，
+     * 检索链路本身坏了，必须与"真没命中"区分开：否则调用方会换个问法反复试，
      * 而不是去查配置。
      */
     @Test

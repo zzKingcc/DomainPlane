@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li><b>记忆</b>保留期默认永久（{@code ttl = null}）。不清的话，同路径域重建
  *       （索引名与记忆键都含域路径）后这段对话历史原样复活，新域的会话一开始就带着旧上下文；</li>
  *   <li><b>断点</b>里存着"即将执行、尚未执行"的工具调用。不清的话，24 小时内同路径域重建
- *       就能 {@code resume(approved=true)} 把当初被审批拦下的破坏性动作补执行掉 ——
+ *       就能 {@code resume(approved=true)} 把当初被审批拦下的破坏性动作补执行掉：
  *       域的删除没有撤销授权。</li>
  * </ul>
  *
@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <b>之前</b>，抛出去正是中止在那之前，域还在。</p>
  *
  * <p>另有一处空域守卫：{@code domain} 为空时 pattern 会退化成 {@code 前缀|*}，
- * 匹配<b>全部域</b>的记忆 —— 一次误传就是全量清空，且不可恢复。守卫必须落在拼 pattern 之前。</p>
+ * 匹配<b>全部域</b>的记忆，一次误传就是全量清空，且不可恢复。守卫必须落在拼 pattern 之前。</p>
  *
  * @author zzkingcc
  */

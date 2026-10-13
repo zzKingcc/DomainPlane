@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class KnowledgeSearchToolTest {
 
-    /** 记录收到的关键词，按脚本返回内容 —— 不 mock，lambda 桩足够 */
+    /** 记录收到的关键词，按脚本返回内容：不 mock，lambda 桩足够 */
     private static final class RecordingRetriever implements ContentRetriever {
 
         private final List<String> queries = new ArrayList<>();
@@ -85,7 +85,7 @@ class KnowledgeSearchToolTest {
         assertEquals("keyword", keyword.name());
         assertEquals("string", keyword.type());
         assertTrue(keyword.required());
-        // 缺说明只会 WARN 不阻断，但模型只能靠参数名猜 —— 这里必须真有说明
+        // 缺说明只会 WARN 不阻断，但模型只能靠参数名猜：这里必须真有说明
         assertEquals(0, ParamSchemaResolver.countMissingDescription(d.params()));
     }
 

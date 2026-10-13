@@ -1,7 +1,7 @@
 package com.zzkingcc.domainplane.server.controller;
 
 import com.zzkingcc.domainplane.runtime.cancellation.CancellationRegistry;
-import com.zzkingcc.domainplane.runtime.metrics.MetricsRegistry;
+import com.zzkingcc.domainplane.common.metrics.MetricsRegistry;
 import com.zzkingcc.domainplane.runtime.tool.ToolRegistry;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;

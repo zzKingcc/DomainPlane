@@ -49,15 +49,15 @@
                             <code>info</code> / <code>ping</code> / <code>count</code> / <code>search</code> /
                             <code>indices.*</code> / <code>bulk</code>，以及 <code>index: true</code> 的
                             <code>dense_vector</code>。而且版本号可能<i>合法地</i>拿不到（只读账号没有
-                            cluster monitor 权限）——"读不到就拒绝"等于逼你换成高权限账号。</li>
+                            cluster monitor 权限）。"读不到就拒绝"等于逼你换成高权限账号。</li>
                         <li><b>9.x</b>：与平台内置客户端（Elasticsearch Java Client 9.4.4）同主版本，官方兼容矩阵保证。</li>
                         <li><b>8.x</b>：上面那些接口在 8.x 全部具备（<code>index: true</code> 的
                             <code>dense_vector</code> 正是 8.0 起的特性），但官方矩阵只保证同主版本，
-                            8.x 未经实测 —— 以「测试连接」和一次知识库重建的实测结果为准。</li>
+                            8.x 未经实测，以「测试连接」和一次知识库重建的实测结果为准。</li>
                         <li><b>7.17 及更低</b>：<code>dense_vector</code> 不支持 <code>index: true</code>，
                             维度上限也只有 1024，索引 mapping 会创建失败。</li>
                         <li><b>IK 分词器是插件，任何版本的 ES 都要单独安装。</b>缺它的后果最隐蔽：
-                            IK mapping 创建失败后会回退到 ES 默认分词器 —— 索引照样建、灌库照样成功，
+                            IK mapping 创建失败后会回退到 ES 默认分词器：索引照样建、灌库照样成功，
                             <b>只有中文检索质量下降，而且不报错</b>。
                             点「测试连接」会直接告诉你 IK 是否可用；<b>换 ES 实例后务必点一次</b>。</li>
                         <li><b>ES 8.x 起默认启用 HTTPS 与安全认证</b>：协议要填 <code>https</code> 且必须带账号；
@@ -211,7 +211,7 @@
 
 <script src="assets/console.js"></script>
 <script>
-    /* 字段表：[输入框 id, 接口字段名, 类型(s=字符串 / n=数字)] —— 一处定义驱动全页 */
+    /* 字段表：[输入框 id, 接口字段名, 类型(s=字符串 / n=数字)]，一处定义驱动全页 */
     var MAP = {
         es: [
             ['esHost', 'host', 's'],
@@ -413,7 +413,7 @@
                 } else {
                     console.debug('[domainplane] 连接测试失败：', data.error);
                     /* data.error 是后端捕获的原始异常（ES/Redis 连接失败时最可能带 userinfo），
-                       经 Console.request 的清洗之外再兜一层 —— 这条路径不经过 request 的错误分支。 */
+                       经 Console.request 的清洗之外再兜一层，这条路径不经过 request 的错误分支。 */
                     showResult(RESULT[which], '连接失败：' + Console.sanitizeError(data.error || '未知原因'), 'err');
                 }
             })

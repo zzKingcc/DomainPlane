@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * manifest 解析：域字符串来自<b>外部报文</b>，非法必须整包拒绝。
  *
- * <p>以前只 warn 放过，结果这个字符串照样进"已声明域"集合、让入口放行 ——
+ * <p>以前只 warn 放过，结果这个字符串照样进"已声明域"集合、让入口放行：
  * 等于任何能调用注册接口的人都能凭空造出一个可用的域。</p>
  */
 class ToolManifestTest {

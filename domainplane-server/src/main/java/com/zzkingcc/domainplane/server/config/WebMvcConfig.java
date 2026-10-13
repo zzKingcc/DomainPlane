@@ -3,10 +3,14 @@ package com.zzkingcc.domainplane.server.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzkingcc.domainplane.server.auth.AuthService;
 import com.zzkingcc.domainplane.server.auth.CredentialAuthInterceptor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * 服务端 Web MVC 配置：跨域策略 + 凭证校验拦截器。
@@ -33,22 +37,35 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     private final AuthService authService;
     private final ObjectMapper objectMapper;
+    private final List<String> allowedOrigins;
 
-    public WebMvcConfig(AuthService authService, ObjectMapper objectMapper) {
+    public WebMvcConfig(AuthService authService,
+                        ObjectMapper objectMapper,
+                        @Value("${domainplane.cors.allowed-origins:}") String allowedOrigins) {
         this.authService = authService;
         this.objectMapper = objectMapper;
+        this.allowedOrigins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isBlank())
+                .toList();
     }
 
     /**
-     * 跨域策略：全放行。
+     * 跨域策略：默认不放行任何跨域来源，需要时用 {@code domainplane.cors.allowed-origins}
+     * （逗号分隔的完整来源，如 {@code https://console.example.com}）显式开启。
+     *
+     * 不能"任意来源 + allowCredentials"：管控台的鉴权完全依赖 Cookie，那样等于允许
+     * 任意站点带着用户的登录态读取管控台响应。管控台与 API 同源部署时本就不需要 CORS。
      */
     @Override
     public void addCorsMappings(CorsRegistry registry) {
+        if (allowedOrigins.isEmpty()) {
+            return;
+        }
         registry.addMapping("/**")
-                .allowedOriginPatterns("*")
-                .allowedMethods("*")
+                .allowedOrigins(allowedOrigins.toArray(String[]::new))
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
-                .exposedHeaders("*")
                 .allowCredentials(true)
                 .maxAge(3600);
     }

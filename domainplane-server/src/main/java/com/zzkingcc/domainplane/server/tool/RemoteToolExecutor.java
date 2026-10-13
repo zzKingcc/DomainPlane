@@ -53,6 +53,11 @@ public class RemoteToolExecutor implements ToolExecutor {
     @Override
     public String execute(ToolExecutionRequest request, Object memoryId) {
         String toolName = request.name();
+        /* 幂等工具重复执行无害，失败后可以放心换副本；非幂等工具只在"请求确定未送达"时才能换。
+           取不到元数据时按 false（最保守）处理。 */
+        boolean idempotent = registry.find(toolName)
+                .map(registered -> registered.descriptor().idempotent())
+                .orElse(false);
         List<InstanceEndpoint> replicas = new ArrayList<>(registry.endpoints(toolName).stream()
                 .filter(endpoint -> !endpoint.isLocal())
                 .toList());
@@ -72,6 +77,14 @@ public class RemoteToolExecutor implements ToolExecutor {
                 return invoke(toolName, replica, request);
             } catch (TransportFailure e) {
                 lastFailure = e.getMessage();
+                if (!e.safeToRetry() && !idempotent) {
+                    /* 请求可能已经送达对端并被执行（读超时、非 2xx、响应体不合规都属这一类），
+                       而该工具不是幂等的：换副本再打一次会重复下单 / 扣款 / 发消息。
+                       此时直接回喂失败原因，由模型决定改写参数还是如实告知用户。 */
+                    log.warn("[远程工具] {} 调用实例 {}（{}）失败且不可安全重试，不再换副本：{}",
+                            toolName, replica.instanceId(), replica.endpoint(), e.getMessage());
+                    return "工具 " + toolName + " 调用失败: " + e.getMessage();
+                }
                 log.warn("[远程工具] {} 调用实例 {}（{}）失败，{}",
                         toolName, replica.instanceId(), replica.endpoint(),
                         i + 1 < attempts ? "换副本重试" : "已无副本可试");
@@ -106,7 +119,8 @@ public class RemoteToolExecutor implements ToolExecutor {
                     .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
                     .build();
         } catch (Exception e) {
-            throw new TransportFailure("调用地址非法（" + endpoint + "）：" + e.getMessage(), e);
+            // 请求根本没发出去，换副本是安全的
+            throw new TransportFailure("调用地址非法（" + endpoint + "）：" + e.getMessage(), e, true);
         }
 
         HttpResponse<String> response;
@@ -115,21 +129,23 @@ public class RemoteToolExecutor implements ToolExecutor {
             response = http.send(httpRequest, HttpResponse.BodyHandlers.ofString());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new TransportFailure("调用被中断", e);
+            throw new TransportFailure("调用被中断", e, false);
         } catch (Exception e) {
-            throw new TransportFailure("请求失败：" + e.getMessage(), e);
+            throw new TransportFailure("请求失败：" + e.getMessage(), e, requestNotDelivered(e));
         }
 
         if (response.statusCode() / 100 != 2) {
+            // 服务端可能已经受理并执行了这次调用（5xx 尤其如此），不可重试
             throw new TransportFailure("实例返回 HTTP " + response.statusCode()
-                    + "：" + abbreviate(response.body()));
+                    + "：" + abbreviate(response.body()), null, false);
         }
 
         JsonNode parsed;
         try {
             parsed = mapper.readTree(response.body());
         } catch (Exception e) {
-            throw new TransportFailure("实例响应不是合法 JSON：" + abbreviate(response.body()), e);
+            // 响应体不合规说明请求已被处理过，不可重试
+            throw new TransportFailure("实例响应不是合法 JSON：" + abbreviate(response.body()), e, false);
         }
 
         log.info("[远程工具] {} ← 实例 {}{}，耗时 {}ms", toolName, replica.instanceId(),
@@ -184,14 +200,36 @@ public class RemoteToolExecutor implements ToolExecutor {
         return flat.length() <= 200 ? flat : flat.substring(0, 200) + "…";
     }
 
-    /** 传输层失败：换副本重试的信号（与"业务失败"区分开） */
+    /**
+     * 请求是否"确定没有被对端接收"。
+     *
+     * 只有连接阶段的失败才成立：连接被拒（对端没在监听）、域名解析不了、连接超时（还没建立起
+     * 可用连接）。读超时恰恰相反：请求已经发出、对端可能正在执行或已经执行完，只是响应
+     * 没按时回来，这种情况绝不能重试。
+     */
+    private static boolean requestNotDelivered(Throwable error) {
+        return error instanceof java.net.ConnectException
+                || error instanceof java.net.UnknownHostException
+                || error instanceof java.net.http.HttpConnectTimeoutException;
+    }
+
+    /**
+     * 传输层失败：换副本重试的信号（与"业务失败"区分开）。
+     *
+     * {@code safeToRetry} 是关键：只有"请求确定未送达"时换副本才是安全的，否则同一个逻辑
+     * 调用可能被两个副本各执行一次（非幂等工具表现为重复下单 / 重复扣款 / 重复发消息）。
+     */
     private static final class TransportFailure extends Exception {
-        TransportFailure(String message) {
-            super(message);
+
+        private final boolean safeToRetry;
+
+        TransportFailure(String message, Throwable cause, boolean safeToRetry) {
+            super(message, cause);
+            this.safeToRetry = safeToRetry;
         }
 
-        TransportFailure(String message, Throwable cause) {
-            super(message, cause);
+        boolean safeToRetry() {
+            return safeToRetry;
         }
     }
 }

@@ -22,21 +22,21 @@ import java.util.Map;
 /**
  * Excel 表格（{@code .xls} / {@code .xlsx}）解析器：{@code byte[] → List<Block>}。
  *
- * 表格是最接近「切片天生就该是表格」的格式 —— 没有任何结构可丢，所以这里的活只有两件：
+ * 表格是最接近「切片天生就该是表格」的格式，没有任何结构可丢，所以这里的活只有两件：
  * 把每个工作表取出来、渲染成 markdown 表格。分节按工作表走：
  * {@code section_path = 文件名 > 工作表名}，与 pdf 的「文件名 > 第N页」同形。
  *
- * .xls（HSSF）与 .xlsx（XSSF）用同一个入口 {@link WorkbookFactory#create} ——
+ * .xls（HSSF）与 .xlsx（XSSF）用同一个入口 {@link WorkbookFactory#create}：
  * 它按文件头判类型，所以「.xls 改名成 .xlsx」也能正确打开，不必自己按扩展名分叉。
  *
  * 四条关键约束（别再靠推理改回去）：
  *
  *   • 公式格必须传 {@link FormulaEvaluator}：不传的话 {@code formatCellValue} 返回的是
  *       公式文本（{@code C2*2}）而不是值。个别函数 POI 算不出来（外部引用、新函数），
- *       这时退回公式文本 —— 宁可让这一格露出原文，也不能让一个格子毁掉整张表。
+ *       这时退回公式文本，宁可让这一格露出原文，也不能让一个格子毁掉整张表。
  *   • 不能按 {@code getFirstRowNum()..getLastRowNum()} 遍历：稀疏表的区间可以很大，
  *       而 {@link Sheet} 的迭代器只会产出真实存在的行。
- *   • 合并单元格只有左上角有值，其余格子是空的 —— 必须按合并区域回填，
+ *   • 合并单元格只有左上角有值，其余格子是空的，必须按合并区域回填，
  *       否则纵向合并的「类别」列只有第一行有值，后面几行全空。
  *   • 取值用 {@link DataFormatter}：日期 / 数字按单元格自己的格式串出来
  *       （{@code 2026-05-29}），而不是序列号 {@code 46170}。
@@ -101,7 +101,7 @@ public final class ExcelReader {
         } catch (KnowledgeBaseException e) {
             throw e;
         } catch (Exception e) {
-            // 加密 / 损坏 / 实际是 csv 改了扩展名 —— 都在这一处，给明确的话术
+            // 加密 / 损坏 / 实际是 csv 改了扩展名，都在这一处，给明确的话术
             throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_UPLOAD_REJECTED,
                     "excel 解析失败（文件损坏、加密，或其实是 csv 改了扩展名）：" + e.getMessage(), e);
         }

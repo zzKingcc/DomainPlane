@@ -8,6 +8,9 @@ import com.zzkingcc.domainplane.api.agent.Domains;
 import com.zzkingcc.domainplane.api.agent.DomainPlaneAgent;
 import com.zzkingcc.domainplane.api.agent.DomainPlaneAgentFactory;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
+import com.zzkingcc.domainplane.api.event.AgentEventType;
+import com.zzkingcc.domainplane.clientcore.exception.ClientErrorCode;
+import com.zzkingcc.domainplane.clientcore.exception.ServerRejectedException;
 import com.zzkingcc.domainplane.api.event.AgentEvent;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
@@ -19,6 +22,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -102,18 +106,52 @@ class DefaultDomainPlaneAgentTest {
         assertTrue(ex.getTools().get(0).isRequireApproval());
     }
 
+    /**
+     * 服务端给的码必须<b>原样</b>到达宿主：不翻译成本地枚举、不替换文案、不猜测可重试性。
+     */
     @Test
-    void ask遇ERROR事件还原成带码异常() {
+    void ask遇ERROR事件原样透传服务端码与文案() {
         scripted = Flux.just(AgentEvent.error(SESSION, "指定的域不存在",
                 ErrorCode.DOMAIN_NOT_FOUND, "trace-9"));
 
-        DomainPlaneException ex = assertThrows(DomainPlaneException.class,
+        ServerRejectedException ex = assertThrows(ServerRejectedException.class,
                 () -> agentOf("ghost").ask(SESSION, "在吗"));
 
-        assertEquals(ErrorCode.DOMAIN_NOT_FOUND, ex.getErrorCode());
-        assertEquals(10004, ex.getCode());
+        assertEquals(ClientErrorCode.SERVER_REJECTED, ex.getClientCode(), "客户端侧只归类为'服务端拒绝'");
+        assertEquals(10004, ex.getServerCode(), "服务端的码一个字不改地带出来");
+        assertEquals("DOMAIN_NOT_FOUND", ex.getServerCodeName());
+        assertEquals("指定的域不存在", ex.getServerMessage(), "文案用服务端的，不由 SDK 重写一遍");
         assertTrue(ex.getMessage().contains("trace-9"), "traceId 要并进文案便于排障");
-        assertFalse(ex.isRetryable());
+        assertFalse(ex.isRetryable(), "服务端没声明可重试，就不替它下结论");
+    }
+
+    @Test
+    void 服务端给了本SDK不认识的码也原样带出而不是兜底成通用错误() {
+        // 这正是"翻译服务端码"最致命的地方：服务端加码后老 SDK 只能兜底，
+        // 宿主从此分不清"服务端说了什么"与"我这边没认出来"。透传没有这个问题。
+        scripted = Flux.just(new AgentEvent(AgentEventType.ERROR, SESSION, "服务端新加的码",
+                null, 99999, null, "trace-x"));
+
+        ServerRejectedException ex = assertThrows(ServerRejectedException.class,
+                () -> agentOf("customer").ask(SESSION, "在吗"));
+
+        assertEquals(99999, ex.getServerCode());
+        assertEquals("服务端新加的码", ex.getServerMessage());
+        assertNull(ex.getServerCodeName(), "本 SDK 不该编一个码名出来");
+    }
+
+    /**
+     * 可重试性由服务端随事件下发，SDK 照办：不是自己看着码推导出来的。
+     */
+    @Test
+    void ERROR事件带的可重试性原样透传() {
+        scripted = Flux.just(AgentEvent.error(SESSION, ErrorCode.ORCHESTRATION_FAILED, "trace-r"));
+
+        ServerRejectedException ex = assertThrows(ServerRejectedException.class,
+                () -> agentOf("customer").ask(SESSION, "在吗"));
+
+        assertEquals(Boolean.TRUE, ex.getServerRetryable(), "服务端说能重试，就原样带出来");
+        assertTrue(ex.isRetryable());
     }
 
     @Test
@@ -143,7 +181,7 @@ class DefaultDomainPlaneAgentTest {
     /**
      * 流被容器/网关中途掐断时，只有半截内容、没有终止事件。
      *
-     * <p>这曾被当成"流正常结束"，于是 ask/stream 把残缺答案当成功交给业务方 ——
+     * <p>这曾被当成"流正常结束"，于是 ask/stream 把残缺答案当成功交给业务方：
      * 现在必须判为失败。</p>
      */
     @Test
@@ -154,7 +192,7 @@ class DefaultDomainPlaneAgentTest {
 
         DomainPlaneException ex = assertThrows(DomainPlaneException.class,
                 () -> agentOf("customer").ask(SESSION, "查订单"));
-        assertEquals(ErrorCode.EXTERNAL_SERVICE_TIMEOUT.getCode(), ex.getErrorCode().getCode());
+        assertEquals(ClientErrorCode.STREAM_TRUNCATED, ex.getClientCode());
     }
 
     @Test
@@ -280,14 +318,14 @@ class DefaultDomainPlaneAgentTest {
                         .ask(SESSION, "在吗"));
         long elapsed = System.currentTimeMillis() - start;
 
-        assertEquals(ErrorCode.EXTERNAL_SERVICE_TIMEOUT.getCode(), ex.getErrorCode().getCode());
+        assertEquals(ClientErrorCode.TIMEOUT, ex.getClientCode());
         assertTrue(elapsed < 5_000, "应在上限内收场，实际耗时 " + elapsed + "ms");
     }
 
     @Test
     void answerTimeout非法值时回落默认上限而不是变成无上限() {
         // 0 / 负数都意味着"立刻放弃"或"无界"，两者都会让 ask 失去保护。
-        // 不能真跑一次 30 分钟的等待 —— 用反射读回落后的实际值断言
+        // 不能真跑一次 30 分钟的等待：用反射读回落后的实际值断言
         for (Duration bad : new Duration[]{Duration.ZERO, Duration.ofSeconds(-1), null}) {
             DefaultDomainPlaneAgent agent = new DefaultDomainPlaneAgent(fakeTransport, "customer", bad);
             assertEquals(DefaultDomainPlaneAgent.DEFAULT_ANSWER_TIMEOUT, answerTimeoutOf(agent),

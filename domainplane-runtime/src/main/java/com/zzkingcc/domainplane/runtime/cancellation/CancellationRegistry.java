@@ -14,16 +14,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * 任务取消信号中心。
  *
- * 停止标志与"执行中"标记都按会话状态键（(域, sessionId)）存放，与断点、记忆同键 ——
+ * 停止标志与"执行中"标记都按会话状态键（(域, sessionId)）存放，与断点、记忆同键：
  * 这三者必须同域，否则会出现"停到了另一个域的同名会话"。
  *
  * 清停止标志的时机是本类最容易出错的地方。编排任务要先进线程池排队，
  * 而用户可以在"排队中"就点停止。若在任务开始执行时才清一次标志，
- * 那次停止就被抹掉了 —— 用户看着界面上的"停止中"，任务照跑到底。
+ * 那次停止就被抹掉了，用户看着界面上的"停止中"，任务照跑到底。
  * 此类故障不报错、不留痕，只表现为"停止偶尔不灵"。
  *
  * 因此把清理唯一入口定为 {@link #prepareNewRound(String)}，且必须在提交进线程池之前
- * 调用（见 {@code AgentOrchestrationService#orchestrate}）。执行线程内一律不再清标志 ——
+ * 调用（见 {@code AgentOrchestrationService#orchestrate}）。执行线程内一律不再清标志：
  * 那一刻清除，等于抹掉排队期间用户的停止请求。
  *
  * @author zzkingcc
@@ -67,13 +67,18 @@ public class CancellationRegistry {
      * 新一轮的唯一准备动作：清掉上一轮遗留的停止标志。
      *
      * 调用时机是硬约束：必须在把任务提交进线程池之前。若挪到任务开始执行时再调，
-     * 排队期间用户点的停止会被这一次清理抹掉 —— 停止请求静默丢失，不报错、不留痕。
+     * 排队期间用户点的停止会被这一次清理抹掉，停止请求静默丢失，不报错、不留痕。
      *
-     * 与 {@link #tryMarkRunning(String)} 的顺序同样重要：本方法会清标志，
-     * 所以必须排在 {@code tryMarkRunning} 之前，否则被拒绝的并发请求会把正在跑那轮的
-     * 停止标志抹掉。
+     * 与 {@link #tryMarkRunning(String)} 共用同一把监视器，且本会话已有在跑的一轮时**不清**：
+     * 并发请求稍后一定会被 {@code tryMarkRunning} 拒掉，而它在这之前清一次标志，
+     * 抹掉的是用户对"正在跑那一轮"的停止请求，界面显示已停止，那一轮照跑到底，
+     * 仍然写记忆、写断点。
      */
-    public void prepareNewRound(String sessionKey) {
+    public synchronized void prepareNewRound(String sessionKey) {
+        if (running.contains(sessionKey)) {
+            // 上一轮尚未结束：本次是并发请求，什么都不该改，交给 tryMarkRunning 拒绝
+            return;
+        }
         if (flags.remove(sessionKey) != null) {
             log.debug("[取消信号] 会话[{}] 开始新一轮，清除上一轮遗留的停止标志", sessionKey);
         }
@@ -82,7 +87,7 @@ public class CancellationRegistry {
     /**
      * 清除会话的停止标志（无条件）。
      *
-     * 不要用它当"新一轮开始前的清理"—— 编排流程中那样用会在任务开始时抹掉
+     * 不要用它当"新一轮开始前的清理"，编排流程中那样用会在任务开始时抹掉
      * 排队期间的停止请求。本轮结束后由 {@code finally} 调用它是安全的：此刻没有并发的新一轮，
      * 若真有，也会被 {@code tryMarkRunning} 挡住。
      */
@@ -100,12 +105,12 @@ public class CancellationRegistry {
      *
      * @return true=获取成功，本次可以执行；false=已有在跑的一轮，应拒绝本次请求
      */
-    public boolean tryMarkRunning(String sessionKey) {
+    public synchronized boolean tryMarkRunning(String sessionKey) {
         return running.add(sessionKey);
     }
 
     /** 释放"执行中"标记；只在成功获取标记的那一轮的 finally 中调用 */
-    public void unmarkRunning(String sessionKey) {
+    public synchronized void unmarkRunning(String sessionKey) {
         running.remove(sessionKey);
     }
 
@@ -119,7 +124,7 @@ public class CancellationRegistry {
      *
      * 为什么"置标志"不够：停止标志只会被执行线程在下一个检查点读到，
      * 而在那之前它仍可能把记忆与断点写回 Redis。所以删域这类破坏性动作必须等到
-     * "执行中"标记真正被释放 —— 编排的 {@code finally} 是先写完记忆 / 断点，
+     * "执行中"标记真正被释放，编排的 {@code finally} 是先写完记忆 / 断点，
      * 再释放标记，所以标记消失就等于这一轮不会再写任何东西了。
      *
      * 停不下来的唯一原因是那一轮正卡在长耗时工具调用里（远程工具 30s、本地工具另有上限），

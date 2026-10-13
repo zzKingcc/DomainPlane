@@ -17,11 +17,11 @@ import java.util.Objects;
  *       与 {@code ExcelReader} / {@code PdfReader} 同列。
  *
  * 驱动导入的组件叫 {@code DocumentIngestor}（"导入文档的组件"），与本类
- * （"待导入的来源"）是同一组词但相反顺序，因此本类不叫 {@code IngestDocument} ——
+ * （"待导入的来源"）是同一组词但相反顺序，因此本类不叫 {@code IngestDocument}：
  * 那会让两种顺序同时存在，读代码时分不清谁是谁。
  *
  * 为什么不用 langchain4j 的 {@code Document}：docx / pdf 是二进制，而 {@code Document}
- * 只有 {@code text()}。把二进制塞进"统一字符集"那一步会有两种结果 ——
+ * 只有 {@code text()}。把二进制塞进"统一字符集"那一步会有两种结果：
  *
  *   • 二进制恰好能通过严格 UTF-8 → 乱码入库。这是最糟的一种：静默成功，
  *       检索出来全是垃圾，日志里一条警告都没有。
@@ -34,7 +34,7 @@ import java.util.Objects;
  */
 public final class IngestSource {
 
-    /** 二进制格式在上传返回值里的"编码"占位 —— 它压根没有文本编码这回事 */
+    /** 二进制格式在上传返回值里的"编码"占位，它压根没有文本编码这回事 */
     public static final String BINARY_ENCODING = "(binary)";
 
     private final byte[] content;
@@ -78,7 +78,7 @@ public final class IngestSource {
     /**
      * 已解码文本；二进制类返回 {@code null}。
      *
-     * 返回 {@code null} 而不是空串，是为了让"这个格式不该有文本"变成显式状态 ——
+     * 返回 {@code null} 而不是空串，是为了让"这个格式不该有文本"变成显式状态：
      * 二进制策略要是误取了它，立刻 NPE 而不是静默导入一堆空切片。
      */
     public String text() {

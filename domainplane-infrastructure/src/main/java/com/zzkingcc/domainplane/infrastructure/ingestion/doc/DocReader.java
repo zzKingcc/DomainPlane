@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  * 旧版 {@code .doc}（Word 97–2003，OLE2 二进制）解析器：{@code byte[] → List<Block>}。
  *
  * 为什么不是 Tika：Tika 的 HWPF 抽取器输出的是「格式无关纯文本」，标题层级与表格结构
- * 都会被拍平 —— 而这两样恰好是切片要的东西。所以直连 HWPF。
+ * 都会被拍平，而这两样恰好是切片要的东西。所以直连 HWPF。
  *
  * 标题层级有两路来源，顺序不能反：
  *
@@ -74,7 +74,7 @@ public final class DocReader {
             throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_UPLOAD_REJECTED,
                     "这是 Word 95 或更早版本保存的格式，解析器不支持；请用 Word 打开后另存为 .docx 再上传", e);
         } catch (Exception e) {
-            // 加密文档 / 损坏的 OLE2 / 实际是 docx 改了扩展名 —— 都落到这一处，给明确的话术
+            // 加密文档 / 损坏的 OLE2 / 实际是 docx 改了扩展名，都落到这一处，给明确的话术
             throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_UPLOAD_REJECTED,
                     "doc 解析失败（文件损坏、加密，或其实是 .docx 改了扩展名）：" + e.getMessage(), e);
         }
@@ -164,7 +164,7 @@ public final class DocReader {
             int n = Integer.parseInt(m.group(1));
             return n >= 1 && n <= 6 ? n : null;
         }
-        // 确实是标题样式但没有编号 —— 当一级处理，总好过退化成正文
+        // 确实是标题样式但没有编号，当一级处理，总好过退化成正文
         return 1;
     }
 

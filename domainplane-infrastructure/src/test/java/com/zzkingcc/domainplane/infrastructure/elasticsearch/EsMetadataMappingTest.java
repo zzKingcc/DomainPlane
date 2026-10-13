@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p><b>为什么这条要专门守</b>：键名对不齐不会编译失败、不会启动失败、不报错，
  * 只在运行时静默退化成默认值。最典型的一处：融合阶段同分时的二级排序键是
  * {@code chunk_seq}，一旦读不到就恒等于 {@code Integer.MAX_VALUE}，
- * 于是「保证同一问题两次检索顺序一致」退化成按内容哈希排 —— 内容一变顺序就跳，
+ * 于是「保证同一问题两次检索顺序一致」退化成按内容哈希排，内容一变顺序就跳，
  * 用户感知为答案在乱跳，而系统一切正常。</p>
  *
  * <p>ES mapping 是 JSON 字面量（{@code withJson} 的写法不支持插常量），
@@ -37,7 +37,7 @@ class EsMetadataMappingTest {
      * metadata 段的字段声明，形如 {@code "chunk_seq":  { "type": "integer" }}。
      *
      * <p>要求 {@code "type"} <b>紧跟</b> {@code &#123;}：mapping 里所有字段都把 type 写在第一项，
-     * 而 {@code "properties": &#123;} 后面跟的是子键名 —— 用 {@code [^}]*} 跨配会把
+     * 而 {@code "properties": &#123;} 后面跟的是子键名，用 {@code [^}]*} 跨配会把
      * 整段子字段的 type 记到 properties 名下（实测 doc_id 会被读成 null、
      * section_path 会被读成它的 keyword 子字段类型）。</p>
      */

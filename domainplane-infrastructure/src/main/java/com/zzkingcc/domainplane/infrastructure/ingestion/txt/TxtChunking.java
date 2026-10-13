@@ -7,7 +7,7 @@ package com.zzkingcc.domainplane.infrastructure.ingestion.txt;
  * 所以切片参数在这里落一份，由服务端启动时从 {@code domainplane.rag.chunking.*} 注入一次。
  *
  * 刻意保持极简：只有三项，其余阈值（页码正则、标题行长、层级数、跨页重复阈值…）
- * 全部是代码里的常量 —— 改就重新构建，避免配置面越摊越大。
+ * 全部是代码里的常量，改就重新构建，避免配置面越摊越大。
  *
  * @author zzkingcc
  */

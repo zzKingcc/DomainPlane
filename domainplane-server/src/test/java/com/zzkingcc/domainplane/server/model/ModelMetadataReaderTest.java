@@ -148,7 +148,7 @@ class ModelMetadataReaderTest {
     void 过滤器被忽略时判不出端点族() {
         Set<String> full = Set.of("a", "b");
         Map<String, Set<String>> bySubType = new LinkedHashMap<>();
-        /* 每个子类型都回了全量清单 —— 说明服务商不认 sub_type，任何结论都是假的 */
+        /* 每个子类型都回了全量清单：说明服务商不认 sub_type，任何结论都是假的 */
         bySubType.put("chat", Set.of("a", "b"));
         bySubType.put("embedding", Set.of("a", "b"));
 

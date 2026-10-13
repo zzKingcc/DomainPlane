@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>要盯的不只是"超时能不能触发"，还有一个更隐蔽的问题：工具执行被挪到隔离线程后
  * {@code ThreadLocal} 不跟随。其中 {@link RetrievalScope} 丢了会让知识库检索从
- * "本轮域 + 祖先链"退化成<b>全库检索</b> —— 那是越权读，而且不会报任何错。
+ * "本轮域 + 祖先链"退化成<b>全库检索</b>：那是越权读，而且不会报任何错。
  * 所以上下文传播与执行后清理都是这里的必测项。</p>
  */
 class ToolExecutorServiceTest {
@@ -347,7 +347,7 @@ class ToolExecutorServiceTest {
      * 单参函数式接口。
      *
      * <p>{@code ToolExecutor} 有两个参数（request + memoryId）不是函数式接口，不能直接写 lambda；
-     * 而夹具里 memoryId 恒为 null，用不到它 —— 这里收一个单参接口再包一层。</p>
+     * 而夹具里 memoryId 恒为 null，用不到它：这里收一个单参接口再包一层。</p>
      */
     @FunctionalInterface
     private interface ToolBody {

@@ -10,7 +10,7 @@ package com.zzkingcc.domainplane.infrastructure.ingestion.block;
  * 决定分片行为的是两个划分：
  *
  *   • 可切（{@link #PARAGRAPH} / {@link #LIST_ITEM} / {@link #QUOTE} / {@link #IMAGE}）：
- *       按语意攒行，交给 {@code Chunker} 按句子打包 —— 与 txt 完全同一套规则。
+ *       按语意攒行，交给 {@code Chunker} 按句子打包，与 txt 完全同一套规则。
  *   • 不可切（{@link #CODE} / {@link #TABLE}）：整块独占一片。代码块切成两半、
  *       表格去掉一半列，这条知识就废了。
  *
@@ -28,7 +28,7 @@ public enum BlockKind {
     PARAGRAPH,
 
     /**
-     * 列表项：保留 {@code -} / {@code *} / {@code 1.} 这些标记 ——
+     * 列表项：保留 {@code -} / {@code *} / {@code 1.} 这些标记，
      * 「会员权益包括：」后面跟一串列表项，标记本身就是检索线索。
      */
     LIST_ITEM,

@@ -6,6 +6,7 @@ import com.zzkingcc.domainplane.api.code.ErrorCode;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -24,7 +25,7 @@ import java.util.List;
  *
  * 连接基底统一为 OpenAI 兼容：四族端点全部走 OpenAI 兼容那套路径
  * （/images/generations、/rerank、/audio/speech、/audio/transcriptions），
- * 档案上不再有协议分派 —— 要接新能力在这个格式上扩即可。
+ * 档案上不再有协议分派，要接新能力在这个格式上扩即可。
  *
  * 无缓存：这四族都是一次性请求，不像对话那样会反复复用同一个客户端，所以本类保持无状态。
  *
@@ -201,6 +202,106 @@ public class ModelEndpointClient {
         return new TranscriptionResult(raw, null, raw);
     }
 
+    // ==================== 生视频 ====================
+
+    /**
+     * 提交生视频任务（OpenAI 兼容形态：{@code POST {baseUrl}/videos}）。
+     *
+     * <p><b>为什么是异步</b>：视频生成普遍要几十秒到几分钟，而平台侧一次工具调用的上限是
+     * 30 秒（{@code domainplane.tool.invoke-timeout-ms}）。把整段生成塞进一次同步调用必然超时，
+     * 所以这里只做"提交"，拿回任务号；生成进度由 {@link #videoStatus} 轮询，产出由
+     * {@link #downloadVideo} 取回。与生图 / 语音的一次性请求是两种形态，不该套同一个模子。</p>
+     *
+     * <p><b>协议为什么是这一套</b>：OpenAI 规范里没有像 {@code /images/generations} 那样
+     * 统一的视频端点，各家形态不一（见 {@code docs/模型检测与未识别绑定限制方案.md} §4）。
+     * 这里采用 OpenAI 现行的 videos 三件套，提交 {@code POST /videos}、查状态
+     * {@code GET /videos/{id}}、取内容 {@code GET /videos/{id}/content}，它是目前唯一
+     * 有公开文档、且与本类其余各族的 OpenAI 兼容基调一致的形态；接新服务商在这套路径上扩适配即可。</p>
+     *
+     * @param profile 档案（取 baseUrl / apiKey / modelName）
+     * @param req     生视频请求（prompt 必填；size / seconds 可选）
+     */
+    public VideoTask createVideo(ModelProfile profile, VideoRequest req) {
+        if (req == null || isBlank(req.prompt())) {
+            throw new ModelEndpointException(ErrorCode.INVALID_PARAMETER, "生视频请求缺少 prompt");
+        }
+        var body = mapper.createObjectNode();
+        body.put("model", profile.modelName());
+        body.put("prompt", req.prompt());
+        putIfPresent(body, "size", req.size());
+        putIntIfPresent(body, "seconds", req.seconds());
+
+        String raw = postJson(endpoint(profile, "videos"), profile.apiKey(), body);
+        return parseVideoTask(readTree(raw));
+    }
+
+    /**
+     * 查询生视频任务状态（{@code GET {baseUrl}/videos/{id}}）。
+     *
+     * <p>状态词表按 OpenAI：{@code queued} / {@code in_progress} / {@code completed} / {@code failed}。
+     * 完成时的成品地址各家放在 {@code url}、{@code data[0].url} 或 {@code content.url} 下，
+     * 三种都认；认不到地址也不报错，取内容走 {@link #downloadVideo}，不依赖这个地址。</p>
+     */
+    public VideoTask videoStatus(ModelProfile profile, String taskId) {
+        if (isBlank(taskId)) {
+            throw new ModelEndpointException(ErrorCode.INVALID_PARAMETER, "生视频任务号不能为空");
+        }
+        String raw = getJson(endpoint(profile, "videos/" + taskId.trim()), profile.apiKey());
+        return parseVideoTask(readTree(raw));
+    }
+
+    /**
+     * 取回成品视频字节（{@code GET {baseUrl}/videos/{id}/content}）。
+     *
+     * <p>只在任务已完成后调用。返回原始字节由调用方决定落盘还是灌进附件暂存区，
+     * 与 {@link #textToSpeech} 同一口径：客户端不碰存储。</p>
+     */
+    public VideoResult downloadVideo(ModelProfile profile, String taskId) {
+        if (isBlank(taskId)) {
+            throw new ModelEndpointException(ErrorCode.INVALID_PARAMETER, "生视频任务号不能为空");
+        }
+        HttpResponse<byte[]> resp = exchange(endpoint(profile, "videos/" + taskId.trim() + "/content"),
+                profile.apiKey(), HttpRequest.BodyPublishers.noBody(), null, "GET");
+        String contentType = resp.headers().firstValue("Content-Type").orElse("video/mp4");
+        return new VideoResult(resp.body(), contentType);
+    }
+
+    /** 任务对象 → 状态视图：id / status / url / error 四个字段各家命名略有出入，这里统一归一 */
+    private static VideoTask parseVideoTask(JsonNode root) {
+        String id = textOrNull(root, "id");
+        if (id == null) {
+            id = textOrNull(root, "task_id");
+        }
+        String status = textOrNull(root, "status");
+        String url = textOrNull(root, "url");
+        if (url == null) {
+            JsonNode data = root.get("data");
+            if (data != null && data.isArray() && !data.isEmpty()) {
+                url = textOrNull(data.get(0), "url");
+            }
+        }
+        if (url == null) {
+            JsonNode content = root.get("content");
+            if (content != null && content.isObject()) {
+                url = textOrNull(content, "url");
+            }
+        }
+        String error = null;
+        JsonNode err = root.get("error");
+        if (err != null && !err.isNull()) {
+            error = err.isObject() ? textOrNull(err, "message") : err.asText(null);
+        }
+        return new VideoTask(id, status, url, error);
+    }
+
+    private static String textOrNull(JsonNode node, String field) {
+        if (node == null || !node.has(field)) {
+            return null;
+        }
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? null : value.asText(null);
+    }
+
     // ==================== HTTP ====================
 
     private String postJson(String url, String apiKey, com.fasterxml.jackson.databind.node.ObjectNode body) {
@@ -227,16 +328,33 @@ public class ModelEndpointClient {
         return resp.body();
     }
 
+    /** 发 GET 请求，返回响应体文本（生视频查状态用） */
+    private String getJson(String url, String apiKey) {
+        HttpResponse<byte[]> resp = exchange(url, apiKey,
+                HttpRequest.BodyPublishers.noBody(), null, "GET");
+        return new String(resp.body(), StandardCharsets.UTF_8);
+    }
+
     /** 发请求并校验状态：非 2xx 一律抛 {@link ModelEndpointException}（带服务商返回的具体错误） */
     private HttpResponse<byte[]> exchange(String url, String apiKey,
                                           HttpRequest.BodyPublisher body, String contentType) {
+        return exchange(url, apiKey, body, contentType, "POST");
+    }
+
+    /** 发请求并校验状态：非 2xx 一律抛 {@link ModelEndpointException}（带服务商返回的具体错误） */
+    private HttpResponse<byte[]> exchange(String url, String apiKey,
+                                          HttpRequest.BodyPublisher body, String contentType,
+                                          String method) {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(60))
                 .header("Authorization", "Bearer " + (apiKey == null ? "" : apiKey))
-                .header("Accept", "application/json, */*")
-                .header("Content-Type", contentType == null ? "application/json" : contentType);
-        HttpRequest request = builder.POST(body).build();
+                .header("Accept", "application/json, */*");
+        /* Content-Type 只在有请求体时声明：GET 带一个 JSON Content-Type 有些网关会直接拒 */
+        if (contentType != null) {
+            builder.header("Content-Type", contentType);
+        }
+        HttpRequest request = builder.method(method, body).build();
         try {
             HttpResponse<byte[]> resp = http.send(request, HttpResponse.BodyHandlers.ofByteArray());
             if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
@@ -437,5 +555,97 @@ public class ModelEndpointClient {
 
     /** 语音识别结果（text 为主，language / raw 为辅） */
     public record TranscriptionResult(String text, String language, String raw) {
+    }
+
+    /** 生视频请求（prompt 必填；size / seconds 可空 = 由服务商默认） */
+    public record VideoRequest(String prompt, String size, Integer seconds) {
+    }
+
+    /**
+     * 生视频任务视图（提交与查状态共用）。
+     *
+     * @param taskId 任务号（服务商侧）
+     * @param status 状态：{@code queued} / {@code in_progress} / {@code completed} / {@code failed}
+     * @param url    完成时的成品地址；未完成或服务商不给地址时为 {@code null}
+     * @param error  失败原因；非失败为 {@code null}
+     */
+    public record VideoTask(String taskId, String status, String url, String error) {
+
+        /** 是否已出成品 */
+        public boolean completed() {
+            return "completed".equalsIgnoreCase(status) || "succeeded".equalsIgnoreCase(status);
+        }
+
+        /** 是否已失败 */
+        public boolean failed() {
+            return "failed".equalsIgnoreCase(status) || "error".equalsIgnoreCase(status);
+        }
+    }
+
+    /**
+     * 取回成品，超过 {@code maxBytes} 立即放弃（返回 {@link VideoResult#tooLarge()}）。
+     *
+     * <p>与 {@link #downloadVideo(ModelProfile, String)} 的差别只在读法：这里按流读、边读边计数，
+     * 超限就停。老方法用 {@code ofByteArray()} 一次性收完，上限是在成品已经完整躺在堆里
+     * 之后才判的，一个几百 MB 的成品就足以把进程拖死（字节数组 + Base64 + JSON 三份副本）。</p>
+     *
+     * <p>先用 {@code Content-Length} 挡一次：能挡住时连传输都省掉。</p>
+     */
+    public VideoResult downloadVideo(ModelProfile profile, String taskId, long maxBytes) {
+        if (isBlank(taskId)) {
+            throw new ModelEndpointException(ErrorCode.INVALID_PARAMETER, "生视频任务号不能为空");
+        }
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(endpoint(profile, "videos/" + taskId.trim() + "/content")))
+                .timeout(Duration.ofSeconds(60))
+                .header("Authorization", "Bearer " + (profile.apiKey() == null ? "" : profile.apiKey()))
+                .header("Accept", "video/*, */*")
+                .GET()
+                .build();
+        try {
+            HttpResponse<InputStream> resp = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            String contentType = resp.headers().firstValue("Content-Type").orElse("video/mp4");
+            try (InputStream in = resp.body()) {
+                if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
+                    String detail = describeError(new String(in.readAllBytes(), StandardCharsets.UTF_8),
+                            resp.statusCode());
+                    throw new ModelEndpointException(ErrorCode.LLM_UNAVAILABLE,
+                            "取回视频成品失败（HTTP " + resp.statusCode() + "）：" + detail);
+                }
+                long declared = resp.headers().firstValueAsLong("Content-Length").orElse(-1L);
+                if (declared > maxBytes) {
+                    return new VideoResult(null, contentType, true);
+                }
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                byte[] buffer = new byte[8192];
+                long total = 0;
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    total += read;
+                    if (total > maxBytes) {
+                        return new VideoResult(null, contentType, true);
+                    }
+                    out.write(buffer, 0, read);
+                }
+                return new VideoResult(out.toByteArray(), contentType, false);
+            }
+        } catch (ModelEndpointException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ModelEndpointException(ErrorCode.LLM_UNAVAILABLE,
+                    "取回视频成品失败：" + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 生视频成品（原始字节 + 内容类型）
+     *
+     * @param tooLarge 成品体积超过调用方给的上限，此时 {@code content} 为 {@code null}
+     */
+    public record VideoResult(byte[] content, String contentType, boolean tooLarge) {
+
+        public VideoResult(byte[] content, String contentType) {
+            this(content, contentType, false);
+        }
     }
 }

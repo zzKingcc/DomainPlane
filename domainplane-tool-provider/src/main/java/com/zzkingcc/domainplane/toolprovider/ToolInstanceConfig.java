@@ -11,7 +11,7 @@ package com.zzkingcc.domainplane.toolprovider;
  * @param instanceId              实例标识；重连必须沿用同一个，否则会留下一个摘不掉的旧副本
  * @param endpoint                本实例的工具调用回流地址（服务端 POST 到它来执行工具），
  *                                必须是服务端能访问到的地址；由配置层解析（显式配置优先，留空则按本进程端口推导）。
- *                                推导不出来时为空串 —— 表示"本实例不接反向调用"，不影响注册与心跳
+ *                                推导不出来时为空串：表示"本实例不接反向调用"，不影响注册与心跳
  * @param heartbeatIntervalSeconds 心跳周期（秒）。服务端判死窗默认 35s = 它的 7 倍
  * @param maxBackoffSeconds       心跳连续失败时的退避上限（秒）。默认 20s，必须小于判死窗
  *                                （否则实例在被判死前都来不及重连）

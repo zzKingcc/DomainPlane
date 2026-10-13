@@ -55,6 +55,15 @@ public class AccountStore {
     private volatile long cacheMtime = MISSING_MTIME;
     private volatile boolean cacheLoaded;
 
+    /**
+     * 本实例是否读到过有效账号（含启动期用种子落盘、以及运行期保存）。
+     *
+     * 用来区分两种 {@link StoreState#ABSENT}：一种是"首次部署、尚未初始化"，应当放行以便进
+     * 管控台建号；另一种是"本来好好的、运行期文件消失了"，此时放行等于把实例拱手让人
+     * （初始化入口是免检的），必须 fail-closed。
+     */
+    private volatile boolean everInitialized;
+
     public AccountStore(StorageLocations storage) {
         this.accountFile = storage.settingsDir().resolve("accounts.json");
     }
@@ -135,6 +144,9 @@ public class AccountStore {
         state = next;
         cacheMtime = lastModified();
         cacheLoaded = true;
+        if (next == StoreState.OK) {
+            everInitialized = true;
+        }
 
         if (enteringCorrupted) {
             log.error("[账号] 账号文件存在但无法解析，进入【降级】状态：受保护接口一律拒绝、初始化入口关闭。"
@@ -167,7 +179,7 @@ public class AccountStore {
     /**
      * 覆盖写入账号文件（原子改名），并同步刷新缓存。
      *
-     * @throws IllegalStateException 写盘失败。必须让调用方感知——静默失败会让用户以为改密已生效
+     * @throws IllegalStateException 写盘失败。必须让调用方感知，静默失败会让用户以为改密已生效
      */
     public synchronized void save(AccountSettings account) {
         try {
@@ -179,6 +191,17 @@ public class AccountStore {
         state = StoreState.OK;
         cacheMtime = lastModified();
         cacheLoaded = true;
+        everInitialized = true;
+    }
+
+    /**
+     * 本实例是否读到过有效账号（用途见 {@link #everInitialized}）。
+     *
+     * @return true = 曾经可用。此后若再变成"无账号"，那是异常而非"待初始化"
+     */
+    public boolean everInitialized() {
+        ensureFresh();
+        return everInitialized;
     }
 
     /** 账号文件路径（供管控台展示，便于运维确认落盘位置与恢复方式） */

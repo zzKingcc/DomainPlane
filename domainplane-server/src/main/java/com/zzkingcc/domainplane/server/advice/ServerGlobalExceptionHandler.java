@@ -149,7 +149,7 @@ public class ServerGlobalExceptionHandler {
      * 这个异常在请求进入 Controller 之前由容器抛出，
      * 所以 {@code KnowledgeBaseService} 里那段基于 {@code RagProperties} 的大小校验
      * 根本没机会执行。它必须有自己的 handler：落到通用兜底会是 {@code UNEXPECTED_ERROR}
-     * （HTTP 500、retryable=true），用户看到"服务暂时不可用，请稍后重试" ——
+     * （HTTP 500、retryable=true），用户看到"服务暂时不可用，请稍后重试"：
      * 重试永远不会成功，而且"文件太大"这个唯一有用的信息被彻底丢掉。
      */
     @ExceptionHandler(MaxUploadSizeExceededException.class)
@@ -251,11 +251,14 @@ public class ServerGlobalExceptionHandler {
     }
 
     /**
-     * 存储运行时不可用 —— "配了但连不上"的那一档（90004，ERROR + 堆栈）
+     * 存储运行时不可用："配了但连不上"的那一档（90004，ERROR + 堆栈）
      */
     private ResponseEntity<Map<String, Object>> storageUnavailable(Throwable e, String summary) {
         log.error("[全局异常][STORAGE] {}(code=90004): {}", summary, e.getMessage(), e);
-        return build(ErrorCode.STORAGE_UNAVAILABLE, summary + "：" + rootMessage(e));
+        // 原文（含 Redis / ES 的地址、端口、驱动报错）只进日志：调用方拿到 traceId 就够了。
+        // detail 不填：90004 是 5xx，build 本来也会把它拦下，这里显式留空是让"不给"这件事
+        // 在读代码时就看得见，而不是靠读者去推导过滤规则。
+        return build(ErrorCode.STORAGE_UNAVAILABLE, null);
     }
 
     /**
@@ -287,12 +290,26 @@ public class ServerGlobalExceptionHandler {
         return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
     }
 
-    private ResponseEntity<Map<String, Object>> build(ErrorCode errorCode, String detail) {
+    /**
+     * 组装错误响应体。
+     *
+     * <p>{@code error} 取码的<b>对外文案</b>（{@link ErrorCode#getUserMessage()}），不是
+     * {@code getMessage()}：后者是运维文案，里面可以有内部术语（"图检查点读写失败"里的"图"
+     * 指编排状态图，在带图的会话里报出来必然被读成图片故障）。终端用户只会看到这一份。</p>
+     *
+     * <p>{@code detail} 只对 4xx 下发：4xx 是"调用方填错了"，补充信息告诉他怎么改，
+     * 有明确价值且内容可控（"同名文档已存在"）。<b>5xx 一律不给 detail</b>：那是服务端故障，
+     * 补充信息多半是底层异常原文（Redis / ES 的地址、端口、驱动报错），对外部调用方没有
+     * 排障价值，只有信息泄露；排障走 traceId 回查服务端日志。</p>
+     */
+    // 包私有而非 private：给同包的测试直接断言"对外发了什么"留一个口子：
+    // 这是全站唯一的对外错误出口，用反射去测它不值得。
+    ResponseEntity<Map<String, Object>> build(ErrorCode errorCode, String detail) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("code", errorCode.getCode());
         body.put("codeName", errorCode.name());
-        body.put("error", errorCode.getMessage());
-        body.put("detail", detail);
+        body.put("error", errorCode.getUserMessage());
+        body.put("detail", errorCode.getHttpStatus() >= 500 ? null : detail);
         // 前端据此决定"退避重试"还是"直接提示"，不必自己维护一份可重试码清单
         body.put("retryable", errorCode.isRetryable());
         body.put("action", errorCode.getAction());

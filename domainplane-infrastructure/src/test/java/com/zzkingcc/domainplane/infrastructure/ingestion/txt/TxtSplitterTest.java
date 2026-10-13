@@ -34,7 +34,7 @@ class TxtSplitterTest {
      *
      * <p>此前每字符都重建一次 String 并全量数长度，一个 20,000 字的行会放大到数亿次字符操作；
      * 而导入是全局串行的（{@code Semaphore(1)}），一条这样的数据就能卡死整个知识库队列。
-     * 这里用「同样的输入，耗时不随长度线性放大」来守住 —— 留足余量避免 CI 抖动误报。</p>
+     * 这里用「同样的输入，耗时不随长度线性放大」来守住，留足余量避免 CI 抖动误报。</p>
      */
     @Test
     void veryLongLineWithoutPunctuationDoesNotBlowUp() {
@@ -219,9 +219,9 @@ class TxtSplitterTest {
     @Test
     void 英文句点只在跟空白或行尾时断句() {
         List<String> sentences = Chunker.splitSentences(
-                "版本 v1.0-beta.1 已发布。官网 api.example.com 可以查。");
+                "版本 v1.0-beta.2 已发布。官网 api.example.com 可以查。");
         assertEquals(2, sentences.size(), "1.0 / api.example.com 不能被句点切开：" + sentences);
-        assertTrue(sentences.get(0).contains("v1.0-beta.1"));
+        assertTrue(sentences.get(0).contains("v1.0-beta.2"));
         assertTrue(sentences.get(1).contains("api.example.com"));
     }
 

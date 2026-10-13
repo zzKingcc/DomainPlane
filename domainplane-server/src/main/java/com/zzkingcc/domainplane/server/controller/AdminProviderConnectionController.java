@@ -23,13 +23,13 @@ import java.util.Map;
  *
  * 一条自定义配置 = 名称 + 服务商地址 +（可选）密钥。它与内置配置项一起出现在
  * 模型表单顶部的预设下拉里，分两段展示：上「内置配置项」、下「自定义配置项」。
- * 选中一条即把地址、密钥一起填好 —— 不用自己对齐"这条地址配哪把 Key"。
+ * 选中一条即把地址、密钥一起填好，不用自己对齐"这条地址配哪把 Key"。
  *
  * 名称在「内置 + 自定义」整体内唯一：两段共用一个选择框，重名就分不清点的是哪一条。
  * 内置名由 {@link ModelPresets} 固定，所以这里在写之前先做一次跨段查重。
  *
  * 凭据面比档案面更严，体现在只有一处：{@link #resolve(String)}。
- * 列表接口只回地址与脱敏密钥，明文只在用户于下拉里明确点了某个名称时才单独取一次 ——
+ * 列表接口只回地址与脱敏密钥，明文只在用户于下拉里明确点了某个名称时才单独取一次，
  * 页面每次打开就把全库明文拉进浏览器内存没有必要，而档案列表里的 Key 本来就是脱敏展示的。
  *
  * 删除不牵连档案：库里存的是"快捷填充"，档案里存的是各自的明文副本，
@@ -82,7 +82,7 @@ public class AdminProviderConnectionController {
         }
         String name = body.getName() == null ? "" : body.getName().trim();
         /* 内置配置项的名字是保留字：下拉里两段共用一个选择框，重名就分不清点的是哪一条。
-           只查名字，不查地址 —— 同一家服务商配两条不同密钥是合理需求。 */
+           只查名字，不查地址，同一家服务商配两条不同密钥是合理需求。 */
         for (ModelPresets.Preset preset : ModelPresets.all()) {
             if (preset.label().equalsIgnoreCase(name)) {
                 throw new BaseException(ErrorCode.INVALID_PARAMETER,
@@ -106,7 +106,7 @@ public class AdminProviderConnectionController {
     /**
      * 按名称删除。
      *
-     * 刻意不级联改档案：档案里的地址与密钥是各自独立的明文副本，没有指向本库的引用 ——
+     * 刻意不级联改档案：档案里的地址与密钥是各自独立的明文副本，没有指向本库的引用，
      * 若在这里去"清理"档案，改的是用户没要求改的配置。返回文案把这一点说清楚即可。
      */
     @DeleteMapping

@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>为什么这条重要：{@code complete()} 会同步触发 sink 的 {@code onDispose}，而 onDispose 里靠
  * {@link StreamSinkRegistry#isCurrent} 判断"这是不是我这一轮"。若在注销前就 complete，
- * {@code isCurrent} 仍为 true，于是把停止标志打到<b>同一个 key 上正在执行的那一轮</b>身上 ——
+ * {@code isCurrent} 仍为 true，于是把停止标志打到<b>同一个 key 上正在执行的那一轮</b>身上：
  * 一个被正常拒绝的请求，亲手摧毁了一个正在跑的合法请求。</p>
  */
 class StreamSinkRegistryTest {
@@ -26,7 +26,7 @@ class StreamSinkRegistryTest {
     /**
      * 捕获 {@code Flux.create} 给出的真 {@link FluxSink}，并挂上 onDispose 回调。
      *
-     * <p>onDispose 是<b>注册在 sink 上</b>的，与是否已订阅无关；complete() 会同步触发它 ——
+     * <p>onDispose 是<b>注册在 sink 上</b>的，与是否已订阅无关；complete() 会同步触发它：
      * 这一点正是被测行为的前提。</p>
      */
     private static final class SinkHolder {

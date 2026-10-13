@@ -17,9 +17,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 一期语义：记忆<b>只增不淘汰</b>，到上限由<b>入口</b>拒绝新一轮（会话作废、换 sessionId）。
+ * 记忆<b>只增不淘汰</b>；{@code capacityFor} 的判定口径只作自检，主线不再用它拒绝开轮。
  *
- * <p>上限只约束"能不能开新一轮"，不约束"能不能收尾"——最终回答永远允许写入，
+ * <p>判定只约束"存了多少"，不约束"这轮给模型看多少"；最终回答永远允许写入，
  * 否则会留下有问无答的孤立提问。</p>
  */
 class DualConstraintChatMemoryTest {
@@ -167,7 +167,7 @@ class DualConstraintChatMemoryTest {
     /**
      * 不变式：<b>任何余量下，模拟完整一轮之后总条数都不超过上限</b>。
      *
-     * <p>逐个余量扫过去，是因为漏洞只在特定窗口出现 ——
+     * <p>逐个余量扫过去，是因为漏洞只在特定窗口出现：
      * {@code maxMessages - 2} 时"按 2 预留"判定为放行，而实际写入 3 条。
      * 只测一个余量会漏掉这个窗口，只测"判定返回 false 就断言没写"则是同义反复
      * （判定与写入用同一个开关，天然不可能超）。</p>

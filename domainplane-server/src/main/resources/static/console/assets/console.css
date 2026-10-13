@@ -145,7 +145,7 @@ body {
 
 /* ===== 按钮 ===== */
 /* 按钮文案一律不折行：这些标签都是「保存」「设为可调用」这类短中文，而中文可以在任意两字
-   之间断行 —— 所在 flex 行一紧就会被挤成「设/为/可/调/用」竖排。宁可让整行换行
+   之间断行，所在 flex 行一紧就会被挤成「设/为/可/调/用」竖排。宁可让整行换行
    （.page-head .actions / .btn-row / .card-foot 都已 flex-wrap: wrap）。
    这与 .tag / .count-badge / .mbadge / .dirty 已有的 nowrap 是同一条规矩。 */
 button {
@@ -177,7 +177,7 @@ button.danger { background: var(--red); }
 
 /* ===== 表单 ===== */
 /* width:100% + 内边距只对「文本类」输入成立。checkbox / radio 一旦被这条命中，就会变成
-   一个占满所在容器的方框 —— 这正是「可调用」「每 10 秒自动刷新」被挤成竖排的真正原因：
+   一个占满所在容器的方框，这正是「可调用」「每 10 秒自动刷新」被挤成竖排的真正原因：
    在 flex 容器里，百分比宽度按容器最终宽度解析，复选框吃光整行，旁边的中文只剩一个字
    的位置；在行内 label 里（知识库「覆盖更新」），它把说明文字顶到下一行，于是同一行里
    垂直居中的「上传」按钮看起来浮在文字上面。 */
@@ -198,7 +198,7 @@ input[type="checkbox"], input[type="radio"] {
     vertical-align: middle;
     accent-color: var(--primary);
 }
-/* 文件框保留输入框外观，但不独占整行 —— 否则「上传」按钮会被挤到单独一行 */
+/* 文件框保留输入框外观，但不独占整行，否则「上传」按钮会被挤到单独一行 */
 input[type="file"] { width: auto; }
 input:focus, select:focus { outline: 2px solid var(--primary-dim); border-color: var(--primary); }
 input:disabled { background: #f8fafc; color: var(--muted); }
@@ -312,7 +312,7 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 .seg .spacer { flex: 1 1 auto; }
 
 /* 空状态：一个虚线框说明"没有"并给出下一步。
-   刻意不给可编辑的表单框 —— 没有配置时最该做的是告诉用户"还没有"，而不是摆一个空输入框等着被填错。 */
+   刻意不给可编辑的表单框，没有配置时最该做的是告诉用户"还没有"，而不是摆一个空输入框等着被填错。 */
 .empty-box {
     border: 1px dashed var(--border);
     background: #fafbfc;
@@ -327,6 +327,10 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 /* 模型卡片内的信息行（键值对） */
 .model-meta { display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.6; }
 .model-meta .k { display: inline-block; min-width: 92px; color: var(--muted); }
+/* 「上下文长度」输入框：宽度必须收窄，输入框默认 width:100%，不收的话单位会飘到行尾，
+   这一行也会比别的信息行抢眼得多。改动即存，见 models.html 的 saveContextWindow。 */
+.model-meta .model-ctx { width: 120px; }
+.model-meta .ctx-unit { margin-left: 6px; color: var(--muted); font-size: 12.5px; }
 
 .mbadge {
     font-size: 12px; padding: 2px 8px; border-radius: 10px;
@@ -440,7 +444,7 @@ tbody tr:hover { background: #fcfcfd; }
 .tag.public { background: #ecfdf5; color: var(--green); }
 .perm-none { color: var(--muted); }
 
-/* 可点选的声明 chip：与 .tag 同一套视觉，但「未选 / 已选」必须一眼分得开 ——
+/* 可点选的声明 chip：与 .tag 同一套视觉，但「未选 / 已选」必须一眼分得开，
    模型类型与模态现在由用户声明，看不清"哪些选了"就等于没声明。 */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .chip {
@@ -557,12 +561,12 @@ tbody tr:hover { background: #fcfcfd; }
 /* 「更新」按钮：无改动 → disabled（全局 button:disabled 就是灰的），有改动才亮起来。
    它挂在卡片头部（删除左侧），不再是绿框里单独的一行。 */
 .tune-save { font-size: 12px; padding: 4px 12px; }
-/* 参数行：网格里的一格，比通用 .field 更紧凑 —— 框内是密集参数区，不是主表单。
+/* 参数行：网格里的一格，比通用 .field 更紧凑，框内是密集参数区，不是主表单。
    label 只指「参数名」那一层，故用 > 限定直接子元素：bool 的开关本身也是 label，
    不限定的话会被这条规则染上参数名的字号与下距，开关就浮起来了。 */
 .tune-field { margin-bottom: 0; }
 .tune-field > label { margin-bottom: 3px; font-size: 12px; }
-/* 分档进度条要横排 4–5 档，窄列会把档名截断 —— 让它独占一整行 */
+/* 分档进度条要横排 4–5 档，窄列会把档名截断，让它独占一整行 */
 .tune-field-wide { grid-column: 1 / -1; }
 /* 绿框里的输入控件比页面其它表单再小一档：框内是密集参数区，不是主表单 */
 .tune-box input:not([type="checkbox"]):not([type="radio"]), .tune-box select {
@@ -571,7 +575,7 @@ tbody tr:hover { background: #fcfcfd; }
 }
 /* ---------- bool 参数的开关（滑块）----------
    原生复选框藏起来但留在 DOM 与 Tab 序里：键盘仍可聚焦、可空格切换，
-   :checked / :disabled 靠相邻兄弟选择器把状态画到轨道上 —— 不改任何 JS。 */
+   :checked / :disabled 靠相邻兄弟选择器把状态画到轨道上，不改任何 JS。 */
 .tune-switch { position: relative; display: inline-flex; align-items: center; }
 .tune-switch input[type="checkbox"] {
     position: absolute;
@@ -609,7 +613,7 @@ tbody tr:hover { background: #fcfcfd; }
 .think-switch-label { color: var(--muted); white-space: nowrap; }
 /* ---------- 卡片头部的「是否回写工具执行信息」开关（域空间页） ----------
    与 .think-switch 同一副面孔：轨道复用 .tune-switch，这里只补说明文字。
-   只渲染在可调用单元（叶子域）卡片上 —— 装配节点不能作为入口，开关无意义。 */
+   只渲染在可调用单元（叶子域）卡片上，装配节点不能作为入口，开关无意义。 */
 .echo-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; }
 .echo-switch-label { color: var(--muted); white-space: nowrap; }
 /* 中文参数名后的英文（wire = 实际发给服务商的字段名）：弱化、等宽，
@@ -621,7 +625,7 @@ tbody tr:hover { background: #fcfcfd; }
     color: #94a3b8;
     font-family: ui-monospace, Menlo, Consolas, monospace;
 }
-/* 多行参数（停止序列）：补上全局只给 input / select 的边框与内边距 ——
+/* 多行参数（停止序列）：补上全局只给 input / select 的边框与内边距，
    否则吃浏览器默认样式，文字贴着边框，且与本页其它输入框不一致。 */
 .tune-field textarea {
     width: 100%;
@@ -640,7 +644,7 @@ tbody tr:hover { background: #fcfcfd; }
 .tune-field textarea:disabled { background: #f8fafc; color: var(--muted); }
 /* ---------- 分档进度条（display:"bar" 的有序枚举，如「思考强度」）----------
    一排等宽档位 = 把"有哪几档、现在在哪一档"一次摊平。左侧档位算已点亮（浅绿），
-   当前档实绿加重，档位说明另起一行 —— 档位名短（none/low/high）、说明长（含"默认 X"），
+   当前档实绿加重，档位说明另起一行，档位名短（none/low/high）、说明长（含"默认 X"），
    挤在同一行必然被截断，分两行才都读得全。轨道底色让它读起来是"一条条"，不是一个下拉框。 */
 .tune-bar { display: flex; flex-direction: column; gap: 4px; }
 .tune-bar-track { display: flex; gap: 4px; padding: 3px; background: #f1f5f9; border-radius: 8px; }

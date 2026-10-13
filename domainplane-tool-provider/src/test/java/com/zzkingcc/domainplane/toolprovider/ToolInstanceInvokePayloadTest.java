@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code /domainplane/invoke} 的入参容错。
  *
  * <p>controller 是 {@code @RequestBody(required = false)}，请求体可以整个缺失，
- * 此时必须回一个协议化的失败响应，而不是抛 NPE 让容器吐 500 + 堆栈 ——
+ * 此时必须回一个协议化的失败响应，而不是抛 NPE 让容器吐 500 + 堆栈：
  * 这个端点按设计是不鉴权的，任何人都能匿名 POST 一个空 body。</p>
  */
 class ToolInstanceInvokePayloadTest {

@@ -18,7 +18,7 @@ import java.util.Map;
  * 有没有适配、适配的调优 schema 是什么」。管控台据此决定参数调优工具栏的显隐与渲染。
  *
  * 「未适配就不能调优」的强制点在档案保存时的复核（{@code AdminModelProfileController#save}），
- * 不在这里 —— 本接口被绕过不影响任何状态。
+ * 不在这里：本接口被绕过不影响任何状态。
  *
  * 路径在 {@code /admin/**} 之下，鉴权由凭证拦截器统一处理。
  *
@@ -38,10 +38,17 @@ public class AdminModelAdapterController {
      * 试匹配：用户一边填表一边问「这家这个模型有没有适配」。
      *
      * 响应形状按设计文档 §4.3：{@code adapter.params} 直接是 chat 族的参数 schema 数组
-     * （P0 只消费 chat 族）。不下发内部结构（match / families map）—— 前端不该
+     * （P0 只消费 chat 族）。不下发内部结构（match / families map）：前端不该
      * 依赖服务端存储形态，多族参数进来时（P1）再长响应字段。
      *
      * 请求体两个字段都可空：空 baseUrl + 空模型名 = 必然未命中（前端清空表单时也会调）。
+     *
+     * <b>「命中」只认按模型名命中</b>（{@code match.models} 精确 / {@code match.modelPatterns} 正则），
+     * 即 {@link ModelAdapterRegistry.MatchResult#byModelName()}；host 级兜底**不算命中**。
+     * 理由：host 兜底只说明「这家服务商登记过」，说明不了「这个模型有适配」：拿同 host 下
+     * id 字典序最小的那条适配往任意未登记模型上套就是张冠李戴（OpenRouter 上尤其明显：
+     * 未登记的模型会显示成 Claude Fable 的调优参数）。与 {@code ModelAdapterRegistry#declaration}
+     * 同一口径。host 兜底仍保留在 {@code registry.match()} 里，供保存复核 {@code validateParams} 使用。
      */
     @PostMapping("/model-adapters/match")
     public Map<String, Object> match(@RequestBody(required = false) MatchBody body) {
@@ -49,10 +56,13 @@ public class AdminModelAdapterController {
         String modelName = body == null ? null : body.getModelName();
         ModelAdapterRegistry.MatchResult result = registry.match(baseUrl, modelName);
 
+        /* 绿框只认「我们登记过这个模型」：host 兜底不给框 */
+        boolean adapted = result.byModelName();
+
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("code", 0);
-        out.put("matched", result.matched());
-        out.put("adapter", result.matched() ? adapterView(result.adapter()) : null);
+        out.put("matched", adapted);
+        out.put("adapter", adapted ? adapterView(result.adapter()) : null);
         return out;
     }
 

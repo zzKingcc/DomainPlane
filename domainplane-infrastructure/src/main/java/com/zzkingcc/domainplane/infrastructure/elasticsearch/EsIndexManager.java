@@ -28,15 +28,24 @@ public class EsIndexManager {
      */
     public static final String DOMAIN_FIELD = "domain";
 
+    /**
+     * 允许拼进 Painless 脚本的字段名形态（无引号、无括号、无分号）。
+     *
+     * 脚本里的字段名来自 {@code _source} 的键，直接字符串拼接等于把任意内容交给脚本引擎解析。
+     * 只放行常规标识符（允许点号，兼容嵌套字段），其余一律拒绝。
+     */
+    private static final java.util.regex.Pattern SAFE_FIELD_NAME =
+            java.util.regex.Pattern.compile("[A-Za-z_][A-Za-z0-9_.]*");
+
     private EsIndexManager() {}
 
     /**
      * 索引是否存在。查询本身失败时抛异常，不返回 {@code false}。
      *
-     * 为什么不能 fail-open：调用方拿这个结果做的是破坏性决策 ——
+     * 为什么不能 fail-open：调用方拿这个结果做的是破坏性决策，
      * {@link #deleteIndex} 会先问"存在吗"，答"不"就直接跳过删除。
      * 若把"查不到"当成"不存在"，那么 ES 一抖动（超时、连接被拒、集群 red），
-     * 删域就会静默跳过索引删除并继续往下走，域没了索引还在 ——
+     * 删域就会静默跳过索引删除并继续往下走，域没了索引还在：
      * 而同一路径域重建后索引名相同（{@link KbIndexes#nameOf} 是路径哈希），
      * 这份"本该删掉的知识内容"会原样复活，且没有任何报错。
      *
@@ -75,12 +84,12 @@ public class EsIndexManager {
      * 删除单个索引；确实不存在时返回 {@code false}（没有东西可删）。
      *
      * @return 是否确实删掉了一个已存在的索引
-     * @throws EsAccessException 查询或删除失败 —— 调用方必须当成失败处理，
+     * @throws EsAccessException 查询或删除失败：调用方必须当成失败处理，
      *                              不能继续往下删域
      */
     public static boolean deleteIndex(ElasticsearchClient esClient, String indexName) {
         // 这里不能再包一层 try-catch 转 IllegalStateException：exists 现在会抛
-        // EsAccessException，而"查询失败"和"删除失败"在上层要区别对待 ——
+        // EsAccessException，而"查询失败"和"删除失败"在上层要区别对待：
         // 前者索引可能还在（不该删域），后者是删操作本身没成功（同样不该删域）
         if (!exists(esClient, indexName)) {
             return false;
@@ -165,7 +174,7 @@ public class EsIndexManager {
      * metadata 用 {@code dynamic:false} + 全部字段显式声明：
      *
      *   • 防字段污染（切片器将来加字段不会悄悄变成 text 把检索带偏）；
-     *   • {@code doc_id} 必须显式声明为可精确查询的类型 —— 它一旦被动态映射成 text，
+     *   • {@code doc_id} 必须显式声明为可精确查询的类型：它一旦被动态映射成 text，
      *       删除/统计用的 {@code term(metadata.doc_id)} 就会失效：UUID 被分词后基本查不中。
      *
      *
@@ -174,7 +183,7 @@ public class EsIndexManager {
      * （{@code ik_smart} 对 "SKU-10086"、"v2.1" 这类标识符切出来的词往往对不上）。
      *
      * 字段名必须与 {@link ChunkMetadataKeys} 一致。这里是 JSON 字面量，
-     * 用不了常量，只能靠约定 —— 所以 {@code EsMetadataMappingTest} 会把两边逐字比对，
+     * 用不了常量，只能靠约定：所以 {@code EsMetadataMappingTest} 会把两边逐字比对，
      * 改名只改一处时那条测试会红。
      */
     static String buildIkMapping(int dims) {
@@ -359,6 +368,15 @@ public class EsIndexManager {
                     try {
                         String finalVecField = vecField;
                         String finalTxtField = txtField == null ? "text" : txtField;
+
+                        // 字段名来自 _source 的键，直接拼进 Painless 源码等于把一段任意字符串
+                        // 交给脚本引擎解析。只放行常规字段名形态（字母/数字/下划线/点），
+                        // 其余一律拒绝：否则一条带引号或括号的键就能改写脚本语义。
+                        if (!SAFE_FIELD_NAME.matcher(finalVecField).matches()
+                                || !SAFE_FIELD_NAME.matcher(finalTxtField).matches()) {
+                            throw new IllegalStateException("索引内出现非法字段名，拒绝生成检索脚本：vec="
+                                    + finalVecField + ", txt=" + finalTxtField);
+                        }
 
                         Map<String, JsonData> params = new HashMap<>();
                         params.put("q", JsonData.of(vecArr));

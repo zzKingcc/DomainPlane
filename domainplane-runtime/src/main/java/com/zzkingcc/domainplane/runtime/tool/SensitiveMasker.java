@@ -15,7 +15,7 @@ import java.util.Set;
  * 敏感参数值掩码 —— 把工具调用参数里声明的敏感项替换成 {@link #MASK}。
  *
  * 为什么需要它：{@code @ToolAdvanced.sensitive} 声明的是"这些参数的值不要外露"，
- * 但参数原文一定会出现在两个地方 —— 推给客户端的工具调用事件与挂起等授权的审批 payload。
+ * 但参数原文一定会出现在两个地方：推给客户端的工具调用事件与挂起等授权的审批 payload。
  * 掩码只作用于这两处的展示文本；真正交给工具执行、以及回喂模型的参数始终是原值，
  * 否则工具会拿到 {@code ***} 而彻底失效。
  *
@@ -35,6 +35,9 @@ public final class SensitiveMasker {
     /** 参数无法解析为 JSON 时的整段占位：不含任何原文，且明确告诉阅读者"这里本该有内容" */
     public static final String UNPARSEABLE = "[参数无法解析，已整体屏蔽]";
 
+    /** 工具已不在注册表时的整段占位：无从知道哪些参数敏感，宁可整段不给 */
+    public static final String WITHHELD = "[工具已下线，参数已整体屏蔽]";
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private SensitiveMasker() {
@@ -45,11 +48,11 @@ public final class SensitiveMasker {
      *
      * 解析失败时整段屏蔽，绝不原样返回。模型生成的 {@code arguments} 是畸形 JSON
      * 的常态，此时若"为了不丢原文"而原样返回，恰好把最需要保护的那批值（身份证、手机号、
-     * 银行卡）明文送进工具调用事件与审批 payload —— 而这两处正是脱敏要守的地方。
+     * 银行卡）明文送进工具调用事件与审批 payload，而这两处正是脱敏要守的地方。
      * 保护机制在失败时退化成不保护，比不保护更危险。
      *
      * 整段屏蔽而非逐字段兜底：解析不出来就无从知道哪些字段敏感，索性不给内容。
-     * 代价是审批人看不到参数，但看不到比误批安全 —— {@link #isMasked(String)}
+     * 代价是审批人看不到参数，但看不到比误批安全：{@link #isMasked(String)}
      * 能让调用方识别出这种情况并拒绝自动批准。
      *
      * @param argumentsJson  工具调用参数（可能为 null / 空白 / 非 JSON）
@@ -73,12 +76,26 @@ public final class SensitiveMasker {
     }
 
     /**
-     * 这次展示文本是否被整体屏蔽了 —— 调用方据此拒绝"盲批"。
+     * 这次展示文本是否被整体屏蔽了：调用方据此拒绝"盲批"。
      *
      * 没有它，宿主看到的就是一个"参数为空"的审批项，与"参数本来就短"无法区分。
      */
     public static boolean isMasked(String maskedText) {
-        return UNPARSEABLE.equals(maskedText);
+        return UNPARSEABLE.equals(maskedText) || WITHHELD.equals(maskedText);
+    }
+
+    /**
+     * 工具已不在注册表时的整段屏蔽。
+     *
+     * 敏感参数声明随工具条目一起消失，此刻没有任何依据判断"哪个参数是敏感的"。
+     * 这时按空集处理等于原样透出全部参数，保护机制在工具下线的一瞬间退化成不保护，
+     * 而"下线工具仍被模型调用"恰恰是最容易发生、也最该闭嘴的时刻。
+     */
+    public static String maskAll(String argumentsJson) {
+        if (argumentsJson == null || argumentsJson.isBlank()) {
+            return argumentsJson;
+        }
+        return WITHHELD;
     }
 
     private static JsonNode maskNode(JsonNode node, Set<String> sensitiveNames) {

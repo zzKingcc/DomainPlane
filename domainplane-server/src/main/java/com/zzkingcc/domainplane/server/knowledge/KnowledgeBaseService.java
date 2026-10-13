@@ -52,7 +52,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * 知识库服务：文档上传 / 列表 / 删除 / 状态，并承担一域一索引的生命周期。
  *
  * 结构性事实（与域树、工具、提示词同构）：一个域 = 一个 ES 索引。
- * 索引名由域路径确定性派生（{@link KbIndexes#nameOf}），在首次上传时按需创建 ——
+ * 索引名由域路径确定性派生（{@link KbIndexes#nameOf}），在首次上传时按需创建，
  * 域是运行期由用户创建的，索引跟着域走，没有统一的"启动期全局索引"。
  *
  * 检索侧的域边界由「查哪些索引」保证：检索域 D 时只查 D 自身与祖先链上的索引，
@@ -138,10 +138,10 @@ public class KnowledgeBaseService {
     // ==================== 域 → 索引 ====================
 
     /**
-     * 规范化并校验文档归属域 —— 与 {@code @Tool(domains = {...})} 同构：
+     * 规范化并校验文档归属域，与 {@code @Tool(domains = {...})} 同构：
      * 必须是从根域出发的完整路径，留空 = 挂在根域 {@code default}。
      *
-     * 路径非法直接抛异常而不是静默丢弃 —— 静默会把文档写到一个树里不存在的域上，
+     * 路径非法直接抛异常而不是静默丢弃，静默会把文档写到一个树里不存在的域上，
      * 结果是永远检索不到且不报错。
      */
     public static String normalizeDomain(String domain) {
@@ -169,7 +169,7 @@ public class KnowledgeBaseService {
     }
 
     /**
-     * 取某个索引的向量存储（按索引名缓存 —— 存储对象本身无状态，只是 client + indexName 的包装）。
+     * 取某个索引的向量存储（按索引名缓存，存储对象本身无状态，只是 client + indexName 的包装）。
      */
     public EmbeddingStore storeFor(String indexName) {
         return storeCache.computeIfAbsent(indexName, name -> ElasticsearchEmbeddingStore.builder()
@@ -230,7 +230,7 @@ public class KnowledgeBaseService {
      * 这份本该删掉的知识内容会原样复活，且没有任何报错。
      *
      * @return 实际存在并被删除的域标识
-     * @throws KnowledgeBaseException ES 不可达或索引删除失败 —— 域未被删除
+     * @throws KnowledgeBaseException ES 不可达或索引删除失败，域未被删除
      */
     public List<String> deleteIndices(Collection<String> domains) {
         if (domains == null || domains.isEmpty()) {
@@ -319,7 +319,7 @@ public class KnowledgeBaseService {
             EsIndexManager.diagnoseElasticsearch(esClient, index);
             // 删不掉就必须停在这里：继续往下 createIndexWithIkMapping 只会撞上
             // "索引已存在且维度一致 → 跳过创建"，于是用户点了"重建"却什么都没重建，
-            // 界面显示成功、维度仍是旧的 —— 又是一个"不报错但没生效"
+            // 界面显示成功、维度仍是旧的，又是一个"不报错但没生效"
             EsIndexManager.deleteIndex(esClient, index);
             EsIndexManager.createIndexWithIkMapping(esClient, index, dimensions);
             EsIndexManager.writeAfterVerify(esClient, index);
@@ -338,7 +338,7 @@ public class KnowledgeBaseService {
      * 因此换向量模型走这条，不需要用户重新上传任何东西。
      *
      * 顺序刻意是「全部捞完 → 才开始删」：逐个索引"捞→删→重灌"的话，
-     * 中途失败会留下部分索引已换新向量、部分还是老向量的混合状态 ——
+     * 中途失败会留下部分索引已换新向量、部分还是老向量的混合状态，
      * 维度相同的两个向量模型混在一个索引里，检索不会报错，只会静默失真。
      *
      * @param dimensions 新索引的向量维度（取"三处同源"的公共取值点）
@@ -373,7 +373,7 @@ public class KnowledgeBaseService {
                 esClient, embeddingModel, preserved, this::storeFor);
 
         // 写回数必须与捞回数逐项相等：不等就说明有切片丢了向量，而在向量检索里
-        // "没向量"等于这条知识凭空消失 —— 比维度不符更难被发现，必须当场炸。
+        // "没向量"等于这条知识凭空消失，比维度不符更难被发现，必须当场炸。
         for (Map.Entry<String, Integer> e : result.preserved().entrySet()) {
             int written = result.reindexed().getOrDefault(e.getKey(), 0);
             if (written != e.getValue()) {
@@ -389,7 +389,7 @@ public class KnowledgeBaseService {
     /**
      * 删掉全部知识库索引（换向量模型时的另一个选项：不要旧内容）。
      *
-     * 与 {@link #rebuildAll(int)} 的区别是不再重建空索引 —— 用户既然选择"丢掉旧知识"，
+     * 与 {@link #rebuildAll(int)} 的区别是不再重建空索引，用户既然选择"丢掉旧知识"，
      * 留一堆空索引没有意义，只会在知识库页显示成一排空域。
      *
      * @return 被删除的索引名
@@ -469,7 +469,7 @@ public class KnowledgeBaseService {
         // ===== 类型分叉 =====
         // 文本类：在这里一次性转成 UTF-8 语义的文本。放在提交任务之前，是为了让"编码判不出"
         // 这类问题在拿导入锁之前就被拒掉。
-        // 二进制类：绝不解码。二进制走统一字符集只有两种结果 —— 恰好能通过严格 UTF-8 就
+        // 二进制类：绝不解码。二进制走统一字符集只有两种结果，恰好能通过严格 UTF-8 就
         // 静默灌进一堆乱码知识（最糟），或者报一句用户永远解决不了的"编码错误"。
         DocumentProcessStrategy route = DocumentProcessStrategyFactory.resolve(name);
         String encoding;
@@ -600,19 +600,14 @@ public class KnowledgeBaseService {
             List<DocumentItem> existing = listIndex(index).stream()
                     .filter(d -> lowerName.equals(d.fileNameLower()))
                     .toList();
-            if (!existing.isEmpty()) {
-                if (!replace) {
-                    throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_DOCUMENT_DUPLICATE,
-                            "域 " + domain + " 下已存在同名文档：" + fileName
-                                    + "（同名判定不区分大小写）。"
-                                    + "如需替换请带 replace=true，或先删除原文档");
-                }
-                for (DocumentItem old : existing) {
-                    deleteByDocId(index, old.docId());
-                    chunkExporter.deleteByDocId(old.docId());
-                }
-                log.info("[知识库] 覆盖更新：已清除域 {} 下同名旧文档 {} 个", domain, existing.size());
+            if (!existing.isEmpty() && !replace) {
+                throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_DOCUMENT_DUPLICATE,
+                        "域 " + domain + " 下已存在同名文档：" + fileName
+                                + "（同名判定不区分大小写）。"
+                                + "如需替换请带 replace=true，或先删除原文档");
             }
+            /* 同名旧文档的删除刻意推迟到新文档确认写入成功之后（见下方）：先删后写时，
+               新文档任一环节失败都会让这次"覆盖更新"变成"只删不写"，旧文档永久丢失。 */
 
             docId = UUID.randomUUID().toString();
             source.metadata().put(ChunkMetadataKeys.DOC_ID, docId);
@@ -628,8 +623,28 @@ public class KnowledgeBaseService {
                 throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_INGEST_ERROR,
                         "导入后未写入任何片段，可能文档内容为空或向量化失败：" + fileName);
             }
+
+            /* 新文档已确认落库，此刻才清理同名旧文档。顺序不能换：反过来的话，新文档任一
+               环节失败都会让这次"覆盖更新"变成"只删不写"，旧文档永久消失。
+
+               清理失败单独吞掉（只记日志），绝不能让它冒泡到下面的 catch，那里会
+               rollback 掉新 docId，而此时旧文档可能已经删掉了一部分，结果是新旧两份都没了。
+               吞掉的代价只是同名文档暂时并存，用户再删一次即可。 */
+            for (DocumentItem old : existing) {
+                try {
+                    deleteByDocId(index, old.docId());
+                    chunkExporter.deleteByDocId(old.docId());
+                } catch (Exception e) {
+                    log.error("[知识库] 覆盖更新时清除旧文档失败（旧 docId={}），新旧两份均保留: {}",
+                            old.docId(), e.getMessage());
+                }
+            }
+            if (!existing.isEmpty()) {
+                log.info("[知识库] 覆盖更新：已清除域 {} 下同名旧文档 {} 个", domain, existing.size());
+            }
+
             // 切片预览：读回索引里真正入库的切片写成 txt，管控台只展示这个路径。
-            // 导出失败不算上传失败 —— 它只是给人核对用的辅助产物。
+            // 导出失败不算上传失败，它只是给人核对用的辅助产物。
             java.nio.file.Path exported = chunkExporter.export(index, docId, fileName, domain);
             String exportPath = exported == null ? null : exported.toAbsolutePath().toString();
 

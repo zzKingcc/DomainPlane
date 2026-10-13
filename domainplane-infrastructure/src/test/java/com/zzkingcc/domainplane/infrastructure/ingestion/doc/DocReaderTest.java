@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>样例文档<b>只能是真的</b>（见 src/test/resources/ingestion/doc/README.md）：
  * HWPF 的样式表、表格遍历、控制符这几处行为与实际二进制布局强相关，用代码现造不出来，
- * 靠推理也必错 —— 这几个样例是把实测结论钉下来的地方。</p>
+ * 靠推理也必错，这几个样例是把实测结论钉下来的地方。</p>
  */
 class DocReaderTest {
 

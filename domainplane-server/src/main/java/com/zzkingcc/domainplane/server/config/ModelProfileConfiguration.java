@@ -45,7 +45,7 @@ public class ModelProfileConfiguration {
     /**
      * 模型元数据读取器：读服务商 {@code GET /models} 清单，定端点族与输入 / 输出模态。
      *
-     * <p>只发 GET、不发推理请求，因此零 token —— 这也是它取代"发最小请求试探"的原因。</p>
+     * <p>只发 GET、不发推理请求，因此零 token：这也是它取代"发最小请求试探"的原因。</p>
      */
     @Bean
     @ConditionalOnMissingBean
@@ -76,11 +76,16 @@ public class ModelProfileConfiguration {
 
     /**
      * 模型解析器：对话模型只来自用户自建的模型档案，没有内置 default。
+     *
+     * <p>返回具体类型 {@link DefaultModelResolver} 而不是 {@link ModelResolver}：能力族解析
+     * （生图 / 语音 / 视频，{@code endpointModel}）不在内核契约里（内核不认识这些族），
+     * 只有服务端的工具要用它。按具体类暴露后，工具可直接注入，同时内核按
+     * {@link ModelResolver} 接口注入仍然命中同一个 bean。</p>
      */
     @Bean
     @ConditionalOnMissingBean(ModelResolver.class)
-    public ModelResolver modelResolver(ModelProfileRegistry registry,
-                                       ModelClientFactory factory) {
+    public DefaultModelResolver modelResolver(ModelProfileRegistry registry,
+                                              ModelClientFactory factory) {
         return new DefaultModelResolver(registry, factory);
     }
 }

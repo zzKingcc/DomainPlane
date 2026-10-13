@@ -27,35 +27,35 @@ import java.util.concurrent.CompletableFuture;
  * 成败还受限流与网络抖动影响；而输出模态根本试不出来。元数据是提供商的声明，不花钱、也更准。
  * 本类**只发 GET**，"不花 token"因此是结构上成立的，不是靠"请求写得很小"来保证的。
  *
- * OpenAI 规范里 {@code GET /models} 给了什么、没给什么 —— 这是本类的全部依据：
+ * OpenAI 规范里 {@code GET /models} 给了什么、没给什么，这是本类的全部依据：
  *
  *   • 给了：{@code data[].id/object/created/owned_by}，即「这个 Key 能用到哪些模型」；
- *   • 没给：端点族、输入 / 输出模态、向量维度 —— 一项都没有。
+ *   • 没给：端点族、输入 / 输出模态、向量维度，一项都没有。
  *
  * 于是按元数据形态由强到弱依次尝试：
  *
- *   • OpenRouter 风格：清单每项额外带 {@code architecture}（输入 / 输出模态）—— 模态直接读到，
+ *   • OpenRouter 风格：清单每项额外带 {@code architecture}（输入 / 输出模态），模态直接读到，
  *       且是**完整枚举**，可以覆盖档案里过时的声明；
  *   • 过滤式（硅基流动这类）：清单本身只有 id，但支持 {@code ?sub_type=chat|embedding|…} 过滤，
  *       靠"该模型出现在哪个子类型列表里"反推端点族，并按该端点的 OpenAI 规范语义填输入 / 输出模态
  *       （{@code /chat/completions} 是文本进、文本出；{@code /embeddings} 是文本进、向量出）。
- *       这一路给的是**基线值**，只能并进已有声明，绝不能覆盖 —— 能吃图片的对话模型在清单里
+ *       这一路给的是**基线值**，只能并进已有声明，绝不能覆盖，能吃图片的对话模型在清单里
  *       同样是 {@code chat}，覆盖会把用户手填的 {@code image} 悄悄抹掉；
  *   • 标准 OpenAI 规范（OpenAI / DeepSeek 官方、vLLM、LM Studio、各类中转）：只有那四个字段，
- *       {@code sub_type} 也不认 —— 除"模型存在"外一律未声明。
+ *       {@code sub_type} 也不认，除"模型存在"外一律未声明。
  *
  *
  * 两条规范化，只做"对齐规范"不改语义：
  *
  *   • 模型名匹配：先精确，再按「去空白 + 忽略大小写 + 忽略 {@code vendor/} 前缀」匹配；
- *       规范化后命中多条即判为歧义并如实报出候选，绝不挑一条 —— 挑错等于绑到别的模型上。
+ *       规范化后命中多条即判为歧义并如实报出候选，绝不挑一条，挑错等于绑到别的模型上。
  *   • 地址：尾斜杠容忍；地址漏了版本段（{@code /v1}）而 {@code /models} 返回 404 时补一次
- *       {@code /v1} 重试。只有 404 / 405 值得重试 —— 401 / 403 / 5xx 换地址也不会变好。
+ *       {@code /v1} 重试。只有 404 / 405 值得重试，401 / 403 / 5xx 换地址也不会变好。
  *
  *
  * 读不到就如实留空，绝不猜。端点族为空表示"未声明"，档案仍可保存（管控台会标出「未声明类型」），
  * 但绑不了域、也当不了向量模型。硬失败（连不上 / 鉴权被拒 / 非 JSON）则抛
- * {@link MetadataException} 由调用方拦下 —— 那是用户能改的错（地址、Key），不该被静默存进一份
+ * {@link MetadataException} 由调用方拦下，那是用户能改的错（地址、Key），不该被静默存进一份
  * 用不了的档案；而"服务商不给这些字段"不是用户的错，如实留空即可。
  *
  * @author zzkingcc
@@ -155,7 +155,7 @@ public class ModelMetadataReader {
      * 读取一个模型在提供商处的元数据。
      *
      * @throws MetadataException 硬失败：入参缺失、连不上、鉴权被拒、响应不是预期的 JSON。
-     *                           服务商不提供清单（404 / 405）不在此列 —— 那是"读不到"，
+     *                           服务商不提供清单（404 / 405）不在此列，那是"读不到"，
      *                           返回端点族为空的正常结果，由调用方如实标成未声明。
      */
     public MetadataResult read(String baseUrl, String apiKey, String modelName) {
@@ -209,7 +209,7 @@ public class ModelMetadataReader {
             return withNote(bySubType.result(), idNote);
         }
         if (bySubType.filterWorks()) {
-            /* 过滤确实生效、这个模型也在全量清单里，却没有落进任何一个已知子类型 ——
+            /* 过滤确实生效、这个模型也在全量清单里，却没有落进任何一个已知子类型，
                这不是"服务商不认 sub_type"，如实说清，别把两件事混成一句 */
             return withNote(unlistedInSubTypes(modelName), idNote);
         }
@@ -383,7 +383,7 @@ public class ModelMetadataReader {
     /**
      * 清单支持 {@code sub_type} 过滤、模型也在清单里，却没落进任何一个已知子类型时的结论。
      *
-     * 与 {@link #openaiPlain} 严格分开：那种情况下说"服务商不认 sub_type"是错的 ——
+     * 与 {@link #openaiPlain} 严格分开：那种情况下说"服务商不认 sub_type"是错的，
      * 过滤是生效的，只是该模型属于我们不认识的子类型（服务商加了新区分类，或这是个新模态）。
      * 两者的下一步完全不同：前者无解，后者是"把子类型表补全就能读到"，说错就把排查方向带偏。
      */
@@ -400,7 +400,7 @@ public class ModelMetadataReader {
      * 唯一被证实的事实是"这个 Key 的清单里有这个模型"，其余一律未声明。端点族不自动补
      * chat：OpenAI 规范的清单里同样列着向量模型，补错就是"能绑到域、却当不了向量模型"的那种
      * 全程不报错的错。这类提供商（OpenAI / DeepSeek 官方、vLLM / LM Studio / 各类中转）
-     * 在管控台上识别不出类型，档案保持未声明 —— 这是零成本识别的固有边界，
+     * 在管控台上识别不出类型，档案保持未声明，这是零成本识别的固有边界，
      * 如实说明比猜一个类型强。
      */
     private static MetadataResult openaiPlain(String modelName) {

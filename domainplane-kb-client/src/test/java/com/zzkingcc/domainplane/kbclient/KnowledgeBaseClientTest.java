@@ -1,6 +1,7 @@
 package com.zzkingcc.domainplane.kbclient;
 
-import com.zzkingcc.domainplane.api.code.ErrorCode;
+import com.zzkingcc.domainplane.clientcore.exception.ClientErrorCode;
+import com.zzkingcc.domainplane.clientcore.exception.ServerRejectedException;
 import com.zzkingcc.domainplane.clientcore.exception.DomainPlaneException;
 import com.zzkingcc.domainplane.clientcore.http.ClientCredential;
 import com.zzkingcc.domainplane.clientcore.properties.ClientProperties;
@@ -27,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 知识库客户端：上传 / 列表 / 删除。
  *
- * <p>用 {@code exchangeFunction} 挡掉真实网络，只验证本 SDK 的契约部分 ——
+ * <p>用 {@code exchangeFunction} 挡掉真实网络，只验证本 SDK 的契约部分：
  * 请求发到哪个路径、带没带域与凭证、响应怎么还原成返回值或带码异常。</p>
  */
 class KnowledgeBaseClientTest {
@@ -134,35 +135,37 @@ class KnowledgeBaseClientTest {
     }
 
     @Test
-    void 上传的业务失败还原成带码异常() {
-        // 服务端把"同名"这类业务失败也包成 200 + success=false，客户端要还原成可分支的码
+    void 上传的业务失败原样带出服务端码与文案() {
+        // 服务端把"同名"这类业务失败也包成 200 + success=false。
+        // 客户端不翻译这个码：60005 是什么含义由宿主判断，SDK 只保证它原样到达。
         respond(HttpStatus.OK, "{\"code\":60005,\"success\":false,\"detail\":\"同名文档已存在\"}");
 
-        DomainPlaneException ex = assertThrows(DomainPlaneException.class,
+        ServerRejectedException ex = assertThrows(ServerRejectedException.class,
                 () -> kb.upload(bytes("内容"), "员工手册.pdf", false));
 
-        assertEquals(ErrorCode.KNOWLEDGE_DOCUMENT_DUPLICATE, ex.getErrorCode());
+        assertEquals(ClientErrorCode.SERVER_REJECTED, ex.getClientCode(), "客户端侧只归类为'服务端拒绝'");
+        assertEquals(60005, ex.getServerCode(), "服务端的码必须原样带出");
         assertTrue(ex.getMessage().contains("同名文档已存在"));
     }
 
     @Test
-    void 上传的传输层失败翻译成带码异常() {
+    void 上传的传输层失败归为客户端自己的码() {
         respond(HttpStatus.UNAUTHORIZED, "{}");
 
         DomainPlaneException ex = assertThrows(DomainPlaneException.class,
                 () -> kb.upload(bytes("内容"), "员工手册.pdf", false));
 
-        assertEquals(ErrorCode.AUTH_REQUIRED, ex.getErrorCode());
+        assertEquals(ClientErrorCode.CREDENTIAL_REJECTED, ex.getClientCode());
     }
 
     @Test
     void 空内容或空文件名不发请求直接拒绝() {
         respond(HttpStatus.OK, "{}");
 
-        assertEquals(ErrorCode.INVALID_PARAMETER, assertThrows(DomainPlaneException.class,
-                () -> kb.upload(new byte[0], "a.pdf", false)).getErrorCode());
-        assertEquals(ErrorCode.INVALID_PARAMETER, assertThrows(DomainPlaneException.class,
-                () -> kb.upload(bytes("内容"), "  ", false)).getErrorCode());
+        assertEquals(ClientErrorCode.INVALID_ARGUMENT, assertThrows(DomainPlaneException.class,
+                () -> kb.upload(new byte[0], "a.pdf", false)).getClientCode());
+        assertEquals(ClientErrorCode.INVALID_ARGUMENT, assertThrows(DomainPlaneException.class,
+                () -> kb.upload(bytes("内容"), "  ", false)).getClientCode());
 
         assertTrue(requests.isEmpty(), "本地能判定的非法入参不该先打一趟服务端");
     }
@@ -211,8 +214,8 @@ class KnowledgeBaseClientTest {
     void 删除的空docId直接拒绝() {
         respond(HttpStatus.OK, "{}");
 
-        assertEquals(ErrorCode.INVALID_PARAMETER,
-                assertThrows(DomainPlaneException.class, () -> kb.delete("  ")).getErrorCode());
+        assertEquals(ClientErrorCode.INVALID_ARGUMENT,
+                assertThrows(DomainPlaneException.class, () -> kb.delete("  ")).getClientCode());
         assertTrue(requests.isEmpty());
     }
 

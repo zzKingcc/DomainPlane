@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>每一条都对应一个真实故障：假名漏判（日文低估约 6 倍）、扩展区段漏判、
  * 代理对被算成两个字符，以及判定表"按相对偏移建、按相对偏移读"引发的越界崩溃
- * —— 那一版在记忆封顶判定里直接抛 {@code ArrayIndexOutOfBoundsException}，
+ * 那一版在记忆封顶判定里直接抛 {@code ArrayIndexOutOfBoundsException}，
  * 整条会话链路挂掉。</p>
  *
  * @author zzkingcc
@@ -66,7 +66,7 @@ class CjkWidthTest {
     @DisplayName("判定表对整个 BMP 都可安全索引（曾按相对偏移读，导致 AIOOBE 崩溃）")
     void everyBmpCharIsIndexable() {
         // 关键：不抛异常即为通过。曾经的实现在 FULLWIDTH 分支上越界，
-        // 而记忆封顶判定每轮都会走到这里 —— 表现为会话直接崩，不是算错
+        // 而记忆封顶判定每轮都会走到这里：表现为会话直接崩，不是算错
         for (int c = 0x3000; c < 0xD800; c++) {
             CjkWidth.isCjk((char) c);
         }

@@ -1,5 +1,6 @@
 package com.zzkingcc.domainplane.infrastructure.redis.checkpoint;
 
+import com.zzkingcc.domainplane.common.exception.CheckpointCorruptedException;
 import com.zzkingcc.domainplane.common.exception.ChatMemoryException;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.api.support.SessionKeys;
@@ -34,6 +35,32 @@ public class RedisCheckpointSaver implements BaseCheckpointSaver {
 
     /** 检查点默认保留时长:中断后未 resume 的会话不会主动清理,靠 TTL 兜底 */
     private static final Duration DEFAULT_TTL = Duration.ofHours(24);
+
+    /**
+     * 单会话保留的检查点上限（只留最近的）。
+     *
+     * 每次 put 都要把整份列表读出来、再整份写回去，列表无上限时单键体积与写入成本
+     * 都随轮次线性增长，一次长会话足以把这条键撑成"大 key"，且写放大是 O(n²)。
+     * resume 只用到最近的那个断点，历史断点仅用于 {@code getStateHistory} 这类排障场景，
+     * 留最近 200 个足够。
+     */
+    private static final int MAX_CHECKPOINTS = 200;
+
+    /**
+     * 分片写锁：同会话的"读改写"必须串行，不同会话之间不要互相排队。
+     * 固定长度数组，键再多也不会把锁对象越攒越多。
+     */
+    private static final Object[] WRITE_LOCKS = new Object[64];
+
+    static {
+        for (int i = 0; i < WRITE_LOCKS.length; i++) {
+            WRITE_LOCKS[i] = new Object();
+        }
+    }
+
+    private static Object lockFor(String key) {
+        return WRITE_LOCKS[Math.floorMod(key.hashCode(), WRITE_LOCKS.length)];
+    }
 
     private final StringRedisTemplate redisTemplate;
     private final CheckpointListSerializer checkpointListSerializer;
@@ -100,9 +127,17 @@ public class RedisCheckpointSaver implements BaseCheckpointSaver {
     public RunnableConfig put(RunnableConfig config, Checkpoint checkpoint) throws Exception {
         String key = buildKey(config);
         try {
-            LinkedList<Checkpoint> all = readAll(key);
-            all.add(checkpoint);
-            writeAll(key, all);
+            LinkedList<Checkpoint> all;
+            // 同会话的 put 必须串行：readAll → add → writeAll 是读改写，
+            // 并发 put 各自读到同一份旧列表，后写的那次把先写的检查点整条丢掉，
+            // 表现为"走完一步之后 resume 找不到断点"。分片锁而不是单锁：
+            // 不同会话之间不该互相排队。
+            synchronized (lockFor(key)) {
+                all = readAll(key);
+                all.add(checkpoint);
+                trim(all);
+                writeAll(key, all);
+            }
             log.info("[检查点] put 会话[{}]: 写入 checkpoint={}, node={}, next={}, 累计={}",
                     threadId(config), checkpoint.getId(), checkpoint.getNodeId(),
                     checkpoint.getNextNodeId(), all.size());
@@ -123,7 +158,7 @@ public class RedisCheckpointSaver implements BaseCheckpointSaver {
     public Tag release(RunnableConfig config) throws Exception {
         String key = buildKey(config);
         // release 的语义是"把这个 threadId 的断点整个删掉"，它只需要读出一份 tag 作为返回值，
-        // 并不依赖读到的内容是否可用 —— 因此这里不能因为数据损坏就放弃删除：
+        // 并不依赖读到的内容是否可用，因此这里不能因为数据损坏就放弃删除：
         // 否则一个损坏的键会永远卡在那里，既读不出、也清不掉（而 deleteByDomain 也只能删整个域）。
         LinkedList<Checkpoint> all;
         try {
@@ -149,7 +184,7 @@ public class RedisCheckpointSaver implements BaseCheckpointSaver {
      * 删除某个域下的全部检查点（删域级联清理用）。
      *
      * 断点里存着"即将执行但还没执行"的工具调用。域被删后若不清，24 小时内同路径域重建
-     * 就能 {@code resume(approved=true)} 把当初那个破坏性动作补执行掉 —— 域的删除没有撤销授权。
+     * 就能 {@code resume(approved=true)} 把当初那个破坏性动作补执行掉，域的删除没有撤销授权。
      * 因此这里失败直接抛：静默跳过等于"删除成功"却把授权留在了原地。
      *
      * @return 删除的键数
@@ -220,15 +255,17 @@ public class RedisCheckpointSaver implements BaseCheckpointSaver {
      *
      * 当成空的代价是灾难性的且不可逆：{@link #put} 走的是"读全部 → 加一条 → 写回整份"，
      * 它读到一个空列表就会把原有整段会话历史覆盖成一条，且全程无任何异常。
-     * 紧接着 {@code get/list} 会报"无检查点"，用户收到的是"会话不存在，请新建会话"——
+     * 紧接着 {@code get/list} 会报"无检查点"，用户收到的是"会话不存在，请新建会话"：
      * 一个与真实原因（数据损坏）毫无关系的错误信息。
      *
      * fail-closed 与记忆侧一致：{@code RedisChatMemoryStore.getMessages} 读失败同样抛异常。
      * 数据存疑时宁可不提供，也不能提供一份被清空过的"正确答案"。
      */
-    private ChatMemoryException corrupt(String key, Exception cause) {
+    private CheckpointCorruptedException corrupt(String key, Exception cause) {
         log.error("[检查点] 反序列化失败（键 {}），按损坏处理并中止本轮读写：{}", key, cause.getMessage(), cause);
-        return new ChatMemoryException(ErrorCode.CHECKPOINT_ERROR,
+        // 抛子类而不是父类：调用方要能把它与"Redis 连不上"分开，
+        // 前者重试无效、必须清键自愈，后者重试可能就好。
+        return new CheckpointCorruptedException(
                 "检查点数据损坏，已中止本轮读写以免覆盖历史数据: " + cause.getMessage(), cause);
     }
 
@@ -241,17 +278,27 @@ public class RedisCheckpointSaver implements BaseCheckpointSaver {
             checkpointListSerializer.write(all, oos);
         }
         String base64 = Base64.getEncoder().encodeToString(baos.toByteArray());
-        redisTemplate.opsForValue().set(key, base64);
-        // 每次写入都续期:中断后长期不 resume 的会话不应永久占用内存
+        // 写入与续期必须是同一条命令：先 SET 再 EXPIRE 的话，崩在两步之间就留下永不过期的键；
+        // 反过来若上一次的 EXPIRE 先到，刚写的断点会被立即删除。带过期时间的 SET 是原子的。
         if (ttl != null && !ttl.isZero() && !ttl.isNegative()) {
-            redisTemplate.expire(key, ttl);
-        } else if (ttl != null && ttl.isNegative()) {
-            // 负数 TTL 落进 Redis 的 EXPIRE 会被服务端当作「立即删除」——
+            redisTemplate.opsForValue().set(key, base64, ttl);
+            return;
+        }
+        redisTemplate.opsForValue().set(key, base64);
+        if (ttl != null && ttl.isNegative()) {
+            // 负数 TTL 落进 Redis 的 EXPIRE 会被服务端当作「立即删除」：
             // 断点刚写进去就没了，挂起的审批从此永远无法 resume，而 get 会报
             // "会话不存在"，把问题指向完全错误的方向。负数一律按永久处理并告警。
             log.warn("[检查点] 会话[{}] 的 checkpoint-ttl 配置为负数（{}），已按永久处理。"
                             + "负数 TTL 会让 Redis 立即删除该键（挂起的审批将无法恢复）。请改为正数",
                     threadIdFromKey(key), ttl);
+        }
+    }
+
+    /** 只保留最近的 {@link #MAX_CHECKPOINTS} 个断点（列表按旧→新排列，砍头留尾） */
+    private static void trim(LinkedList<Checkpoint> all) {
+        while (all.size() > MAX_CHECKPOINTS) {
+            all.removeFirst();
         }
     }
 }

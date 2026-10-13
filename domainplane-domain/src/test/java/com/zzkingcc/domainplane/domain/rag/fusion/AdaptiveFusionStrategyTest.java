@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 双轨切换：来源（索引）数为 1 → 分数制；≥2 → RRF。
  *
  * <p>分辨方式：分数制的名次 1 归一化后正好拿满权重（本例权重 1.0 → 融合分 1.0），
- * RRF 的名次 1 是 {@code w/(k+1)}（约 0.016）—— 量级相差两个数量级，不可能混淆。</p>
+ * RRF 的名次 1 是 {@code w/(k+1)}（约 0.016）：量级相差两个数量级，不可能混淆。</p>
  */
 class AdaptiveFusionStrategyTest {
 
@@ -68,7 +68,7 @@ class AdaptiveFusionStrategyTest {
      * 判据是"<b>有命中</b>的来源数"，不是"通道里出现过几个来源"。
      *
      * <p>通道按域链无条件解析出来，祖先域没上传过文档时它根本没有索引。若按通道数判，
-     * 任何非根域都会被判成多来源、一律走 RRF —— 分数制只在根域生效，等于白留一轨。</p>
+     * 任何非根域都会被判成多来源、一律走 RRF：分数制只在根域生效，等于白留一轨。</p>
      */
     @Test
     void singleNonEmptySourceAmongMany_usesScoreBasedTrack() {

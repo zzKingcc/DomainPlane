@@ -31,8 +31,17 @@ public class AuthService {
     private final Object writeLock = new Object();
 
     /** "当前是否仍是默认密码"的缓存（BCrypt 校验要 ~100ms，不该每次开页面都重算） */
-    private volatile Boolean defaultCredential;
-    private volatile String defaultCredentialCheckedFor;
+    /**
+     * 默认口令判定缓存。
+     *
+     * 必须是一个不可变对象一次性替换：拆成"哈希"与"结论"两个 volatile 字段时，
+     * 写与读都不是原子的：并发下可能读到"新的哈希 + 旧的结论"，
+     * 把刚改过密码的账号报成"仍是默认口令"（或反之）。
+     */
+    private record DefaultCredentialCheck(String passwordHash, boolean isDefault) {
+    }
+
+    private volatile DefaultCredentialCheck defaultCredentialCheck;
 
     public AuthService(AccountStore accountStore, CredentialService credentialService) {
         this.accountStore = accountStore;
@@ -45,10 +54,21 @@ public class AuthService {
     }
 
     /**
+     * 本实例是否曾经读到过有效账号。
+     *
+     * 与 {@link #isInitialized()} 的差别只体现在"文件曾经存在、现在没了"这一种情形：
+     * 那时两者一 true 一 false，调用方据此把"运行期账号文件消失"（异常，须拒绝放行）
+     * 与"首次部署尚未建号"（正常，须放行以便初始化）分开处置。
+     */
+    public boolean hasEverBeenInitialized() {
+        return accountStore.everInitialized();
+    }
+
+    /**
      * 账号文件是否已损坏（文件存在、但读不出来）。
      *
      * 与"未初始化"是两个相反的处置：本状态必须拒绝一切受保护请求，
-     * 且不开放初始化入口——账号数据已经在里面了，允许重新初始化等于允许任何人接管实例。
+     * 且不开放初始化入口：账号数据已经在里面了，允许重新初始化等于允许任何人接管实例。
      */
     public boolean isStoreCorrupted() {
         return accountStore.state() == AccountStore.StoreState.CORRUPTED;
@@ -121,7 +141,7 @@ public class AuthService {
      * 记录最后登录信息。
      *
      * 尽力而为，不阻断登录：这是审计信息，丢了不影响鉴权；而账号目录只读（容器挂载
-     * 只读卷、权限收紧）时若照旧抛错，会出现"密码正确却永远登不进管控台，还报系统内部错误"——
+     * 只读卷、权限收紧）时若照旧抛错，会出现"密码正确却永远登不进管控台，还报系统内部错误"：
      * 那才是真的把人锁在门外。真正必须报错的写盘是改密码：静默失败会让用户以为新密码已生效。
      */
     private void recordLogin(String from) {
@@ -221,16 +241,17 @@ public class AuthService {
             return false;
         }
         String hash = account.getPasswordHash();
-        if (hash.equals(defaultCredentialCheckedFor) && defaultCredential != null) {
-            return defaultCredential;
+        // 一次 volatile 读拿到"哈希 + 结论"的整体快照，不存在读到半新半旧的可能
+        DefaultCredentialCheck cached = defaultCredentialCheck;
+        if (cached != null && java.util.Objects.equals(cached.passwordHash(), hash)) {
+            return cached.isDefault();
         }
         String seedDefault = AccountStore.defaultPassword();
         if (seedDefault == null) {
             return false;
         }
         boolean isDefault = PasswordHasher.matches(seedDefault, hash);
-        defaultCredentialCheckedFor = hash;
-        defaultCredential = isDefault;
+        defaultCredentialCheck = new DefaultCredentialCheck(hash, isDefault);
         return isDefault;
     }
 
@@ -255,7 +276,6 @@ public class AuthService {
     }
 
     private void invalidateDefaultCredentialCache() {
-        defaultCredential = null;
-        defaultCredentialCheckedFor = null;
+        defaultCredentialCheck = null;
     }
 }

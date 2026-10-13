@@ -3,7 +3,7 @@ package com.zzkingcc.domainplane.server.auth;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.api.support.TraceId;
-import com.zzkingcc.domainplane.runtime.metrics.MetricsRegistry;
+import com.zzkingcc.domainplane.common.metrics.MetricsRegistry;
 import com.zzkingcc.domainplane.server.audit.AuditLog;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -63,6 +63,18 @@ public class CredentialAuthInterceptor implements HandlerInterceptor {
         }
 
         if (!authService.isInitialized()) {
+            if (authService.hasEverBeenInitialized()) {
+                /* 曾经可读、现在读不到了（文件被删 / 卷被卸载 / 权限被改）。
+                   这种状态绝不能按"未初始化"放行：初始化入口是免检的，放行等于允许
+                   任何人在此状态下重建管理员账号、直接接管实例。宁可全站不可用。 */
+                log.error("[鉴权] 账号文件在运行期消失，拒绝请求：{} {}",
+                        request.getMethod(), request.getRequestURI());
+                reject(response, ErrorCode.AUTH_STORE_CORRUPTED,
+                        "账号文件在运行期消失（本实例曾完成初始化，现已不可读）。"
+                                + "为避免任何人在此状态下重建账号接管实例，服务端拒绝一切请求："
+                                + "请恢复账号文件后重启服务");
+                return false;
+            }
             if (uninitializedWarned.compareAndSet(false, true)) {
                 log.warn("[鉴权] 服务端尚无账号，本次按【不鉴权】放行（{}）。"
                         + "请打开管控台完成初始化后即自动生效", request.getRequestURI());
@@ -72,6 +84,14 @@ public class CredentialAuthInterceptor implements HandlerInterceptor {
 
         String credential = resolve(request);
         if (authService.verify(credential)) {
+            if (mustChangeDefaultCredential(request)) {
+                log.warn("[鉴权] 管理员仍在使用初始默认口令，拒绝变更类请求：{} {}",
+                        request.getMethod(), request.getRequestURI());
+                reject(response, ErrorCode.AUTH_DEFAULT_CREDENTIAL,
+                        "服务端仍在使用初始默认口令。请先在管控台修改管理员密码，"
+                                + "修改后变更类操作自动恢复（读取类请求不受影响）");
+                return false;
+            }
             return true;
         }
 
@@ -85,7 +105,33 @@ public class CredentialAuthInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * 请求计数与审计——只在这一处做，避免每个 Controller 各写一遍。
+     * 初始默认口令未修改时，只放行"读取 + 改密"两类请求。
+     *
+     * 种子口令写在仓库里，等于公开密码。只提示不阻断时，任何能访问到端口的人
+     * 都能用它登录并改配置：这属于部署方还没做任何决定就已经被接管。
+     * 但不整体封死：读取类请求留着，管控台才能正常打开并弹出改密入口；
+     * 改密接口必须可达，否则处置路径被自己堵住。
+     *
+     * @return true = 本次请求应被拒绝
+     */
+    private boolean mustChangeDefaultCredential(HttpServletRequest request) {
+        // 只约束管控台（Cookie 载具）。API 载具是程序化调用，改密不在它的职责范围内，
+        // 在此拦下只会让存量客户端在升级后集体报错，而安全收益为零，口令本就是公开的。
+        if (carrier != Carrier.COOKIE) {
+            return false;
+        }
+        if (!isMutating(request.getMethod())) {
+            return false;
+        }
+        String uri = request.getRequestURI();
+        if (uri != null && uri.startsWith("/admin/password")) {
+            return false;
+        }
+        return authService.isDefaultCredential();
+    }
+
+    /**
+     * 请求计数与审计：只在这一处做，避免每个 Controller 各写一遍。
      */
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
@@ -128,7 +174,7 @@ public class CredentialAuthInterceptor implements HandlerInterceptor {
             return request.getHeader(CredentialService.CREDENTIAL_HEADER);
         }
         // 管控台：优先 Cookie（HttpOnly，JS 读不到，降低 XSS 偷凭证的面）。
-        // Cookie 缺失时回退读凭证头——程序化调用方（starter 的上传方法、ETL 脚本）
+        // Cookie 缺失时回退读凭证头：程序化调用方（starter 的上传方法、ETL 脚本）
         // 走的是"用户名密码换凭证"，拿不到登录 Cookie，只能带头。
         // 两种载具共用同一套签发与校验逻辑，回退不扩大权限面。
         Cookie[] cookies = request.getCookies();

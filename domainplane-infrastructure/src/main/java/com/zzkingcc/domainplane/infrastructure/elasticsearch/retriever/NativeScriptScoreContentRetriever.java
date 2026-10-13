@@ -108,6 +108,12 @@ public class NativeScriptScoreContentRetriever implements ContentRetriever {
         } catch (IOException e) {
             log.error("[ES检索] 查询异常: {}", e.getMessage(), e);
             throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_SEARCH_ERROR, "ES 向量检索异常: " + e.getMessage(), e);
+        } catch (RuntimeException e) {
+            // 同 KeyMatch：4xx/5xx 以 ElasticsearchException 形式抛出，不属于 IOException，
+            // 不在这里归类就会绕过 ErrorCode，上层拿不到可展示的错误语义。
+            log.error("[ES检索] 查询失败: {}", e.getMessage(), e);
+            throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_SEARCH_ERROR,
+                    "ES 向量检索失败: " + e.getMessage(), e);
         }
     }
 }

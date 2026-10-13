@@ -50,7 +50,7 @@
                 <div class="field">
                     <label for="newPassword">新密码</label>
                     <input id="newPassword" type="password" autocomplete="new-password">
-                    <div class="help">不超过 72 字节（UTF-8 下中文约 24 个字符）——BCrypt 的硬上限，超出会被拒。</div>
+                    <div class="help">不超过 72 字节（UTF-8 下中文约 24 个字符）。BCrypt 的硬上限，超出会被拒。</div>
                 </div>
                 <div class="field">
                     <label for="newPassword2">确认新密码</label>
@@ -68,7 +68,7 @@
                 <div class="disclose-body">
                     凭证是<b>签名式（HMAC）</b>：实际签名密钥由【主密钥 + 密码哈希】派生，所以改密码不需要"通知"任何人，
                     全部旧凭证的签名会立刻对不上。<br>
-                    <b>因此本次登录也会被踢掉</b>——这不是缺陷，而是"改密码即踢人"的直接体现；保存后请重新登录。
+                    <b>因此本次登录也会被踢掉</b>。这不是缺陷，而是"改密码即踢人"的直接体现；保存后请重新登录。
                 </div>
             </details>
         </div>

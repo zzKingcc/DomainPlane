@@ -38,7 +38,7 @@ public class ToolConfiguration {
      * 工具注册表：扫描所有工具
      *
      * 两侧写法统一：方法上有 {@code @Tool} 就算工具，不要求类实现
-     * {@link DomainPlaneToolProvider}——该接口只是可选标记（实现了照样被扫到，
+     * {@link DomainPlaneToolProvider}：该接口只是可选标记（实现了照样被扫到，
      * 不实现也一样），与工具实例 SDK（{@code domainplane-tool-instance}）的扫描规则一致。
      * 同一段工具代码在服务端进程与业务进程之间搬迁，不用改一个字。
      */

@@ -13,7 +13,7 @@ import org.springframework.web.reactive.function.client.WebClient;
  * 知识库 SDK 自动装配。
  *
  * 只多一个 Bean：{@code domainplaneKnowledgeBaseClient}。WebClient 与凭证
- * 由 {@link DomainPlaneClientAutoConfiguration} 提供 —— 引不引对话 SDK 都一样，因此
+ * 由 {@link DomainPlaneClientAutoConfiguration} 提供，引不引对话 SDK 都一样，因此
  * 单独引本模块也能开箱即用。
  *
  * 本模块不做启动期连通性校验：服务端未启动不阻断接入方启动，

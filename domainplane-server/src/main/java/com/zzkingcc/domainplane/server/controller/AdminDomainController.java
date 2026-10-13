@@ -8,6 +8,9 @@ import com.zzkingcc.domainplane.common.exception.BaseException;
 import com.zzkingcc.domainplane.common.exception.ChatMemoryException;
 import com.zzkingcc.domainplane.common.exception.KnowledgeBaseException;
 import com.zzkingcc.domainplane.infrastructure.redis.checkpoint.RedisCheckpointSaver;
+import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisConversationArchive;
+import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisConversationSummary;
+import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisHistorySearch;
 import com.zzkingcc.domainplane.infrastructure.redis.memory.RedisChatMemoryStore;
 import com.zzkingcc.domainplane.runtime.cancellation.CancellationRegistry;
 import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
@@ -15,6 +18,7 @@ import com.zzkingcc.domainplane.runtime.tool.ToolRegistry;
 import com.zzkingcc.domainplane.server.knowledge.DomainChannelProvider;
 import com.zzkingcc.domainplane.server.knowledge.KnowledgeBaseService;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
+import com.zzkingcc.domainplane.server.mcp.McpConnectionStore;
 import com.zzkingcc.domainplane.server.settings.DomainSettings;
 import com.zzkingcc.domainplane.server.settings.DomainSettingsStore;
 import com.zzkingcc.domainplane.server.settings.DomainStore;
@@ -45,9 +49,9 @@ import java.util.Set;
  *
  *
  * 为什么必须显式：只有显式声明，才能把"父域不能当入口"写成一条不受结构变化影响的规则；
- * 而"有没有子域"是随时会变的派生事实 —— 拿它当判据会在新增子域时静默改变调用方的可用性。
+ * 而"有没有子域"是随时会变的派生事实：拿它当判据会在新增子域时静默改变调用方的可用性。
  *
- * 删除的边界：只有根域不可删。删除是递归的 —— 该域的全部子孙一并带走，
+ * 删除的边界：只有根域不可删。删除是递归的：该域的全部子孙一并带走，
  * 不向上提升层级；删除前会先删知识库索引，删不干净就拒绝删域。
  *
  * 路径在 {@code /admin/**} 之下，鉴权由凭证拦截器统一处理。
@@ -61,7 +65,7 @@ public class AdminDomainController {
 
     /**
      * 删域前等待在飞会话停止的上限。取 5 秒：正常一轮在下一个检查点就会看到停止标志，
-     * 只有卡在长耗时工具调用里才会耗到头 —— 那属于"还在用已撤销的授权干活"，必须让调用方看到。
+     * 只有卡在长耗时工具调用里才会耗到头：那属于"还在用已撤销的授权干活"，必须让调用方看到。
      */
     private static final Duration RUNNING_STOP_TIMEOUT = Duration.ofSeconds(5);
 
@@ -70,10 +74,14 @@ public class AdminDomainController {
     private final KnowledgeBaseService knowledgeBase;
     private final DomainSettingsStore domainSettingsStore;
     private final ModelProfileRegistry modelProfileRegistry;
+    private final McpConnectionStore mcpConnectionStore;
     private final ToolRegistry toolRegistry;
     private final DomainChannelProvider domainChannelProvider;
     private final RedisChatMemoryStore chatMemoryStore;
     private final RedisCheckpointSaver checkpointSaver;
+    private final RedisConversationArchive conversationArchive;
+    private final RedisHistorySearch historySearch;
+    private final RedisConversationSummary conversationSummary;
     private final CancellationRegistry cancellationRegistry;
 
     public AdminDomainController(DomainRegistry domainRegistry,
@@ -81,20 +89,28 @@ public class AdminDomainController {
                                  KnowledgeBaseService knowledgeBase,
                                  DomainSettingsStore domainSettingsStore,
                                  ModelProfileRegistry modelProfileRegistry,
+                                 McpConnectionStore mcpConnectionStore,
                                  ToolRegistry toolRegistry,
                                  DomainChannelProvider domainChannelProvider,
                                  RedisChatMemoryStore chatMemoryStore,
                                  RedisCheckpointSaver checkpointSaver,
+                                 RedisConversationArchive conversationArchive,
+                                 RedisHistorySearch historySearch,
+                                 RedisConversationSummary conversationSummary,
                                  CancellationRegistry cancellationRegistry) {
         this.domainRegistry = domainRegistry;
         this.domainStore = domainStore;
         this.knowledgeBase = knowledgeBase;
         this.domainSettingsStore = domainSettingsStore;
         this.modelProfileRegistry = modelProfileRegistry;
+        this.mcpConnectionStore = mcpConnectionStore;
         this.toolRegistry = toolRegistry;
         this.domainChannelProvider = domainChannelProvider;
         this.chatMemoryStore = chatMemoryStore;
         this.checkpointSaver = checkpointSaver;
+        this.conversationArchive = conversationArchive;
+        this.historySearch = historySearch;
+        this.conversationSummary = conversationSummary;
         this.cancellationRegistry = cancellationRegistry;
     }
 
@@ -115,6 +131,9 @@ public class AdminDomainController {
         if (!created.created()) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, created.reason());
         }
+        // 重新创建同名域 = 撤销作废：不解除的话，工具侧的心跳仍会被撤销集挡住，
+        // 域建出来了却永远没有工具声明它，表现为"刚建好的域一个工具都没有"。
+        toolRegistry.allowDomains(List.of(Domains.normalize(body.getId())));
         domainStore.saveDeclarations(domainRegistry.manualConfig());
         log.info("[域管理] 已创建域 {}（来源 MANUAL，可调用={}）", body.getId().trim(), callable);
         return view("created", body.getId().trim(), List.of());
@@ -134,7 +153,7 @@ public class AdminDomainController {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, "缺少 callable（true=可调用单元，false=装配节点）");
         }
         String normalized = Domains.normalize(id);
-        // 根域同样服从叶子规则（有子域时它也只是装配节点），因此这里不需要根域特例 ——
+        // 根域同样服从叶子规则（有子域时它也只是装配节点），因此这里不需要根域特例：
         // 唯一的硬约束是"只有叶子域可以作为可调用单元"。
         DomainRegistry.CallableResult result = domainRegistry.setCallable(normalized, body.getCallable());
         if (!result.changed()) {
@@ -149,10 +168,10 @@ public class AdminDomainController {
      *
      * 语义边界（与前端那颗开关一一对应）：
      *   • 关（默认）= 调用方只收到最终答复，收不到工具调用请求与执行结果；
-     *   • 审批挂起（待授权工具清单）不归它管 —— 那是功能骨架，恒下发；
+     *   • 审批挂起（待授权工具清单）不归它管：那是功能骨架，恒下发；
      *   • 只对可调用单元（叶子域）有意义：装配节点不能作为入口，给它设了也永远读不到。
      *     因此这里按可调用性校验，非叶子直接拒绝（前端同样只给可调用单元渲染开关）。
-     *     装配节点上已存在的设置信息不清除 —— 域将来变回叶子时自动恢复生效。
+     *     装配节点上已存在的设置信息不清除：域将来变回叶子时自动恢复生效。
      *
      * @param body {@code echo} 目标值；true=回写，false=不回写
      */
@@ -187,16 +206,16 @@ public class AdminDomainController {
      *
      * 原因：每一步失败都是"抛异常中止、域未删除"，所以中止点必须落在
      * 还没有任何东西被删的位置。原先 Redis 清理排在索引之后，一旦它失败，
-     * 索引已经删掉、域却还在 —— 留下一个比直接失败更难收拾的半完成状态。
+     * 索引已经删掉、域却还在：留下一个比直接失败更难收拾的半完成状态。
      *
      * 为什么这几步都必须成功才继续：
      *
      *   • 索引：一域一索引，索引是该域知识的唯一载体；域先没了那些索引就再没人认领
      *       （检索不到、上传也无从指定），而索引名是域路径的哈希，
-     *       同路径域重建时名字相同 —— 这份本该删掉的知识内容会原样复活。
+     *       同路径域重建时名字相同：这份本该删掉的知识内容会原样复活。
      *   • 会话记忆：保留期默认永久，不清则同路径域重建时对话历史原样复活。
      *   • 检查点：里面存着"即将执行、尚未执行"的工具调用，不清则 24 小时内重建域
-     *       就能 {@code resume(approved=true)} 把当初被拦下的破坏性动作补执行掉 ——
+     *       就能 {@code resume(approved=true)} 把当初被拦下的破坏性动作补执行掉：
      *       删域没有撤销授权。
      *   • 域属性（提示词 / 模型绑定 / 工具声明派生记录 / 检索器缓存）：
      *       否则同路径域重建时静默复活旧配置。
@@ -223,7 +242,7 @@ public class AdminDomainController {
         //     那一轮仍会继续调工具（已剥离域声明、等于授权已撤销），并把记忆与断点
         //     **写回**下面刚清过的 Redis 键。这里先 requestStop 再等 running 标记释放，
         //     确保"没有东西会在清理之后又写回来"。停不下来（正卡在长耗时工具）就中止，
-        //     不默默往下删 —— 与 I-03/I-04 同一 fail-closed 判据。
+        //     不默默往下删：与 I-03/I-04 同一 fail-closed 判据。
         Set<String> affectedSet = Set.copyOf(affected);
         List<String> inflight = cancellationRegistry.runningKeys().stream()
                 .filter(key -> affectedSet.contains(SessionKeys.domainOf(key)))
@@ -240,19 +259,29 @@ public class AdminDomainController {
             log.info("[域管理] 删除域 {} 前已停掉在飞会话 {}", normalized, inflight);
         }
 
-        // 3) Redis 记忆与检查点排在所有破坏性动作之前（有意为之），且失败即抛（原先只 warn）。
+        // 3) Redis 记忆、会话归档与检查点排在所有破坏性动作之前（有意为之），且失败即抛（原先只 warn）。
         //    中止必须落在"还没删任何东西"的位置：否则 Redis 挂了才中止，索引已删、域还在，
-        //    半完成状态比直接失败更难收拾。不清记忆/检查点，同路径域重建会复活旧对话历史与待执行的破坏性调用。
+        //    半完成状态比直接失败更难收拾。不清记忆/检查点，同路径域重建会复活旧对话历史与待执行的破坏性调用；
+        //    不清归档同理：归档里是**全量对话**（提问 + 工具现场 + 回答），
+        //    漏掉它等于"删域成功"之后，一句旧话还能把整段历史勾回来（方案 §10-R5）。
         int purgedMemories = 0;
         int purgedCheckpoints = 0;
+        int purgedArchives = 0;
+        int purgedIndexes = 0;
+        int purgedSummaries = 0;
         try {
             for (String domain : affected) {
                 purgedMemories += chatMemoryStore.deleteByDomain(domain);
                 purgedCheckpoints += checkpointSaver.deleteByDomain(domain);
+                purgedArchives += conversationArchive.deleteByDomain(domain);
+                purgedIndexes += historySearch.deleteByDomain(domain);
+                // 摘要与归档同族：它是有损压缩的产物，重放归档也复原不出同一份措辞，
+                // 所以按档案级对待：删域时必须一起清（M4-R1）
+                purgedSummaries += conversationSummary.deleteByDomain(domain);
             }
         } catch (ChatMemoryException e) {
             throw new BaseException(ErrorCode.CHAT_MEMORY_DELETE_ERROR,
-                    "删除域 " + normalized + " 前清理会话记忆/检查点失败，已中止、域未删除："
+                    "删除域 " + normalized + " 前清理会话记忆/归档/检索索引/滚动摘要/检查点失败，已中止、域未删除："
                             + e.getMessage());
         }
 
@@ -271,9 +300,11 @@ public class AdminDomainController {
 
         // 5) 域属性一并清理：提示词 / 工具执行信息回写开关 / 模型绑定 / 工具声明派生记录。
         //    不清理的话，同路径域将来重建时会"静默复活"旧配置。
-        domainSettingsStore.removePrompts(affected);
-        domainSettingsStore.removeToolCallEcho(affected);
+        domainSettingsStore.removeDomains(affected);
         modelProfileRegistry.unbindDomains(affected);
+        // MCP 连接绑定按"域维度"存储，删域级联摘掉受影响域的绑定（连接本身不删，与模型绑定同口径）；
+        // 摘完后由 McpCoordinator 的 reconcile 把已无绑定的连接工具从注册表摘除。
+        mcpConnectionStore.unbindDomains(Set.copyOf(affected));
         toolRegistry.forgetDomains(affected);
 
         // 6) 以上都成功才动域
@@ -283,9 +314,9 @@ public class AdminDomainController {
         }
         domainStore.saveDeclarations(domainRegistry.manualConfig());
         log.info("[域管理] 已删除域 {} 及其子孙 {}；连带删除知识库索引 {} 个（域 {}），"
-                        + "会话记忆 {} 条、断点 {} 条",
+                        + "会话记忆 {} 条、会话归档 {} 个、检索索引 {} 个、滚动摘要 {} 个、断点 {} 条",
                 normalized, deleted.removed(), removedIndices.size(), removedIndices,
-                purgedMemories, purgedCheckpoints);
+                purgedMemories, purgedArchives, purgedIndexes, purgedSummaries, purgedCheckpoints);
         return view("deleted", normalized, deleted.removed(), removedIndices);
     }
 

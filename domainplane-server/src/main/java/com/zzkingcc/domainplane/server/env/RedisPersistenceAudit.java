@@ -80,7 +80,7 @@ public class RedisPersistenceAudit {
                 log.warn("""
                         ================ [Redis 自检] 淘汰策略会丢记忆 ================
                         当前 maxmemory-policy = {}（应为 noeviction）。
-                        内存紧张时 Redis 会直接淘汰会话记忆 key —— 那不是"缓冲"，是随机丢用户历史。
+                        内存紧张时 Redis 会直接淘汰会话记忆 key，那不是"缓冲"，是随机丢用户历史。
                         注意：改成 noeviction 后写满会导致写入失败（对话报错），
                         所以请同时按容量配置 maxmemory（单会话上限约 60–120KB）并做用量告警。
                         ==========================================================""", policy);

@@ -23,11 +23,21 @@ final class FusionSupport {
     private FusionSupport() {
     }
 
-    /** 按文本内容 SHA-256 判同一条 */
+    /**
+     * 去重身份 = 文件名 + 切片序号 + 正文，取 SHA-256。
+     *
+     * <p>只取正文哈希会把"不同切片但正文相同"的内容判成同一条并丢弃：PDF 每页的页眉页脚、
+     * 表格里重复的行、合同的标准条款都是这种形态。用户看到的是"明明有 10 处依据，
+     * 检索只回了 1 处"。加上文件与序号之后，同一条切片在不同通道（向量 / 关键词）命中时
+     * 仍然折叠成一条，重复正文的不同切片则各自保留。</p>
+     */
     static String hashContent(Content content) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest(content.textSegment().text().getBytes(StandardCharsets.UTF_8));
+            String identity = meta(content, ChunkMetadataKeys.FILE_NAME)
+                    + "\u0000" + meta(content, ChunkMetadataKeys.CHUNK_SEQ)
+                    + "\u0000" + content.textSegment().text();
+            byte[] hash = md.digest(identity.getBytes(StandardCharsets.UTF_8));
             return java.util.HexFormat.of().formatHex(hash);
         } catch (Exception e) {
             return content.textSegment().text();
@@ -69,7 +79,7 @@ final class FusionSupport {
     /**
      * 标题是否命中查询词。
      *
-     * @param queryKeywords 由 {@link #keywords(String)} 预先切好的候选词 ——
+     * @param queryKeywords 由 {@link #keywords(String)} 预先切好的候选词：
      *        切分结果与 query 一一对应且在整轮融合内不变，不能在每条 content 上重算：
      *        2000 字的中文查询会展开出上千个 bigram 候选，重算一次就是上千次字符串分配 × 条数。
      */
@@ -104,7 +114,9 @@ final class FusionSupport {
         if (query == null) {
             return keywords;
         }
-        for (String segment : query.toLowerCase().split(SEGMENT_SPLIT)) {
+        // 明确用 ROOT：默认 locale 下 "I" 在土耳其语环境会变成 "ı"，关键词集合随环境漂移，
+        // 同一查询在两地跑出两种排序
+        for (String segment : query.toLowerCase(java.util.Locale.ROOT).split(SEGMENT_SPLIT)) {
             if (segment.isEmpty()) {
                 continue;
             }
@@ -124,14 +136,14 @@ final class FusionSupport {
     /**
      * 用预先切好的候选词判定文本是否命中。
      *
-     * 单个 CJK 字符不作候选（{@code kw.length() >= 2} 这道闸）—— 单字命中率接近 100%，
+     * 单个 CJK 字符不作候选（{@code kw.length() >= 2} 这道闸）：单字命中率接近 100%，
      * 放进来会让标题增益变成常量、彻底失去区分度。
      */
     static boolean containsAnyKeyword(String text, Set<String> queryKeywords) {
         if (text == null || queryKeywords == null || queryKeywords.isEmpty()) {
             return false;
         }
-        String lowerText = text.toLowerCase();
+        String lowerText = text.toLowerCase(java.util.Locale.ROOT);
         for (String kw : queryKeywords) {
             if (kw.length() >= 2 && lowerText.contains(kw)) {
                 return true;
@@ -146,7 +158,7 @@ final class FusionSupport {
     /**
      * 高频虚字（疑问词、助词、连词、介词、指示词、数词、量词），只用于过滤 bigram，不过滤整段。
      * 若不拦，无区分度的组合（如「如何」）会让标题被几乎任何问句命中，增益变成常量。
-     * 判据为「两字全是虚字才丢」，保留「申请」等含一个实义字的组合——
+     * 判据为「两字全是虚字才丢」，保留「申请」等含一个实义字的组合：
      * 少丢只是增益略高（可控），多丢会吞掉真命中（查得到却排不上去）。
      */
     private static final String FUNCTION_CHARS =

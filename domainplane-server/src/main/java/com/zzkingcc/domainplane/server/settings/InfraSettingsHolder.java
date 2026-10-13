@@ -210,8 +210,11 @@ public class InfraSettingsHolder {
             throw new NotConfiguredException("请先填写 Elasticsearch 地址");
         }
         rejectInvalid(candidate.validate(), "Elasticsearch");
-        RestClient restClient = SwappableElasticsearchTransport.buildRestClient(candidate);
-        try (RestClientTransport transport = new RestClientTransport(restClient, new JacksonJsonpMapper())) {
+        // 两个都要纳入 try-with-resources：RestClientTransport 构造失败时，上面刚建好的连接池
+        // 没有任何人关，而 testEs 是管控台上可以反复点击的接口：每点一次就泄一个池。
+        // 关闭顺序由内到外（transport 先关），RestClient 重复 close 是空操作。
+        try (RestClient restClient = SwappableElasticsearchTransport.buildRestClient(candidate);
+             RestClientTransport transport = new RestClientTransport(restClient, new JacksonJsonpMapper())) {
             ElasticsearchClient client = new ElasticsearchClient(transport);
             Boolean ok = client.ping().value();
             if (ok == null || !ok) {

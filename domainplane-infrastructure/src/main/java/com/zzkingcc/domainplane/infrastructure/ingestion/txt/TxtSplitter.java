@@ -15,7 +15,7 @@ import java.util.List;
  * txt 切片入口：把 {@link TxtNormalizer} → {@link TxtCleaner} → {@link OutlineReader} → {@link Chunker}
  * 四步串起来。
  *
- * 四步里只有「认标题」与格式相关 —— 将来加 md / html 只换那一步，其余三步原样复用。
+ * 四步里只有「认标题」与格式相关，将来加 md / html 只换那一步，其余三步原样复用。
  * 这也是 {@code DocumentProcessStrategyFactory} 与各策略保留不动的意义。
  *
  * 切片正文的构造：{@code section_path + 空行 + 正文}。把标题路径写进正文，模型能看出这段话

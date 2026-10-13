@@ -18,10 +18,10 @@ import java.util.stream.Collectors;
  *
  * 域以完整路径为标识（{@code default.sales.order}），根为 {@link Domains#DEFAULT}。
  * 登记一律走沿链补齐：给一条完整路径，链上缺失的祖先节点一并建出，已存在的节点原样复用
- * （不改它的 {@link Source}）。因此不存在悬空节点 —— 每个域都挂得到根上。
+ * （不改它的 {@link Source}）。因此不存在悬空节点，每个域都挂得到根上。
  *
  * {@link Source} 只标记这个域是怎么来的，不是等级：三种来源同级，删除规则一视同仁
- * （只有根域因是整棵树的起点而不可删）。来源差异仅体现在生命周期上 ——
+ * （只有根域因是整棵树的起点而不可删）。来源差异仅体现在生命周期上：
  * {@code MANUAL} 落盘、重启仍在；{@code DERIVED} 由工具声明产生、不落盘，重启后随声明重建。
  *
  * @author zzkingcc
@@ -105,7 +105,7 @@ public class DomainRegistry {
     /**
      * 被显式声明过可调用性的域 → 该值（落盘用）。
      *
-     * 与 {@code domains} 的区别：沿链补齐出来的祖先、以及工具声明派生出来的域都不在这里 ——
+     * 与 {@code domains} 的区别：沿链补齐出来的祖先、以及工具声明派生出来的域都不在这里，
      * 它们的可调用性由创建路径的默认值决定（祖先不可调用、被声明的域可调用），重启后可按同样的
      * 规则重建，不需要落盘。只有"人点过"的决定才需要持久化。
      */
@@ -218,7 +218,7 @@ public class DomainRegistry {
 
     /**
      * 沿链登记：路径上每一段都确保存在，缺失的按 {@code source} 建出，已存在的原样保留
-     * （不改它的 source，也不改它的 callable —— 显式声明过的可调用性优先）。
+     * （不改它的 source，也不改它的 callable，显式声明过的可调用性优先）。
      *
      * @param targetCallable 链尾那个被显式声明的域是否可调用；沿链补齐出来的祖先一律不可调用
      */
@@ -236,7 +236,7 @@ public class DomainRegistry {
                 continue;
             }
             // 祖先只负责装配（供后代继承）；链尾那个被显式声明的域才可能是可调用单元，
-            // 且它必须"出生时就是叶子"——若它已有子域（子域先于父域创建），
+            // 且它必须"出生时就是叶子"，若它已有子域（子域先于父域创建），
             // 按叶子规则它只能是装配节点。
             boolean callable = targetCallable && i == chain.size() - 1 && !hasChildren(step);
             domains.put(step, new Domain(step, Domains.parentOf(step), source, callable,
@@ -295,7 +295,7 @@ public class DomainRegistry {
     /**
      * 删除域及其全部子孙（递归，不向上提升层级）。
      *
-     * 只有根域拒绝删除 —— 它是整棵树的起点。其余域不论来源都可删；
+     * 只有根域拒绝删除，它是整棵树的起点。其余域不论来源都可删；
      * 派生域删掉后重启会随工具声明重建，这是它生命周期的固有结果，不另设限制。
      */
     public DomainDeleteResult delete(String domainId) {
@@ -337,13 +337,13 @@ public class DomainRegistry {
      * 判据 = 已登记 ∧ 显式标记可调用 ∧ 是叶子域（无子域）。
      *
      * 叶子约束是本域树的硬性规则：一个域只要有子域，就必须作为装配节点存在、
-     * 不能当入口；根域也服从这条规则 —— 只要它有了子域，它同样只是装配节点。
+     * 不能当入口；根域也服从这条规则，只要它有了子域，它同样只是装配节点。
      * 于是"整棵树只有一个根域"时根域可调用，一旦往下建了子域，入口就必须落到叶子。
      * 需要"父域整体"的入口时，请另建一个叶子域，而不是把父域本身变成入口。
      *
      * 为什么在读取时派生而不是在写入路径上维护标记：标记有多个来源
      * （管控台显式声明、工具声明派生、落盘文件里的历史值），任何一处漏改都会破掉规则。
-     * 派生则只有这一个判据实现，绕不过去 —— 写入侧存的是"意图"，这里算的是"生效"。
+     * 派生则只有这一个判据实现，绕不过去，写入侧存的是"意图"，这里算的是"生效"。
      */
     public boolean isCallable(String domainId) {
         Domain domain = domains.get(Domains.normalize(domainId));
@@ -357,7 +357,7 @@ public class DomainRegistry {
         return domain.callable() && !hasChildren(domain.id());
     }
 
-    /** 全部可调用单元（供客户端清单与入口提示）—— 只含叶子域 */
+    /** 全部可调用单元（供客户端清单与入口提示），只含叶子域 */
     public Set<String> callableIds() {
         return domains.values().stream()
                 .filter(this::isEffectiveCallable)
@@ -429,7 +429,7 @@ public class DomainRegistry {
     /**
      * 需要落盘的域与其可调用性（只含被显式声明过的域），按标识排序。
      *
-     * 派生域与沿链补齐的祖先不进这里 —— 它们的可调用性能按创建规则重建。
+     * 派生域与沿链补齐的祖先不进这里，它们的可调用性能按创建规则重建。
      *
      * 写出去的是生效值（显式标记 ∧ 无子域），不是原始意图：一个有子域的域
      * 无论曾被声明成什么，落盘都记装配节点。这样文件与管控台展示、与入口判据三者一致，

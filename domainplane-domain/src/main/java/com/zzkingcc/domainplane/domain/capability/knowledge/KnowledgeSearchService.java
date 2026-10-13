@@ -45,7 +45,7 @@ public class KnowledgeSearchService {
                 return "未检索到相关内容";
             }
             // 两道收口：条数上限（可配）+ 正文字符预算。
-            // 条数不是真正的瓶颈 —— 同样的条数，切片长短能差几倍；按字符收口才控得住上下文占用。
+            // 条数不是真正的瓶颈：同样的条数，切片长短能差几倍；按字符收口才控得住上下文占用。
             int limit = Math.min(contents.size(), RetrievalLimits.injectTopN());
             int budget = RetrievalLimits.maxContextChars();
             StringBuilder sb = new StringBuilder();
@@ -54,7 +54,7 @@ public class KnowledgeSearchService {
             for (int i = 0; i < limit; i++) {
                 Content c = contents.get(i);
                 String body = c.textSegment().text();
-                // 首条无论如何都收 —— 否则预算配得偏小时一条都给不出去，检索形同关闭
+                // 首条无论如何都收：否则预算配得偏小时一条都给不出去，检索形同关闭
                 if (injected > 0 && used + body.length() > budget) {
                     break;
                 }
@@ -84,7 +84,7 @@ public class KnowledgeSearchService {
             return result;
         } catch (Exception e) {
             // 走到这里说明检索链路本身有问题（上面返回空列表那条分支才是"没命中"）。
-            // 可能是检索引擎未配置（该去管控台补），也可能是暂时故障——域层拿不到区分二者的错误码
+            // 可能是检索引擎未配置（该去管控台补），也可能是暂时故障：域层拿不到区分二者的错误码
             log.error("[知识库检索] 检索异常：{}", e.getMessage(), e);
             return "知识库检索服务当前不可用：可能是检索服务尚未配置，也可能是暂时故障。"
                     + "请确认知识库配置后再试。";

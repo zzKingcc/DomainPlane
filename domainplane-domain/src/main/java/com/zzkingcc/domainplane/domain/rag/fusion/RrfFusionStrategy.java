@@ -22,14 +22,14 @@ import java.util.stream.IntStream;
  * RRF（Reciprocal Rank Fusion）融合策略 —— 多索引召回时使用。
  *
  * 为什么多索引必须换它：BM25 的 idf 用本索引（本分片）的文档频率计算，
- * 同一个词在不同索引里量纲不同 —— 把多索引的 BM25 分池化后做 min-max 只会把
+ * 同一个词在不同索引里量纲不同：把多索引的 BM25 分池化后做 min-max 只会把
  * 「小索引里稀有词被抬高的分」当成 max，把其余结果压扁。向量分虽可比，但同一轮里
  * 两路量纲也不同。RRF 只看名次，天然免疫这一切。
  *
  * 公式：{@code score(d) = Σ_L (w_L / (k + rank_L(d)))}。其中：
  *
  *   • 权重按模态均摊：每张向量表的基准 {@code w = vectorWeight / 向量表个数}，
- *       每张关键词表 {@code w = keywordWeight / 关键词表个数} —— 这样 向量:关键词 的比例
+ *       每张关键词表 {@code w = keywordWeight / 关键词表个数}：这样 向量:关键词 的比例
  *       不随域链长度（索引个数）漂移，否则祖先越多、向量表越多，BM25 会被越压越扁。
  *       分摊只统计有命中的表，空表不占份额。
  *   • 层级衰减：表的基准权重再乘 {@code ancestorDecay ^ depth}（depth = 距查询域的距离，
@@ -55,7 +55,7 @@ public class RrfFusionStrategy implements FusionStrategy {
                               FusionConfig fusion) {
         long start = System.currentTimeMillis();
 
-        // 只有"有命中"的表才参与权重分摊 —— 空表若也占份额，权重就摊给了空气，
+        // 只有"有命中"的表才参与权重分摊：空表若也占份额，权重就摊给了空气，
         // 该模态剩下的表反而被压低（祖先域还没建索引时会频繁触发）。
         List<RankedList> active = (lists == null ? List.<RankedList>of() : lists).stream()
                 .filter(l -> l != null && !l.isEmpty())

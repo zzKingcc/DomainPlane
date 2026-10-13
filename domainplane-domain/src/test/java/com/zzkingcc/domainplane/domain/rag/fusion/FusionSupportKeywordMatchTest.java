@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 要求标题包含这一整串才命中。实测 10 条真实中文查询<b>全部不命中</b>，
  * {@code title-boost} / {@code file-name-boost} 两个配置项在中文场景下形同空转。</p>
  *
- * <p>这些用例刻意都用「真实文档标题 + 用户长问句」的形态，而不是短词对短词 ——
+ * <p>这些用例刻意都用「真实文档标题 + 用户长问句」的形态，而不是短词对短词：
  * 后者旧实现本来就能过，测不出问题。</p>
  */
 class FusionSupportKeywordMatchTest {
@@ -59,7 +59,7 @@ class FusionSupportKeywordMatchTest {
     // ==================== 反例：虚字闸 ====================
 
     /**
-     * 全是虚字的 bigram 不该算命中 ——
+     * 全是虚字的 bigram 不该算命中：
      * 否则标题「这个」「是什么」会被任何问句命中，增益彻底失效。
      */
     @Test
@@ -78,7 +78,7 @@ class FusionSupportKeywordMatchTest {
 
     /**
      * 虚字闸的判据是「两个字<b>全是</b>虚字才丢」，不是「含虚字就丢」。
-     * 「申请」含虚字「请」但「申」是实义字，必须留下 —— 否则「怎么开发票申请」这类查询会全部失效。
+     * 「申请」含虚字「请」但「申」是实义字，必须留下：否则「怎么开发票申请」这类查询会全部失效。
      */
     @Test
     void bigramWithOneContentCharIsKept() {

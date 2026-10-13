@@ -20,7 +20,7 @@ import java.util.Map;
 /**
  * 关键词精准匹配检索器（BM25）
  *
- * 多字段权重一次性表达"哪里命中更重要"，而不是把字段拆成多张排名表 ——
+ * 多字段权重一次性表达"哪里命中更重要"，而不是把字段拆成多张排名表：
  * 表数保持 = 索引 × 模态，融合阶段的按模态均摊权重才不会被字段数稀释。
  *
  * @author zzkingcc
@@ -116,6 +116,12 @@ public class KeywordMatchContentRetriever implements ContentRetriever {
         } catch (IOException e) {
             log.error("[ES关键词检索] 查询异常: {}", e.getMessage(), e);
             throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_SEARCH_ERROR, "ES 关键词检索异常: " + e.getMessage(), e);
+        } catch (RuntimeException e) {
+            // ES 返回 4xx/5xx 时抛的是 ElasticsearchException（运行时异常），IOException 接不住：
+            // 直接逃逸会绕过 ErrorCode 分类，上层只能当"未知错误"处理，前端也就给不出可行动提示。
+            log.error("[ES关键词检索] 查询失败: {}", e.getMessage(), e);
+            throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_SEARCH_ERROR,
+                    "ES 关键词检索失败: " + e.getMessage(), e);
         }
     }
 }

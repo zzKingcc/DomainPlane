@@ -46,14 +46,14 @@ import java.util.Set;
  * public String refundOrder(@ToolParam("订单号") String orderNo,
  *                           @ToolParam("退款金额，单位：元") BigDecimal amount) { ... }
  *
- * 方法签名即参数 schema，注解即治理策略，方法体即执行逻辑 —— 三者合一。
+ * 方法签名即参数 schema，注解即治理策略，方法体即执行逻辑：三者合一。
  *
  * 什么时候扫
  * 在 {@code ToolInstanceClient} 装配时执行（见 {@link ToolInstanceAutoConfiguration}），
  * 早于心跳启动。扫描只取"类型"做筛选，只对命中的 Bean 触发实例化，不做全容器提前初始化。
  *
  * 失败策略
- * 参数名解析不出、工具名重复、{@code desc} 缺失 —— 全部启动期直接抛异常。
+ * 参数名解析不出、工具名重复、{@code desc} 缺失：全部启动期直接抛异常。
  * 工具声明错了却等到模型来调用才发现，排查成本远高于启动失败。
  *
  * @author zzkingcc
@@ -164,7 +164,7 @@ public final class ToolProviderScanner {
     private static boolean isInfrastructure(Class<?> type) {
         String name = type.getName();
         // 只排除框架自身：扫它们只会带来噪音，且可能触发不该触发的初始化。
-        // 不排除 DomainPlane 的包 —— SDK 自己的 Bean 上不会有 @Tool，按注解命中即可。
+        // 不排除 DomainPlane 的包：SDK 自己的 Bean 上不会有 @Tool，按注解命中即可。
         return name.startsWith("org.springframework.") || name.startsWith("java.");
     }
 
@@ -175,7 +175,7 @@ public final class ToolProviderScanner {
             throw new IllegalStateException("@Tool.desc 必填（它是模型判断何时调用的唯一依据）：" + where);
         }
 
-        // 参数结构一律交给 ParamSchemaResolver —— 与本地 Bean 工具共用同一份实现，
+        // 参数结构一律交给 ParamSchemaResolver：与本地 Bean 工具共用同一份实现，
         // 保证"同一段工具代码搬到另一侧得到同一个 schema"（这正是 ⑧ 要消除的不一致）。
         // 顶层参数名以绑定侧（Spring 参数名发现）为准：无 -parameters 时 resolver 只能用 arg0 兜底，
         // 而 handler 靠 Spring 拿到真实名；名字不一致模型就调不对参，所以这里按 binding 重新落键。
@@ -247,7 +247,7 @@ public final class ToolProviderScanner {
      * 解析方法参数：名字、类型、是否必填。
      *
      * 参数名优先取 {@code @ToolParam.name}，其次取编译期元数据 / 调试信息。
-     * 取不到就直接失败 —— 用 {@code arg0} 当参数名注册出去，模型会拿着错误的 key 调参，
+     * 取不到就直接失败：用 {@code arg0} 当参数名注册出去，模型会拿着错误的 key 调参，
      * 这种错在联调时极难定位。
      */
     private ScanBinding binding(Method method, String where) {

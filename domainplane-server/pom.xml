@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.zzkingcc</groupId>
         <artifactId>DomainPlane</artifactId>
-        <version>v1.0-beta.1</version>
+        <version>v1.0-beta.2</version>
     </parent>
 
     <artifactId>domainplane-server</artifactId>
@@ -96,7 +96,7 @@
             <version>${langchain4j.beta.version}</version>
         </dependency>
         <!-- langchain4j-easy-rag 刻意不引：它只是"一站式本地 RAG"的便利封装，本项目一个类都没用到，
-             却会拖进近 180MB 传递依赖——
+             却会拖进近 180MB 传递依赖，
                · langchain4j-document-parser-apache-tika → Tika 全家桶（poi / xmlbeans / pdfbox / fontbox…，约 35MB）
                · langchain4j-embeddings-bge-small-en-v15-q → onnxruntime(93MB) + tokenizers(18.7MB) + djl + jna
              本项目的文档解析走自己的 DocumentProcessStrategy（上传内容按 UTF-8 直接取文本），

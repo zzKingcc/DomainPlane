@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit;
  * （串行 / 并行 + 超时，失败互不影响），把每路结果组成排名表，融合重排交给
  * {@link FusionStrategy}。
  *
- * 本类只负责「召回编排 + 失败处理」，不内联融合算法，也不知道 ES ——
+ * 本类只负责「召回编排 + 失败处理」，不内联融合算法，也不知道 ES：
  * 通道由 {@link ChannelProvider} 按当前域解析给出（多索引时 = 域链上各域的索引 × 2）。
  * 这样融合策略（分数制 / RRF）可以自由替换而不动编排。
  *
@@ -112,7 +112,7 @@ public class CompositeRetriever implements ContentRetriever {
         }
 
         // 整轮共享一个 deadline：超时是「这次检索多久还不返回」的总预算，不是每条通道各等一次。
-        // 域链深 5 就是 10 条通道，按每通道各等 5s 算，单次检索会拖到 50s —— 而编排线程池
+        // 域链深 5 就是 10 条通道，按每通道各等 5s 算，单次检索会拖到 50s：而编排线程池
         // （core 8 / max 32）扛不住几个这样的请求。串行模式同样受它约束，否则一条卡死的通道
         // 就能无限期占住线程。
         long deadline = start + effectiveTimeoutMs();
@@ -121,7 +121,7 @@ public class CompositeRetriever implements ContentRetriever {
         int succeeded = 0;
 
         if (executor == null) {
-            // 串行模式也必须放进一个线程里跑，否则调用线程会被阻塞在通道上、无法被超时中断 ——
+            // 串行模式也必须放进一个线程里跑，否则调用线程会被阻塞在通道上、无法被超时中断：
             // 那正是「串行模式完全没有超时保护」的根因。用一个临时单线程池：
             // 整轮通道在同一个线程上排队（仍是串行），但每条都能被 cancel(true) 打断。
             try (ExecutorService serial = Executors.newSingleThreadExecutor(SERIAL_FACTORY)) {
@@ -150,7 +150,7 @@ public class CompositeRetriever implements ContentRetriever {
 
         if (succeeded == 0) {
             // 全部通道失败 ≠ 没有相关内容：这里若返回空列表，"检索链路坏了"会和"真没命中"
-            // 长得一模一样 —— 调用方会换个问法反复试，而不是去查配置。
+            // 长得一模一样：调用方会换个问法反复试，而不是去查配置。
             throw new IllegalStateException("知识库检索全部通道失败（通道数 " + channels.size()
                     + "），无法判断是否存在相关内容");
         }
@@ -188,7 +188,7 @@ public class CompositeRetriever implements ContentRetriever {
     /**
      * 在调用线程上直接召回，仅做异常隔离。
      *
-     * 用于并行分支 —— 那里每条通道已经提交到 {@code executor}，超时由
+     * 用于并行分支：那里每条通道已经提交到 {@code executor}，超时由
      * {@link #await} 按整轮 deadline 控制，不需要再包一层线程。
      */
     private ChannelResult retrieveDirectly(Channel channel, Query query) {
@@ -204,7 +204,7 @@ public class CompositeRetriever implements ContentRetriever {
     /**
      * 串行模式下的安全召回：单通道异常不影响其它通道，且受整轮 deadline 约束。
      *
-     * 通道提交到 {@code pool}（一个临时单线程池）而不是在调用线程上直接跑 ——
+     * 通道提交到 {@code pool}（一个临时单线程池）而不是在调用线程上直接跑：
      * 直接跑的话调用线程会被阻塞在通道上，超时无从生效，那正是串行模式
      * 完全没有超时保护的根因。
      */

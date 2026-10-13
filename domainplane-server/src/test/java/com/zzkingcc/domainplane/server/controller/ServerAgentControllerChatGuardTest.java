@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *   • 命中 → 事件序列 = [TOKEN(固定话术), DONE]，HTTP 200 + SSE；
  *   • AgentService 零调用：不写记忆、不建断点、不调模型；
  *   • 参数校验（sessionId / message / domain 必填）先于拦截，缺参仍是 400；
- *   • 超长（40005）不跟队 —— 那是可操作的参数错误，仍走 JSON 400。
+ *   • 超长（40005）不跟队：那是可操作的参数错误，仍走 JSON 400。
  *
  * @author zzkingcc
  */

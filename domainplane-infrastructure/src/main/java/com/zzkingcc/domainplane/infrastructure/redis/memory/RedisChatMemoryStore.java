@@ -32,10 +32,15 @@ import java.util.List;
  * 选 List 而不是 Hash：List 天然有序且支持尾部增量追加；
  * Hash 的字段名还得自己编序号，顺序还得另想办法保证。
  *
- * 附带好处：{@code RPUSH} 是单条原子命令，并发写不会互相覆盖 ——
+ * 附带好处：{@code RPUSH} 是单条原子命令，并发写不会互相覆盖，
  * 原先"读全量改全量写"存在丢消息的窗口。
  *
  * 只增不减的语义仍由上层保证，本类不做淘汰。
+ *
+ * <p>M4-R5 起另有两件"不必读全量"的事也下沉到这里：近况窗口取尾部
+ * （{@link #tailMessages}）、回滚前拿长度并截尾（{@link #sizeOf} / {@link #truncate}）。
+ * 编排层原先每轮都要 "读全量快照 → 失败时整体回写"，在长会话上是 O(n) 的读与写；
+ * 换成"读尾部 + 记长度 + 截尾回滚"后与历史长度无关。</p>
  *
  * @author zzkingcc
  */
@@ -84,18 +89,16 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
                 log.debug("[会话记忆] 读取会话[{}]：无历史消息", memoryId);
                 return new ArrayList<>();
             }
-
-            List<ChatMessage> messages = new ArrayList<>(raw.size());
-            for (String json : raw) {
-                if (json == null || json.isBlank()) {
-                    continue;
-                }
-                try {
-                    messages.addAll(ChatMessageDeserializer.messagesFromJson(json));
-                } catch (Exception e) {
-                    log.warn("[会话记忆] 会话[{}] 中有 1 条消息无法解析，已跳过：{}", memoryId, e.getMessage());
-                }
+            // LRANGE 的结束下标是闭区间，这里多读一条专门用来判"有没有被截断"。
+            // 不能静默截断：调用方多是"读全量 → 追加 → 整段写回"，
+            // 被截掉的尾部会在那一次回写里永久消失，而且全程没有任何信号。
+            if (raw.size() > MAX_READ) {
+                log.error("[会话记忆] 会话[{}] 的历史超过单次读取上限 {} 条，本次只取前 {} 条。"
+                                + "若有调用方整段回写，尾部历史会丢失 —— 请缩短会话或调大上限",
+                        memoryId, MAX_READ, MAX_READ);
+                raw = new ArrayList<>(raw.subList(0, MAX_READ));
             }
+            List<ChatMessage> messages = deserialize(memoryId, raw);
             log.debug("[会话记忆] 读取会话[{}]：{} 条历史消息", memoryId, messages.size());
             return messages;
         } catch (ChatMemoryException e) {
@@ -104,6 +107,101 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
             log.error("[会话记忆] 读取会话[{}]失败：{}", memoryId, e.getMessage(), e);
             throw new ChatMemoryException(ErrorCode.CHAT_MEMORY_READ_ERROR, "读取会话记忆失败: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 只取<b>最近</b> {@code limit} 条（一次 {@code LRANGE key -limit -1}）。
+     *
+     * <p>近况窗口要的就是尾部若干轮的原文，而 {@link #getMessages} 是全量读：
+     * 在万轮会话上，为了一个 16 条的窗口把整段历史拉回来再丢掉，是纯粹的白跑一趟
+     * （M4-R5）。{@code LRANGE} 的负下标天然从尾部数，且 Redis List 是双端结构，
+     * 从尾部取 N 条的代价与总量无关。</p>
+     *
+     * @param limit 最多取多少条；{@code <= 0} 返回空
+     */
+    public List<ChatMessage> tailMessages(Object memoryId, int limit) {
+        if (limit <= 0) {
+            return new ArrayList<>();
+        }
+        String key = buildKey(memoryId);
+        try {
+            List<String> raw = redisTemplate.opsForList().range(key, -((long) limit), -1L);
+            List<ChatMessage> messages = deserialize(memoryId, raw);
+            log.debug("[会话记忆] 读取会话[{}]尾部：{} 条（上限 {}）", memoryId, messages.size(), limit);
+            return messages;
+        } catch (ChatMemoryException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[会话记忆] 读取会话[{}]尾部失败：{}", memoryId, e.getMessage(), e);
+            throw new ChatMemoryException(ErrorCode.CHAT_MEMORY_READ_ERROR,
+                    "读取会话记忆尾部失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 当前条数（一次 {@code LLEN}，O(1)）。
+     *
+     * <p>回滚只需要"本轮写入之前有多长"，拿一个长度比把整段历史读回来便宜得多
+     * （M4-R5）。</p>
+     */
+    public long sizeOf(Object memoryId) {
+        try {
+            Long n = redisTemplate.opsForList().size(buildKey(memoryId));
+            return n == null ? 0L : n;
+        } catch (Exception e) {
+            log.error("[会话记忆] 读取会话[{}]条数失败：{}", memoryId, e.getMessage(), e);
+            throw new ChatMemoryException(ErrorCode.CHAT_MEMORY_READ_ERROR,
+                    "读取会话记忆条数失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 截断为只保留前 {@code keep} 条（一次 {@code LTRIM}）。
+     *
+     * <p>这是"回滚本轮"的实现手段：本轮往记忆里追加了几条，回滚就是把它们从尾部剪掉，
+     * 而 {@code LTRIM} 从尾部剪的代价与保留量无关。{@code keep <= 0} 退化为整键删除。</p>
+     *
+     * <p>比"读快照 → 整体替换回写"少一次全量读与一次全量写，而且语义更窄：
+     * 它只能剪尾部，绝不会把历史改写成另一份内容。</p>
+     */
+    public void truncate(Object memoryId, int keep) {
+        String key = buildKey(memoryId);
+        try {
+            if (keep <= 0) {
+                redisTemplate.delete(key);
+                log.debug("[会话记忆] 会话[{}] 截断到 0 条，已删除该键", memoryId);
+                return;
+            }
+            redisTemplate.opsForList().trim(key, 0L, keep - 1L);
+            log.debug("[会话记忆] 会话[{}] 已截断为前 {} 条", memoryId, keep);
+        } catch (ChatMemoryException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[会话记忆] 截断会话[{}]失败：{}", memoryId, e.getMessage(), e);
+            throw new ChatMemoryException(ErrorCode.CHAT_MEMORY_WRITE_ERROR, "截断会话记忆失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 原始元素 → 消息列表。单条坏元素只跳过并告警、不让整段历史读不出来：记忆是长期存储，
+     * 里面可能混着改版前写入的老格式数据，为一条坏数据丢掉整段对话不划算。
+     */
+    private List<ChatMessage> deserialize(Object memoryId, List<String> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<ChatMessage> messages = new ArrayList<>(raw.size());
+        for (String json : raw) {
+            if (json == null || json.isBlank()) {
+                continue;
+            }
+            try {
+                messages.addAll(ChatMessageDeserializer.messagesFromJson(json));
+            } catch (Exception e) {
+                log.warn("[会话记忆] 会话[{}] 中有 1 条消息无法解析，已跳过：{}", memoryId, e.getMessage());
+            }
+        }
+        return messages;
     }
 
     /**
@@ -149,7 +247,7 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
      * 带着整段历史一起重写。langchain4j 的 {@code ChatMemoryStore} 接口没有单独的
      * append 语义，所以本类额外暴露这个方法，由 {@code DualConstraintChatMemory} 直接调用。
      *
-     * 并发安全：{@code RPUSH} 是单条原子命令，两个并发写不会互相覆盖 ——
+     * 并发安全：{@code RPUSH} 是单条原子命令，两个并发写不会互相覆盖，
      * 这正是选 List 的附带好处（原先"读全量改全量写"有丢消息的窗口）。
      */
     public void appendMessage(Object memoryId, ChatMessage message) {
@@ -177,7 +275,7 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
             return;
         }
         if (ttl != null && ttl.isNegative()) {
-            // 负数 TTL 落进 Redis 的 EXPIRE 会被服务端当作「立即删除」——
+            // 负数 TTL 落进 Redis 的 EXPIRE 会被服务端当作「立即删除」：
             // 记忆会刚写进去就没了，Agent 表现为"永远失忆"且没有任何报错。
             // 所以负数一律按"永久"处理并告警，让配置错误浮出来。
             log.warn("[会话记忆] 会话[{}] 的 TTL 配置为负数（{}），已按永久处理。"
@@ -205,7 +303,7 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
      * 删除某个域下的全部会话记忆（删域级联清理用）。
      *
      * 键形如 {@code domainplane:chat:memory:{域}|{sessionId}}，因此按 {@code 域|} 前缀扫描即可。
-     * 记忆保留期默认是永久，不清掉的话：同路径域将来重建，这段对话历史会原样复活 ——
+     * 记忆保留期默认是永久，不清掉的话：同路径域将来重建，这段对话历史会原样复活，
      * 用户以为域已删干净，实际上一句旧话就把它勾回来了。
      *
      * 用 SCAN 而非 KEYS：KEYS 会阻塞整个 Redis 实例。
@@ -215,7 +313,7 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
     public int deleteByDomain(String domain) {
         String normalized = domain == null ? "" : domain.trim();
         // 守卫必须在拼 pattern 之前：domain 为空时 pattern 会退化成
-        // "domainplane:chat:memory:|*"，匹配全部域的记忆 —— 一次误传就是全量清空，
+        // "domainplane:chat:memory:|*"，匹配全部域的记忆，一次误传就是全量清空，
         // 而记忆保留期默认永久、清掉不可恢复。RedisCheckpointSaver 里有同款守卫。
         if (normalized.isEmpty()) {
             throw new ChatMemoryException(ErrorCode.INVALID_PARAMETER,
@@ -230,8 +328,8 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
      * 删域流程里这一步在 {@code domainRegistry.delete} 之前，抛异常正好中止删域，域仍保留。
      * 这两处 Redis 清理各自承担一条安全保证：
      *
-     *   • 记忆保留期默认永久 —— 不清的话同路径域重建，这段对话历史原样复活；
-     *   • 断点里存着"即将执行、尚未执行"的工具调用 —— 不清的话，24 小时内重建域
+     *   • 记忆保留期默认永久，不清的话同路径域重建，这段对话历史原样复活；
+     *   • 断点里存着"即将执行、尚未执行"的工具调用，不清的话，24 小时内重建域
      *       就能 {@code resume(approved=true)} 把当初被拦下的破坏性动作补执行掉。
      *
      * 失败只 warn 等于把两条保证静默降级为"尽力而为"，而用户看到的是"删除成功"。

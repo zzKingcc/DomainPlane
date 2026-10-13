@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 域链 = {@code Domains.chainOf(当前域)}，即自身 + 全部祖先（含根域），
  * 与工具可见性、提示词的同构语义一致：挂在父域的内容，子域天然可用。
  *
- * 不预判索引是否存在 —— 某条祖先域还没上传过任何文档时它没有索引，此时通道安静地返回空
+ * 不预判索引是否存在，某条祖先域还没上传过任何文档时它没有索引，此时通道安静地返回空
  * （检索器开了 {@code ignoreUnavailable / allowNoIndices}），比先探测一遍省掉 N 次往返。
  *
  * 每条通道带 depth（距查询域的距离，0 = 自身），供融合阶段做层级衰减：

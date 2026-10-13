@@ -13,7 +13,7 @@
 
     <groupId>com.zzkingcc</groupId>
     <artifactId>DomainPlane</artifactId>
-    <version>v1.0-beta.1</version>
+    <version>v1.0-beta.2</version>
     <packaging>pom</packaging>
     <name>DomainPlane</name>
     <description>Java-based AI Workflow Orchestration Starter - 多模块聚合工程</description>
@@ -30,10 +30,6 @@
         <module>domainplane-kb-client</module>
         <module>domainplane-tool-provider</module>
         <module>domainplane-server</module>
-
-        <!-- 示例：进主构建，例子不会悄悄编不过。
-             每个示例是一个独立的 Spring Boot 应用，坐标仍是 DomainPlane 的。 -->
-        <module>examples/chat-window</module>
     </modules>
 
     <properties>
@@ -41,7 +37,7 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <domainplane.version>v1.0-beta.1</domainplane.version>
+        <domainplane.version>v1.0-beta.2</domainplane.version>
         <langchain4j.version>1.18.1</langchain4j.version>
         <langchain4j.beta.version>1.18.1-beta28</langchain4j.beta.version>
         <langgraph4j.version>1.8.17</langgraph4j.version>

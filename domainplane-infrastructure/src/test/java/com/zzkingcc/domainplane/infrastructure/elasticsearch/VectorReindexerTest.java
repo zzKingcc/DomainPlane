@@ -34,9 +34,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>这组测试守的是一个会静默毁数据的实现走偏：保留原文重灌的整个价值在于
  * "捞回来的原文一条都不能少"。三个具体的丢数据方式：</p>
  * <ol>
- *   <li><b>不翻页</b> —— 只取第一页（1 万条）就删索引重建，尾部原文永久丢失；</li>
- *   <li><b>捞取失败仍往下走</b> —— 某个索引读不到却继续删，删掉的是没保住的原文；</li>
- *   <li><b>写回数与捞回数不等</b> —— 部分切片没写回向量，在向量检索里等于凭空消失。</li>
+ *   <li><b>不翻页</b>：只取第一页（1 万条）就删索引重建，尾部原文永久丢失；</li>
+ *   <li><b>捞取失败仍往下走</b>：某个索引读不到却继续删，删掉的是没保住的原文；</li>
+ *   <li><b>写回数与捞回数不等</b>：部分切片没写回向量，在向量检索里等于凭空消失。</li>
  * </ol>
  *
  * <p>三者都不会报错，只会让检索结果悄悄变差，所以必须用测试钉死。</p>
@@ -207,7 +207,7 @@ class VectorReindexerTest {
     void preserveKeepsPagingWhenPagesAreNotFull() {
         // 这是真实缺陷的形状：ES 侧有自己的单页上限（index.max_result_window / 分片限制），
         // 实际返回可能小于请求的 size。若按"这页满不满"判断是否取完，大索引会被静默截断，
-        // 而下一步就要删索引 —— 截掉的那部分原文永久丢失，且零报错。
+        // 而下一步就要删索引，截掉的那部分原文永久丢失，且零报错。
         StubClient client = new StubClient();
         client.pageSize = 2;
         client.alwaysReturnPartialPage = true;

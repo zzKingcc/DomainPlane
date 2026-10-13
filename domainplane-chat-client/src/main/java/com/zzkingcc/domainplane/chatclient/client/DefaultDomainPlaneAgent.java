@@ -2,14 +2,16 @@ package com.zzkingcc.domainplane.chatclient.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zzkingcc.domainplane.clientcore.exception.ClientErrorCode;
 import com.zzkingcc.domainplane.clientcore.exception.DomainPlaneException;
+import com.zzkingcc.domainplane.clientcore.exception.ServerRejectedException;
 import com.zzkingcc.domainplane.api.agent.AgentRequest;
 import com.zzkingcc.domainplane.api.agent.AgentService;
 import com.zzkingcc.domainplane.api.agent.ApprovalRequiredException;
 import com.zzkingcc.domainplane.api.agent.DomainPlaneAgent;
-import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.api.event.AgentEvent;
 import com.zzkingcc.domainplane.api.event.AgentEventType;
+import com.zzkingcc.domainplane.api.model.MessageContent;
 import com.zzkingcc.domainplane.api.model.ToolCall;
 import lombok.ToString;
 import org.slf4j.Logger;
@@ -73,10 +75,10 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
     }
 
     @Override
-    public String ask(String sessionId, String question) {
+    public String ask(String sessionId, java.util.List<MessageContent> contents) {
         List<AgentEvent> collected;
         try {
-            collected = events(sessionId, question).collectList().block(answerTimeout);
+            collected = events(sessionId, contents).collectList().block(answerTimeout);
         } catch (IllegalStateException e) {
             // reactor 的 block(Duration) 超时抛这个，消息通常不含业务信息
             throw timedOut(sessionId, e);
@@ -103,7 +105,7 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
             }
         }
         // 没收到任何终止事件就走到这里 = 流被中途掐断（容器异步超时、网关截断、连接重置…）。
-        // 此时手上的 answer 只是半截，绝不能当成功返回 —— 那等于让业务方拿着残缺答案继续跑。
+        // 此时手上的 answer 只是半截，绝不能当成功返回：那等于让业务方拿着残缺答案继续跑。
         if (!terminated) {
             throw truncated(sessionId, collected.size());
         }
@@ -126,7 +128,7 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
     private static DomainPlaneException truncated(String sessionId, int received) {
         log.warn("[DomainPlaneAgent] 会话[{}] 事件流未收到终止事件即结束，已收到 {} 个事件，判定为流被截断",
                 sessionId, received);
-        return new DomainPlaneException(ErrorCode.EXTERNAL_SERVICE_TIMEOUT,
+        return new DomainPlaneException(ClientErrorCode.STREAM_TRUNCATED,
                 "事件流在收到终止事件（DONE/STOPPED/ERROR）前结束，答案不完整（已收到 " + received
                         + " 个事件）；若本轮耗时较长，请调大 domainplane.client.read-timeout 或服务端"
                         + " spring.mvc.async.request-timeout");
@@ -135,18 +137,18 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
     /** 整轮等待超过上限：连截断信号都没等到，只能按超时收场 */
     private DomainPlaneException timedOut(String sessionId, Throwable cause) {
         log.warn("[DomainPlaneAgent] 会话[{}] 等待答案超过上限（{}）", sessionId, answerTimeout, cause);
-        return new DomainPlaneException(ErrorCode.EXTERNAL_SERVICE_TIMEOUT,
+        return new DomainPlaneException(ClientErrorCode.TIMEOUT,
                 "等待答案超过上限（" + answerTimeout + "），本轮未收到任何终止事件。"
                         + "请确认服务端仍在运行，或调大 domainplane.client.answer-timeout");
     }
 
     @Override
-    public Flux<String> stream(String sessionId, String question) {
-        // 截断检测：记录是否见过终止事件，流"正常结束"时若没见过就补一个错误 ——
+    public Flux<String> stream(String sessionId, java.util.List<MessageContent> contents) {
+        // 截断检测：记录是否见过终止事件，流"正常结束"时若没见过就补一个错误，
         // 没有终止事件就没有"答完了"的凭据，半截答案绝不能按完整答案交给业务方。
         var terminated = new java.util.concurrent.atomic.AtomicBoolean(false);
         var counter = new java.util.concurrent.atomic.AtomicInteger();
-        return events(sessionId, question)
+        return events(sessionId, contents)
                 .concatMap(event -> {
                     counter.incrementAndGet();
                     if (isTerminal(event.getType())) {
@@ -164,11 +166,19 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
                         : Flux.error(truncated(sessionId, counter.get()))));
     }
 
+    /**
+     * 拿完整事件流（可带图）。
+     *
+     * <p>{@code contents} 原样填进 {@link AgentRequest}：合并 TEXT、保留图片块都由
+     * {@code AgentRequest} 自己负责，这里不做任何裁剪：裁剪过一次，就再也说不清
+     * 哪一层丢的。</p>
+     */
     @Override
-    public Flux<AgentEvent> events(String sessionId, String question) {
+    public Flux<AgentEvent> events(String sessionId, java.util.List<MessageContent> contents) {
         return transport.chat(AgentRequest.builder()
                 .sessionId(sessionId)
-                .message(question)
+                .message(DomainPlaneAgent.mergedText(contents))
+                .contents(contents)
                 .domain(domainId)
                 .build());
     }
@@ -196,14 +206,14 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
      *
      * 解析失败即失败，不当成"没有待授权工具"往下走：
      * 空清单会被宿主渲染成一张空的确认框，宿主照样能点批准 → 危险动作执行，
-     * 而没人看到过批准内容。这与"丢掉需要审批这件事"一样糟，只是更隐蔽 ——
+     * 而没人看到过批准内容。这与"丢掉需要审批这件事"一样糟，只是更隐蔽：
      * 后者宿主知道出事了，前者宿主以为自己批的是空操作。
      *
      * 抛出的异常不含原始 payload（避免把工具参数带进异常消息落到日志里）。
      */
     private List<ToolCall> parseToolCalls(String sessionId, String payload) {
         if (payload == null || payload.isBlank()) {
-            throw new DomainPlaneException(ErrorCode.UNEXPECTED_ERROR,
+            throw new DomainPlaneException(ClientErrorCode.RESPONSE_UNREADABLE,
                     "审批中断事件未携带待授权清单，无法在本轮继续；请查看服务端日志排查 payload 构造。"
                             + "为安全起见本轮不会放行任何工具，请重试该会话");
         }
@@ -213,7 +223,7 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
                 String name = tool.path("name").asText("");
                 if (name.isBlank()) {
                     // 清单里有无名条目 = 宿主渲染出来是一行空白，用户不知道自己在批什么
-                    throw new DomainPlaneException(ErrorCode.UNEXPECTED_ERROR,
+                    throw new DomainPlaneException(ClientErrorCode.RESPONSE_UNREADABLE,
                             "审批清单中存在无名称条目，无法确认待授权动作，已阻断本轮（请重试该会话）");
                 }
                 JsonNode arguments = tool.path("arguments");
@@ -227,30 +237,41 @@ public class DefaultDomainPlaneAgent implements DomainPlaneAgent {
         } catch (Exception e) {
             log.warn("[DomainPlaneAgent] 会话[{}] 中断 payload 解析失败（已阻断本轮，不按空清单放行）",
                     sessionId, e);
-            throw new DomainPlaneException(ErrorCode.UNEXPECTED_ERROR,
+            throw new DomainPlaneException(ClientErrorCode.RESPONSE_UNREADABLE,
                     "审批清单解析失败，本轮不会放行任何工具，请查看服务端日志排查 payload 构造");
         }
         if (calls.isEmpty()) {
             // 服务端发了"有审批中断"但清单为空：状态不一致，绝不能当成"无需审批"
             log.warn("[DomainPlaneAgent] 会话[{}] 收到空的审批清单，已阻断本轮", sessionId);
-            throw new DomainPlaneException(ErrorCode.UNEXPECTED_ERROR,
+            throw new DomainPlaneException(ClientErrorCode.RESPONSE_UNREADABLE,
                     "审批清单为空，无法确认待授权动作，本轮不会放行任何工具，请重试该会话");
         }
         return List.copyOf(calls);
     }
 
-    /** ERROR 事件 → 带码异常；traceId 并进文案，方便一键排障 */
+    /**
+     * ERROR 事件 → {@link ServerRejectedException}（原样透传）。
+     *
+     * <p>事件的 code / codeName / content / traceId 一个字不改地交出去。<b>不把服务端码
+     * 翻译成本地枚举</b>：翻译要求 SDK 与服务端共用一份枚举，服务端加一个新码之后，
+     * 老 SDK 只能把它兜底成"未预期错误"，宿主从此分不清"服务端说了什么"与
+     * "我这边没认出来"。透传则没有这个问题。</p>
+     */
     private static DomainPlaneException failure(AgentEvent event) {
-        ErrorCode code = event.getCode() == null ? null : ErrorCode.of(event.getCode());
-        if (code == null) {
-            // 服务端给了未在本版本枚举里的码：兜底成可重试的服务错误，但保留原文案
-            code = ErrorCode.UNEXPECTED_ERROR;
+        Integer serverCode = event.getCode();
+        if (serverCode == null) {
+            // 服务端报错却没给码：这不是一次"带码的业务拒绝"，按响应读不懂处理，
+            // 但文案仍用服务端原文：它比我们编的任何一句都准。
+            String content = event.getContent();
+            String message = content == null || content.isBlank() ? "服务端报错但未携带状态码" : content;
+            if (event.getTraceId() != null && !event.getTraceId().isBlank()) {
+                message = message + "（traceId=" + event.getTraceId() + "）";
+            }
+            return new DomainPlaneException(ClientErrorCode.RESPONSE_UNREADABLE, message);
         }
-        String message = event.getContent() == null || event.getContent().isBlank()
-                ? code.getMessage() : event.getContent();
-        if (event.getTraceId() != null && !event.getTraceId().isBlank()) {
-            message = message + "（traceId=" + event.getTraceId() + "）";
-        }
-        return new DomainPlaneException(code, message);
+        // SSE 通道没有 HTTP 状态可言，置 -1；可重试性来自服务端随事件下发的 retryable，
+        // 它没给就是 null（不是 false）："没说"和"说了不能重试"是两回事。
+        return new ServerRejectedException(serverCode, event.getCodeName(), event.getContent(),
+                null, event.getTraceId(), -1, event.getRetryable());
     }
 }

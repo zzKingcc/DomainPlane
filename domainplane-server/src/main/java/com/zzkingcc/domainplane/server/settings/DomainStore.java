@@ -22,7 +22,7 @@ import java.util.Map;
  * 只存管控台声明的域：内置根域由代码预置，派生域由工具声明决定，两者都不落盘。
  *
  * 落盘结构与可调用性一一对应：域是不是"可调用单元"是显式声明，不靠"有没有子域"这种
- * 派生事实推断 —— 后者会在新增子域时静默改变调用方的可用性。
+ * 派生事实推断：后者会在新增子域时静默改变调用方的可用性。
  *
  * @author zzkingcc
  */
@@ -61,7 +61,7 @@ public class DomainStore {
      *
      * 文件不存在或解析失败都不阻断启动，但两者被区分开：
      * {@link StoredDomains.Status#ABSENT} 是"没有配置"，{@link StoredDomains.Status#CORRUPT}
-     * 是"配置坏了" —— 后者禁止触发迁移与覆盖写盘，否则会把一份可能还能修好的文件抹成空配置，
+     * 是"配置坏了"：后者禁止触发迁移与覆盖写盘，否则会把一份可能还能修好的文件抹成空配置，
      * 而且迁移标记一旦被写成 true 就再也不会重来。
      */
     public StoredDomains load() {
@@ -97,7 +97,7 @@ public class DomainStore {
             this.corruptOnLoad = false;
             return new StoredDomains(callables, settings.isCallableMigrated(), StoredDomains.Status.OK);
         } catch (IOException e) {
-            // 这里必须区分"文件不存在"和"文件损坏" —— 两者都返回空配置会让启动期的一次性迁移
+            // 这里必须区分"文件不存在"和"文件损坏"：两者都返回空配置会让启动期的一次性迁移
             // 把这份空配置当成权威写回磁盘（callableMigrated 被置为 true），原始内容就此永久丢失，
             // 而且此后不会再试第二次。损坏时宁可让启动带着空注册表跑完（域需要重建，但原始文件还在，
             // 运维修好后重启即可恢复），也不能覆盖它。
@@ -124,7 +124,7 @@ public class DomainStore {
      *
      * @param callables        域标识 → 是否可调用（顺序即落盘顺序）
      * @param callableMigrated 是否已完成"非叶子→装配节点"的一次性迁移
-     * @throws IllegalStateException 写盘失败 —— 必须让调用方感知，静默失败会让用户以为已生效
+     * @throws IllegalStateException 写盘失败，必须让调用方感知，静默失败会让用户以为已生效
      */
     public void save(Map<String, Boolean> callables, boolean callableMigrated) {
         assertWritable();
@@ -153,7 +153,7 @@ public class DomainStore {
     }
 
     /**
-     * 当前配置是否已损坏——损坏时禁止任何覆盖写。
+     * 当前配置是否已损坏：损坏时禁止任何覆盖写。
      *
      * 损坏的含义是"文件在，但读不出来"。此刻内存里的注册表只包含根域与工具派生的域，
      * 人工建的域一个都没有，把它写回磁盘就是抹掉全部人工域，且不可逆。
@@ -180,7 +180,7 @@ public class DomainStore {
      * @param callables        域标识 → 是否可调用
      * @param callableMigrated 是否已完成一次性迁移
      * @param status           读取结果状态。{@link Status#CORRUPT} 时两个字段都无意义，
-     *                         调用方必须据此拒绝迁移与写盘 —— 见 {@link #load()} 的说明。
+     *                         调用方必须据此拒绝迁移与写盘：见 {@link #load()} 的说明。
      */
     public record StoredDomains(Map<String, Boolean> callables, boolean callableMigrated, Status status) {
 
@@ -220,7 +220,7 @@ public class DomainStore {
      *
      * 不要改回 {@code DomainSettings}：同包已有顶层的 {@code DomainSettings}
      * （{@code settings/DomainSettings.java}，存"域 → 提示词片段"，落盘 {@code prompts.json}），
-     * 两者语义完全不同。同名会让本类内的简单名解析与包外import 分道扬镳 ——
+     * 两者语义完全不同。同名会让本类内的简单名解析与包外import 分道扬镳：
      * {@code DomainStore} 内的 {@code DomainSettings} 指向本类，{@code AdminController}
      * 等通过 import 的是顶层那份，读代码时极易看错。
      */

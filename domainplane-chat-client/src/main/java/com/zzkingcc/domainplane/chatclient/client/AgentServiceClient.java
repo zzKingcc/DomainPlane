@@ -81,7 +81,7 @@ public class AgentServiceClient implements AgentService {
     /**
      * 停止任务。
      *
-     * 会话状态在服务端按 (域, sessionId) 隔离，因此 stop 必须携带与 chat 相同的域 ——
+     * 会话状态在服务端按 (域, sessionId) 隔离，因此 stop 必须携带与 chat 相同的域：
      * 门面已绑定域，这里由调用方传入的 {@code domain} 决定。
      */
     @Override
@@ -99,17 +99,16 @@ public class AgentServiceClient implements AgentService {
                     .block();
             DomainPlaneException businessError = DomainPlaneErrors.fromResponseBody(resp);
             if (businessError != null) {
-                log.warn("[DomainPlane客户端] stop 会话[{}] 被服务端拒绝: code={}({}), {}",
-                        sessionId, businessError.getCode(), businessError.getCodeName(),
-                        businessError.getMessage());
+                log.warn("[DomainPlane客户端] stop 会话[{}] 被服务端拒绝: {}",
+                        sessionId, businessError.describe());
                 return false;
             }
             return resp != null && Boolean.TRUE.equals(resp.get("stopRequested"));
         } catch (Exception e) {
             invalidateIfUnauthorized(e);
             DomainPlaneException mapped = DomainPlaneErrors.fromTransport(e);
-            log.error("[DomainPlane客户端] stop 会话[{}] 失败: code={}({}), {}",
-                    sessionId, mapped.getCode(), mapped.getCodeName(), mapped.getMessage(), e);
+            log.error("[DomainPlane客户端] stop 会话[{}] 失败: {}",
+                    sessionId, mapped.describe(), e);
             return false;
         }
     }

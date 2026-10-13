@@ -32,6 +32,13 @@ public final class AgentEvent implements Serializable {
     private final String codeName;
     /** 一次完整调用的追踪 ID */
     private final String traceId;
+    /**
+     * 是否可重试（仅 {@code ERROR} 事件有值）。
+     *
+     * <p>由服务端随码一起下发，调用方据此决定退避重试还是直接提示：不需要认识这个码，
+     * 更不需要自己从码推导。SDK 侧原样透传（见 {@code ServerRejectedException}）。</p>
+     */
+    private final Boolean retryable;
     /** 事件产生时间 */
     private final long timestamp;
 
@@ -46,6 +53,7 @@ public final class AgentEvent implements Serializable {
                       @JsonProperty("code") Integer code,
                       @JsonProperty("codeName") String codeName,
                       @JsonProperty("traceId") String traceId,
+                      @JsonProperty("retryable") Boolean retryable,
                       @JsonProperty("timestamp") Long timestamp) {
         this.type = type;
         this.sessionId = sessionId;
@@ -54,16 +62,25 @@ public final class AgentEvent implements Serializable {
         this.code = code;
         this.codeName = codeName;
         this.traceId = traceId;
+        this.retryable = retryable;
         this.timestamp = timestamp == null ? System.currentTimeMillis() : timestamp;
     }
 
+    /** 便捷构造：不带 retryable 与时间戳（同进程构造事件用） */
+    public AgentEvent(AgentEventType type, String sessionId, String content, String payload,
+                      Integer code, String codeName, String traceId) {
+        this(type, sessionId, content, payload, code, codeName, traceId, null,
+                System.currentTimeMillis());
+    }
+
     private AgentEvent(AgentEventType type, String sessionId, String content, String payload) {
-        this(type, sessionId, content, payload, null, null, null, System.currentTimeMillis());
+        this(type, sessionId, content, payload, null, null, null, null, System.currentTimeMillis());
     }
 
     private AgentEvent(AgentEventType type, String sessionId, String content,
-                       Integer code, String codeName, String traceId) {
-        this(type, sessionId, content, null, code, codeName, traceId, System.currentTimeMillis());
+                       Integer code, String codeName, String traceId, Boolean retryable) {
+        this(type, sessionId, content, null, code, codeName, traceId, retryable,
+                System.currentTimeMillis());
     }
 
     /** 模型增量输出 */
@@ -110,14 +127,19 @@ public final class AgentEvent implements Serializable {
     public static AgentEvent error(String sessionId, String message,
                                    com.zzkingcc.domainplane.api.code.ErrorCode errorCode, String traceId) {
         return new AgentEvent(AgentEventType.ERROR, sessionId,
-                message == null ? errorCode.getMessage() : message,
-                errorCode.getCode(), errorCode.name(), traceId);
+                message == null ? errorCode.getUserMessage() : message,
+                errorCode.getCode(), errorCode.name(), traceId, errorCode.isRetryable());
     }
 
-    /** 执行异常 */
+    /**
+     * 执行异常：文案取码的<b>对外文案</b>，并带上服务端声明的可重试性。
+     *
+     * <p>不取 {@code getMessage()}：那是运维文案，里面可以有内部术语（如"图检查点读写失败"），
+     * 直接展示给终端用户既看不懂也会误导。</p>
+     */
     public static AgentEvent error(String sessionId,
                                    com.zzkingcc.domainplane.api.code.ErrorCode errorCode, String traceId) {
-        return error(sessionId, errorCode.getMessage(), errorCode, traceId);
+        return error(sessionId, errorCode.getUserMessage(), errorCode, traceId);
     }
 
     /** 本轮执行正常结束 */

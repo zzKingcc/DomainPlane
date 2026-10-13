@@ -7,6 +7,7 @@ import com.zzkingcc.domainplane.common.exception.BaseException;
 import com.zzkingcc.domainplane.server.config.AiProperties;
 import com.zzkingcc.domainplane.server.env.StorageLocations;
 import com.zzkingcc.domainplane.server.model.ModelAdapterRegistry;
+import com.zzkingcc.domainplane.server.model.ModelCapabilityProbe;
 import com.zzkingcc.domainplane.server.model.ModelMetadataReader;
 import com.zzkingcc.domainplane.server.model.ModelProfile;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
@@ -166,7 +167,8 @@ class AdminModelProfileDetectTest {
         LlmModelHolder holder = new LlmModelHolder(new AiProperties(), new StubStore());
         out[0] = new AdminModelProfileController(registry, store, holder,
                 new ModelMetadataReader(),
-                new ModelAdapterRegistry(new DefaultResourceLoader()), null, null);
+                new ModelAdapterRegistry(new DefaultResourceLoader()),
+                new ModelCapabilityProbe(), null, null);
         return registry;
     }
 

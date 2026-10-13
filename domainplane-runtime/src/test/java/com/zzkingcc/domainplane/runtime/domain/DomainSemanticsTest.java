@@ -78,7 +78,7 @@ class DomainSemanticsTest {
     @Test
     void wildcardIsNoLongerADomain() {
         ToolDescriptor tool = toolWithDomains("*");
-        // "*" 不是合法域路径，不在任何域的祖先链上，因此处处不可见 —— 不再有通配语义
+        // "*" 不是合法域路径，不在任何域的祖先链上，因此处处不可见，不再有通配语义
         assertFalse(tool.visibleIn(Domains.DEFAULT));
         assertFalse(tool.visibleIn("default.sales"));
     }
@@ -278,7 +278,7 @@ class DomainSemanticsTest {
 
         assertTrue(registry.isCallable("default.sales"), "建它时它还是叶子，可调用");
 
-        // 给它加一个子域 —— 它立刻不再是叶子，必须降级为装配节点
+        // 给它加一个子域：它立刻不再是叶子，必须降级为装配节点
         registry.ensureChain("default.sales.order");
 
         assertFalse(registry.isCallable("default.sales"),

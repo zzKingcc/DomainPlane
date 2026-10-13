@@ -13,7 +13,7 @@ package com.zzkingcc.domainplane.runtime.tool;
  *
  *
  * DRAINING 是为"判死与清理并发"准备的中间态：超时定时器与强制下线可能同时触发，
- * 靠状态机单飞——只有把 ONLINE 改成 DRAINING 成功的那一方，才获得清理权。
+ * 靠状态机单飞，只有把 ONLINE 改成 DRAINING 成功的那一方，才获得清理权。
  * @author zzkingcc
  */
 public enum InstanceState {
@@ -44,7 +44,7 @@ public enum InstanceState {
         return label;
     }
 
-    /** 是否为"拒绝心跳"的状态（管控台显示与 410 判定共用同一判据；熔断不在其中——它只掐工具，不掐心跳） */
+    /** 是否为"拒绝心跳"的状态（管控台显示与 410 判定共用同一判据；熔断不在其中：它只掐工具，不掐心跳） */
     public boolean isRejecting() {
         return this == FORCE_OFFLINE;
     }

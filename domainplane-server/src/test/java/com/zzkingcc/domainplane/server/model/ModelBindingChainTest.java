@@ -13,13 +13,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 「域 → 模型」绑定沿链回落：自身没绑就向上找最近一个绑了模型的祖先。
  *
- * <p>回落的是<b>域链</b>，不是任何内置默认值 —— 根域也没绑就是真的没有。</p>
+ * <p>回落的是<b>域链</b>，不是任何内置默认值：根域也没绑就是真的没有。</p>
  */
 class ModelBindingChainTest {
 
+    /**
+     * 按旧口径（一个域一个列表 = 主模型）造设置。
+     *
+     * <p>用例写的是"某域绑了哪几个别名"，不关心族；这里统一折成 {@code chat} 族，
+     * 让断言继续读 {@code resolveAlong}（那本来就是主模型的解析入口）。</p>
+     */
     private static ModelProfileSettings settings(Map<String, List<String>> bindings) {
         ModelProfileSettings settings = new ModelProfileSettings();
-        settings.setDomainBindings(new LinkedHashMap<>(bindings));
+        Map<String, ModelProfileSettings.DomainModels> converted = new LinkedHashMap<>();
+        bindings.forEach((domain, aliases) ->
+                converted.put(domain, ModelProfileSettings.DomainModels.ofChat(aliases)));
+        settings.setDomainBindings(converted);
         return settings;
     }
 

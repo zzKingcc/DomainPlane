@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
  * 里一次性转成 UTF-8 语义的字符串；后面的清洗、切片、写索引、导出都只处理 UTF-8，
  * 全链路不含任何编码分支。
  *
- * 探测顺序固定为：BOM →（无 BOM 时）严格 UTF-8 → GB18030。两条都判不出就拒绝该文件 ——
+ * 探测顺序固定为：BOM →（无 BOM 时）严格 UTF-8 → GB18030。两条都判不出就拒绝该文件，
  * 猜错编码会静默灌进乱码知识，比直接报错更糟。
  *
  * @author zzkingcc
@@ -36,7 +36,7 @@ public final class TxtNormalizer {
     /** 行尾空白（含全角空格），行首缩进要保留 */
     private static final Pattern TRAILING_BLANK = Pattern.compile("[ \\t\\u3000]+(?=\\n|\\z)");
 
-    /** 控制字符；\\t(09) \\n(0A) \\f(0C) 刻意排除 —— \\f 要留给清洗阶段找跨页重复行 */
+    /** 控制字符；\\t(09) \\n(0A) \\f(0C) 刻意排除，\\f 要留给清洗阶段找跨页重复行 */
     private static final Pattern CONTROL_CHARS = Pattern.compile("[\\u0000-\\u0008\\u000B\\u000E-\\u001F\\u007F]");
 
     private TxtNormalizer() {

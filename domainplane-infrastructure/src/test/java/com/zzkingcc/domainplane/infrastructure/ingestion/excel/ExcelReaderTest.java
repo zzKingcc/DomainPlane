@@ -131,7 +131,7 @@ class ExcelReaderTest {
 
         ExcelReader.ExcelParseResult result = ExcelReader.read(bytes(workbook), "计算.xlsx");
 
-        // 不传 FormulaEvaluator 的话 POI 会给出 "A2*B2" 这个公式文本 —— 那就把公式当知识入库了
+        // 不传 FormulaEvaluator 的话 POI 会给出 "A2*B2" 这个公式文本，那就把公式当知识入库了
         assertEquals("| 数量 | 倍数 | 结果 |\n| --- | --- | --- |\n| 3 | 2 | 6 |", onlyTable(result));
     }
 

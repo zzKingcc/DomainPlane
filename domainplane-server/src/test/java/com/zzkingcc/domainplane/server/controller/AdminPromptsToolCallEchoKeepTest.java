@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 提示词保存（POST /admin/prompts）不能把「工具执行信息回写」开关冲掉。
  *
- * 保存是整份覆盖写，而提示词页的请求体只有 prompts 段 —— 不合并的话，
+ * 保存是整份覆盖写，而提示词页的请求体只有 prompts 段：不合并的话，
  * 在提示词页点一次保存，各域拨好的回写开关就全部静默回到默认（关）。
  *
  * @author zzkingcc

@@ -1,13 +1,13 @@
 # DomainPlane 服务端镜像构建流程
 #
-# 1. 可执行 jar：domainplane-server/target/domainplane-v1.0-beta.1.jar
+# 1. 可执行 jar：domainplane-server/target/domainplane-v1.0-beta.2.jar
 # 2. 把该 jar 与本 Dockerfile 放在同一目录，构建镜像：
-#      docker build -t domainplane-server:v1.0-beta.1 .
+#      docker build -t domainplane-server:v1.0-beta.2 .
 # 3. 运行：
 #      docker run -d --name domainplane -p 9527:9527 \
 #        -v domainplane-config:/var/lib/domainplane/config \
 #        -v domainplane-chunks:/var/lib/domainplane/chunks \
-#        domainplane-server:v1.0-beta.1
+#        domainplane-server:v1.0-beta.2
 #
 # 约定：
 #   1. 默认端口 9527，可用 SERVER_PORT 环境变量或 --server.port= 覆盖；
@@ -26,7 +26,7 @@ RUN groupadd -r domainplane \
  && chown -R domainplane:domainplane /opt/domainplane /var/lib/domainplane /var/log/domainplane
 
 WORKDIR /opt/domainplane
-COPY --chown=domainplane:domainplane domainplane-v1.0-beta.1.jar app.jar
+COPY --chown=domainplane:domainplane domainplane-v1.0-beta.2.jar app.jar
 
 USER domainplane
 EXPOSE 9527
@@ -35,7 +35,7 @@ ENV TZ=Asia/Shanghai \
     DOMAINPLANE_LOG_LEVEL=INFO \
     JAVA_OPTS="-XX:MaxRAMPercentage=75 -Duser.timezone=Asia/Shanghai"
 
-# 存活探针打免鉴权的 GET /health —— /api/agent/health 需要凭证，编排系统的探针配不了请求头。
+# 存活探针打免鉴权的 GET /health，/api/agent/health 需要凭证，编排系统的探针配不了请求头。
 # 基础镜像（Ubuntu 基底的 temurin）没有 curl，用 bash 的 /dev/tcp 发一个最简 HTTP 请求，只看首行是否 200。
 # 换成 alpine 基底（musl）需要改写法；K8s 请直接用原生 httpGet 探针，不需要镜像内有任何工具。
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \

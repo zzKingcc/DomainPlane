@@ -17,7 +17,7 @@ public final class InputSanitizer {
 
     private static final Logger log = LoggerFactory.getLogger(InputSanitizer.class);
 
-    /** 用户输入最大长度（字符）。超长显式拒绝，不截断 —— 见 {@link #validate(String)}。 */
+    /** 用户输入最大长度（字符）。超长显式拒绝，不截断，见 {@link #validate(String)}。 */
     private static final int MAX_INPUT_LENGTH = 2000;
 
     //1、指令覆盖检测
@@ -39,7 +39,7 @@ public final class InputSanitizer {
             // 没有 (?m) 时 ^ 只匹配整个字符串开头，行首注入完全不被检测到。
             Pattern.compile("(?im)^\\s*(system|assistant|user|function|tool)\\s*[:：]"),
             Pattern.compile("(?i)\\[system\\]|\\[assistant\\]|\\[user\\]"),
-            Pattern.compile("SystemMessage\\s*[:：]"),
+            Pattern.compile("(?i)SystemMessage\\s*[:：]"),
             Pattern.compile("(?i)role\\s*[:：]\\s*(system|assistant)"),
             Pattern.compile("你是.{0,5}(系统|AI|模型|GPT|LLM|大模型|人工智能)"),
             Pattern.compile("(?s)you are.{0,5}(system|AI|model|GPT|LLM)"),
@@ -147,15 +147,18 @@ public final class InputSanitizer {
      *         携带 {@link com.zzkingcc.domainplane.api.code.ErrorCode#INPUT_REJECTED}（40003）
      * @throws com.zzkingcc.domainplane.common.exception.BaseException 输入超过
      *         {@value #MAX_INPUT_LENGTH} 字符，携带
-     *         {@link com.zzkingcc.domainplane.api.code.ErrorCode#INPUT_TOO_LONG}（40005）——
+     *         {@link com.zzkingcc.domainplane.api.code.ErrorCode#INPUT_TOO_LONG}（40005）：
      *         拒绝而非截断，且抛出点在任何副作用之前
      */
     public static String validate(String input) {
-        if (isMalicious(input)) {
+        /* 顺序本身就是安全语义：必须"先清洗、再检测"。
+           反过来（先检测原串）会被零宽字符绕过：关键词被拆成 "sys\u200Btem" 时正则失配，
+           而清洗随后又把零宽字符去掉、还原成明文注入载荷，检测等于白做。 */
+        String cleaned = sanitize(input);
+        if (isMalicious(cleaned)) {
             throw new com.zzkingcc.domainplane.common.exception.BaseException(
                     com.zzkingcc.domainplane.api.code.ErrorCode.INPUT_REJECTED);
         }
-        String cleaned = sanitize(input);
         if (cleaned.length() > MAX_INPUT_LENGTH) {
             // 只记长度不记内容：用户输入属隐私，全文入日志既无必要也会显著膨胀日志体积
             log.warn("[输入安全] 输入超长被拒绝: {} 字符 > 上限 {} 字符", cleaned.length(), MAX_INPUT_LENGTH);
@@ -193,7 +196,22 @@ public final class InputSanitizer {
         }
     }
 
+    /**
+     * 日志用的短摘要。
+     *
+     * 必须压平换行：否则用户可提交 "正常问题\n2026-10-17 ERROR ... - admin login ok"，
+     * 在日志里伪造出完整的一行记录（日志注入）。
+     * 按码点截断而不是按 char，避免切在代理对中间产出非法 UTF-16。
+     */
     private static String truncate(String input, int maxLen) {
-        return input.length() <= maxLen ? input : input.substring(0, maxLen) + "...";
+        if (input == null) {
+            return "";
+        }
+        String flat = input.replaceAll("[\\r\\n\\t\\u0000-\\u001F]+", " ").trim();
+        int codePoints = flat.codePointCount(0, flat.length());
+        if (codePoints <= maxLen) {
+            return flat;
+        }
+        return flat.substring(0, flat.offsetByCodePoints(0, maxLen)) + "...";
     }
 }

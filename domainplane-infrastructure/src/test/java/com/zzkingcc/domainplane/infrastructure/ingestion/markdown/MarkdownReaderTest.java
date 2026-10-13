@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * md 解析器的回归样例：md 的标题是「读」出来的，不是猜出来的 —— 这条别再退回txt 那套正则。
+ * md 解析器的回归样例：md 的标题是「读」出来的，不是猜出来的，这条别再退回txt 那套正则。
  */
 class MarkdownReaderTest {
 

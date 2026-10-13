@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * 口径（与前端域卡片头部那颗开关一一对应）：
  *   • 拨到开 / 关都落盘，只动 toolCallEcho 一个域的一个键；
- *   • 只对可调用单元（叶子域）受理 —— 装配节点不能作为入口，设了也永远读不到；
+ *   • 只对可调用单元（叶子域）受理：装配节点不能作为入口，设了也永远读不到；
  *   • 域不存在 / 请求体缺失一律拒绝，且原因说得清是哪一个。
  *
  * 控制器其余依赖（domainStore / knowledgeBase / modelProfileRegistry / toolRegistry 等）
@@ -49,7 +49,7 @@ class AdminDomainToolCallEchoTest {
         store = new DomainSettingsStore(storage);
         // domainStore 本路径不落盘，但 view() 要读它的 filePath() 展示给前端，给真实实例
         return new AdminDomainController(registry, new DomainStore(storage), null, store,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null);
     }
 
     private static AdminDomainController.ToolCallEchoBody body(Boolean echo) {

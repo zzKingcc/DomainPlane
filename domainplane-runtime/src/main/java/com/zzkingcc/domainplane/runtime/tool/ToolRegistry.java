@@ -42,9 +42,26 @@ public class ToolRegistry {
     private final Set<String> declaredDomains = ConcurrentHashMap.newKeySet();
 
     /**
+     * 被显式撤销过的域：管控台删域后记在这里，从此不再接受工具声明。
+     *
+     * 为什么必须是"记住"而不是"删一次"：{@link #forgetDomains} 只是把域从现有声明里剥离，
+     * 存活实例的下一次心跳仍会带着原始 manifest 回来，{@link #remember} 与
+     * {@link #refreshReplica} 会立刻把域重新声明回来、并把工具重建为该域的可调用叶子：
+     * 删域等于没删，授权边界也一并恢复。撤销态在进程内保持，直到管控台重新创建同名域
+     * （{@link #allowDomains}）。
+     */
+    private final Set<String> revokedDomains = ConcurrentHashMap.newKeySet();
+
+    /**
+     * 域变更互斥锁：{@link #forgetDomains} 与 {@link #remember} 必须串行，
+     * 否则"删域正在剥离声明"与"心跳正在登记声明"交错，撤销结果取决于两条线程的时序。
+     */
+    private final Object domainLock = new Object();
+
+    /**
      * 域注册表：工具声明的域在这里沿链派生（完整路径，缺失祖先一并补齐）。
      *
-     * 只给工具注册表时，用缺省实例（仅含根域）—— 供单元测试与最小装配使用。
+     * 只给工具注册表时，用缺省实例（仅含根域）：供单元测试与最小装配使用。
      */
     private final DomainRegistry domainRegistry;
 
@@ -108,7 +125,31 @@ public class ToolRegistry {
             throw new IllegalArgumentException(
                     "instanceId '" + InstanceEndpoint.LOCAL_INSTANCE_ID + "' 为本地工具保留，远程实例不可使用");
         }
-        List<Registered> incoming = manifest == null ? List.of() : List.copyOf(manifest);
+        // 说明："mcp:" 前缀守卫不放在本方法：MCP 自身盖章（McpToolBridge）也走这里，
+        // 以 mcp:<连接名> 作 instanceId。对外部 tool-provider 占用 mcp: 的拦截在 ToolRegistrationController。
+        List<Registered> raw = manifest == null ? List.of() : List.copyOf(manifest);
+        // 已撤销的域不得随心跳复活：整包声明先按撤销集过滤，后续 diff / refresh / add
+        // 全部基于过滤后的声明。否则存活实例的一次心跳就能把工具重新绑回被删的域，
+        // 删域对该域的授权边界也就一并撤销了。
+        List<Registered> incoming = new ArrayList<>(raw.size());
+        for (Registered r : raw) {
+            ToolDescriptor d = r.descriptor();
+            List<String> declared = d.domains() == null ? List.of() : d.domains();
+            List<String> kept = declared.stream()
+                    .filter(domain -> domain == null || !revokedDomains.contains(domain))
+                    .toList();
+            if (kept.size() == declared.size()) {
+                incoming.add(r);
+                continue;
+            }
+            // 剥光 = 该工具原本只服务于被删的域：写哨兵让它对任何域都不可见。
+            // 留空会回落根域（空列表 = 挂在根域上），根域在每个域的祖先链里，等于放大授权。
+            List<String> effective = kept.isEmpty() ? List.of(ToolDescriptor.REVOKED_DOMAIN) : kept;
+            incoming.add(new Registered(
+                    new ToolDescriptor(d.name(), d.description(), d.category(), d.version(), d.sideEffect(),
+                            d.idempotent(), d.toModel(), d.params(), effective, d.approval(), d.source()),
+                    r.specification(), r.executor(), r.endpoints()));
+        }
         String callEndpoint = endpoint == null ? "" : endpoint;
 
         synchronized (StripedLocks.of(instanceId)) {
@@ -196,7 +237,7 @@ public class ToolRegistry {
                         incoming.executor(), List.of(replica));
             }
             // 条目已存在且是远程工具：只追加/覆盖本实例的副本。
-            // 未变副本复用同一 InstanceEndpoint 引用，不 new 新对象——排障时对象身份可追、日志可对齐。
+            // 未变副本复用同一 InstanceEndpoint 引用，不 new 新对象：排障时对象身份可追、日志可对齐。
             List<InstanceEndpoint> merged = new ArrayList<>(old.endpoints().size() + 1);
             for (InstanceEndpoint e : old.endpoints()) {
                 if (!e.instanceId().equals(instanceId)) {
@@ -294,8 +335,17 @@ public class ToolRegistry {
 
     // ==================== 读取 ====================
 
-    /** 按名查找 */
+    /**
+     * 按名查找。
+     *
+     * 名称为 {@code null} / 空白时直接判"不存在"：{@link ConcurrentHashMap#get(Object)}
+     * 不接受 null 键，而工具名来自模型输出，"模型漏了 name 字段"是常态。
+     * 抛 NPE 会让这条调用绕开既有的 TOOL_NOT_FOUND 回喂路径，整轮对话直接失败。
+     */
     public Optional<Registered> find(String name) {
+        if (name == null || name.isBlank()) {
+            return Optional.empty();
+        }
         return Optional.ofNullable(tools.get(name));
     }
 
@@ -353,7 +403,7 @@ public class ToolRegistry {
     }
 
     /**
-     * 注册表里出现过的全部域——含"曾经有人声明、此刻已无工具"的域，
+     * 注册表里出现过的全部域：含"曾经有人声明、此刻已无工具"的域，
      * 因此入口不会因为一次工具断开就把某个域判成不存在。
      */
     public Set<String> knownDomains() {
@@ -372,8 +422,21 @@ public class ToolRegistry {
      * 同时把它沿链派生进域树（完整路径，缺失的祖先一并补齐，不留悬空节点）。
      */
     private void remember(List<String> domains) {
-        addDomains(declaredDomains, domains);
-        domainRegistry.ensureChains(domains);
+        if (domains == null || domains.isEmpty()) {
+            return;
+        }
+        // 与 forgetDomains 共用一把锁：否则"撤销正在剥离"与"心跳正在登记"交错，
+        // 结果取决于两条线程的时序：撤销可能被一次恰好落在窗口内的心跳抹掉。
+        synchronized (domainLock) {
+            List<String> allowed = domains.stream()
+                    .filter(domain -> domain != null && !revokedDomains.contains(domain))
+                    .toList();
+            if (allowed.isEmpty()) {
+                return;
+            }
+            addDomains(declaredDomains, allowed);
+            domainRegistry.ensureChains(allowed);
+        }
     }
 
     private static void addDomains(Set<String> target, List<String> domains) {
@@ -400,18 +463,43 @@ public class ToolRegistry {
      *
      * 剥离与清 {@code declaredDomains} 缺一不可：{@link #knownDomains()} 会
      * {@link #addDomains 从活着的工具条目} 把域重新捞回来，只清 declaredDomains 的话，
-     * 被删的域仍留在「域空间」列表里（来源显示"工具派生"），再点删除还会报"域不存在"——
+     * 被删的域仍留在「域空间」列表里（来源显示"工具派生"），再点删除还会报"域不存在"：
      * 看着像没删干净，实际是"已删但仍被工具声明复活"。
      *
      * 剥离还有一个安全含义：工具可见性完全由 descriptor 的域列表决定
-     * （见 {@code ToolDescriptor.visibleIn}），不清掉的话，删域对该域的授权边界不撤销 ——
+     * （见 {@code ToolDescriptor.visibleIn}），不清掉的话，删域对该域的授权边界不撤销：
      * 正在飞行的破坏性工具调用照常通过复核。
      */
     public void forgetDomains(Collection<String> domains) {
         if (domains == null || domains.isEmpty()) {
             return;
         }
-        declaredDomains.removeAll(domains);
+        synchronized (domainLock) {
+            // 先记撤销再剥离：顺序反过来的话，剥离完成到记撤销之间的一次心跳就能把域加回来
+            revokedDomains.addAll(domains.stream()
+                    .filter(domain -> domain != null && !domain.isBlank())
+                    .toList());
+            declaredDomains.removeAll(domains);
+            stripFromLiveTools(domains);
+        }
+    }
+
+    /**
+     * 解除撤销：管控台重新创建同名域时调用，允许工具重新声明这些域。
+     *
+     * 只清撤销标记，不主动补声明：工具声明来自工具侧，重启或下一次心跳会自然带回；
+     * 这里替它们"补"一遍等于凭空造出一次没人真正声明过的授权。
+     */
+    public void allowDomains(Collection<String> domains) {
+        if (domains == null || domains.isEmpty()) {
+            return;
+        }
+        synchronized (domainLock) {
+            revokedDomains.removeAll(domains);
+        }
+    }
+
+    private void stripFromLiveTools(Collection<String> domains) {
         for (Map.Entry<String, Registered> entry : tools.entrySet()) {
             Registered registered = entry.getValue();
             ToolDescriptor descriptor = registered.descriptor();

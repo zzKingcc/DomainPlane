@@ -12,7 +12,7 @@ import java.util.Map;
  * {@code file_name} 与 {@code section_title}。切片侧明明写全了
  * （{@code BlockSplitter} 会写 {@code chunk_seq} / {@code chunk_total} / {@code page_from}），
  * 读取侧漏了，于是融合阶段的排序二级键「按 chunk_seq 升序」恒等于
- * {@code Integer.MAX_VALUE} —— 承诺的稳定排序实际退化成按内容哈希排。
+ * {@code Integer.MAX_VALUE}：承诺的稳定排序实际退化成按内容哈希排。
  * 修一处漏一处的典型隐患，所以收敛到唯一实现。
  */
 final class EsMetadata {

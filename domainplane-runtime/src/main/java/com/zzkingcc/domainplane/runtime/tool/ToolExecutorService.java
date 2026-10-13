@@ -21,19 +21,19 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 本地工具执行的超时与隔离层。
  *
  * 为什么需要它：远程工具走 HTTP，{@code HttpRequest.timeout()} 天然兜底；
- * 而本地 Bean 工具是在编排线程上直接调用的 —— 一个死循环或永久阻塞的方法
+ * 而本地 Bean 工具是在编排线程上直接调用的：一个死循环或永久阻塞的方法
  * 会占住一个编排线程直到进程结束。编排池 max 32，几十个这样的调用就能让整个服务停摆，
  * 而且不报错、不释放，日志上只表现为"突然变慢"。
  *
  * 做法是把执行挪到独立的有界线程池，用 {@code future.get(timeout)} 卡上限。
  * 但有三个 ThreadLocal 是编排在自己线程上绑的（{@link ToolInvocationContext}
- * 审计身份、{@link RetrievalScope} 检索域、{@link TraceId} 排障标识），换线程执行它们就丢了 ——
+ * 审计身份、{@link RetrievalScope} 检索域、{@link TraceId} 排障标识），换线程执行它们就丢了：
  * 检索域丢失会让知识库从"按本轮域过滤"退化成"全库检索"（越权读），
  * 审计身份丢失会让工具调用查不到是谁发的。所以这里必须显式搬运并复原。
  *
  * 超时只能让调用方不再等，不能真正杀死死循环的线程（除非它响应中断）。
  * 所以池必须是有界且独立的：卡死的工具最多占满工具池，编排线程照常释放，
- * 不会把编排池一起拖死。池满时直接拒（回喂模型"系统繁忙"），不排队等 ——
+ * 不会把编排池一起拖死。池满时直接拒（回喂模型"系统繁忙"），不排队等：
  * 排队等于把超时压力转嫁给编排线程。
  *
  * @author zzkingcc
@@ -119,7 +119,7 @@ public class ToolExecutorService implements AutoCloseable {
                 try {
                     return task.call();
                 } finally {
-                    // 工具线程是池化复用的，不清会把上下文留给下一个任务 —— 那会造成
+                    // 工具线程是池化复用的，不清会把上下文留给下一个任务，那会造成
                     // "这一轮的审计身份被记到下一轮工具调用上"这种查不出来的串号
                     ToolInvocationContext.clear();
                     RetrievalScope.clear();
@@ -134,13 +134,13 @@ public class ToolExecutorService implements AutoCloseable {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             // 调用线程（编排线程）被中断：这通常是会话被 stop 了。把中断标志还原回去再上抛，
-            // 绝不能吞成"工具失败"——那会让 stop 请求变成一次普通的工具报错
+            // 绝不能吞成"工具失败"，那会让 stop 请求变成一次普通的工具报错
             future.cancel(true);
             Thread.currentThread().interrupt();
             throw e;
         } catch (TimeoutException e) {
             // cancel(true) 发中断：工具若在 sleep / wait / 阻塞 IO 上会就此退出。
-            // 不响应中断的（纯死循环）只能继续占着线程 —— 这正是池必须独立且有界的原因
+            // 不响应中断的（纯死循环）只能继续占着线程：这正是池必须独立且有界的原因
             future.cancel(true);
             log.warn("[工具执行] 工具[{}] 超过 {}ms 上限，已放弃等待并发出中断。"
                     + "若该工具不响应中断，其线程仍会占用隔离池直到进程结束",
@@ -189,11 +189,15 @@ public class ToolExecutorService implements AutoCloseable {
      * 调用线程上下文的搬运包。
      *
      * 为什么必须搬运：工具执行被挪到隔离线程后 {@code ThreadLocal} 天然不跟随，
-     * 而这两个每一个都不能丢 ——
+     * 而这四个每一个都不能丢：
      * {@link RetrievalScope} 丢了会让检索从"本轮域 + 祖先链"退化成全库检索（越权读）；
-     * {@link TraceId} 丢了会让工具侧日志与服务端这次调用对不上，排障线索断掉。
+     * {@link TraceId} 丢了会让工具侧日志与服务端这次调用对不上，排障线索断掉；
+     * sessionId 丢了历史检索工具就不知道该读哪个会话的档（跨会话读是越权口子）；
+     * {@link RoundSearchBudget} 必须按引用搬运：一轮里多次工具调用要扣同一个桶，
+     * 在工具线程上新建一个等于每调用一次重置一次，"每轮限次"形同虚设。
      */
-    record ContextSnapshot(String traceId, String domain) {
+    record ContextSnapshot(String traceId, String domain, String sessionId,
+                           RoundSearchBudget searchBudget) {
 
         static ContextSnapshot capture() {
             // traceId 有两个来源，且**不等价**：编排层 bind 进来的是本次调用的 traceId（权威），
@@ -204,7 +208,8 @@ public class ToolExecutorService implements AutoCloseable {
             if (traceId == null || traceId.isBlank()) {
                 traceId = TraceId.current();
             }
-            return new ContextSnapshot(traceId, RetrievalScope.current());
+            return new ContextSnapshot(traceId, RetrievalScope.current(),
+                    ToolInvocationContext.sessionId(), ToolInvocationContext.searchBudget());
         }
 
         /** 在隔离线程上复原。复原不完整比不复原更危险，所以逐项显式设置 */
@@ -214,10 +219,15 @@ public class ToolExecutorService implements AutoCloseable {
             if (traceId != null) {
                 ToolInvocationContext.bind(traceId);
             }
+            if (sessionId != null) {
+                ToolInvocationContext.bind(traceId, sessionId, searchBudget);
+            } else if (searchBudget != null) {
+                ToolInvocationContext.bind(traceId, null, searchBudget);
+            }
             if (domain != null) {
                 RetrievalScope.bind(domain);
             }
-            // TraceId.begin 用传入值覆盖生成值，null/空白时它会自动生成一个 ——
+            // TraceId.begin 用传入值覆盖生成值，null/空白时它会自动生成一个：
             // 这正是"忘了 begin"的兜底语义，工具线程上应当同样成立
             TraceId.begin(traceId);
         }

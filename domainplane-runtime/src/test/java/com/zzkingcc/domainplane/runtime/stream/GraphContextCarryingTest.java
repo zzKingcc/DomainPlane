@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>为什么这条不能靠"读注释"保证：注册表里存的是"当前那一轮"，而节点跑的是"发起它的那一轮"。
  * 两个请求重叠时（网关重试、前端双击、同一会话并发 resume），注册表已经指向后者，
- * 按 key 回查会让前者的节点拿到后者的上下文 —— 工具调用按别人的域过滤、
+ * 按 key 回查会让前者的节点拿到后者的上下文：工具调用按别人的域过滤、
  * 模型的 token 流进别人的 SSE 流。这条测试用"注册表指向 B、但配置携带 A"来复现该场景。</p>
  */
 class GraphContextCarryingTest {
@@ -47,7 +47,7 @@ class GraphContextCarryingTest {
                 .addMetadata("domainplane.streamContext", a)
                 .build();
 
-        // A 还在跑图时，B 来了 —— register 会覆盖注册表并结束 A 的流
+        // A 还在跑图时，B 来了：register 会覆盖注册表并结束 A 的流
         StreamContext b = register(registry);
 
         assertNotSame(a, b, "两个请求必须是不同的上下文");

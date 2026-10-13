@@ -4,6 +4,9 @@ import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.common.exception.BaseException;
 import com.zzkingcc.domainplane.common.exception.ChatMemoryException;
 import com.zzkingcc.domainplane.infrastructure.redis.checkpoint.RedisCheckpointSaver;
+import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisConversationArchive;
+import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisConversationSummary;
+import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisHistorySearch;
 import com.zzkingcc.domainplane.infrastructure.redis.memory.RedisChatMemoryStore;
 import com.zzkingcc.domainplane.runtime.cancellation.CancellationRegistry;
 import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
@@ -13,6 +16,7 @@ import com.zzkingcc.domainplane.server.knowledge.DomainChannelProvider;
 import com.zzkingcc.domainplane.server.knowledge.KnowledgeBaseService;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
 import com.zzkingcc.domainplane.server.model.ModelProfileStore;
+import com.zzkingcc.domainplane.server.mcp.McpConnectionStore;
 import com.zzkingcc.domainplane.server.settings.DomainSettingsStore;
 import com.zzkingcc.domainplane.server.settings.DomainStore;
 import com.zzkingcc.domainplane.server.env.StorageLocations;
@@ -46,7 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>现在的顺序是「<b>Redis 记忆与检查点 → 知识库索引 → 域属性 → 删域</b>」，
  * 中止点永远落在"还没有任何东西被删"的位置。</p>
  *
- * <p>本测试用<b>调用序列</b>把这条顺序钉死，而不是只断言结果 —— 结果断言在两种顺序下都会绿。</p>
+ * <p>本测试用<b>调用序列</b>把这条顺序钉死，而不是只断言结果：结果断言在两种顺序下都会绿。</p>
  *
  * @author zzkingcc
  */
@@ -121,7 +125,9 @@ class AdminDomainDeleteOrderTest {
 
     private static class StubSettingsStore extends DomainSettingsStore {
         StubSettingsStore() { super(storage()); }
-        @Override public void removePrompts(Collection<String> domains) { record("settings.removePrompts"); }
+        // 生产侧把 prompts + toolCallEcho 合并成一次读改写（避免两次落盘之间被插队），
+        // 所以桩也要跟着记在 removeDomains 上，才反映真实的调用顺序
+        @Override public void removeDomains(Collection<String> domains) { record("settings.removeDomains"); }
     }
 
     private static class StubModelRegistry extends ModelProfileRegistry {
@@ -168,15 +174,67 @@ class AdminDomainDeleteOrderTest {
         }
     }
 
+    /** 会话归档桩：与记忆/检查点同一批清理，删域漏掉它等于历史还能被勾回来 */
+    private static class StubConversationArchive extends RedisConversationArchive {
+        RuntimeException failure;
+        int returnValue = 3;
+
+        StubConversationArchive() { super(null); }
+
+        @Override public int deleteByDomain(String domain) {
+            record("archive.deleteByDomain:" + domain);
+            if (failure != null) {
+                throw failure;
+            }
+            return returnValue;
+        }
+    }
+
+    /** 检索索引桩：与归档同一批清理，漏删等于删域后旧话还能把历史勾回来 */
+    private static class StubHistorySearch extends RedisHistorySearch {
+        RuntimeException failure;
+        int returnValue = 7;
+
+        StubHistorySearch() { super(null, null); }
+
+        @Override public int deleteByDomain(String domain) {
+            record("index.deleteByDomain:" + domain);
+            if (failure != null) {
+                throw failure;
+            }
+            return returnValue;
+        }
+    }
+
+    /** 滚动摘要桩：与归档同族清理（有损压缩，过期/漏删都无法重放复原） */
+    private static class StubConversationSummary extends RedisConversationSummary {
+        RuntimeException failure;
+        int returnValue = 2;
+
+        StubConversationSummary() { super(null); }
+
+        @Override public int deleteByDomain(String domain) {
+            record("summary.deleteByDomain:" + domain);
+            if (failure != null) {
+                throw failure;
+            }
+            return returnValue;
+        }
+    }
+
     private record Harness(AdminDomainController controller, StubRegistry registry,
                            StubKnowledgeBase kb, StubMemoryStore memory,
-                           StubCheckpointSaver checkpoint) {}
+                           StubConversationArchive archive, StubHistorySearch index,
+                           StubConversationSummary summary, StubCheckpointSaver checkpoint) {}
 
     private static Harness harness() {
         CALLS.clear();
         StubRegistry registry = new StubRegistry();
         StubKnowledgeBase kb = new StubKnowledgeBase();
         StubMemoryStore memory = new StubMemoryStore();
+        StubConversationArchive archive = new StubConversationArchive();
+        StubHistorySearch index = new StubHistorySearch();
+        StubConversationSummary summary = new StubConversationSummary();
         StubCheckpointSaver checkpoint = new StubCheckpointSaver();
         AdminDomainController controller = new AdminDomainController(
                 registry,
@@ -184,13 +242,17 @@ class AdminDomainDeleteOrderTest {
                 kb,
                 new StubSettingsStore(),
                 new StubModelRegistry(),
+                new McpConnectionStore(storage()),
                 new StubToolRegistry(),
                 new StubChannelProvider(),
                 memory,
                 checkpoint,
+                archive,
+                index,
+                summary,
                 // 删域前会先停掉该域在跑的会话；本用例不关注，传真实实例即可（无 running key）
                 new CancellationRegistry());
-        return new Harness(controller, registry, kb, memory, checkpoint);
+        return new Harness(controller, registry, kb, memory, archive, index, summary, checkpoint);
     }
 
     private static int indexOf(String prefix) {
@@ -214,7 +276,7 @@ class AdminDomainDeleteOrderTest {
         int firstMemory = indexOf("memory.deleteByDomain");
         int firstIndex = indexOf("kb.deleteIndices");
         int evict = indexOf("channel.evictIndices");
-        int prompts = indexOf("settings.removePrompts");
+        int prompts = indexOf("settings.removeDomains");
         int unbind = indexOf("model.unbindDomains");
         int forget = indexOf("tool.forgetDomains");
         int save = indexOf("store.saveDeclarations");
@@ -234,21 +296,29 @@ class AdminDomainDeleteOrderTest {
     }
 
     @Test
-    @DisplayName("记忆先于检查点清理，且逐域成对执行（自身 + 全部子孙）")
-    void memoryAndCheckpointArePairedPerDomain() {
+    @DisplayName("记忆 → 检查点 → 归档 → 检索索引 → 滚动摘要，逐域成套执行（自身 + 全部子孙）")
+    void memoryCheckpointAndArchiveArePairedPerDomain() {
         Harness h = harness();
 
         h.controller().delete("default.sales");
 
-        // 每个域都是 memory 紧跟 checkpoint，不交叉
+        // 每个域都是 memory → checkpoint → archive → index → summary，互不交叉
         List<String> redisCalls = CALLS.stream()
-                .filter(c -> c.startsWith("memory.") || c.startsWith("checkpoint."))
+                .filter(c -> c.startsWith("memory.") || c.startsWith("checkpoint.")
+                        || c.startsWith("archive.") || c.startsWith("index.")
+                        || c.startsWith("summary."))
                 .toList();
-        assertEquals(4, redisCalls.size(), "2 个域（自身 + 1 个子孙）× 2 项清理：" + redisCalls);
+        assertEquals(10, redisCalls.size(), "2 个域（自身 + 1 个子孙）× 5 项清理：" + redisCalls);
         assertEquals("memory.deleteByDomain:default.sales.order", redisCalls.get(0));
         assertEquals("checkpoint.deleteByDomain:default.sales.order", redisCalls.get(1));
-        assertEquals("memory.deleteByDomain:default.sales", redisCalls.get(2));
-        assertEquals("checkpoint.deleteByDomain:default.sales", redisCalls.get(3));
+        assertEquals("archive.deleteByDomain:default.sales.order", redisCalls.get(2));
+        assertEquals("index.deleteByDomain:default.sales.order", redisCalls.get(3));
+        assertEquals("summary.deleteByDomain:default.sales.order", redisCalls.get(4));
+        assertEquals("memory.deleteByDomain:default.sales", redisCalls.get(5));
+        assertEquals("checkpoint.deleteByDomain:default.sales", redisCalls.get(6));
+        assertEquals("archive.deleteByDomain:default.sales", redisCalls.get(7));
+        assertEquals("index.deleteByDomain:default.sales", redisCalls.get(8));
+        assertEquals("summary.deleteByDomain:default.sales", redisCalls.get(9));
     }
 
     // ==================== 中止点 ====================
@@ -265,7 +335,20 @@ class AdminDomainDeleteOrderTest {
         assertTrue(e.getMessage().contains("已中止、域未删除"), "文案要说明中止：" + e.getMessage());
         assertEquals(-1, indexOf("kb.deleteIndices"), "索引还没被删：" + CALLS);
         assertEquals(-1, indexOf("registry.delete"), "域还没被删：" + CALLS);
-        assertEquals(-1, indexOf("settings.removePrompts"), "域属性还没被动：" + CALLS);
+        assertEquals(-1, indexOf("settings.removeDomains"), "域属性还没被动：" + CALLS);
+    }
+
+    @Test
+    @DisplayName("检索索引清理失败：同样中止在索引之前（漏删 = 删域后旧话还能勾回历史）")
+    void abortsBeforeAnythingIsDeletedWhenIndexCleanupFails() {
+        Harness h = harness();
+        h.index().failure = new ChatMemoryException(ErrorCode.CHAT_MEMORY_DELETE_ERROR, "索引损坏");
+
+        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales"));
+
+        assertEquals(ErrorCode.CHAT_MEMORY_DELETE_ERROR, e.getErrorCode());
+        assertEquals(-1, indexOf("kb.deleteIndices"), "知识库索引还没被删：" + CALLS);
+        assertEquals(-1, indexOf("registry.delete"), "域还没被删：" + CALLS);
     }
 
     @Test
@@ -282,6 +365,32 @@ class AdminDomainDeleteOrderTest {
     }
 
     @Test
+    @DisplayName("归档清理失败：同样中止在索引之前（漏清归档 = 删域后旧话还能勾回全量历史）")
+    void abortsBeforeAnythingIsDeletedWhenArchiveFails() {
+        Harness h = harness();
+        h.archive().failure = new ChatMemoryException(ErrorCode.CHAT_MEMORY_DELETE_ERROR, "归档损坏");
+
+        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales"));
+
+        assertEquals(ErrorCode.CHAT_MEMORY_DELETE_ERROR, e.getErrorCode());
+        assertEquals(-1, indexOf("kb.deleteIndices"), "索引还没被删：" + CALLS);
+        assertEquals(-1, indexOf("registry.delete"), "域还没被删：" + CALLS);
+    }
+
+    @Test
+    @DisplayName("滚动摘要清理失败：同样中止在索引之前（漏清 = 旧摘要域重建后复活）")
+    void abortsBeforeAnythingIsDeletedWhenSummaryCleanupFails() {
+        Harness h = harness();
+        h.summary().failure = new ChatMemoryException(ErrorCode.CHAT_MEMORY_DELETE_ERROR, "摘要损坏");
+
+        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales"));
+
+        assertEquals(ErrorCode.CHAT_MEMORY_DELETE_ERROR, e.getErrorCode());
+        assertEquals(-1, indexOf("kb.deleteIndices"), "知识库索引还没被删：" + CALLS);
+        assertEquals(-1, indexOf("registry.delete"), "域还没被删：" + CALLS);
+    }
+
+    @Test
     @DisplayName("索引清理失败：中止，域属性与域都保留（Redis 已清是既定代价，域还在）")
     void abortsBeforeDomainRemovalWhenIndexCleanupFails() {
         Harness h = harness();
@@ -291,7 +400,7 @@ class AdminDomainDeleteOrderTest {
         BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales"));
 
         assertEquals(ErrorCode.KNOWLEDGE_BASE_ERROR, e.getErrorCode());
-        assertEquals(-1, indexOf("settings.removePrompts"), "域属性还没被动：" + CALLS);
+        assertEquals(-1, indexOf("settings.removeDomains"), "域属性还没被动：" + CALLS);
         assertEquals(-1, indexOf("registry.delete"), "域还没被删：" + CALLS);
     }
 
@@ -303,7 +412,9 @@ class AdminDomainDeleteOrderTest {
         Harness missing = harness();
         assertThrows(BaseException.class, () -> missing.controller().delete("default.nope"));
         assertTrue(CALLS.stream().noneMatch(c -> c.startsWith("memory.") || c.startsWith("checkpoint.")
-                || c.startsWith("kb.")), "前置校验失败不该有任何副作用：" + CALLS);
+                || c.startsWith("archive.") || c.startsWith("index.") || c.startsWith("summary.")
+                || c.startsWith("kb.")),
+                "前置校验失败不该有任何副作用：" + CALLS);
 
         Harness root = harness();
         BaseException e = assertThrows(BaseException.class, () -> root.controller().delete("default"));

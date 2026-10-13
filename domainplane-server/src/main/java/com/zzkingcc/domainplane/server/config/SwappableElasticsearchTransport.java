@@ -108,7 +108,7 @@ public class SwappableElasticsearchTransport implements ElasticsearchTransport, 
     }
 
     /**
-     * 未配置守卫 —— 把"压根没配"和"配了但连不上"在调用点就分开。
+     * 未配置守卫：把"压根没配"和"配了但连不上"在调用点就分开。
      */
     private void requireConfigured() {
         if (!holder.isEsConfigured()) {
@@ -148,9 +148,16 @@ public class SwappableElasticsearchTransport implements ElasticsearchTransport, 
     @Override
     public void close() throws IOException {
         RestClientTransport d = this.delegate;
+        this.delegate = null;
         if (d != null) {
             d.close();
         }
+        // 宽限期内还没被关掉的旧实例也要收：它们是 RestClient 的连接池（线程非守护），
+        // 而调度线程是守护线程：进程退出时不会等它，那些池线程就无人回收，挂住退出。
+        for (RestClientTransport pending : PENDING_CLOSE) {
+            closeQuietly(pending);
+        }
+        DELAYED_CLOSE.shutdownNow();
     }
 
     /**
@@ -163,17 +170,31 @@ public class SwappableElasticsearchTransport implements ElasticsearchTransport, 
                 return t;
             });
 
+    /**
+     * 宽限期内待关闭的旧实例。
+     *
+     * 调度线程本身是守护线程，JVM 退出不会等它：但被它延后关闭的 {@link RestClient}
+     * 内部的连接池线程不是守护线程。宽限期内退出进程时，这些实例没人关，池线程无人回收，
+     * 进程挂在那里退出不掉。所以销毁入口必须把待关闭的实例一并收掉。
+     */
+    private static final java.util.Set<RestClientTransport> PENDING_CLOSE =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     private static void scheduleClose(RestClientTransport old) {
         if (old == null) {
             return;
         }
-        DELAYED_CLOSE.schedule(() -> {
-            try {
-                old.close();
-            } catch (Exception e) {
-                log.debug("[存储配置] 关闭旧的 ES 通信层时出错（可忽略）: {}", e.getMessage());
-            }
-        }, GRACE_SECONDS, TimeUnit.SECONDS);
+        PENDING_CLOSE.add(old);
+        DELAYED_CLOSE.schedule(() -> closeQuietly(old), GRACE_SECONDS, TimeUnit.SECONDS);
+    }
+
+    private static void closeQuietly(RestClientTransport transport) {
+        PENDING_CLOSE.remove(transport);
+        try {
+            transport.close();
+        } catch (Exception e) {
+            log.debug("[存储配置] 关闭旧的 ES 通信层时出错（可忽略）: {}", e.getMessage());
+        }
     }
 
     private static boolean hasText(String s) {

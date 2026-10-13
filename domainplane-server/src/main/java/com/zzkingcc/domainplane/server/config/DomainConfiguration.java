@@ -48,7 +48,7 @@ public class DomainConfiguration {
     /**
      * 一次性归一：把"当前已经有子域"的域的落盘标记改成装配节点。
      *
-     * 叶子规则本身不靠这里保证 —— 它由 {@link DomainRegistry#isCallable} 在读取时派生
+     * 叶子规则本身不靠这里保证：它由 {@link DomainRegistry#isCallable} 在读取时派生
      * （显式标记 ∧ 无子域），无论标记从哪来都越不过去。本迁移只是把历史落盘值
      * 一次性对齐成生效值，免得文件里留着一堆与实际角色不符的 {@code true}。
      *
@@ -59,7 +59,7 @@ public class DomainConfiguration {
                                                              DomainStore domainStore) {
         return () -> {
             // 自检类的 bean 一律不该把启动带崩：这里是唯一没有 try/catch 的一个，
-            // 而配置目录在容器里常常是只读挂载 —— 迁移失败应当"下次启动再试"，而不是进程起不来。
+            // 而配置目录在容器里常常是只读挂载：迁移失败应当"下次启动再试"，而不是进程起不来。
             try {
                 runMigration(domainRegistry, domainStore);
             } catch (Exception e) {
@@ -73,7 +73,7 @@ public class DomainConfiguration {
         if (stored.status() == DomainStore.StoredDomains.Status.CORRUPT) {
             // 损坏时**绝不迁移、绝不写盘**：此刻注册表里只有根域与工具派生域，
             // 人工建的域一个都没有。此时写回磁盘就是把它们全部抹掉，且迁移标记一旦置 true
-            // 就再也不会重来 —— 一次磁盘故障升级成永久的数据丢失。
+            // 就再也不会重来：一次磁盘故障升级成永久的数据丢失。
             // 让服务带着"只有派生域"的状态启动，至少原始文件还在，运维修好后重启即可恢复。
             log.error("[域] 配置文件已损坏，跳过可调用性迁移并拒绝写盘。"
                     + "请修复或恢复 {}；在此之前人工建的域不会生效（服务仍可正常启动）", domainStore.filePath());
@@ -84,7 +84,7 @@ public class DomainConfiguration {
         }
         List<String> changed = new ArrayList<>();
         for (DomainRegistry.Domain domain : domainRegistry.all()) {
-            // 不再对根域豁免：根域也服从叶子规则 —— 它有了子域就同样只是装配节点，
+            // 不再对根域豁免：根域也服从叶子规则：它有了子域就同样只是装配节点，
             // "整棵树只有根域"时它才是叶子、才可调用。
             if (!domain.callable()) {
                 continue;

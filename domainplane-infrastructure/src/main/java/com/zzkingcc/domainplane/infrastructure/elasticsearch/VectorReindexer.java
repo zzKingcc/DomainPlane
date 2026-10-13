@@ -23,7 +23,7 @@ import java.util.Map;
  *
  * 为什么需要它：ES 的 {@code dense_vector} 维度是 mapping 的不可变参数，
  * 维度变了只能删索引重建。但索引里除了向量还有 {@code text}（BM25 原文）与
- * {@code metadata}（{@code doc_id} / {@code file_name} / {@code chunk_seq} …）——
+ * {@code metadata}（{@code doc_id} / {@code file_name} / {@code chunk_seq} …）：
  * 原文明明还在。直接 {@code deleteIndex + create} 等于把可复用的东西一起扔了，
  * 用户得把每个文档重新上传一遍，而切片是服务端算出来的、本可以就地重算向量。
  *
@@ -32,7 +32,7 @@ import java.util.Map;
  * 切片与元数据原样保留，所以 BM25 通道的召回结果不会变，只有向量换了。
  *
  * 失败语义是fail-closed：任一步失败立即抛，中止在"还有东西没被删"的位置。
- * 特别注意先全部捞完再开始删 —— 一个索引一个索引地"捞→删→重灌"，
+ * 特别注意先全部捞完再开始删：一个索引一个索引地"捞→删→重灌"，
  * 中途失败会留下前面几个索引已换新向量、后面几个还是老向量的混合状态，
  * 而向量空间不同、维度相同的两个模型混在一个索引里，检索结果会静默失真。
  *
@@ -70,7 +70,7 @@ public final class VectorReindexer {
      * @param preserved 各索引捞回来的条数
      * @param reindexed 各索引实际写回的条数
      * @implNote 两者必须逐项相等；不等就意味着丢切片（捞取被截断、或写回中途失败），
-     * 而向量缺失的切片在向量检索里等于凭空消失 —— 所以刻意把它作为可核对的返回值暴露出去。
+     * 而向量缺失的切片在向量检索里等于凭空消失：所以刻意把它作为可核对的返回值暴露出去。
      */
     public record ReindexResult(Map<String, Integer> preserved, Map<String, Integer> reindexed) {
     }
@@ -79,7 +79,7 @@ public final class VectorReindexer {
      * 把一批索引的原文捞出来（删索引之前调用）。
      *
      * 翻页到取完为止：单个索引的切片数没有上限（单文件就允许 2000 片），
-     * 只取第一页等于静默丢弃尾部原文 —— 而后面就要删索引了，那部分数据就此不可恢复。
+     * 只取第一页等于静默丢弃尾部原文：而后面就要删索引了，那部分数据就此不可恢复。
      * 所以用 {@code search_after} 一页一页取，直到返回不足一页。
      *
      * @return 索引名 → 该索引的切片列表（无文档的索引不出现在结果里）
@@ -99,6 +99,9 @@ public final class VectorReindexer {
                     SearchRequest.Builder req = new SearchRequest.Builder()
                             .index(index)
                             .size(FETCH_BATCH)
+                            // 必须显式开启：ES 默认只把 total 精确统计到 1 万条（relation=gte），
+                            // 下面按 total 判"取完了"会在大索引上提前 break：而紧接着就要删索引重建
+                            .trackTotalHits(t -> t.enabled(true))
                             .sort(so -> so.field(f -> f.field(SORT_FIELD).order(SortOrder.Asc)))
                             .source(src -> src.filter(f -> f.includes("text", "metadata")));
                     if (after != null) {
@@ -129,7 +132,7 @@ public final class VectorReindexer {
                     // 判"取完了"必须看 total，不能看"这页是不是满页"：
                     // ES 侧有自己的单页上限（index.max_result_window / 分片限制），实际返回条数
                     // 可能小于我们请求的 size。那种情况下"不足一页"不等于"没有更多"，
-                    // 按页大小判断会在大索引上静默截断 —— 而下一步就要删索引，截掉的部分永久丢失。
+                    // 按页大小判断会在大索引上静默截断：而下一步就要删索引，截掉的部分永久丢失。
                     long total = resp.hits().total() == null ? consumed : resp.hits().total().value();
                     if (consumed >= total) {
                         break;

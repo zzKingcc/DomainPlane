@@ -7,13 +7,13 @@
     <parent>
         <groupId>com.zzkingcc</groupId>
         <artifactId>DomainPlane</artifactId>
-        <version>v1.0-beta.1</version>
+        <version>v1.0-beta.2</version>
     </parent>
 
     <artifactId>domainplane-tool-provider</artifactId>
     <name>domainplane-tool-provider</name>
     <description>DomainPlane 工具 SDK（工具提供方）：工具注册 + 注解扫描 + 心跳保活 + 工具调用回调端点。
-        工具实现在这里、工具治理在服务端 —— 两者进程分离，工具实例不依赖 DomainPlane 任何内部模块。</description>
+        工具实现在这里、工具治理在服务端，两者进程分离，工具实例不依赖 DomainPlane 任何内部模块。</description>
 
     <dependencies>
         <!-- ===== 公共契约层：工具注解契约 + 服务端连接配置 ===== -->

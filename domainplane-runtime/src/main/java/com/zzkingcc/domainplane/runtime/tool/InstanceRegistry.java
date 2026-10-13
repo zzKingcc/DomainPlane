@@ -52,7 +52,7 @@ public class InstanceRegistry {
                 return false;
             }
 
-            // 熔断中：心跳照常受理、照常刷 lastSeen，但不把副本写回注册表——
+            // 熔断中：心跳照常受理、照常刷 lastSeen，但不把副本写回注册表：
             // 否则下一次心跳就自行解除熔断了。恢复只能由控制台或实例重启触发。
             if (existing != null && existing.state() == InstanceState.MUTED) {
                 log.debug("[实例心跳] {} 处于熔断状态，仅刷新 lastSeen，副本保持摘除", instanceId);
@@ -129,7 +129,7 @@ public class InstanceRegistry {
             try {
                 cleanup.run();
             } catch (RuntimeException e) {
-                // 回滚成 ONLINE：冻在 DRAINING 等于这次清理被静默放弃——扫描器只看 ONLINE，不会再来一次
+                // 回滚成 ONLINE：冻在 DRAINING 等于这次清理被静默放弃，扫描器只看 ONLINE，不会再来一次
                 sessions.put(instanceId, current);
                 log.error("[实例判死] {} 摘除副本时异常，已回滚状态待下轮重试: {}",
                         instanceId, e.getMessage(), e);
@@ -199,7 +199,7 @@ public class InstanceRegistry {
     }
 
     /**
-     * 解除熔断：置回 {@code ONLINE}，并把 manifest 摘要换成哨兵值——
+     * 解除熔断：置回 {@code ONLINE}，并把 manifest 摘要换成哨兵值：
      * 下一次心跳必然判定"摘要变了"从而走慢路径，用实例自己带来的 manifest 重建副本。
      * 服务端因此不必缓存 manifest。
      *

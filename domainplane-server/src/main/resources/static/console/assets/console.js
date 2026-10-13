@@ -9,7 +9,7 @@
     'use strict';
 
     /* ===== 服务端地址：一律同源相对路径 =====
-       管控台必须从服务端自己的地址打开 —— 凭证是 HttpOnly Cookie，跨站时浏览器既不保存也不携带，
+       管控台必须从服务端自己的地址打开，凭证是 HttpOnly Cookie，跨站时浏览器既不保存也不携带，
        表现成"登录成功却每个接口都 401"。
        这里刻意不写死端口：服务端换端口（或经反向代理）后，写死的地址会把整站接口打到另一个端口上，
        而页面自己完全看不出来哪里错了。 */
@@ -86,14 +86,14 @@
        而这些异常会被原样渲染到页面上（ES / Redis 连接失败尤其常见）：
          · URL 里的 userinfo —— redis://user:pass@host:6379、http://user:pass@host
          · Windows 盘符绝对路径、常见 Unix 目录下的绝对路径（部署结构不该随错误一起公开）
-       只替换命中的凭据片段，前后文原样保留 —— 排障仍看得到"连的是哪台、报的什么错"。 */
+       只替换命中的凭据片段，前后文原样保留，排障仍看得到"连的是哪台、报的什么错"。 */
     var CRED_PATTERNS = [
         /* 协议://user:pass@host → 协议://***@host（host 保留：要靠它定位连的是哪台） */
         { re: /([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^\/\s:@]+:[^\/\s@]+@/g,
           to: function (m, p1) { return p1 + '***@'; } },
         /* Windows 盘符绝对路径：C:\Users\... 、 D:/java/...
            ⚠️ 必须带前置边界：`redis://h:6379` 里的 `s:/` 会被裸正则当成盘符，
-           把 host 和端口一起吃掉 —— 而 host 恰恰是排障要看的。 */
+           把 host 和端口一起吃掉，而 host 恰恰是排障要看的。 */
         { re: /(^|[\s"'（(])([A-Za-z]:[\\\/][^\s"'<>，。；、）)\]]{2,})/g,
           to: function (m, p1) { return p1 + '***'; } },
         /* 常见部署目录下的 Unix 绝对路径：/opt/... /var/... /home/... */
@@ -125,8 +125,10 @@
             + '<path d="M8 9h8M8 12.5h5"/>',
         /* 域：三层堆叠 = 域的叠加空间（域是平行的命名空间，用"叠"而不是"箱"） */
         domains: '<path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 12l10 5 10-5"/><path d="M2 17l10 5 10-5"/>',
-        /* 熔断工具调用：心跳线——实例还在不在跳，决定它的工具是否还能被调用 */
+        /* 熔断工具调用：心跳线，实例还在不在跳，决定它的工具是否还能被调用 */
         instances: '<path d="M2 12h4l3-7 4 14 3-7h6"/>',
+        /* MCP 连接：链接符号，对接外部 MCP server */
+        mcp: '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/>',
         account: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/>'
     };
 
@@ -138,6 +140,7 @@
         { key: 'instances', label: '熔断工具调用', href: 'instances.html', icon: 'instances' },
         { key: 'prompts', label: '提示词设定', href: 'prompts.html', icon: 'prompts' },
         { key: 'knowledge', label: '知识库', href: 'knowledge.html', icon: 'knowledge' },
+        { key: 'mcp', label: 'MCP 连接', href: 'mcp.html', icon: 'mcp' },
         { key: 'account', label: '账号', href: 'account.html', icon: 'account' }
     ];
 
@@ -236,7 +239,7 @@
 
     /* ===== 访问方式不对：显式提示，别让"登录成功却一直 401"被当成服务端 bug =====
        凭证受浏览器同源策略约束：页面不是从服务端地址打开时（例如用 file:// 直接预览 HTML、
-       或托管在别的站点上），请求要么发不出去、要么不携带 Cookie ——
+       或托管在别的站点上），请求要么发不出去、要么不携带 Cookie，
        于是登录接口**成功**、而每个受保护接口都回 401「未携带凭证」。
        这是访问方式问题，不是凭证逻辑问题，所以要在页面上说清而不是只留一行日志。 */
     function warnIfCrossOrigin() {

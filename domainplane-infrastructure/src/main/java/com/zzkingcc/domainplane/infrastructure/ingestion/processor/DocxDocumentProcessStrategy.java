@@ -43,7 +43,7 @@ public class DocxDocumentProcessStrategy extends AbstractDocumentProcessStrategy
             }
             DocxReader.DocxParseResult parsed = DocxReader.read(raw);
             if (parsed.blocks().isEmpty()) {
-                // 整篇只有图片的 docx 是典型的"扫描件"变体 —— 明确报错，不要"导入成功、0 片"
+                // 整篇只有图片的 docx 是典型的"扫描件"变体，明确报错，不要"导入成功、0 片"
                 throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_UPLOAD_REJECTED,
                         "文件 " + safeFileName(source) + " 没有解析出任何文字内容"
                                 + "（可能整篇是图片 / 截图，或文档被加密），请提供文字版");

@@ -3,7 +3,7 @@
   "provider": "deepseek",
   "label": "DeepSeek Flash（V4.1）",
   "docUrl": "https://api-docs.deepseek.com/api/create-chat-completion",
-  "input": ["text"],
+  "input": ["text", "image"],
   "output": ["text"],
   "match": {
     "hosts": ["api.deepseek.com"],

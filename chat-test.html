@@ -54,6 +54,28 @@
   #rawlog { background: #0f1115; color: #d6e2ff; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; padding: 10px; border-radius: 6px; max-height: 240px; overflow: auto; white-space: pre-wrap; }
   .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
   .pill { font-size: 11px; color: var(--muted); }
+  /* ============ 附件（图片 / 视频 / 音频） ============ */
+  .attach-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .attach-bar input[type=file] { display: none; }
+  .attach-list { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .attach-list:empty { display: none; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; max-width: 260px;
+    border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px;
+    background: #fff; font-size: 12px; color: var(--text);
+  }
+  .chip .k { flex: 0 0 auto; }
+  .chip .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip .s { color: var(--muted); flex: 0 0 auto; }
+  .chip .x {
+    flex: 0 0 auto; cursor: pointer; color: var(--muted); border: none; background: none;
+    padding: 0 2px; font-size: 14px; line-height: 1; width: auto;
+  }
+  .chip .x:hover { color: var(--err-t); }
+  .chip.bad { border-color: var(--err-t); color: var(--err-t); }
+  .att-img { max-width: 240px; max-height: 160px; border-radius: 8px; display: block; margin-top: 6px; }
+  .att-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .att-row .pill { background: #eef2f8; border-radius: 6px; padding: 2px 8px; }
 </style>
 </head>
 <body>
@@ -84,6 +106,12 @@
   <div class="panel">
     <h2>② 对话测试</h2>
     <textarea id="message" placeholder="输入消息，回车发送（Shift+Enter 换行）">你好，请用一句话介绍你自己。</textarea>
+    <div class="attach-bar">
+      <button id="pickBtn" class="ghost" type="button">📎 添加文件（图 / 视频 / 音频）</button>
+      <input id="filePicker" type="file" accept="image/*,video/*,audio/*" multiple>
+      <span id="attachHint" class="pill">文件随本轮消息一起上行，同一会话可多轮混合发送</span>
+    </div>
+    <div id="attachList" class="attach-list"></div>
     <div class="row" style="margin-top:10px;">
       <button id="sendBtn">发送</button>
       <button id="stopBtn" class="ghost" disabled>停止</button>
@@ -91,6 +119,7 @@
       <span id="convStatus" class="pill"></span>
     </div>
     <div class="hint">sessionId：<span id="sidLabel" class="pill">—</span>（多轮对话沿用同一会话，点"新建会话"重置）</div>
+    <div class="hint">图片走能力路由（主模型可看图则直进上下文，否则 seeImage 委派）；视频 / 音频按原样进主模型消息，需域所绑模型自身支持。</div>
   </div>
 
   <div class="panel">
@@ -201,11 +230,128 @@ function headers(extra = {}) {
   return h;
 }
 
-function addUserBubble(text) {
+/* ==================== 附件：图片 / 视频 / 音频 ==================== */
+/* 与后端契约（api/model/ContentType）对齐：image/* → IMAGE_BASE64，
+   video/* → VIDEO_BASE64，audio/* → AUDIO_BASE64；base64 不带 data: 前缀
+   （契约的 base64 字段明确"不含 data: 前缀"，带上会被当成数据本身发出去）。 */
+let attached = [];
+/* 文件读取中（readAsDataURL 是异步的）：没读完不发放 ——
+   否则大文件（几十 MB 的视频）读一半时按发送，附件还没进列，
+   本轮会只带着文本发出去， chips 却随后才出现，用户以为带上了。 */
+let reading = false;
+
+const KIND_OF = (mime) => mime.startsWith('image/') ? 'image'
+  : mime.startsWith('video/') ? 'video'
+  : mime.startsWith('audio/') ? 'audio' : null;
+const KIND_ICON = { image: '🖼️', video: '🎬', audio: '🎵' };
+
+function fmtSize(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+/** data URL → { mime, base64 }：前缀里取 mime，逗号后是纯 base64 */
+function splitDataUrl(dataUrl) {
+  const comma = dataUrl.indexOf(',');
+  const head = dataUrl.slice(5, comma); // 去掉开头的 "data:"
+  return { mime: head.split(';')[0] || 'application/octet-stream', base64: dataUrl.slice(comma + 1) };
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error || new Error('读取失败'));
+    r.readAsDataURL(file);
+  });
+}
+
+function renderAttachments() {
+  const box = $('attachList');
+  box.innerHTML = '';
+  attached.forEach((a, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip' + (a.kind ? '' : ' bad');
+    chip.title = a.kind ? a.mime + ' · ' + fmtSize(a.size) : '不支持的类型：' + (a.mime || '未知');
+    const k = document.createElement('span');
+    k.className = 'k'; k.textContent = a.kind ? (KIND_ICON[a.kind] || '📄') : '⚠️';
+    const n = document.createElement('span');
+    n.className = 'n'; n.textContent = a.name;
+    const s = document.createElement('span');
+    s.className = 's'; s.textContent = fmtSize(a.size);
+    const x = document.createElement('button');
+    x.className = 'x'; x.type = 'button'; x.textContent = '×'; x.title = '移除';
+    x.onclick = () => { attached.splice(i, 1); renderAttachments(); };
+    chip.appendChild(k); chip.appendChild(n); chip.appendChild(s); chip.appendChild(x);
+    box.appendChild(chip);
+  });
+}
+
+async function addFiles(fileList) {
+  const files = Array.from(fileList || [])
+    .filter(f => !attached.some(a => a.name === f.name && a.size === f.size));
+  if (!files.length) { renderAttachments(); return; }
+  reading = true;
+  $('convStatus').textContent = '文件读取中…';
+  try {
+    for (const f of files) {
+      const kind = KIND_OF(f.type || '');
+      const item = { name: f.name, size: f.size, mime: f.type || '', kind, dataUrl: null, base64: null };
+      if (kind) {
+        try {
+          item.dataUrl = await readAsDataUrl(f);
+          const parts = splitDataUrl(item.dataUrl);
+          item.base64 = parts.base64;
+          item.mime = parts.mime; // 以 data URL 头为准（file.type 个别浏览器为空）
+        } catch (e) {
+          item.kind = null; // 读失败：标记为坏签，不进 contents
+        }
+      }
+      attached.push(item);
+    }
+  } finally {
+    reading = false;
+    if (!streaming) $('convStatus').textContent = '空闲';
+    renderAttachments();
+  }
+}
+
+/** 本轮 contents：TEXT 块在前（与 AgentRequest.getMessage() 合并口径一致），媒体块按选择序 */
+function buildContents(msg, usable) {
+  const blocks = [];
+  if (msg) blocks.push({ type: 'TEXT', text: msg });
+  for (const a of usable) {
+    blocks.push({
+      type: a.kind === 'image' ? 'IMAGE_BASE64' : a.kind === 'video' ? 'VIDEO_BASE64' : 'AUDIO_BASE64',
+      base64: a.base64,
+      mime: a.mime
+    });
+  }
+  return blocks;
+}
+
+function addUserBubble(text, atts) {
   const d = document.createElement('div');
   d.className = 'msg user';
   const b = document.createElement('div');
-  b.className = 'bubble'; b.textContent = text;
+  b.className = 'bubble';
+  if (text) b.appendChild(document.createTextNode(text));
+  (atts || []).forEach(a => {
+    if (a.kind === 'image' && a.dataUrl) {
+      const img = document.createElement('img');
+      img.className = 'att-img'; img.src = a.dataUrl; img.alt = a.name;
+      b.appendChild(img);
+    } else {
+      const row = document.createElement('div');
+      row.className = 'att-row';
+      const pill = document.createElement('span');
+      pill.className = 'pill';
+      pill.textContent = (KIND_ICON[a.kind] || '📄') + ' ' + a.name + '（' + fmtSize(a.size) + '）';
+      row.appendChild(pill);
+      b.appendChild(row);
+    }
+  });
   d.appendChild(b); $('chat').appendChild(d); scroll();
 }
 
@@ -381,13 +527,14 @@ async function pump(res) {
 }
 
 async function send() {
-  if (streaming) return;
+  if (streaming || reading) return;
   const msg = $('message').value.trim();
-  if (!msg) return;
+  const usable = attached.filter(a => a.kind && a.base64);
+  if (!msg && !usable.length) return;
   const domain = ($('domain').value || 'default').trim();
   if (!domain) { alert('domain 不能为空'); return; }
 
-  addUserBubble(msg);
+  addUserBubble(msg, usable);
   resetBlock();
   $('message').value = '';
   streaming = true;
@@ -395,16 +542,21 @@ async function send() {
   $('stopBtn').disabled = false;
   $('convStatus').textContent = '对话中…';
 
-  const body = JSON.stringify({ sessionId, message: msg, domain });
+  // 有附件时走 contents（多模态契约）；纯文本保持旧体，两条路径都覆盖到
+  const body = usable.length
+    ? JSON.stringify({ sessionId, message: msg, domain, contents: buildContents(msg, usable) })
+    : JSON.stringify({ sessionId, message: msg, domain });
 
   try {
     const res = await fetch(base() + '/api/agent/chat', {
       method: 'POST', headers: headers(), body
     });
     if (!res.ok) {
+      // 服务端没收下（参数错 / 未认证）：不清附件，用户改完可直接重发
       showGovernedError(await res.text().catch(() => ''));
       return;
     }
+    attached = []; renderAttachments();
     await pump(res);
   } catch (e) {
     showNetworkFailure();
@@ -471,12 +623,18 @@ function newSession() {
   $('sidLabel').textContent = sessionId;
   $('chat').innerHTML = '';
   resetBlock();
+  attached = []; renderAttachments();
 }
 
 $('loginBtn').onclick = login;
 $('sendBtn').onclick = send;
 $('stopBtn').onclick = stop;
 $('newBtn').onclick = newSession;
+$('pickBtn').onclick = () => $('filePicker').click();
+$('filePicker').addEventListener('change', () => {
+  addFiles($('filePicker').files);
+  $('filePicker').value = ''; // 清空才能重复选同一个文件
+});
 $('message').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });

@@ -10,7 +10,7 @@ import java.util.List;
  * 和向量（表头 + 数据同现）都吃得到。
  *
  * docx 与 excel 的合并单元格处理方式不同（docx 由 POI 直接给出合并后的格子、excel 要自己按
- * 合并区域回填），但落地形态完全一致 —— 这里只负责最后那一步渲染。
+ * 合并区域回填），但落地形态完全一致，这里只负责最后那一步渲染。
  *
  * @author zzkingcc
  */
@@ -64,8 +64,9 @@ public final class MarkdownTable {
             folded.append(c < 0x20 ? ' ' : c);
         }
         String text = folded.toString().replaceAll("\\s{2,}", " ").strip();
-        if (text.length() > MAX_CELL_CHARS) {
-            text = text.substring(0, MAX_CELL_CHARS);
+        if (text.codePointCount(0, text.length()) > MAX_CELL_CHARS) {
+            // 按码点截：切在代理对中间会留下孤立 surrogate，转成 UTF-8 就是 U+FFFD
+            text = text.substring(0, text.offsetByCodePoints(0, MAX_CELL_CHARS));
         }
         // 单元格里的竖线会破坏表格结构，必须最后转义（转义后再截断就会把反斜杠截断）
         return text.replace("|", "\\|");

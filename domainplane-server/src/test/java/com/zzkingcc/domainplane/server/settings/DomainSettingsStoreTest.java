@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 域提示词的落盘与删域清理。
  *
- * <p>不清理的话，被删域的片段会变成孤儿键 —— 同路径域将来重建时会<b>静默复活</b>旧提示词。</p>
+ * <p>不清理的话，被删域的片段会变成孤儿键：同路径域将来重建时会<b>静默复活</b>旧提示词。</p>
  */
 class DomainSettingsStoreTest {
 

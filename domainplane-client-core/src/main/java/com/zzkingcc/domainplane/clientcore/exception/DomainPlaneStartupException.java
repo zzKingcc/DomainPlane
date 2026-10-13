@@ -1,19 +1,20 @@
 package com.zzkingcc.domainplane.clientcore.exception;
 
-import com.zzkingcc.domainplane.api.code.ErrorCode;
-
 /**
  * DomainPlane 客户端启动期异常
+ *
+ * <p>换凭证失败这类"还没发业务请求就失败了"的情形专用；被
+ * {@link DomainPlaneErrors#fromTransport} 归一成父类后才交给接入方。</p>
  *
  * @author zzkingcc
  */
 public class DomainPlaneStartupException extends DomainPlaneException {
 
-    public DomainPlaneStartupException(ErrorCode errorCode, String message) {
-        super(errorCode, message);
+    public DomainPlaneStartupException(ClientErrorCode clientCode, String message) {
+        super(clientCode, message);
     }
 
-    public DomainPlaneStartupException(ErrorCode errorCode, String message, Throwable cause) {
-        super(errorCode, message, cause);
+    public DomainPlaneStartupException(ClientErrorCode clientCode, String message, Throwable cause) {
+        super(clientCode, message, cause);
     }
 }

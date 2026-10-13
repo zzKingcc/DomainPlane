@@ -67,7 +67,7 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
         IngestReport report = new IngestReport(docCount, split.sections(), split.droppedLines());
 
         // 切片数上限：几百页的文档一次就能产出几千片，向量化是分批请求模型的，
-        // 一次上传就能把导入队列堵住 —— 在动手向量化之前先挡掉
+        // 一次上传就能把导入队列堵住，在动手向量化之前先挡掉
         guardChunkLimit(documents, allSegments);
 
         if (allSegments.isEmpty()) {
@@ -79,11 +79,11 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
         //
         //    只用正文哈希会造成跨文档误伤：一次上传可能包含多个文件，而两个文件里
         //    出现同一句话（合同的标准条款、多份文件共用的表头、政策里的通用表述）
-        //    是常态。纯正文哈希会让后一个文件的这条切片被当成"已存在"而丢弃 ——
+        //    是常态。纯正文哈希会让后一个文件的这条切片被当成"已存在"而丢弃：
         //    报告仍按文档数返回、日志仍写"写入完成"，用户完全看不出来有内容没入库。
         //
         //    加了 file_name 之后：同一文档内的重复段落仍会去重（真正想做的），
-        //    而"改了文件名重传同一份文档"不再是同一身份 —— 这是可接受的，
+        //    而"改了文件名重传同一份文档"不再是同一身份，这是可接受的，
         //    因为文档管理侧本来就有同名校验与 replace 覆盖。
         for (TextSegment seg : allSegments) {
             seg.metadata().put("content_hash", computeContentHash(seg.text()));
@@ -107,7 +107,7 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
         //
         //    分两步是有意的：ES 的 terms 查询没法表达「哈希 A 且文件名 X」这种配对条件，
         //    而 mapping 里也没有 dedup_key 字段（新增字段要重建存量索引，代价太大）。
-        //    先用 terms 取回候选文档的 (content_hash, file_name)，在内存里算去重键比对 ——
+        //    先用 terms 取回候选文档的 (content_hash, file_name)，在内存里算去重键比对：
         //    存量索引无需迁移，行为也正确。
         Set<String> candidateHashes = new LinkedHashSet<>();
         for (TextSegment seg : uniqueSegments.values()) {
@@ -142,6 +142,14 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
 
                 Response<List<Embedding>> embedResp = embeddingModel.embedAll(batch);
                 List<Embedding> embeddings = embedResp.content();
+                /* 条数必须逐一对上：模型少返回一条时下面的 get(i) 会越界，而越界发生在
+                   批次写入中途，索引里会留下"部分切片没有向量"的中间态（没有向量的切片
+                   在向量通道里等于消失）。宁可整批不写，让上层按失败回滚。 */
+                if (embeddings == null || embeddings.size() != batch.size()) {
+                    throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_INGEST_ERROR,
+                            "向量模型返回条数与请求不一致（请求 " + batch.size() + " 条，返回 "
+                                    + (embeddings == null ? 0 : embeddings.size()) + " 条）");
+                }
                 for (int i = 0; i < batch.size(); i++) {
                     embeddingStore.add(embeddings.get(i), batch.get(i));
                 }
@@ -168,24 +176,49 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
     /**
      * 单文件切片数上限（防雪崩，不是限制功能）。
      *
-     * 几百页的 PDF / 超长 docx 一次就能产出几千片，向量化要分批请求模型 ——
+     * 几百页的 PDF / 超长 docx 一次就能产出几千片，向量化要分批请求模型：
      * 一次上传就能把导入队列堵死。超限直接拒绝，并告诉用户怎么做（拆成几个小文件）。
      */
     protected void guardChunkLimit(List<IngestSource> documents, List<TextSegment> segments) {
         int limit = IngestLimits.maxChunksPerDocument();
-        if (limit <= 0 || segments.size() <= limit) {
+        if (limit <= 0 || segments == null || segments.isEmpty()) {
             return;
         }
-        String name = documents == null || documents.isEmpty() ? "(unknown)" : documents.get(0).fileName();
-        throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_UPLOAD_REJECTED,
-                "文件 " + name + " 切出 " + segments.size() + " 片，超过单文件上限 " + limit
-                        + " 片；请把它拆成几个小文件分别上传");
+        // 必须按文件名分组再判：一次上传可以是多个文件，把"总片数"当成"单文件片数"
+        // 会误伤正常上传；而且报错还把总数安在第一个文件头上，用户按提示去拆那个文件，
+        // 拆完再传依旧报同样的错。
+        java.util.Map<String, Integer> perFile = new java.util.LinkedHashMap<>();
+        for (TextSegment segment : segments) {
+            String name = segment.metadata() == null
+                    ? null : segment.metadata().getString(ChunkMetadataKeys.FILE_NAME);
+            if (name == null || name.isBlank()) {
+                name = "(unknown)";
+            }
+            perFile.merge(name, 1, Integer::sum);
+        }
+        for (java.util.Map.Entry<String, Integer> entry : perFile.entrySet()) {
+            if (entry.getValue() > limit) {
+                // 切片没带文件名（老数据 / 上游没写 metadata）时分组键是 "(unknown)"；
+                // 单文件上传这种情况下总数就等于该文件的片数，直接报那个文件名，
+                // 否则用户看到 "(unknown)" 完全不知道该拆哪个文件。
+                String label = entry.getKey();
+                if ("(unknown)".equals(label) && documents != null && documents.size() == 1) {
+                    String only = documents.get(0).fileName();
+                    if (only != null && !only.isBlank()) {
+                        label = only;
+                    }
+                }
+                throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_UPLOAD_REJECTED,
+                        "文件 " + label + " 切出 " + entry.getValue() + " 片，超过单文件上限 " + limit
+                                + " 片；请把它拆成几个小文件分别上传");
+            }
+        }
     }
 
     /**
      * 计算 content_hash：SHA-256(切片正文)。
      *
-     * 只算正文，不含文件名与标题 —— 正文里已经带了 section_path，所以重复内容一定同哈希；
+     * 只算正文，不含文件名与标题，正文里已经带了 section_path，所以重复内容一定同哈希；
      * 而"改了文件名重传"不会因此变成新内容，去重才有意义。
      */
     protected String computeContentHash(String text) {
@@ -203,7 +236,7 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
      *
      * 加文件名是为了把去重限制在「同一份文档内」：同一文档里的重复段落仍会被去掉
      * （这是去重本来要解决的问题），但不会把另一个文件里相同的句子误判成重复内容。
-     * 分隔符用 {@code \n} —— 文件名在入库时已被规范化，不含控制字符，不会与内容混淆。
+     * 分隔符用 {@code \n}，文件名在入库时已被规范化，不含控制字符，不会与内容混淆。
      */
     protected static String computeDedupKey(String contentHash, String fileName) {
         return (contentHash == null ? "" : contentHash) + "\n" + (fileName == null ? "" : fileName);
@@ -242,9 +275,13 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
                                 .terms(tf -> tf.value(fieldValues)))
                         .build();
 
+                // 不能拿 chunk.size() 当上限：一个正文哈希可能命中"同内容的多份文件"，
+                // 命中数被卡在哈希个数上时，多出来的去重键读不到，同内容切片会被重复写入。
+                // 留 10 倍余量并封顶；触顶时告警，宁可少判一次重复，也别悄悄写重。
+                int fetchSize = Math.min(2000, Math.max(chunk.size() * 10, chunk.size()));
                 SearchResponse<Map> resp = esClient.search(s -> s
                                 .index(indexName)
-                                .size(chunk.size())
+                                .size(fetchSize)
                                 .source(src -> src.filter(f -> f.includes("metadata")))
                                 .query(termsQuery),
                         Map.class);
@@ -266,8 +303,10 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
                     existing.add(computeDedupKey(hash.toString(), name == null ? null : name.toString()));
                 });
             } catch (Exception e) {
-                log.warn("[分片去重-{}] 查询ES已有content_hash失败（索引可能不存在或无content_hash字段），"
-                        + "跳过ES去重: {}", strategyName(), e.getMessage());
+                // 升到 error：这里是"本次去重整体失效"，同内容切片会被重复写入。
+                // warn 级别混在常规告警里没人会注意，而后果是索引里越来越多重复条目。
+                log.error("[分片去重-{}] 查询 ES 已有 content_hash 失败（索引可能不存在或无 content_hash 字段），"
+                        + "本次导入将跳过 ES 去重，可能写入重复切片: {}", strategyName(), e.getMessage());
             }
         }
 
@@ -277,7 +316,7 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
     /**
      * 文本类策略用：把 {@link IngestSource} 还原成 langchain4j 的 {@code Document}。
      *
-     * 只有文本类能走这一步 —— 二进制载体 {@link IngestSource#text()} 为 {@code null}，
+     * 只有文本类能走这一步，二进制载体 {@link IngestSource#text()} 为 {@code null}，
      * 这里会跳过并告警（二进制策略应该取 {@link IngestSource#content()}）。
      */
     protected static List<Document> asDocuments(List<IngestSource> sources) {

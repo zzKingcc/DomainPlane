@@ -15,7 +15,7 @@ import java.util.List;
 /**
  * Excel 表格（{@code .xls} / {@code .xlsx}）文档处理策略。
  *
- * {@code .xls}（HSSF）与 {@code .xlsx}（XSSF）由同一个读取器处理 ——
+ * {@code .xls}（HSSF）与 {@code .xlsx}（XSSF）由同一个读取器处理：
  * {@code WorkbookFactory} 按文件头判类型，不需要按扩展名分叉，所以这里一条策略覆盖两个扩展名。
  * 这与"加格式 = 加一套适配器"不冲突：适配器只有一个（Excel 表格），扩展名只是它的入口。
  *
@@ -43,7 +43,7 @@ public class ExcelDocumentProcessStrategy extends AbstractDocumentProcessStrateg
             }
             ExcelReader.ExcelParseResult parsed = ExcelReader.read(raw, safeFileName(source));
             if (parsed.blocks().isEmpty()) {
-                // 所有工作表都是空的 —— 明确报错，不要"导入成功、0 片"
+                // 所有工作表都是空的，明确报错，不要"导入成功、0 片"
                 throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_UPLOAD_REJECTED,
                         "文件 " + safeFileName(source) + " 没有解析出任何表格内容"
                                 + "（共 " + parsed.skippedSheets() + " 个工作表，全部为空），请检查后再上传");

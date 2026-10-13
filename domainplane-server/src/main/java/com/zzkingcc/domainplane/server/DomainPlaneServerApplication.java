@@ -21,31 +21,16 @@ import org.springframework.context.event.EventListener;
 public class DomainPlaneServerApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(DomainPlaneServerApplication.class, withPlatformDefaults(args));
-    }
-
-    /**
-     * 在 Spring 装配前用 {@link RuntimeEnvironment} 动态探测运行系统，给两个存储目录注入平台默认兜底。
-     */
-    private static String[] withPlatformDefaults(String[] args) {
-        applyPlatformDefault(args, "domainplane.settings.path", "DOMAINPLANE_SETTINGS_PATH", RuntimeEnvironment.defaultSettingsPath());
-        applyPlatformDefault(args, "domainplane.logging.path", "DOMAINPLANE_LOG_PATH", RuntimeEnvironment.defaultLogPath());
-        return args;
-    }
-
-    private static void applyPlatformDefault(String[] args, String key, String envName, String platformDefault) {
-        if (System.getProperty(key) != null) {
-            return;
-        }
-        if (System.getenv(envName) != null) {
-            return;
-        }
-        for (String arg : args) {
-            if (arg != null && arg.startsWith("--" + key + "=")) {
-                return;
-            }
-        }
-        System.setProperty(key, platformDefault);
+        SpringApplication application = new SpringApplication(DomainPlaneServerApplication.class);
+        // 用 defaultProperties 而不是 System.setProperty：系统属性优先级高于 application.yaml，
+        // 部署方在 yaml 里显式写的路径会被平台默认值静默盖掉（而且没有任何提示）。
+        // defaultProperties 的优先级最低：命令行参数、环境变量、yaml 都能正常覆盖它，
+        // 这才是"兜底默认"该待的位置。
+        java.util.Map<String, Object> defaults = new java.util.LinkedHashMap<>();
+        defaults.put("domainplane.settings.path", RuntimeEnvironment.defaultSettingsPath());
+        defaults.put("domainplane.logging.path", RuntimeEnvironment.defaultLogPath());
+        application.setDefaultProperties(defaults);
+        application.run(args);
     }
 
     private final ToolRouter toolRouter;

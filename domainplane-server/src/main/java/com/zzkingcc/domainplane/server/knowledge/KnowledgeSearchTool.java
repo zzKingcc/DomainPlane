@@ -9,12 +9,12 @@ import org.springframework.stereotype.Component;
  * 知识库检索工具：把域层的检索能力暴露成模型可调用的工具。
  *
  * <p>为什么工具类在 server 而能力在 domain：{@link KnowledgeSearchService} 是纯能力组件
- * （只回答"检索到什么"），"以什么名字、什么口径暴露给模型"是服务端的装配决策 ——
+ * （只回答"检索到什么"），"以什么名字、什么口径暴露给模型"是服务端的装配决策，
  * 与 {@code ToolConfiguration} 扫描服务端 Bean 注册工具的机制配套，域层不背工具注解。</p>
  *
  * <p>域策略：不声明 domains（挂根域、按累加语义全树可见）。检索范围不由工具可见性决定，
  * 而由 tools 节点执行时绑定的 {@code RetrievalScope}（= 本轮域）决定：按域链
- * （自身 + 全部祖先）查索引，挂在父域的知识子域天然可用 —— 与
+ * （自身 + 全部祖先）查索引，挂在父域的知识子域天然可用，与
  * {@code DomainChannelProvider} 的通道解析同构。要收紧授权时改成显式完整路径域即可。</p>
  *
  * <p>READ + 免审批：检索不改任何状态，直连 tools 节点执行，不触发 review 中断；

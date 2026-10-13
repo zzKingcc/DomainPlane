@@ -20,7 +20,7 @@ spring:
   mvc:
     async:
       # SSE（/api/agent/chat、/resume）的异步请求超时。
-      # 不设时由容器默认值兜底 —— Tomcat 的 asyncTimeout 默认为 30s，且那是**总时限**、
+      # 不设时由容器默认值兜底，Tomcat 的 asyncTimeout 默认为 30s，且那是**总时限**、
       # 不是空闲重置：一轮正常的慢回答（首 token 慢 + 工具耗时）超过 30s 就会被容器掐断连接。
       # 断流后客户端拿到的只是半截内容，却会当作"流正常结束"（见 DefaultDomainPlaneAgent 的终止事件校验）。
       # 这里显式关闭容器侧的异步超时；客户端侧仍有 domainplane.client.read-timeout 作为兜底。
@@ -80,6 +80,13 @@ domainplane:
     # 保留期：这里不写 = 永久不过期（记忆是长期存储，靠 Redis RDB+AOF 保住）。
     # 需要保留期时设环境变量 DOMAINPLANE_MEMORY_TTL=30d，或在此加一行 ttl: 30d
     checkpoint-ttl: 24h
+    # 其余子项走代码默认值（MemoryProperties），需要覆盖时在下面按需加：
+    #   assembly-budget / assembly-window-share / assembly-window-turns / assembly-summary-budget / assembly-max-cards
+    #   recall-word-weight / recall-bigram-weight / recall-unigram-weight / recall-extra-stop-words
+    #     停用词同时决定写索引与查询两侧的切词，改完要重放归档重建索引；权重只在查询打分生效、即时生效
+    #   summary-enabled（默认 false）/ summary-min-new-turns / summary-max-material-turns
+    #     / summary-max-output-tokens / summary-workers
+    #     滚动摘要是一次额外模型调用，默认关；关掉退化为 digest 拼接，历史不丢
 
   # 图编排线程池
   agent:

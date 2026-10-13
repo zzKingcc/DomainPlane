@@ -45,7 +45,7 @@ class SensitiveMaskerTest {
     @Test
     void nonJsonArgumentsAreBlockedWholesaleRatherThanLeaked() {
         // 模型生成畸形 JSON 是常态。此时原样返回 = 把身份证/手机号明文送进
-        // 工具调用事件与审批 payload —— 而那正是脱敏要守的两处。
+        // 工具调用事件与审批 payload：而那正是脱敏要守的两处。
         // 保护机制在失败时退化成不保护，比不保护更危险，所以整段屏蔽。
         String masked = SensitiveMasker.mask("not-json", Set.of("phone"));
 

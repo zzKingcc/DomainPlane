@@ -81,7 +81,7 @@ public class RetrievalConfiguration {
      * 提成独立 bean 而不是内联 new 进 {@link CompositeRetriever}：
      * 删域流程要用它失效检索器缓存（索引删了但还在缓存里会被旧检索器继续命中），
      * 那是与"查询"无关的另一条使用路径。内联构造时它拿不到 bean 引用，
-     * {@code AdminDomainController} 就只能声明一个根本不存在类型的依赖 ——
+     * {@code AdminDomainController} 就只能声明一个根本不存在类型的依赖：
      * 于是 ES 未配置、检索器未装配的场景下整个应用起不来。
      */
     @Bean

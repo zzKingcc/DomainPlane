@@ -63,6 +63,17 @@ public class ToolRegistrationController {
                     "hint", "see docs/API.md §2.6"));
         }
 
+        // "mcp:" 是 MCP 连接的保留 instanceId 前缀：外部工具实例不得占用，
+        // 否则会在 ToolRegistry 的 byInstance 上与 MCP 连接撞键、互相覆盖工具。
+        // MCP 自身盖章走的是 McpToolBridge → ToolRegistry.replaceInstanceTools，不经此入口，故不受影响。
+        if (parsed.instanceId() != null && parsed.instanceId().startsWith("mcp:")) {
+            log.warn("[工具注册] 拒绝占用 MCP 保留前缀的注册: {}", parsed.instanceId());
+            return ResponseEntity.badRequest().body(Map.of(
+                    "accepted", false,
+                    "reason", "instanceId 以 'mcp:' 开头是 MCP 连接的保留前缀，外部工具实例不可使用",
+                    "hint", "see docs/API.md §2.6"));
+        }
+
         warnIfEndpointUnreachable(parsed.instanceId(), parsed.endpoint(), request.getRemoteAddr());
 
         boolean accepted;
@@ -113,7 +124,7 @@ public class ToolRegistrationController {
     }
 
     /**
-     * 回流地址的主机是否是回环地址。只认字面量，不做 DNS 解析——
+     * 回流地址的主机是否是回环地址。只认字面量，不做 DNS 解析，
      * 这个判断在每次心跳的请求线程里执行，不能引入阻塞的网络调用。
      */
     private static boolean isLoopbackHost(String endpoint) {

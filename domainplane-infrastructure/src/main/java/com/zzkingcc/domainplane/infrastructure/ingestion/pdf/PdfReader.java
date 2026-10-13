@@ -33,7 +33,7 @@ import java.util.regex.Pattern;
  *   • 跨页拼接：页边界几乎总是断在半句上，不拼回来就会切出一堆半截句子。
  *
  *
- * 本轮不做字号推断标题（设计里的阶段 5）：没有可信的标题时，分节退回「页」——
+ * 本轮不做字号推断标题（设计里的阶段 5）：没有可信的标题时，分节退回「页」，
  * {@code section_path = 文件名 > 第N页}。页是 pdf 天然的结构边界，也是最适合引用回原文的锚点。
  *
  * 明确不做：表格还原（只有文本流，硬做必然错）、双栏顺序还原（要坐标聚类，失败是静默的）、
@@ -50,7 +50,7 @@ public final class PdfReader {
      * 页眉页脚候选的最大行长。
      *
      * 比 txt 那条 40 字宽松得多：pdf 的页眉常写着"产品名 - 机密 - 第 N 页"这种，动辄四五十字。
-     * 敢放宽是因为这里还有两道更硬的约束（在页面边缘 + 两页以上同位置重复），长度只作兜底 ——
+     * 敢放宽是因为这里还有两道更硬的约束（在页面边缘 + 两页以上同位置重复），长度只作兜底：
      * 真有一整段正文挤在页面边缘、还每页一字不差地重复，那它就是版式噪音。
      */
     private static final int MAX_EDGE_CHARS = 120;
@@ -74,7 +74,7 @@ public final class PdfReader {
     /** 行距超过全文中位行距的这个倍数，就认为是换段 */
     private static final float PARAGRAPH_GAP_RATIO = 1.8f;
 
-    /** 跨页拼接时，下一页首行短于这个长度就不拼 —— 短行大概率是标题，拼进去会把标题吃进正文 */
+    /** 跨页拼接时，下一页首行短于这个长度就不拼，短行大概率是标题，拼进去会把标题吃进正文 */
     private static final int MIN_CROSS_PAGE_JOIN_CHARS = 12;
 
     private PdfReader() {
@@ -83,7 +83,7 @@ public final class PdfReader {
     /**
      * @param blocks     Block 流：{@code TITLE(1, 文件名)} → 每页 {@code TITLE(2, 第N页)} + 若干 PARAGRAPH
      * @param dropped    删掉的页眉页脚 / 页码行数
-     * @param paragraphs 正文段落数（不含页码标题）—— 为 0 就是抽不出文字的扫描件
+     * @param paragraphs 正文段落数（不含页码标题），为 0 就是抽不出文字的扫描件
      * @param pages      pdf 页数
      */
     public record PdfParseResult(List<Block> blocks, int dropped, int paragraphs, int pages) {
@@ -107,7 +107,7 @@ public final class PdfReader {
         try (PDDocument document = Loader.loadPDF(content)) {
             pages = document.getNumberOfPages();
             LineStripper stripper = new LineStripper();
-            // 不按坐标排序的话，行顺序会是内容流顺序 —— 双栏或后插入的浮层会乱序
+            // 不按坐标排序的话，行顺序会是内容流顺序，双栏或后插入的浮层会乱序
             stripper.setSortByPosition(true);
             stripper.setStartPage(1);
             stripper.setEndPage(pages);
@@ -201,7 +201,7 @@ public final class PdfReader {
     /**
      * 找出页眉页脚行的序号。
      *
-     * 判定要三条同时成立 —— 误删一行正文的代价远大于留下一行噪音：
+     * 判定要三条同时成立，误删一行正文的代价远大于留下一行噪音：
      *
      *   • 是所在页最前 / 最后的 1~2 行（页眉页脚天然在页面边缘）；
      *   • 短（< {@value #MAX_EDGE_CHARS} 字）且不以句末标点结尾、不是列表项；
@@ -209,7 +209,7 @@ public final class PdfReader {
      *
      *
      * 第 3 条里的"归一化"是实测踩出来的：页眉写着 {@code ... Page 1} / {@code ... Page 2}，
-     * 直接比文本永远不相等 —— 归掉数字才认得出是同一个页眉。
+     * 直接比文本永远不相等，归掉数字才认得出是同一个页眉。
      */
     private static Set<Integer> noiseIndexes(List<Line> lines) {
         Map<Integer, List<Line>> byPage = new LinkedHashMap<>();
@@ -362,7 +362,7 @@ public final class PdfReader {
      *
      * 不能直接取中位数：页内还夹着"页眉→正文""正文→页脚"这两个大跳变（能到几百磅），
      * 页数少的文档里它们会把中位数整个带偏。做法是先用最小行距圈出候选区间（≤ 最小行距的 2.5 倍），
-     * 再在候选里取中位数 —— 最小行距就是正文的行距，大跳变会被这个区间挡在外面。
+     * 再在候选里取中位数，最小行距就是正文的行距，大跳变会被这个区间挡在外面。
      */
     private static float referenceGap(List<Line> lines) {
         List<Float> gaps = new ArrayList<>();

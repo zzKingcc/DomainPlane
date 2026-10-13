@@ -38,12 +38,12 @@ import java.util.List;
  *
  *   • 「模型设置」页里被选中为向量模型的那个档案（{@code ModelProfileSettings.embeddingAlias}）；
  *       向量模型全局只有一个，所有域共用；
- *   • 都没选时，回落到部署 yaml（{@code domainplane.ai.embedding.*}）—— 这是部署期兜底，
+ *   • 都没选时，回落到部署 yaml（{@code domainplane.ai.embedding.*}）：这是部署期兜底，
  *       不是界面上的第二套配置。
  *
  *
  * 关键：选中过档案、但该档案已不可用时，绝不静默回落到 yaml。回落会让用户
- * 以为"已经换成新模型了"，实际检索用的还是老向量 —— 表现是灌库成功、检索结果莫名其妙，
+ * 以为"已经换成新模型了"，实际检索用的还是老向量：表现是灌库成功、检索结果莫名其妙，
  * 且没有任何报错。这里宁可当成未配置，让调用点显式报错。
  *
  * @author zzkingcc
@@ -184,7 +184,7 @@ public class LlmModelHolder {
      * 界面上被选中的向量档案；没选则返回 {@code null}。
      *
      * 与 {@code embeddingProfile()} 的区别：这里不做可用性过滤。
-     * "选中过一个档案"这件事本身必须被看见 —— 哪怕它此刻已不可用，也要如实反映成
+     * "选中过一个档案"这件事本身必须被看见，哪怕它此刻已不可用，也要如实反映成
      * "选了但坏了"，而不是悄悄显示成"没配置"或回落 yaml。
      */
     private ModelProfile selectedEmbeddingProfile() {
@@ -201,7 +201,7 @@ public class LlmModelHolder {
     /**
      * 生效中的向量档案：只有已选中且此刻可用才算。
      *
-     * 选中但不可用时返回 {@code null}，而 {@link #selectedEmbeddingProfile()} 仍非空 ——
+     * 选中但不可用时返回 {@code null}，而 {@link #selectedEmbeddingProfile()} 仍非空：
      * 两者不一致正是"选了档案但它坏了"的判据，{@link #rebuild} 据此拒绝回落 yaml。
      */
     private ModelProfile usableEmbeddingProfile() {
@@ -279,7 +279,7 @@ public class LlmModelHolder {
     /** 按当前设置重建三个模型实例 */
     private void rebuild(LlmSettings s) {
         if (!s.isUsable()) {
-            // 不抛异常：未配置是合法状态（首次部署、还没配服务商）——按项目日志原则够不上 WARN，
+            // 不抛异常：未配置是合法状态（首次部署、还没配服务商）：按项目日志原则够不上 WARN，
             // 只记 INFO 陈述状态；真正的失败在调用点由委派代理抛 NotConfiguredException。
             // 注意此处只清对话侧：向量模型可以配在另一家服务商上，与对话模型是否可用无关。
             log.info("[模型设置] 对话模型未配置（缺 baseUrl / apiKey / modelName），"
@@ -376,7 +376,7 @@ public class LlmModelHolder {
 
     // ===== 三个委派代理 =====
     // 只覆盖真正干活的 doXxx 与元信息方法，其余方法走接口 default 实现，
-    // 由 default 实现回调到 doXxx —— 因此无需逐个人工转发。
+    // 由 default 实现回调到 doXxx，因此无需逐个人工转发。
 
     /**
      * 把携带通用 {@link ChatRequestParameters} 的请求提升为当前模型协议所需的参数类型。

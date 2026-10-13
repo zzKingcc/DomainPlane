@@ -98,7 +98,7 @@ public class ToolInstanceAutoConfiguration {
     /**
      * 连接状态快照 Bean。
      *
-     * 心跳失败不阻断启动，"进程活着但工具没注册上"只能靠状态区分 —— 这个 Bean 就是那个出口：
+     * 心跳失败不阻断启动，"进程活着但工具没注册上"只能靠状态区分：这个 Bean 就是那个出口：
      * 接入方注入它接到自己的健康检查端点或 Actuator 上即可。
      */
     @Bean
@@ -115,7 +115,7 @@ public class ToolInstanceAutoConfiguration {
      *
      * 推导不出来时返回空串而不是抛异常：地址配错的后果是"服务端回调不到本实例"，
      * 而那本来就该在真正发生调用时才暴露，不该让接入方的程序起不来。
-     * 本实例仍会照常注册并心跳，工具也照常被声明 —— 只有反向调用这条路是空的。
+     * 本实例仍会照常注册并心跳，工具也照常被声明：只有反向调用这条路是空的。
      */
     private String resolveEndpoint(ToolInstanceProperties properties, Environment environment) {
         String explicit = properties.getEndpoint();

@@ -17,13 +17,13 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * 缓存设计的两个要点：
  *
- *   • 键是档案指纹（含 Key 哈希）—— 改了 Key 或端点，指纹变，
+ *   • 键是档案指纹（含 Key 哈希），改了 Key 或端点，指纹变，
  *     自然拿到新实例，不需要手工清缓存；
  *   • 每个别名只保留当前指纹那一个实例：旧实例在下次取用时被清掉，
  *     避免反复改配置堆实例。
  *
  * 连接基底只有 OpenAI 兼容一种格式：所有档案都走 OpenAi(Streaming)ChatModel。
- * 服务商差异由对方暴露的 OpenAI 兼容入口吸收，本项目不做协议分派 ——
+ * 服务商差异由对方暴露的 OpenAI 兼容入口吸收，本项目不做协议分派，
  * 后续要接新能力，在这个格式上扩，而不是按服务商开分支。
  *
  * 服务商适配（{@link ModelAdapterRegistry}）落在两个地方：
@@ -57,16 +57,17 @@ public class ModelClientFactory {
         Map<String, StreamingChatModel> versions =
                 streamingByAlias.computeIfAbsent(profile.alias(), alias -> new ConcurrentHashMap<>());
 
-        StreamingChatModel existing = versions.get(fingerprint);
-        if (existing != null) {
-            return existing;
-        }
-        // 顺序很重要：先构建、再清理旧指纹、最后放入 —— 不能在 map.compute 里改同一个 map
-        StreamingChatModel built = buildStreaming(profile);
+        // 用 computeIfAbsent 而不是"先 get、没有就 build、再 evict+put"：
+        // 后者在冷启动的并发首请求下会各建一个实例，随后的 evict 互相把对方清掉，
+        // 被清掉的那个连接池没有人关，每次并发都是一份孤儿连接。
+        // 驱逐留在 compute 之外做：不能在 compute 的回调里改同一个 map。
+        StreamingChatModel built = versions.computeIfAbsent(fingerprint, fp -> {
+            StreamingChatModel created = buildStreaming(profile);
+            log.info("[模型档案] 构建流式客户端：alias={} model={} baseUrl={}（指纹 {}）",
+                    profile.alias(), profile.modelName(), profile.baseUrl(), fp);
+            return created;
+        });
         evictOthers(versions, fingerprint);
-        versions.put(fingerprint, built);
-        log.info("[模型档案] 构建流式客户端：alias={} model={} baseUrl={}（指纹 {}）",
-                profile.alias(), profile.modelName(), profile.baseUrl(), fingerprint);
         return built;
     }
 
@@ -78,13 +79,8 @@ public class ModelClientFactory {
         Map<String, ChatModel> versions =
                 chatByAlias.computeIfAbsent(profile.alias(), alias -> new ConcurrentHashMap<>());
 
-        ChatModel existing = versions.get(fingerprint);
-        if (existing != null) {
-            return existing;
-        }
-        ChatModel built = buildChat(profile);
+        ChatModel built = versions.computeIfAbsent(fingerprint, fp -> buildChat(profile));
         evictOthers(versions, fingerprint);
-        versions.put(fingerprint, built);
         return built;
     }
 
@@ -127,7 +123,7 @@ public class ModelClientFactory {
      * 此刻允许下发的**标准参数** wire 集合。
      *
      * 私有参数的过滤在 {@link #effectiveParams} 里做；标准参数走的是框架 setter，不经那条路，
-     * 所以单独算一遍 —— 两处都读同一份 enabledWhen，口径不会分叉。
+     * 所以单独算一遍，两处都读同一份 enabledWhen，口径不会分叉。
      *
      * 口径是"默认放行、条件不成立才拦"：没登记条件的标准参数一律放行，未命中适配也一律放行
      * （与 {@code effectiveParams} 的"原样下发"一致），于是新逻辑只可能收窄条件参数这一个点，
@@ -150,7 +146,7 @@ public class ModelClientFactory {
     /**
      * 温度：留空就不发送，由服务商默认决定。
      *
-     * 不再注入平台自造的默认值 —— 那会让"没填"实际等于"被平台改成了某个数"，
+     * 不再注入平台自造的默认值，那会让"没填"实际等于"被平台改成了某个数"，
      * 而用户界面上看不到这个数；换个服务商，行为还会跟着变。
      */
     private static void applyTemperature(java.util.function.Consumer<Double> setter, ModelProfile profile,
@@ -193,7 +189,7 @@ public class ModelClientFactory {
      * 与标准参数同路并列：langchain4j 把 customParameters 与 temperature 等字段
      * 合并进同一个 ChatCompletionRequest，服务商看到的是一个完整请求体。
      *
-     * 补缺规则：适配 schema 声明了 {@code default} 而用户没填的键，在此填上 ——
+     * 补缺规则：适配 schema 声明了 {@code default} 而用户没填的键，在此填上，
      * "没填"对用户是不发送，对适配是"按适配登记的默认走"，两者在 default 存在时重合。
      * 未命中适配的档案原样下发（正常应为空，保存时已被拒绝非空）。
      */
@@ -212,17 +208,17 @@ public class ModelClientFactory {
      * 请求体要的是 {@code wire}（OpenAI 字段名，如 {@code reasoning_effort}）。
      * 翻译只此一处：存储 / 校验 / 视图全用 key，注入前才换成 wire。
      *
-     * 补缺规则：适配 schema 声明了 {@code default} 而用户没填的键，在此填上 ——
+     * 补缺规则：适配 schema 声明了 {@code default} 而用户没填的键，在此填上，
      * "没填"对用户是不发送，对适配是"按适配登记的默认走"，两者在 default 存在时重合。
      * 条件参数也参与补缺，但补出来的值**同样要过下面那道条件门**：条件不成立时连默认值
      * 都不发射。
      *
      * 标准参数（{@code std=true}）**不走这里**：它的值在 {@link ModelProfile} 的老字段上，
      * 由 {@link #allowedStdWires} + setter 那条路专管（见 {@link #applyTemperature} /
-     * {@link #applyMaxTokens}）。default 对标准参数只用于界面空态提示，不参与注入 ——
+     * {@link #applyMaxTokens}）。default 对标准参数只用于界面空态提示，不参与注入，
      * 否则同一个 {@code temperature} 会既进 customParameters、又进 builder setter，发两遍。
      *
-     * 过滤规则：条件不成立的值不发射 —— 正常路径下这种值在保存时就被
+     * 过滤规则：条件不成立的值不发射，正常路径下这种值在保存时就被
      * {@code validateParams} 拒了，这里只兜住绕过控制器写入的档案（改配置文件、旧版本残留）。
      * 发给服务商一个它不看的字段，比不发更糟：看起来配了，实际没生效。
      *

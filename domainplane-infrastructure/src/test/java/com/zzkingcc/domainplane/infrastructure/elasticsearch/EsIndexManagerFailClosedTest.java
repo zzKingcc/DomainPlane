@@ -31,11 +31,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>这组测试守的是一个具体的静默错误：{@code exists} 查询失败时若返回 {@code false}，
  * {@link EsIndexManager#deleteIndex} 会认为"没有东西可删"直接跳过，删域流程照样往下走并
- * 报告成功 —— 域没了索引还在。而索引名是<b>域路径的哈希</b>，同一路径域将来重建时索引名相同，
+ * 报告成功，域没了索引还在。而索引名是<b>域路径的哈希</b>，同一路径域将来重建时索引名相同，
  * 这份本该删掉的知识内容会原样复活，全程零报错。</p>
  *
  * <p>对照组是 {@link EsIndexManager#listIndices}：它<b>必须保持 fail-open</b>。
- * 同一批改动不能顺手把它也改成抛异常 —— 那是管控台列表页，ES 抖一下代价是多显示一行空，
+ * 同一批改动不能顺手把它也改成抛异常，那是管控台列表页，ES 抖一下代价是多显示一行空，
  * 抛异常的代价是页面整个打不开。两种处理方式并存，正是"看接收方是人还是机器"的判据。</p>
  *
  * @author zzkingcc
@@ -182,7 +182,7 @@ class EsIndexManagerFailClosedTest {
         assertThrows(EsAccessException.class,
                 () -> EsIndexManager.deleteIndex(client(stub), "domainplane_kb_abc123"));
 
-        // 关键：不能在"没问到答案"的情况下还发删除 —— 那是把决策建立在未知上
+        // 关键：不能在"没问到答案"的情况下还发删除，那是把决策建立在未知上
         assertEquals(0, stub.deleteCalls.get(), "存在性没确认前不得发出删除请求");
     }
 

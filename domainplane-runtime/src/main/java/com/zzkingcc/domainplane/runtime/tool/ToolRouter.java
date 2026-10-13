@@ -3,7 +3,7 @@ package com.zzkingcc.domainplane.runtime.tool;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.api.tool.ToolDescriptor;
 import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
-import com.zzkingcc.domainplane.runtime.metrics.MetricsRegistry;
+import com.zzkingcc.domainplane.common.metrics.MetricsRegistry;
 import com.zzkingcc.domainplane.runtime.usage.TokenUsageRecorder;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -30,7 +30,7 @@ public class ToolRouter {
     /** 本地工具的执行隔离层（超时 + 有界池）；远程工具走 HTTP 自带超时，不经它*/
     private final ToolExecutorService execution;
 
-    /** 只接工具注册表时，域注册表用缺省实例（仅含根域）—— 供单元测试与最小装配使用 */
+    /** 只接工具注册表时，域注册表用缺省实例（仅含根域），供单元测试与最小装配使用 */
     public ToolRouter(ToolRegistry registry) {
         this(registry, new DomainRegistry());
     }
@@ -159,7 +159,7 @@ public class ToolRouter {
     public String execute(ToolExecutionRequest request) {
         Optional<ToolRegistry.Registered> found = registry.find(request.name());
         if (found.isEmpty()) {
-            // 文案取自 ErrorCode,与 toolsNode 复核层拒绝时的文案同源——同一个事实只该有一种说法
+            // 文案取自 ErrorCode,与 toolsNode 复核层拒绝时的文案同源：同一个事实只该有一种说法
             String message = ErrorCode.TOOL_NOT_FOUND.getMessage() + ": " + request.name();
             log.warn("[工具路由] {}", message);
             MetricsRegistry.toolCall(false);
@@ -201,7 +201,7 @@ public class ToolRouter {
             log.error("[工具路由] 工具[{}] 执行失败: {}", request.name(), e.getMessage(), e);
             result = describeFailure(request.name(), e);
         }
-        // 成功失败都计：失败率是运维最需要的那个数。"工具不存在"也算失败——它对模型同样是失败信号
+        // 成功失败都计：失败率是运维最需要的那个数。"工具不存在"也算失败，它对模型同样是失败信号
         MetricsRegistry.toolCall(success);
 
         // 统一记录 Token 用量（唯一统计点）
@@ -213,7 +213,7 @@ public class ToolRouter {
      * 是否本地工具（不经 HTTP 回流，执行器直接调 Bean 方法）。
      *
      * 只有本地工具走隔离层。远程工具的耗时已经被
-     * {@code HttpRequest.timeout(...)} 卡住，而它是纯 IO 等待 —— 塞进池子只会占着池里的
+     * {@code HttpRequest.timeout(...)} 卡住，而它是纯 IO 等待：塞进池子只会占着池里的
      * 线程空等，还会让本该给本地工具兜底的容量被远程调用吃掉。
      */
     private static boolean isLocal(ToolRegistry.Registered registered) {
@@ -224,7 +224,7 @@ public class ToolRouter {
      * 超时 / 池满这类"没能开始或没能完成"的回喂文案。
      *
      * 与 {@link #describeFailure} 分开是因为模型该采取的动作不同：工具内部报错时
-     * 换参数重试有意义，超时或系统繁忙时再原样重试只会再耗一轮 —— 该做的是告诉用户
+     * 换参数重试有意义，超时或系统繁忙时再原样重试只会再耗一轮：该做的是告诉用户
      * 「这一步没成」，让用户决定要不要继续。
      */
     private static String describeUnavailable(String toolName, String reason) {
@@ -236,7 +236,7 @@ public class ToolRouter {
      * 生成回喂给模型的失败描述：够模型改口，不泄内部细节。
      *
      * 原先直接拼 {@code e.getMessage()}。那段文本常常含 SQL 语句、文件路径、
-     * 内网主机名甚至凭据片段 —— 模型会把它原样转述给终端用户，等于把内部结构
+     * 内网主机名甚至凭据片段：模型会把它原样转述给终端用户，等于把内部结构
      * 通过对话泄漏出去。而 {@code message} 本身对模型决策几乎没有增量价值：
      * 它无法据此修好工具，只能如实告诉用户"这一步没成"。
      *
@@ -252,7 +252,7 @@ public class ToolRouter {
     /**
      * 异常消息里的高危片段一律抹掉，只留下能帮助模型判断"是不是参数问题"的部分。
      *
-     * 这里只做兜底，不做完整脱敏 —— 完整的敏感项脱敏由工具作者在
+     * 这里只做兜底，不做完整脱敏：完整的敏感项脱敏由工具作者在
      * {@code @ToolAdvanced.sensitive} 里声明。这一层挡的是"作者没声明、但异常消息
      * 顺带带出来"的情况（框架级异常、底层驱动异常）。
      */

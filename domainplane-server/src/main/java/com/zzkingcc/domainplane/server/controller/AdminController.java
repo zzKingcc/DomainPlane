@@ -44,7 +44,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -157,6 +159,9 @@ public class AdminController {
         body.put("embeddingCapabilities", current.getEmbeddingCapabilities());
         body.put("chatConfigured", modelHolder.isConfigured() || modelProfileRegistry.hasChatModel());
         body.put("embeddingConfigured", modelHolder.isEmbeddingConfigured());
+        /* 已登记的向量档案数：概览据此区分「未配置」（一个档案都没有）与「未启用」（有档案但没启用）。
+           这两件事该给的指引完全不同，只看 embeddingConfigured 会把它们混成同一个"未配置"。 */
+        body.put("embeddingProfileCount", modelProfileRegistry.embeddingProfileCount());
         body.put("settingsFile", settingsStore.filePath());
         return body;
     }
@@ -167,12 +172,12 @@ public class AdminController {
      * @param rebuildIndex 管控台已二次确认"维度变化、同意重建索引"时为 {@code true}
      */
     @PostMapping("/settings")
-    public Map<String, Object> saveSettings(@RequestBody LlmSettings settings,
+    public ResponseEntity<Map<String, Object>> saveSettings(@RequestBody LlmSettings settings,
                                             @RequestParam(defaultValue = "false") boolean rebuildIndex) {
         log.info("[管控] 收到模型设置保存请求: chatBaseUrl={}, chatModel={}, embeddingModel={}, rebuildIndex={}",
                 settings.getChatBaseUrl(), settings.getChatModelName(),
                 settings.getEmbeddingModelName(), rebuildIndex);
-        // Key 留空表示"不修改"，用已保存的值补齐——避免管控台不发明文导致 Key 被清空
+        // Key 留空表示"不修改"，用已保存的值补齐：避免管控台不发明文导致 Key 被清空
         fillBlankKeysFromCurrent(settings);
 
         DimCheck dim = checkEmbeddingDimension(settings);
@@ -181,7 +186,7 @@ public class AdminController {
             Map<String, Object> fail = failBody(dim.message());
             fail.put("declaredDimension", dim.declaredDims());
             fail.put("newDimension", dim.newDims());
-            return fail;
+            return status(HttpStatus.BAD_REQUEST, fail);
         }
         if (dim.verdict() == DimVerdict.NEEDS_REBUILD && !rebuildIndex) {
             // 维度变了但用户还没确认重建 → 本次保存不生效，配置保持原样
@@ -189,13 +194,14 @@ public class AdminController {
             fail.put("requiresRebuild", true);
             fail.put("indexDimension", dim.indexDims());
             fail.put("newDimension", dim.newDims());
-            return fail;
+            // 409：请求本身没错，是还缺一次"同意重建"的确认，与参数非法区分开
+            return status(HttpStatus.CONFLICT, fail);
         }
 
         try {
             modelHolder.apply(settings);
         } catch (IllegalStateException e) {
-            return failBody(e.getMessage());
+            return status(HttpStatus.INTERNAL_SERVER_ERROR, failBody(e.getMessage()));
         }
 
         // 维度变化且用户已确认 → 紧接着重建索引（embeddingModel 是持有者委派代理，apply 后已指向新模型）。
@@ -210,7 +216,7 @@ public class AdminController {
                 rebuilt = true;
                 log.info("[管控] 知识库索引重建完成（dims={}，索引 {}）", dim.newDims(), rebuiltIndices);
             } catch (Exception e) {
-                // 配置已落盘并生效，只是索引重建失败 —— 必须如实告知，不能报成功
+                // 配置已落盘并生效，只是索引重建失败：必须如实告知，不能报成功
                 log.error("[管控] 知识库索引重建失败（配置已生效）: {}", e.getMessage(), e);
                 Map<String, Object> fail = failBody(
                         "配置已保存并生效，但知识库索引重建失败：" + e.getMessage()
@@ -218,7 +224,7 @@ public class AdminController {
                 fail.put("saved", true);
                 fail.put("rebuilt", false);
                 fillKeyState(fail);
-                return fail;
+                return status(HttpStatus.INTERNAL_SERVER_ERROR, fail);
             }
         }
 
@@ -232,17 +238,17 @@ public class AdminController {
         result.put("message", rebuilt
                 ? "已保存并立即生效，知识库索引已按新维度 " + dim.newDims() + " 重建"
                 : (dim.note() != null ? "已保存并立即生效（" + dim.note() + "）" : "已保存并立即生效"));
-        return result;
+        return ResponseEntity.ok(result);
     }
 
     /**
      * 清空内置的某个模型配置（{@code kind} = {@code chat} / {@code embedding}）。
      *
      * 只清目标那一组，另一组原样保留。清空后该模型视为「未配置」；
-     * 若 yaml 里也没有兜底值，则未绑定任何档案的域将没有可用模型 —— 管控台需二次确认。
+     * 若 yaml 里也没有兜底值，则未绑定任何档案的域将没有可用模型：管控台需二次确认。
      */
     @DeleteMapping("/settings/{kind}")
-    public Map<String, Object> clearSettings(@PathVariable("kind") String kind) {
+    public ResponseEntity<Map<String, Object>> clearSettings(@PathVariable("kind") String kind) {
         boolean embedding = "embedding".equalsIgnoreCase(kind);
         if (!embedding && !"chat".equalsIgnoreCase(kind)) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, "kind 只能是 chat 或 embedding");
@@ -271,7 +277,7 @@ public class AdminController {
         try {
             modelHolder.apply(next);
         } catch (IllegalStateException e) {
-            return failBody(e.getMessage());
+            return status(HttpStatus.INTERNAL_SERVER_ERROR, failBody(e.getMessage()));
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -280,7 +286,7 @@ public class AdminController {
         result.put("embeddingConfigured", modelHolder.isEmbeddingConfigured());
         fillKeyState(result);
         result.put("message", (embedding ? "向量模型" : "对话模型") + "配置已清空");
-        return result;
+        return ResponseEntity.ok(result);
     }
 
     /** 保存失败/需确认时的统一响应体 */
@@ -289,6 +295,17 @@ public class AdminController {
         fail.put("success", false);
         fail.put("error", message);
         return fail;
+    }
+
+    /**
+     * 统一出口：业务失败也带上对应的 HTTP 状态。
+     *
+     * <p>全局异常处理器按 {@code ErrorCode#getHttpStatus()} 定状态，控制器里"直接 return 失败体"
+     * 的路径却一律 200：调用方（SDK / 脚本 / 网关）只能靠解析 body 才知道失败，
+     * 重试与告警都拿不到信号。</p>
+     */
+    private static <T> ResponseEntity<T> status(HttpStatus httpStatus, T body) {
+        return ResponseEntity.status(httpStatus).body(body);
     }
 
     /**
@@ -396,14 +413,15 @@ public class AdminController {
      * @param type {@code chat}（默认）或 {@code embedding}
      */
     @PostMapping("/settings/test")
-    public Map<String, Object> testSettings(@RequestBody(required = false) LlmSettings settings,
+    public ResponseEntity<Map<String, Object>> testSettings(@RequestBody(required = false) LlmSettings settings,
                                             @RequestParam(defaultValue = "chat") String type) {
         LlmSettings candidate = settings == null ? new LlmSettings() : settings;
         fillBlankKeysFromCurrent(candidate);
         Map<String, Object> result = new LinkedHashMap<>();
+        HttpStatus httpStatus = HttpStatus.OK;
         try {
             if ("embedding".equalsIgnoreCase(type)) {
-                testEmbedding(candidate, result);
+                httpStatus = testEmbedding(candidate, result);
             } else {
                 String reply = modelHolder.testChatConnection(candidate);
                 result.put("success", true);
@@ -419,14 +437,18 @@ public class AdminController {
             result.put("message", CONNECT_FAILED + "：" + reason);
             result.put("error", reason);
             result.put("detail", e.getMessage());
+            // 502：本次请求的入参没问题，是上游不可达/拒绝，与参数非法区分开
+            httpStatus = HttpStatus.BAD_GATEWAY;
         }
-        return result;
+        return status(httpStatus, result);
     }
 
     /**
      * 向量测试的完整裁决：连通性 + 维度契约 + 索引一致性
+     *
+     * @return 对应的 HTTP 状态：维度声明与模型不符属入参问题（400），其余按成功处理
      */
-    private void testEmbedding(LlmSettings candidate, Map<String, Object> result) {
+    private HttpStatus testEmbedding(LlmSettings candidate, Map<String, Object> result) {
         LlmModelHolder.EmbeddingProbe probe = modelHolder.testEmbeddingConnection(candidate);
         int actual = probe.actualDimension();
         Integer declared = probe.declaredDimension();
@@ -444,7 +466,7 @@ public class AdminController {
             result.put("message", "已连通，但" + detail + "。请填写该模型真正支持的维度，"
                     + "或改用支持自定义维度的模型（具体支持范围请查服务商文档）。");
             result.put("error", detail);
-            return;
+            return HttpStatus.BAD_REQUEST;
         }
 
         String dimNote = declared != null
@@ -460,6 +482,7 @@ public class AdminController {
         }
         result.put("success", true);
         result.put("message", "向量模型连通正常，" + dimNote + idxNote);
+        return HttpStatus.OK;
     }
 
     /**
@@ -831,7 +854,7 @@ public class AdminController {
         t.put("paramCount", d.params() == null ? 0 : d.params().size());
         t.put("provider", providerOf(d.source()));
         t.put("source", d.source());
-        // 该工具是否"只声明了一个域"——一眼看出域的专属能力，还是全域通用能力
+        // 该工具是否"只声明了一个域"：一眼看出域的专属能力，还是全域通用能力
         t.put("exclusive", d.domains() != null && d.domains().size() == 1);
         return t;
     }
@@ -1130,7 +1153,7 @@ public class AdminController {
             d.put("name", domain);
             d.put("chain", Domains.chainOf(domain));
             d.put("ancestors", Domains.ancestorsOf(domain));
-            // 工具清单带 source（哪个 Bean#方法提供的）——"域从哪来"的答案就在这儿
+            // 工具清单带 source（哪个 Bean#方法提供的）："域从哪来"的答案就在这儿
             List<Map<String, Object>> tools = new ArrayList<>();
             toolRouter.toolSpecifications(domain).stream()
                     .map(ToolSpecification::name)
@@ -1175,7 +1198,7 @@ public class AdminController {
     @PostMapping("/prompts")
     public Map<String, Object> savePrompts(@RequestBody(required = false) DomainSettings incoming) {
         DomainSettings toSave = normalize(incoming);
-        // toolCallEcho 不归提示词页管：那页不发这个字段，而保存是整份覆盖写 ——
+        // toolCallEcho 不归提示词页管：那页不发这个字段，而保存是整份覆盖写：
         // 不合并的话，在提示词页点一次保存就会把各域的工具执行信息回写开关冲回默认（关）。
         toSave.setToolCallEcho(domainSettingsStore.load().getToolCallEcho());
         // 域必须已登记：提示词是域的属性，给树里不存在的域存片段只会变成永远不生效的孤儿
@@ -1218,7 +1241,7 @@ public class AdminController {
                 }
                 String domain = k.trim();
                 // 键必须是完整路径域：写成短名的片段永远不会命中任何域，
-                // 静默丢弃会让用户以为配过了 —— 直接跳过并在返回里列为孤儿键
+                // 静默丢弃会让用户以为配过了：直接跳过并在返回里列为孤儿键
                 String reason = Domains.validatePath(domain);
                 if (reason == null) {
                     result.getPrompts().put(domain, v);
@@ -1244,7 +1267,7 @@ public class AdminController {
             merged.putIfAbsent(domain, "");
         }
         /* 编辑框里不放未登记的域：保存是整份覆盖，放进来等于让前端把孤儿键反复写回去，
-           而且保存入口现在会拒绝未登记的域 —— 留着它们会把整个页面卡在"保存失败"上。
+           而且保存入口现在会拒绝未登记的域：留着它们会把整个页面卡在"保存失败"上。
            孤儿键仍然通过 orphanPrompts 字段只读地暴露出来。 */
         merged.keySet().removeIf(domain -> !domainRegistry.contains(domain));
         return merged;

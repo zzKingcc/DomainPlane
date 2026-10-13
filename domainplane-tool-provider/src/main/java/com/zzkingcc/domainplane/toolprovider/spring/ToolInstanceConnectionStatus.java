@@ -9,7 +9,7 @@ import java.util.Map;
  * 工具实例的连接状态快照。
  *
  * 心跳失败从不阻断启动（见 {@link ToolInstanceClient} 的退避重试），
- * 所以"进程活着但工具没注册上"这件事只能靠状态区分 —— 这个 Bean 就是那个出口：
+ * 所以"进程活着但工具没注册上"这件事只能靠状态区分：这个 Bean 就是那个出口：
  * 接入方注入它接到自己的健康检查端点或 Actuator 上即可。
  *
  * 刻意不实现 Actuator 的 {@code HealthIndicator}：那会给本 SDK 引入

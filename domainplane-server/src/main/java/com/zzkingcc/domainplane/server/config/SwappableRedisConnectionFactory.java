@@ -106,7 +106,7 @@ public class SwappableRedisConnectionFactory implements RedisConnectionFactory, 
     }
 
     /**
-     * 未配置守卫 —— 把"压根没配"和"配了但连不上"在取连接点就分开。
+     * 未配置守卫：把"压根没配"和"配了但连不上"在取连接点就分开。
      */
     private void requireConfigured() {
         if (!holder.isRedisConfigured()) {
@@ -149,10 +149,21 @@ public class SwappableRedisConnectionFactory implements RedisConnectionFactory, 
     @Override
     public void destroy() {
         LettuceConnectionFactory d = this.delegate;
+        this.delegate = null;
         if (d != null) {
             d.destroy();
         }
+        // 宽限期内还没销毁的旧工厂也要收：调度线程是守护线程，进程退出时不等它，
+        // 而那些工厂的 Lettuce 事件循环线程不是守护线程：没人关就会把进程挂住。
+        for (LettuceConnectionFactory pending : PENDING_DESTROY) {
+            destroyQuietly(pending);
+        }
+        DELAYED_DESTROY.shutdownNow();
     }
+
+    /** 宽限期内待销毁的旧工厂（见 {@link #destroy()} 的说明） */
+    private static final java.util.Set<LettuceConnectionFactory> PENDING_DESTROY =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /**
      * 延迟销毁专用调度器：固定单线程 + 守护线程。
@@ -169,12 +180,16 @@ public class SwappableRedisConnectionFactory implements RedisConnectionFactory, 
         if (old == null) {
             return;
         }
-        DELAYED_DESTROY.schedule(() -> {
-            try {
-                old.destroy();
-            } catch (Exception e) {
-                log.debug("[存储配置] 销毁旧的 Redis 连接工厂时出错（可忽略）: {}", e.getMessage());
-            }
-        }, GRACE_SECONDS, TimeUnit.SECONDS);
+        PENDING_DESTROY.add(old);
+        DELAYED_DESTROY.schedule(() -> destroyQuietly(old), GRACE_SECONDS, TimeUnit.SECONDS);
+    }
+
+    private static void destroyQuietly(LettuceConnectionFactory factory) {
+        PENDING_DESTROY.remove(factory);
+        try {
+            factory.destroy();
+        } catch (Exception e) {
+            log.debug("[存储配置] 销毁旧的 Redis 连接工厂时出错（可忽略）: {}", e.getMessage());
+        }
     }
 }

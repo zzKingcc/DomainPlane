@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -112,17 +113,20 @@ public final class ToolManifest {
                 .parameters(ToolParamSchema.toSpecificationSchema(parameters))
                 .build();
 
+        // 副作用等级先算出来：它同时决定"缺省要不要审批"，两处必须用同一个值
+        Tool.Effect effect = sideEffect(entry.path("sideEffect"), name);
+
         ToolDescriptor descriptor = new ToolDescriptor(
                 name,
                 entry.path("description").asText(""),
                 entry.path("category").asText("default"),
                 entry.path("version").asText("1.0.0"),
-                sideEffect(entry.path("sideEffect")),
+                effect,
                 entry.path("idempotent").asBoolean(true),
                 entry.path("toModel").asBoolean(true),
                 List.copyOf(params),
                 domains(entry.path("domains"), name),
-                approval(entry),
+                approval(entry, effect, name),
                 // source 只作来源标识与排障，不参与路由（路由永远看地址列表）
                 "remote://" + instanceId + "@" + endpoint);
 
@@ -131,15 +135,32 @@ public final class ToolManifest {
     }
 
     /**
-     * 审批策略
+     * 审批策略。
+     *
+     * 未声明时按副作用推导：写操作（WRITE / DESTRUCTIVE）一律要求审批，只读工具免审批。
+     * 一律缺省成"免审批"是原实现的问题：漏报一个写操作的审批声明，等于该操作没有审批，
+     * 而且这件事在日志与界面上都是静默的。
      */
-    private static ToolDescriptor.Approval approval(JsonNode entry) {
-        boolean required = entry.path("requiresApproval").asBoolean(false);
-        String mode = text(entry, "approvalMode");
+    private static ToolDescriptor.Approval approval(JsonNode entry, Tool.Effect effect, String toolName) {
+        JsonNode requiredNode = entry.path("requiresApproval");
+        boolean required;
+        if (requiredNode.isMissingNode() || requiredNode.isNull()) {
+            required = effect != Tool.Effect.READ;
+            log.warn("[工具注册] 工具 {} 未声明 requiresApproval，按 sideEffect={} 推导为{}",
+                    toolName, effect, required ? "需审批" : "免审批");
+        } else if (!requiredNode.isBoolean()) {
+            required = true;
+            log.warn("[工具注册] 工具 {} 的 requiresApproval 不是布尔值（{}），按需审批处理",
+                    toolName, requiredNode.asText());
+        } else {
+            required = requiredNode.asBoolean();
+        }
         if (!required) {
             return ToolDescriptor.Approval.none();
         }
-        String effectiveMode = mode == null || "NONE".equalsIgnoreCase(mode) ? "ALWAYS" : mode.toUpperCase();
+        String mode = text(entry, "approvalMode");
+        String effectiveMode = mode == null || "NONE".equalsIgnoreCase(mode)
+                ? "ALWAYS" : mode.toUpperCase(Locale.ROOT);
         return new ToolDescriptor.Approval(
                 effectiveMode,
                 entry.path("approvalCondition").asText(""),
@@ -148,21 +169,31 @@ public final class ToolManifest {
                 entry.path("approvalTimeoutSeconds").asInt(300));
     }
 
-    /** 副作用等级：接受枚举名（READ/WRITE/DESTRUCTIVE），也接受布尔（false=READ、true=WRITE） */
-    private static Tool.Effect sideEffect(JsonNode node) {
+    /**
+     * 副作用等级：接受枚举名（READ / WRITE / DESTRUCTIVE），也接受布尔（false=READ、true=WRITE）。
+     *
+     * 缺失或无法识别时按 WRITE 处理，而不是回落 READ：READ 意味着免审批、且被当作可放心
+     * 重试的只读操作，把未知副作用的工具降级成 READ 属于 fail-open：一个真实的写操作会被
+     * 当成只读放过去，日志里还看不出异常。按 WRITE 处理则至少会要求审批。
+     * 不直接拒绝注册是有意的：只缺一个元数据就让整个实例的全部工具下线，代价大于收益。
+     */
+    private static Tool.Effect sideEffect(JsonNode node, String toolName) {
         if (node == null || node.isMissingNode() || node.isNull()) {
-            return Tool.Effect.READ;
+            log.warn("[工具注册] 工具 {} 未声明 sideEffect，按 WRITE 处理（不能当只读：只读意味着免审批）",
+                    toolName);
+            return Tool.Effect.WRITE;
         }
         if (node.isBoolean()) {
             return node.asBoolean() ? Tool.Effect.WRITE : Tool.Effect.READ;
         }
-        String raw = node.asText("").trim().toUpperCase();
+        String raw = node.asText("").trim().toUpperCase(Locale.ROOT);
         for (Tool.Effect effect : Tool.Effect.values()) {
             if (effect.name().equals(raw)) {
                 return effect;
             }
         }
-        return Tool.Effect.READ;
+        log.warn("[工具注册] 工具 {} 的 sideEffect 值 '{}' 无法识别，按 WRITE 处理", toolName, raw);
+        return Tool.Effect.WRITE;
     }
 
     /**
@@ -215,7 +246,7 @@ public final class ToolManifest {
             return hex.toString();
         } catch (Exception e) {
             // 理论上不会发生（SHA-256 是 JDK 必备算法）。真发生了就退化成"永不判等"，
-            // 即每次心跳都走完整 diff——宁可多做功，也不可漏同步。
+            // 即每次心跳都走完整 diff，宁可多做功，也不可漏同步。
             log.error("[工具注册] 实例 {} 的 manifest 摘要计算失败，本次按'已变化'处理: {}",
                     instanceId, e.getMessage());
             return "digest-" + System.nanoTime();

@@ -141,13 +141,49 @@ public class AdminModelEndpointController {
         return out;
     }
 
-    // ==================== 内部 ====================
+    /**
+     * 生视频（提交任务）：{@code POST /admin/model-endpoints/video?alias=...}
+     *
+     * <p>只提交、不等待：视频生成动辄几十秒到几分钟，管控台点一下不该把连接挂住。
+     * 返回任务号，由 {@code /video/status} 查进度。</p>
+     */
+    @PostMapping("/video")
+    public Map<String, Object> createVideo(@RequestParam("alias") String alias,
+                                          @RequestBody VideoBody body) {
+        ModelProfile profile = resolve(alias, ModelProfile.EP_VIDEO);
+        ModelEndpointClient.VideoTask task = client.createVideo(profile,
+                new ModelEndpointClient.VideoRequest(body.getPrompt(), body.getSize(), body.getSeconds()));
+        Map<String, Object> out = base(alias, ModelProfile.EP_VIDEO);
+        putTask(out, task);
+        return out;
+    }
 
+    /**
+     * 查生视频任务：{@code POST /admin/model-endpoints/video/status?alias=...}
+     */
+    @PostMapping("/video/status")
+    public Map<String, Object> videoStatus(@RequestParam("alias") String alias,
+                                          @RequestBody VideoStatusBody body) {
+        ModelProfile profile = resolve(alias, ModelProfile.EP_VIDEO);
+        ModelEndpointClient.VideoTask task = client.videoStatus(profile, body.getTaskId());
+        Map<String, Object> out = base(alias, ModelProfile.EP_VIDEO);
+        putTask(out, task);
+        return out;
+    }
+
+    private static void putTask(Map<String, Object> out, ModelEndpointClient.VideoTask task) {
+        out.put("taskId", task.taskId());
+        out.put("status", task.status());
+        out.put("url", task.url());
+        out.put("error", task.error());
+    }
+
+    // ==================== 内部 ====================
     /**
      * 取档案并校验它声明了要调用的端点族。
      *
      * 端点族是"这份档案能不能干这事"的唯一判据：没声明 images 族的档案，即使底层服务商
-     * 支持生图，也不该被拿去发生图请求 —— 那会把"没配置"伪装成"服务商报错"。
+     * 支持生图，也不该被拿去发生图请求，那会把"没配置"伪装成"服务商报错"。
      */
     private ModelProfile resolve(String alias, String family) {
         if (alias == null || alias.isBlank()) {
@@ -209,5 +245,19 @@ public class AdminModelEndpointController {
         private String language;
         private String prompt;
         private String responseFormat;
+    }
+
+    /** 生视频请求体（prompt 必填） */
+    @Data
+    public static class VideoBody {
+        private String prompt;
+        private String size;
+        private Integer seconds;
+    }
+
+    /** 生视频查状态请求体（taskId 必填） */
+    @Data
+    public static class VideoStatusBody {
+        private String taskId;
     }
 }

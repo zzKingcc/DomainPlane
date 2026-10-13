@@ -36,7 +36,7 @@ public class AccountSettings {
     /** 最后登录时间（ISO-8601） */
     private String lastLoginAt;
 
-    /** 最后登录来源（IP，仅记录不校验——网络安全边界交部署方） */
+    /** 最后登录来源（IP，仅记录不校验：网络安全边界交部署方） */
     private String lastLoginFrom;
 
     /**

@@ -29,7 +29,7 @@ import java.util.stream.IntStream;
  *   • 重排：按融合分降序（同分按 chunk_seq），取 TopN，回写分项分 / 融合分 / 名次 / 命中通道
  *
  *
- * 只在"实际有命中的来源数 ≤ 1"时被选中（见 {@link AdaptiveFusionStrategy}）—— 此时所有表同源，
+ * 只在"实际有命中的来源数 ≤ 1"时被选中（见 {@link AdaptiveFusionStrategy}）：此时所有表同源，
  * BM25 分数在同一索引内可比，分数制才成立。多来源场景由 {@link RrfFusionStrategy} 承担。
  * 也因为是单来源，本策略不使用 {@code RankedList#depth}（层级衰减无意义）。
  *
@@ -70,7 +70,16 @@ public class DefaultFusionStrategy implements FusionStrategy {
         for (Content c : vector) {
             String hash = FusionSupport.hashContent(c);
             double score = FusionSupport.extractScore(c);
-            scoreMap.computeIfAbsent(hash, k -> new ScoreEntry(c, queryKeywords, fusion)).vectorScore = score;
+            ScoreEntry existing = scoreMap.get(hash);
+            if (existing == null) {
+                ScoreEntry entry = new ScoreEntry(c, queryKeywords, fusion);
+                entry.vectorScore = score;
+                scoreMap.put(hash, entry);
+            } else {
+                // 取最大值而不是覆盖：同一去重键出现多次时，覆盖会让分数随列表顺序变化，
+                // 与 RRF 那套口径也不一致（那边取的是排名最优）。
+                existing.vectorScore = Math.max(existing.vectorScore, score);
+            }
         }
 
         int keywordAdded = 0;
@@ -79,7 +88,12 @@ public class DefaultFusionStrategy implements FusionStrategy {
             double score = FusionSupport.extractScore(c);
             ScoreEntry exist = scoreMap.get(hash);
             if (exist != null) {
-                exist.keywordScore = score;
+                // keywordScore 为 null 表示"该条没被关键词通道命中过"，不能直接参与 Math.max
+                // （拆箱即 NPE）。取最大值而不是覆盖：同一条被关键词通道命中多次时，
+                // 覆盖会让分数随列表顺序变化，与 RRF 那套"取排名最优"的口径也不一致。
+                exist.keywordScore = exist.keywordScore == null
+                        ? score
+                        : Math.max(exist.keywordScore, score);
             } else {
                 ScoreEntry entry = new ScoreEntry(c, queryKeywords, fusion);
                 entry.keywordScore = score;
@@ -153,7 +167,7 @@ public class DefaultFusionStrategy implements FusionStrategy {
      *
      * 增益是乘法（{@code 分 × (1 + boost)}），与 {@link RrfFusionStrategy} 语义一致。
      * 加法 boost 在本轨（归一化分 0~1）看着合理，但在 RRF 轨（分约 0.01 量级）会变成十几倍、
-     * 直接统治排序 —— 同一个常量在两轨下含义不同是隐性坑，故统一为乘法。
+     * 直接统治排序：同一个常量在两轨下含义不同是隐性坑，故统一为乘法。
      */
     private void computeFusedScores(List<ScoreEntry> entries) {
         for (ScoreEntry e : entries) {

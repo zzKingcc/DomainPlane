@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 锁住分数制融合（<b>单索引</b>轨）：去重 / 归一化加权 / TopN 重排 / 标题文件名 boost / 通道标记。
  * 这些是升级前 {@code CompositeRetriever} 的内联行为，抽成 {@link DefaultFusionStrategy} 后
- * 必须逐字节等价 —— 本测试即"对拍"。
+ * 必须逐字节等价：本测试即"对拍"。
  */
 class DefaultFusionStrategyTest {
 
@@ -117,7 +117,7 @@ class DefaultFusionStrategyTest {
 
     /**
      * 多张同模态的排名表在分数制下会拼回一路（这是"单来源轨"的假设）；
-     * 真正多来源时应由 {@link AdaptiveFusionStrategy} 走 RRF —— 此用例只钉住拼表行为。
+     * 真正多来源时应由 {@link AdaptiveFusionStrategy} 走 RRF：此用例只钉住拼表行为。
      */
     @Test
     void multipleListsOfSameModality_areConcatenated() {
@@ -134,7 +134,7 @@ class DefaultFusionStrategyTest {
 
     /**
      * 增益是<b>乘法</b>而非加法：中间那条归一化 0.5，标题命中后应是 0.5×1.2=0.6，
-     * 加法会得到 0.5+0.2=0.7 —— 同一常量在两轨下含义必须一致，故统一为乘法。
+     * 加法会得到 0.5+0.2=0.7：同一常量在两轨下含义必须一致，故统一为乘法。
      */
     @Test
     void titleBoost_isMultiplicative_notAdditive() {

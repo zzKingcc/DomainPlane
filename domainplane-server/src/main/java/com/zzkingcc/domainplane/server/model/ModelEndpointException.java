@@ -9,7 +9,7 @@ import com.zzkingcc.domainplane.common.exception.BaseException;
  * 与对话链路区分开：对话走 langchain4j 适配器（{@link ModelClientFactory}），
  * 而这四个族 langchain4j 没有抽象，由 {@link ModelEndpointClient} 直接走 JDK HttpClient。
  * 调用失败（HTTP 非 2xx / 网络异常）与"协议不支持"是两类不同结论，但都收拢到这一个异常，
- * 由 {@link #getErrorCode()} 区分 —— 上层（管控台控制器）据此决定是"提示服务商报错"
+ * 由 {@link #getErrorCode()} 区分，上层（管控台控制器）据此决定是"提示服务商报错"
  * 还是"提示该协议暂未适配"。
  *
  * @author zzkingcc

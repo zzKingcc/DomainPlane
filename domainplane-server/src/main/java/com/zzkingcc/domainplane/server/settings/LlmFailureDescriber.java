@@ -2,6 +2,7 @@ package com.zzkingcc.domainplane.server.settings;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zzkingcc.domainplane.common.exception.UpstreamLlmFailure;
 
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
@@ -71,16 +72,40 @@ public final class LlmFailureDescriber {
             JsonNode body = MAPPER.readTree(raw.substring(start));
             JsonNode error = body.path("error");
             JsonNode node = (error.isMissingNode() || error.isNull()) ? body : error;
-            String mapped = mapCode(text(node, "code"));
+            String code = text(node, "code");
+            String message = text(node, "message");
+            /* 上游会把"欠费 / 凭证"塞进通用 400 码里：DeepSeek 用 invalid_request_error 报
+               "Insufficient Balance"。只按 code 归类会把它误报成"模型名或接口地址不正确"，
+               真正的原因（余额不足）反被吞掉。message 语义更明确时优先信它。 */
+            String byMessage = mapMessage(message);
+            if (byMessage != null) {
+                return byMessage;
+            }
+            String mapped = mapCode(code);
             if (mapped != null) {
                 return mapped;
             }
-            String message = text(node, "message");
             return message == null ? null : abbreviate(message);
         } catch (Exception ignore) {
             // 不是 JSON / 结构不符 → 交给后面的网络层判断与原文兜底
             return null;
         }
+    }
+
+    /**
+     * 按上游原文语义归类，排在错误码归类之前。
+     *
+     * <p>理由：code 是服务商自定义的，粒度参差（"欠费"落进通用 400 是常态），
+     * 而 message 描述的是具体发生了什么。认不出返回 {@code null}，交回 code 归类。</p>
+     */
+    private static String mapMessage(String message) {
+        if (UpstreamLlmFailure.looksLikeQuotaExhausted(message)) {
+            return "账户余额或额度不足（上游：" + abbreviate(message) + "）";
+        }
+        if (UpstreamLlmFailure.looksLikeAuthFailure(message)) {
+            return "API Key 无效或未被授权（上游：" + abbreviate(message) + "）";
+        }
+        return null;
     }
 
     /** 上游错误码 → 中文说明；认不出返回 {@code null} */

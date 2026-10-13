@@ -15,7 +15,7 @@ public final class Domains {
     /**
      * 根域（基层域）：整棵域树的起点，启动即存在、不可删除。
      *
-     * 工具声明留空、调用未指定域都归一化为它 —— 即"挂在根上"，按累加语义对全树可见。
+     * 工具声明留空、调用未指定域都归一化为它：即"挂在根上"，按累加语义对全树可见。
      */
     public static final String DEFAULT = "default";
 
@@ -96,9 +96,9 @@ public final class Domains {
      * 校验完整域路径。规则（顺序即报错优先级）：
      *
      *   • 非空、总长 ≤ {@link #MAX_PATH_LENGTH}；
-     *   • 必须从根域 {@link #DEFAULT} 出发 —— 不允许悬空节点；
+     *   • 必须从根域 {@link #DEFAULT} 出发：不允许悬空节点；
      *   • 单段非空、长度 ≤ {@link #MAX_SEGMENT_LENGTH}、字符集 {@code [A-Za-z0-9_-]}；
-     *   • 自身链上不得重复段 —— 同名不同父允许，同一条链上重复不允许。
+     *   • 自身链上不得重复段：同名不同父允许，同一条链上重复不允许。
      *
      *
      * @return {@code null} 表示合法；否则返回不合法原因

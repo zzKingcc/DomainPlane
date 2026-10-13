@@ -1,6 +1,6 @@
 package com.zzkingcc.domainplane.clientcore.http;
 
-import com.zzkingcc.domainplane.api.code.ErrorCode;
+import com.zzkingcc.domainplane.clientcore.exception.ClientErrorCode;
 import com.zzkingcc.domainplane.clientcore.exception.DomainPlaneErrors;
 import com.zzkingcc.domainplane.clientcore.exception.DomainPlaneStartupException;
 import com.zzkingcc.domainplane.clientcore.properties.ClientProperties;
@@ -80,7 +80,7 @@ public class ClientCredential {
         String username = server.getUsername();
         String password = server.getPassword();
         if (username == null || username.isBlank() || password == null || password.isBlank()) {
-            throw new DomainPlaneStartupException(ErrorCode.AUTH_REQUIRED,
+            throw new DomainPlaneStartupException(ClientErrorCode.INVALID_ARGUMENT,
                     "未配置接入账号：请在 domainplane.username / domainplane.password 中填写服务端账号"
                             + "（服务端默认由种子初始化为 domainplane / domainplane）");
         }
@@ -96,7 +96,7 @@ public class ClientCredential {
 
             Object value = body == null ? null : body.get("credential");
             if (value == null || value.toString().isBlank()) {
-                throw new DomainPlaneStartupException(ErrorCode.AUTH_REQUIRED,
+                throw new DomainPlaneStartupException(ClientErrorCode.RESPONSE_UNREADABLE,
                         "服务端未返回凭证，请确认 " + server.getServerUrl() + " 是 DomainPlane 服务端");
             }
             // 只记账号，凭证是凭据，明文不进日志

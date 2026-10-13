@@ -16,7 +16,7 @@ import org.springframework.web.reactive.function.client.WebClient;
  * DomainPlane 对话 SDK 自动装配。
  *
  * 本模块只多一个 Bean：{@code domainplaneAgentFactory}。WebClient 与凭证
- * 由 {@link DomainPlaneClientAutoConfiguration} 提供 —— 这些与"引了哪个 SDK"无关，
+ * 由 {@link DomainPlaneClientAutoConfiguration} 提供：这些与"引了哪个 SDK"无关，
  * 知识库 SDK 引的是同一份，两个 SDK 同时在场也只会装配一次。
  *
  * 本模块不做启动期连通性校验：服务端未启动不阻断接入方启动，
@@ -31,7 +31,7 @@ public class ChatAutoConfiguration {
      * 对话的唯一入口：域门面工厂。
      *
      * {@code forDomain("customer")} 拿到绑定域的门面，之后 {@code ask} / {@code stream} /
-     * {@code events} / {@code resume} / {@code stop} 都不必再提域 —— 域是接线动作，不是每次调用都要记得传的参数。
+     * {@code events} / {@code resume} / {@code stop} 都不必再提域：域是接线动作，不是每次调用都要记得传的参数。
      *
      * 底层远程通道（{@code AgentServiceClient}）由这里内部持有，不单独暴露 Bean：
      * 对外只留这一个入口。要看工具调用 / 审批中断 / 错误码用 {@code agent.events(...)}。

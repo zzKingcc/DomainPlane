@@ -67,7 +67,7 @@ public class DomainPlaneClientAutoConfiguration {
     /**
      * 访问凭证持有者：账号密码换签名凭证并缓存（进程内单例，业务调用共用）。
      *
-     * 凭证在首次业务调用时才换取，不在启动期换取 —— 见本类的 {@code domainplaneClientAutoConfiguration} 注释。
+     * 凭证在首次业务调用时才换取，不在启动期换取：见本类的 {@code domainplaneClientAutoConfiguration} 注释。
      */
     @Bean
     @ConditionalOnMissingBean

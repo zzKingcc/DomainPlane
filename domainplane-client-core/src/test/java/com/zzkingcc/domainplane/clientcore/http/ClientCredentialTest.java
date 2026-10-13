@@ -1,6 +1,6 @@
 package com.zzkingcc.domainplane.clientcore.http;
 
-import com.zzkingcc.domainplane.api.code.ErrorCode;
+import com.zzkingcc.domainplane.clientcore.exception.ClientErrorCode;
 import com.zzkingcc.domainplane.clientcore.exception.DomainPlaneStartupException;
 import com.zzkingcc.domainplane.clientcore.properties.ClientProperties;
 import com.zzkingcc.domainplane.sdkcore.config.DomainPlaneProperties;
@@ -91,7 +91,7 @@ class ClientCredentialTest {
                 json(HttpStatus.OK, "{\"credential\":\"cred-1\"}"), server(" ", ""));
 
         DomainPlaneStartupException ex = assertThrows(DomainPlaneStartupException.class, credential::get);
-        assertEquals(ErrorCode.AUTH_REQUIRED, ex.getErrorCode());
+        assertEquals(ClientErrorCode.INVALID_ARGUMENT, ex.getClientCode());
         assertTrue(ex.getMessage().contains("domainplane.username"), "提示要给出该改哪个配置键");
         assertTrue(requests.isEmpty(), "账号密码缺失属本地配置问题，不该发请求");
     }
@@ -102,7 +102,7 @@ class ClientCredentialTest {
                 json(HttpStatus.UNAUTHORIZED, "{\"code\":10003}"), server("domainplane", "wrong"));
 
         DomainPlaneStartupException ex = assertThrows(DomainPlaneStartupException.class, credential::get);
-        assertEquals(ErrorCode.AUTH_FAILED, ex.getErrorCode());
+        assertEquals(ClientErrorCode.CREDENTIAL_REJECTED, ex.getClientCode());
         assertTrue(ex.getMessage().contains("domainplane.password"));
     }
 
@@ -112,7 +112,7 @@ class ClientCredentialTest {
                 json(HttpStatus.CONFLICT, "{\"code\":10005}"), server("domainplane", "domainplane"));
 
         DomainPlaneStartupException ex = assertThrows(DomainPlaneStartupException.class, credential::get);
-        assertEquals(ErrorCode.AUTH_NOT_INITIALIZED, ex.getErrorCode());
+        assertEquals(ClientErrorCode.SERVER_NOT_INITIALIZED, ex.getClientCode());
         assertTrue(ex.getMessage().contains("/console/login.html"), "要指到初始化入口而不是只说失败");
     }
 
@@ -122,7 +122,7 @@ class ClientCredentialTest {
                 json(HttpStatus.OK, "{\"token\":\"something-else\"}"), server("domainplane", "domainplane"));
 
         DomainPlaneStartupException ex = assertThrows(DomainPlaneStartupException.class, credential::get);
-        assertEquals(ErrorCode.AUTH_REQUIRED, ex.getErrorCode());
+        assertEquals(ClientErrorCode.RESPONSE_UNREADABLE, ex.getClientCode());
         assertTrue(ex.getMessage().contains("http://localhost:9527"));
     }
 
@@ -143,6 +143,7 @@ class ClientCredentialTest {
     @Test
     void 凭证请求头与服务端约定一致() {
         assertEquals("X-DomainPlane-Credential", ClientCredential.CREDENTIAL_HEADER);
-        assertSame(ErrorCode.AUTH_REQUIRED, ErrorCode.of(10002));
+        assertSame(ClientErrorCode.CREDENTIAL_REJECTED, ClientErrorCode.of(95003),
+                "客户端码表要能按数字码反查，接入方硬编码数字时才不会落空");
     }
 }

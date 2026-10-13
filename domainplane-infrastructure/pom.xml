@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.zzkingcc</groupId>
         <artifactId>DomainPlane</artifactId>
-        <version>v1.0-beta.1</version>
+        <version>v1.0-beta.2</version>
     </parent>
 
     <artifactId>domainplane-infrastructure</artifactId>

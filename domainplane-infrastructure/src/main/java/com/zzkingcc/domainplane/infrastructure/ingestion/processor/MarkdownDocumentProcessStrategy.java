@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * Markdown 文档处理策略（{@code .md} / {@code .markdown}）。
  *
- * 管线只有两步：md 解析（读结构）→ 通用切片层。与 txt 的差别就在这第一步 ——
+ * 管线只有两步：md 解析（读结构）→ 通用切片层。与 txt 的差别就在这第一步，
  * txt 用正则「猜」标题，md 的 {@code #} 前缀是确定信息；
  * 后面的句子打包、重叠、去重、向量化由 {@link AbstractDocumentProcessStrategy} 统一封装。
  *

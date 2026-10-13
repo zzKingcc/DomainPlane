@@ -27,14 +27,14 @@ import java.util.regex.Pattern;
  * docx 解析器（docx 入库的格式适配层）：{@code byte[] → List<Block>}。
  *
  * 为什么不用 Tika：Tika 的 XHTML 把 docx 的标题降级成了普通
- * {@code } —— 它保留了表格结构，但丢掉了标题层级。而标题层级正是我们要的核心信息，
+ * {@code }，它保留了表格结构，但丢掉了标题层级。而标题层级正是我们要的核心信息，
  * POI 直读 {@code 段落样式}（{@code Heading1} / {@code 标题 1}）和
  * {@code 大纲级别}（{@code outlineLvl}）本来就拿得到。
  *
  * 三条刻意的取舍：
  *
  *   • 页眉页脚根本不读：这里只遍历 {@link XWPFDocument#getBodyElements()}，
- *       它们压根进不来 —— 比事后按"是否重复"删除干净得多。
+ *       它们压根进不来，比事后按"是否重复"删除干净得多。
  *   • 表格与段落按文档顺序穿插：正文里"一段话 → 一张表 → 又一段话"很常见，
  *       先全段落再全部表格会把表和它的说明文字拆到两处。
  *   • 图片只留占位：不做 OCR（见 MULTI-FORMAT 设计 §五）；
@@ -74,7 +74,7 @@ public final class DocxReader {
         } catch (KnowledgeBaseException e) {
             throw e;
         } catch (Exception e) {
-            // 加密文档 / 损坏的 zip / 实际是 doc 改名成 docx —— 都是这一处，给明确的话术
+            // 加密文档 / 损坏的 zip / 实际是 doc 改名成 docx，都是这一处，给明确的话术
             throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_UPLOAD_REJECTED,
                     "docx 解析失败（文件损坏、加密，或其实是旧版 .doc 改了扩展名）：" + e.getMessage(), e);
         }
@@ -149,7 +149,7 @@ public final class DocxReader {
             }
             return null;
         }
-        // 确实是标题样式但没有编号 —— 当一级处理，总好过退化成正文
+        // 确实是标题样式但没有编号，当一级处理，总好过退化成正文
         return 1;
     }
 
@@ -176,7 +176,7 @@ public final class DocxReader {
     /**
      * 表格 → {@link MarkdownTable}。
      *
-     * 渲染细节（列齐平、单元格转义、截断）与旧版 doc、excel 共用同一份实现 ——
+     * 渲染细节（列齐平、单元格转义、截断）与旧版 doc、excel 共用同一份实现：
      * 三个格式的表在检索侧必须长得一样，不然 BM25 的字段权重就没法统一。
      */
     private static Block tableBlock(XWPFTable table) {

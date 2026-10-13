@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 提示词 ↔ 工具可见性自检：只认"提示词里点名了工具名"这一种不一致，且必须按词边界匹配。
  *
- * <p>提示词沿链拼接，因此传入的是每个域<b>合成后</b>的全文 —— 祖先域的片段同样算数。</p>
+ * <p>提示词沿链拼接，因此传入的是每个域<b>合成后</b>的全文：祖先域的片段同样算数。</p>
  */
 class PromptToolConsistencyAuditTest {
 
@@ -53,7 +53,7 @@ class PromptToolConsistencyAuditTest {
 
     @Test
     void 祖先域的片段会落到后代域身上() {
-        // ping 只挂在 default.sales 上，但根域 default 的片段点名了它 ——
+        // ping 只挂在 default.sales 上，但根域 default 的片段点名了它：
         // 根域片段会拼进每个后代域，于是 default 与 default.hr 都要报
         List<ToolDescriptor> tools = List.of(tool("ping", "default.sales"));
         Map<String, String> promptByDomain = new LinkedHashMap<>();
