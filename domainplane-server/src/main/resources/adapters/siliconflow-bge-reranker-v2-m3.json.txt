@@ -1,0 +1,34 @@
+{
+  "id": "siliconflow-bge-reranker-v2-m3",
+  "provider": "siliconflow",
+  "label": "BAAI/bge-reranker-v2-m3（硅基流动·重排）",
+  "docUrl": "https://docs.siliconflow.cn/cn/api-reference/rerank/create-rerank",
+  "input": ["text"],
+  "output": ["score"],
+  "match": {
+    "hosts": ["api.siliconflow.cn"],
+    "models": ["BAAI/bge-reranker-v2-m3"]
+  },
+  "families": {
+    "rerank": {
+      "params": [
+        {
+          "key": "topN",
+          "label": "返回条数",
+          "type": "int",
+          "wire": "top_n",
+          "std": false,
+          "min": 1
+        },
+        {
+          "key": "returnDocuments",
+          "label": "返回原文",
+          "type": "bool",
+          "wire": "return_documents",
+          "std": false,
+          "default": false
+        }
+      ]
+    }
+  }
+}

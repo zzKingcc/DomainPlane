@@ -1,0 +1,33 @@
+{
+  "id": "openai-gpt-6.1-sol",
+  "provider": "openai",
+  "label": "OpenAI GPT-6.1 Sol（近旗舰）",
+  "docUrl": "https://platform.openai.com/docs/models/gpt-6.1-sol",
+  "input": ["text"],
+  "output": ["text"],
+  "match": {
+    "hosts": ["api.openai.com"],
+    "models": ["gpt-6.1-sol"]
+  },
+  "families": {
+    "chat": {
+      "params": [
+        {
+          "key": "reasoningEffort",
+          "label": "思考强度",
+          "type": "enum",
+          "wire": "reasoning_effort",
+          "std": false,
+          "display": "bar",
+          "default": "medium",
+          "options": [
+            {"value": "low", "label": "low"},
+            {"value": "medium", "label": "medium"},
+            {"value": "high", "label": "high"},
+            {"value": "xhigh", "label": "xhigh"}
+          ]
+        }
+      ]
+    }
+  }
+}

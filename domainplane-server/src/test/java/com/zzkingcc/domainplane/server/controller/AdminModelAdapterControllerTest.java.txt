@@ -1,0 +1,105 @@
+package com.zzkingcc.domainplane.server.controller;
+
+import com.zzkingcc.domainplane.server.model.ModelAdapterRegistry;
+import org.junit.jupiter.api.Test;
+import org.springframework.core.io.DefaultResourceLoader;
+
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * 匹配接口的响应契约（设计文档 §4.3）：{@code adapter.params} 直接是 chat 族参数 schema 数组。
+ *
+ * 这条契约被前端调优框直接消费（{@code applyAdapter} 读 {@code adapter.params}）——
+ * 形状漂移的后果是"框显示了但一个控件都没有"，且没有任何报错，所以在这里钉死。
+ *
+ * @author zzkingcc
+ */
+class AdminModelAdapterControllerTest {
+
+    private final AdminModelAdapterController controller =
+            new AdminModelAdapterController(new ModelAdapterRegistry(new DefaultResourceLoader()));
+
+    private static AdminModelAdapterController.MatchBody body(String baseUrl, String modelName) {
+        AdminModelAdapterController.MatchBody b = new AdminModelAdapterController.MatchBody();
+        b.setBaseUrl(baseUrl);
+        b.setModelName(modelName);
+        return b;
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void 匹配接口按文档形状下发chat族schema() {
+        Map<String, Object> r = controller.match(body("https://api.openai.com/v1", "gpt-5.6-sol"));
+
+        assertEquals(true, r.get("matched"));
+        Map<String, Object> ad = (Map<String, Object>) r.get("adapter");
+        assertEquals("openai-gpt-5.6-sol", ad.get("id"));
+        assertTrue(String.valueOf(ad.get("label")).contains("Sol"), "label 原样下发");
+        assertEquals("https://platform.openai.com/docs/models/gpt-5.6-sol", ad.get("docUrl"));
+
+        /* 直接调方法拿到的是 ParamSpec 记录（HTTP 链路上由 Jackson 序列化成 JSON 对象，
+           字段名即组件名 —— 前端读的 key/label/type/wire/std/min/max/options 都在） */
+        List<ModelAdapterRegistry.ParamSpec> params =
+                (List<ModelAdapterRegistry.ParamSpec>) ad.get("params");
+        List<String> keys = params.stream().map(ModelAdapterRegistry.ParamSpec::key).toList();
+        assertEquals(List.of("reasoningEffort", "verbosity", "temperature", "maxTokens"), keys,
+                "chat 族参数 schema 原样下发（含标准参数 温度 / 单次最大输出）");
+        ModelAdapterRegistry.ParamSpec effort = params.get(0);
+        assertEquals("reasoning_effort", effort.wire(), "wire 要下发（注入时按它翻译）");
+        assertEquals(false, effort.std());
+        assertFalse(effort.options().isEmpty(), "枚举 options 要下发（前端渲染下拉）");
+
+        /* 标准参数的 std=true 与 min/max 也必须下发：卡片靠它决定"值落老字段"并给数值框设上下限 */
+        ModelAdapterRegistry.ParamSpec temperature = params.get(2);
+        assertEquals("temperature", temperature.wire());
+        assertEquals(true, temperature.std());
+        assertEquals(0.0, temperature.min());
+        assertEquals(2.0, temperature.max());
+
+        assertFalse(ad.containsKey("families"), "不下发内部 families map：前端不该依赖存储形态");
+        assertFalse(ad.containsKey("match"), "不下发内部 match 结构");
+    }
+
+    @Test
+    void 未命中时adapter为null() {
+        Map<String, Object> r = controller.match(body("https://api.example.com/v1", "m"));
+
+        assertEquals(false, r.get("matched"));
+        assertNull(r.get("adapter"));
+    }
+
+    @Test
+    void 空请求体按未命中处理() {
+        Map<String, Object> r = controller.match(null);
+
+        assertEquals(false, r.get("matched"));
+        assertNull(r.get("adapter"));
+    }
+
+    @Test
+    void 未登记模型落在host兜底时不当作已适配() {
+        /* OpenRouter 上任意未登记模型：hosts 里有 openrouter.ai，但 models / modelPatterns 都没登记它。
+           旧口径（matched）会给出一份"别人的"调优 schema —— 同 host 下 id 字典序最小的那条，
+           于是绿框显示成 Claude Fable 的参数。新口径只认按模型名命中 → 不给框。 */
+        Map<String, Object> r = controller.match(
+                body("https://openrouter.ai/api/v1", "some/vendor-not-registered"));
+
+        assertEquals(false, r.get("matched"), "host 兜底只说明这家服务商登记过，不算已适配");
+        assertNull(r.get("adapter"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void 已登记的模型仍按模型名命中() {
+        /* 反向对照：收紧不能把「按模型名命中」也一起挡掉 */
+        Map<String, Object> r = controller.match(
+                body("https://openrouter.ai/api/v1", "openai/gpt-6-luna"));
+
+        assertEquals(true, r.get("matched"));
+        assertEquals("openrouter-openai-gpt-6-luna",
+                ((Map<String, Object>) r.get("adapter")).get("id"));
+    }
+}

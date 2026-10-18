@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP 连接 · DomainPlane 管控台</title>
+    <link rel="stylesheet" href="assets/console.css">
+    <style>
+        .mcp-icon { width: 17px; height: 17px; flex: 0 0 17px; color: var(--primary); }
+        .kv { display: grid; grid-template-columns: 92px 1fr; gap: 4px 10px; font-size: 12.5px; margin-top: 8px; }
+        .kv .k { color: var(--muted); }
+        .kv .v { word-break: break-all; font-family: ui-monospace, Consolas, monospace; }
+        .pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+        .pick-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; cursor: pointer; background: var(--card); }
+        .pick-card:hover { border-color: var(--primary); }
+        .pick-card.on { border-color: var(--primary); background: var(--primary-dim); }
+        .pick-card .pc-name { font-size: 13px; font-weight: 600; font-family: ui-monospace, Consolas, monospace; }
+        .form-row { margin-bottom: 12px; }
+        .form-row label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 5px; }
+        .form-row input, .form-row select, .form-row textarea {
+            width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px;
+            background: var(--bg); color: var(--text); font-size: 13px; box-sizing: border-box;
+            font-family: ui-monospace, Consolas, monospace;
+        }
+        .form-row textarea { min-height: 64px; resize: vertical; }
+        .form-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .tag.ready { color: #16a34a; border-color: #16a34a; }
+        .tag.failed { color: var(--red); border-color: var(--red); }
+        .tag.off { color: var(--muted); }
+    </style>
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <main class="main">
+        <div class="page-head">
+            <div class="head-line">
+                <div>
+                    <h2>MCP 连接</h2>
+                    <p>对接外部 MCP server（Model Context Protocol）。一个连接 = 一个 MCP 实例，其工具经命名规范化后注册进平台，
+                       再按"域绑定"授权给指定域可见。v1 实装 Streamable HTTP 传输。</p>
+                </div>
+                <span class="count-badge" id="connCount">—</span>
+            </div>
+            <div class="actions">
+                <button id="createBtn">新增连接</button>
+                <button class="ghost" id="refreshBtn">重新读取</button>
+            </div>
+        </div>
+
+        <div id="connList"></div>
+    </main>
+</div>
+
+<!-- ===== 新增 / 编辑 遮罩层 ===== -->
+<div class="modal-mask" id="editModal" hidden>
+    <div class="modal-panel" role="dialog" aria-modal="true" style="max-width:620px;">
+        <div class="modal-head">
+            <h3 id="editTitle">新增 MCP 连接</h3>
+            <span class="spacer"></span>
+            <button class="ghost" id="editClose">关闭</button>
+        </div>
+        <div class="modal-body" style="padding:6px 2px;">
+            <div class="form-row">
+                <label>连接名（唯一，工具命名空间前缀；禁止连续双下划线）</label>
+                <input id="f_name" placeholder="如 qqmail">
+            </div>
+            <div class="form-row">
+                <label>MCP server 地址（Streamable HTTP 端点）</label>
+                <input id="f_url" placeholder="https://api.mail.qq.com/mcp">
+            </div>
+            <div class="form-2">
+                <div class="form-row">
+                    <label>传输类型</label>
+                    <select id="f_transport">
+                        <option value="STREAMABLE_HTTP">STREAMABLE_HTTP（2025-03-26，已实装）</option>
+                        <option value="LEGACY_SSE">LEGACY_SSE（2024-11-05，预留）</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>审批策略</label>
+                    <select id="f_approval">
+                        <option value="ALL">ALL（全部需人工批准，推荐默认）</option>
+                        <option value="DESTRUCTIVE_ONLY">DESTRUCTIVE_ONLY（仅破坏性需批准）</option>
+                        <option value="READ_ONLY_FREE">READ_ONLY_FREE（只读免批准）</option>
+                        <option value="NONE">NONE（全部免批准，仅内网可信）</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <label>自定义请求头（JSON 对象，如鉴权；不回显，留空=保持不变）</label>
+                <textarea id="f_headers" placeholder='{"Authorization":"Bearer xxxx"}'></textarea>
+            </div>
+            <div class="form-row">
+                <label>OAuth 客户端（服务器要求授权时才需要；动态注册被拒时填预登记的 client_id）</label>
+                <input id="f_oauth_cid" placeholder="client_id（留空=动态注册）">
+            </div>
+            <div class="form-row">
+                <label>client_secret（不回显，留空=保持不变；公共客户端可留空）</label>
+                <input id="f_oauth_secret" type="password" placeholder="••••••（已配置则留空保持不变）">
+            </div>
+            <div class="form-2">
+                <div class="form-row">
+                    <label>注册用 client 名称（留空=WorkBuddy）</label>
+                    <input id="f_oauth_cname" placeholder="WorkBuddy">
+                </div>
+                <div class="form-row">
+                    <label>授权范围 scope（留空=服务器默认）</label>
+                    <input id="f_oauth_scope" placeholder="如 mail.read">
+                </div>
+            </div>
+            <div class="form-row">
+                <label>固定回调地址 redirect_uri（留空=用当前管控台地址；服务商只认固定回调时才填）</label>
+                <input id="f_oauth_redirect" placeholder="https://你的域名/admin/mcp-connections/xxx/oauth/callback">
+            </div>
+            <div class="form-2">
+                <div class="form-row">
+                    <label>单次调用超时（毫秒，默认 30000）</label>
+                    <input id="f_timeout" type="number" placeholder="30000">
+                </div>
+                <div class="form-row">
+                    <label>工具白名单（逗号分隔原始工具名；留空=全部）</label>
+                    <input id="f_allow" placeholder="GetMe,ListMessages">
+                </div>
+            </div>
+            <div class="form-row">
+                <label>备注</label>
+                <input id="f_remark" placeholder="可选">
+            </div>
+            <div class="form-row">
+                <label><input type="checkbox" id="f_enabled" checked style="width:auto;margin-right:6px;">启用（关=不连、不注册）</label>
+            </div>
+        </div>
+        <footer class="card-foot">
+            <button id="editSaveBtn">保存</button>
+            <button class="ghost" id="editClearBtn">重置</button>
+        </footer>
+    </div>
+</div>
+
+<!-- ===== 绑定域 遮罩层 ===== -->
+<div class="modal-mask" id="bindModal" hidden>
+    <div class="modal-panel" role="dialog" aria-modal="true" style="max-width:680px;">
+        <div class="modal-head">
+            <h3>配置 <span class="mono" id="bindConnName"></span> 的域绑定</h3>
+            <span class="spacer"></span>
+            <button class="ghost" id="bindClose">关闭</button>
+        </div>
+        <div id="bindCardList" class="pick-grid" style="margin-top:10px;"></div>
+        <div id="bindEmpty" class="perm-none" style="margin-top:10px; display:none;"></div>
+        <footer class="card-foot">
+            <button id="bindSaveBtn">保存绑定</button>
+            <button class="ghost" id="bindClearBtn">全部解绑</button>
+        </footer>
+    </div>
+</div>
+
+<!-- ===== 工具目录 遮罩层 ===== -->
+<div class="modal-mask" id="toolsModal" hidden>
+    <div class="modal-panel" role="dialog" aria-modal="true" style="max-width:720px;">
+        <div class="modal-head">
+            <h3><span class="mono" id="toolsConnName"></span> 的工具目录</h3>
+            <span class="spacer"></span>
+            <button class="ghost" id="toolsClose">关闭</button>
+        </div>
+        <div id="toolsBody" style="margin-top:10px;"></div>
+    </div>
+</div>
+
+<script src="assets/console.js"></script>
+<script>
+    var esc = Console.escapeHtml;
+    var CONNS = [];
+    var BINDINGS = { domainBindings: {}, connectionBindings: {} };
+    var DOMAINS = [];
+
+    var EP = { STREAMABLE_HTTP: 'Streamable HTTP', LEGACY_SSE: 'Legacy SSE' };
+
+    function statusTag(c) {
+        if (!c.enabled) { return '<span class="tag off">已禁用</span>'; }
+        if (c.ready) { return '<span class="tag ready">已就绪</span>'; }
+        if (c.needsAuth) {
+            return '<span class="tag approval" title="' + esc(c.lastError || '') + '">需授权</span>';
+        }
+        if (c.status === 'FAILED') { return '<span class="tag failed" title="' + esc(c.lastError || '') + '">连接失败</span>'; }
+        return '<span class="tag off">未连接</span>';
+    }
+
+    function sideEffectTag(se) {
+        var cls = 'perm';
+        if (se === 'READ') { cls = 'read'; }
+        else if (se === 'WRITE') { cls = 'write'; }
+        else if (se === 'DESTRUCTIVE') { cls = 'destructive'; }
+        return '<span class="tag ' + cls + '">' + esc(se) + '</span>';
+    }
+
+    function render() {
+        var box = document.getElementById('connList');
+        document.getElementById('connCount').textContent = CONNS.length + ' 个连接';
+        if (!CONNS.length) {
+            box.innerHTML = '<div class="card"><span class="perm-none">还没有任何 MCP 连接。点「新增连接」接入一个外部 MCP server。</span></div>';
+            return;
+        }
+        box.innerHTML = CONNS.map(function (c) {
+            var bound = (BINDINGS.connectionBindings[c.name] || []);
+            var boundTags = bound.length
+                ? bound.map(function (d) { return '<span class="tag public mono">' + esc(d) + '</span>'; }).join(' ')
+                : '<span class="perm-none">未绑定任何域（工具对谁都不可见）</span>';
+            return '<section class="card model-card">'
+                + '<header class="card-head">'
+                +   '<svg class="mcp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"'
+                +     ' stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/>'
+                +     '<path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>'
+                +   '<h2 class="mono">' + esc(c.name) + '</h2>'
+                +   statusTag(c)
+                +   '<span class="spacer"></span>'
+                +   '<span class="card-note">工具 ' + (c.ready ? c.toolCount : 0) + ' · 策略 ' + esc(c.approvalPolicy) + '</span>'
+                +   (c.enabled
+                        ? '<button class="ghost" data-toggle="' + esc(c.name) + '" data-to="false">停用</button>'
+                        : '<button class="ghost" data-toggle="' + esc(c.name) + '" data-to="true">启用</button>')
+                +   '<button class="ghost" data-test="' + esc(c.name) + '">测试</button>'
+                +   '<button class="ghost" data-tools="' + esc(c.name) + '">工具</button>'
+                +   (c.needsAuth
+                        ? '<button class="ghost" data-oauth="' + esc(c.name) + '">授权</button>'
+                        : '')
+                +   '<button class="ghost" data-bind="' + esc(c.name) + '">绑定域</button>'
+                +   '<button class="ghost" data-edit="' + esc(c.name) + '">编辑</button>'
+                +   '<button class="ghost" data-del="' + esc(c.name) + '">删除</button>'
+                + '</header>'
+                + '<div class="kv">'
+                +   '<span class="k">地址</span><span class="v">' + esc(c.url) + '</span>'
+                +   '<span class="k">传输</span><span class="v">' + esc(EP[c.transport] || c.transport) + '</span>'
+                +   (c.hasHeaders ? '<span class="k">鉴权</span><span class="v">已配置（明文不回显）</span>' : '')
+                +   (c.oauthClientId
+                        ? '<span class="k">OAuth</span><span class="v">client_id ' + esc(c.oauthClientId)
+                          + (c.hasOauthClientSecret ? ' + secret' : '') + '（手工登记）</span>'
+                        : '')
+                +   (c.lastError ? '<span class="k">错误</span><span class="v" style="color:var(--red);">' + esc(c.lastError) + '</span>' : '')
+                + '</div>'
+                + '<div style="margin-top:8px;"><span class="k" style="color:var(--muted);font-size:12px;">绑定域：</span> ' + boundTags + '</div>'
+                + '</section>';
+        }).join('');
+
+        box.querySelectorAll('button[data-toggle]').forEach(function (b) {
+            b.addEventListener('click', function () { toggle(b.getAttribute('data-toggle'), b.getAttribute('data-to') === 'true'); });
+        });
+        box.querySelectorAll('button[data-test]').forEach(function (b) {
+            b.addEventListener('click', function () { testConn(b.getAttribute('data-test')); });
+        });
+        box.querySelectorAll('button[data-oauth]').forEach(function (b) {
+            b.addEventListener('click', function () { startOAuth(b.getAttribute('data-oauth')); });
+        });
+        box.querySelectorAll('button[data-tools]').forEach(function (b) {
+            b.addEventListener('click', function () { showTools(b.getAttribute('data-tools')); });
+        });
+        box.querySelectorAll('button[data-bind]').forEach(function (b) {
+            b.addEventListener('click', function () { openBind(b.getAttribute('data-bind')); });
+        });
+        box.querySelectorAll('button[data-edit]').forEach(function (b) {
+            b.addEventListener('click', function () { openEdit(b.getAttribute('data-edit')); });
+        });
+        box.querySelectorAll('button[data-del]').forEach(function (b) {
+            b.addEventListener('click', function () { delConn(b.getAttribute('data-del')); });
+        });
+    }
+
+    /* ===== 列表 / 绑定加载 ===== */
+    function loadBindings() {
+        return Console.request('/admin/mcp-bindings').then(function (r) {
+            BINDINGS = r || { domainBindings: {}, connectionBindings: {} };
+        });
+    }
+    function loadDomains() {
+        return Console.request('/admin/domains').then(function (r) {
+            DOMAINS = (r && r.domains) || [];
+        }).catch(function () { DOMAINS = []; });
+    }
+    function load() {
+        document.getElementById('connList').innerHTML = '<div class="card"><span class="perm-none">加载中…</span></div>';
+        Console.request('/admin/mcp-connections').then(function (r) {
+            CONNS = (r && r.connections) || [];
+            return loadBindings();
+        }).then(render).catch(function (e) {
+            document.getElementById('connList').innerHTML =
+                '<div class="card" style="color:var(--red);">读取失败：' + esc(e.message) + '</div>';
+        });
+    }
+
+    /* ===== 新增 / 编辑 ===== */
+    var EDIT_NAME = '';
+    function openCreate() {
+        EDIT_NAME = '';
+        document.getElementById('editTitle').textContent = '新增 MCP 连接';
+        document.getElementById('f_name').value = '';
+        document.getElementById('f_name').disabled = false;
+        document.getElementById('f_url').value = '';
+        document.getElementById('f_transport').value = 'STREAMABLE_HTTP';
+        document.getElementById('f_approval').value = 'ALL';
+        document.getElementById('f_headers').value = '';
+        document.getElementById('f_oauth_cid').value = '';
+        document.getElementById('f_oauth_secret').value = '';
+        document.getElementById('f_oauth_cname').value = '';
+        document.getElementById('f_oauth_scope').value = '';
+        document.getElementById('f_oauth_redirect').value = '';
+        document.getElementById('f_timeout').value = '30000';
+        document.getElementById('f_allow').value = '';
+        document.getElementById('f_remark').value = '';
+        document.getElementById('f_enabled').checked = true;
+        document.getElementById('editModal').hidden = false;
+        document.body.style.overflow = 'hidden';
+    }
+    function openEdit(name) {
+        var c = CONNS.filter(function (x) { return x.name === name; })[0];
+        if (!c) { return; }
+        EDIT_NAME = name;
+        document.getElementById('editTitle').textContent = '编辑 MCP 连接';
+        document.getElementById('f_name').value = c.name;
+        document.getElementById('f_name').disabled = true;
+        document.getElementById('f_url').value = c.url || '';
+        document.getElementById('f_transport').value = c.transport || 'STREAMABLE_HTTP';
+        document.getElementById('f_approval').value = c.approvalPolicy || 'ALL';
+        document.getElementById('f_headers').value = '';
+        document.getElementById('f_oauth_cid').value = c.oauthClientId || '';
+        document.getElementById('f_oauth_secret').value = '';
+        document.getElementById('f_oauth_cname').value = c.oauthClientName || '';
+        document.getElementById('f_oauth_scope').value = c.oauthScope || '';
+        document.getElementById('f_oauth_redirect').value = c.oauthRedirectUri || '';
+        document.getElementById('f_timeout').value = c.callTimeoutMs || 30000;
+        document.getElementById('f_allow').value = (c.toolAllowlist || []).join(', ');
+        document.getElementById('f_remark').value = c.remark || '';
+        document.getElementById('f_enabled').checked = c.enabled !== false;
+        document.getElementById('editModal').hidden = false;
+        document.body.style.overflow = 'hidden';
+    }
+    function closeEdit() {
+        document.getElementById('editModal').hidden = true;
+        document.body.style.overflow = '';
+    }
+    function saveEdit() {
+        var name = document.getElementById('f_name').value.trim();
+        var url = document.getElementById('f_url').value.trim();
+        var headersRaw = document.getElementById('f_headers').value.trim();
+        var headers = {};
+        if (headersRaw) {
+            try { headers = JSON.parse(headersRaw); }
+            catch (e) { alert('自定义请求头不是合法 JSON：' + e.message); return; }
+        }
+        var allowRaw = document.getElementById('f_allow').value.trim();
+        var allow = allowRaw ? allowRaw.split(/[,\s]+/).filter(Boolean) : [];
+        var timeout = parseInt(document.getElementById('f_timeout').value, 10);
+        var body = {
+            name: name, url: url,
+            transport: document.getElementById('f_transport').value,
+            approvalPolicy: document.getElementById('f_approval').value,
+            headers: headers,
+            callTimeoutMs: isNaN(timeout) ? 30000 : timeout,
+            enabled: document.getElementById('f_enabled').checked,
+            toolAllowlist: allow,
+            remark: document.getElementById('f_remark').value.trim(),
+            oauthClientId: document.getElementById('f_oauth_cid').value.trim(),
+            oauthClientSecret: document.getElementById('f_oauth_secret').value,
+            oauthClientName: document.getElementById('f_oauth_cname').value.trim(),
+            oauthScope: document.getElementById('f_oauth_scope').value.trim(),
+            oauthRedirectUri: document.getElementById('f_oauth_redirect').value.trim()
+        };
+        Console.jsonRequest('/admin/mcp-connections', 'POST', body)
+            .then(function (r) {
+                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '保存失败'); }
+                alert(r && r.message ? r.message : '已保存');
+                closeEdit();
+                load();
+            })
+            .catch(function (e) { alert('保存失败：' + e.message); });
+    }
+
+    /* ===== 启停 / 删除 / 测试 ===== */
+    function toggle(name, enabled) {
+        Console.jsonRequest('/admin/mcp-connections/' + encodeURIComponent(name) + '/toggle',
+                            'POST', null)
+            .then(function (r) {
+                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '操作失败'); }
+                load();
+            })
+            .catch(function (e) { alert('操作失败：' + e.message); });
+    }
+    function delConn(name) {
+        if (!confirm('确认删除 MCP 连接 ' + name + '？\n\n其工具会被摘除、绑定会解绑（不删域）。')) { return; }
+        Console.jsonRequest('/admin/mcp-connections?name=' + encodeURIComponent(name), 'DELETE')
+            .then(function (r) {
+                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '删除失败'); }
+                load();
+            })
+            .catch(function (e) { alert('删除失败：' + e.message); });
+    }
+    function testConn(name) {
+        if (!confirm('对 ' + name + ' 发起连通性测试（initialize + tools/list）？')) { return; }
+        Console.jsonRequest('/admin/mcp-connections/' + encodeURIComponent(name) + '/test', 'POST', null)
+            .then(function (r) {
+                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '测试失败'); }
+                alert((r && r.message) + (r && r.tools ? '\n工具：' + r.tools.join(', ') : ''));
+                load();
+            })
+            .catch(function (e) { alert('测试失败：' + e.message); });
+    }
+
+    /* ===== OAuth 授权：拿授权 URL 后浏览器跳转，管理员登录同意，回调落 token 并建连 ===== */
+    function startOAuth(name) {
+        Console.jsonRequest('/admin/mcp-connections/' + encodeURIComponent(name) + '/oauth/start',
+                            'POST', null)
+            .then(function (r) {
+                if (r && r.code && r.code !== 0) {
+                    throw new Error(Console.sanitizeError(r.detail || r.error) || '发起授权失败');
+                }
+                if (r && r.authorizeUrl) { location.href = r.authorizeUrl; return; }
+                throw new Error('授权端点未返回授权链接');
+            })
+            .catch(function (e) { alert('发起授权失败：' + e.message); });
+    }
+
+    /* ===== 工具目录 ===== */
+    function showTools(name) {
+        document.getElementById('toolsConnName').textContent = name;
+        document.getElementById('toolsBody').innerHTML = '加载中…';
+        document.getElementById('toolsModal').hidden = false;
+        document.body.style.overflow = 'hidden';
+        Console.request('/admin/mcp-connections/' + encodeURIComponent(name) + '/tools')
+            .then(function (r) {
+                var tools = (r && r.tools) || [];
+                if (!tools.length) {
+                    document.getElementById('toolsBody').innerHTML =
+                        '<div class="perm-none">' + (r && r.ready ? '该连接没有工具' : '连接未就绪，无法读取工具目录') + '</div>';
+                    return;
+                }
+                document.getElementById('toolsBody').innerHTML = tools.map(function (t) {
+                    return '<div class="card" style="margin-bottom:8px;padding:10px 12px;">'
+                        + '<div style="display:flex;gap:8px;align-items:center;">'
+                        +   '<span class="mono" style="font-weight:600;">' + esc(t.originalName) + '</span>'
+                        +   (t.allowed ? '' : '<span class="tag off" title="被工具白名单裁剪">已裁剪</span>')
+                        +   sideEffectTag(t.sideEffect)
+                        +   '<span class="spacer"></span>'
+                        +   '<span class="card-note mono">→ ' + esc(t.mappedName) + '</span>'
+                        + '</div>'
+                        + (t.description ? '<div class="card-note" style="margin-top:4px;">' + esc(t.description) + '</div>' : '')
+                        + '</div>';
+                }).join('');
+            })
+            .catch(function (e) {
+                document.getElementById('toolsBody').innerHTML =
+                    '<div class="card" style="color:var(--red);">读取失败：' + esc(e.message) + '</div>';
+            });
+    }
+
+    /* ===== 域绑定 ===== */
+    var BIND_CONN = '';
+    var BIND_PICK = [];
+    function openBind(name) {
+        BIND_CONN = name;
+        var currently = BINDINGS.connectionBindings[name] || [];
+        BIND_PICK = currently.slice();
+        document.getElementById('bindConnName').textContent = name;
+        renderBindCards();
+        document.getElementById('bindModal').hidden = false;
+        document.body.style.overflow = 'hidden';
+    }
+    function closeBind() {
+        document.getElementById('bindModal').hidden = true;
+        document.body.style.overflow = '';
+    }
+    function renderBindCards() {
+        var box = document.getElementById('bindCardList');
+        var empty = document.getElementById('bindEmpty');
+        if (!DOMAINS.length) {
+            box.innerHTML = '';
+            empty.style.display = 'block';
+            empty.textContent = '还没有任何域，请先到「域空间」创建。';
+            return;
+        }
+        empty.style.display = 'none';
+        box.innerHTML = DOMAINS.map(function (d) {
+            var on = BIND_PICK.indexOf(d.name) >= 0;
+            return '<div class="pick-card' + (on ? ' on' : '') + '" data-pick="' + esc(d.name) + '">'
+                +   '<div class="pc-name">' + esc(d.name) + (on ? ' ✓' : '')
+                +     (d.callable ? '' : ' <span class="tag approval" title="装配节点：只把工具传给后代">装配</span>')
+                +   '</div>'
+                +   '<div class="pc-note">来源 ' + esc(d.sourceLabel || d.source || '') + '</div>'
+                + '</div>';
+        }).join('');
+        box.querySelectorAll('div[data-pick]').forEach(function (card) {
+            card.addEventListener('click', function () {
+                var d = card.getAttribute('data-pick');
+                var i = BIND_PICK.indexOf(d);
+                if (i >= 0) { BIND_PICK.splice(i, 1); } else { BIND_PICK.push(d); }
+                renderBindCards();
+            });
+        });
+    }
+    function saveBind() {
+        // 逐域应用 diff：开=并入该域的连接集合；关=从集合剔除。保证连接级联解绑语义正确。
+        var promises = [];
+        DOMAINS.forEach(function (d) {
+            var current = (BINDINGS.domainBindings[d.name] || []).slice();
+            var want = BIND_PICK.indexOf(d.name) >= 0;
+            var has = current.indexOf(BIND_CONN) >= 0;
+            if (want === has) { return; }
+            var next = want ? current.concat([BIND_CONN]) : current.filter(function (x) { return x !== BIND_CONN; });
+            promises.push(Console.jsonRequest('/admin/mcp-bindings/' + encodeURIComponent(d.name), 'PUT', { connections: next }));
+        });
+        Promise.all(promises.map(function (p) {
+            return p.catch(function (e) { return { __error: e.message }; });
+        })).then(function (results) {
+            var err = results.filter(function (r) { return r && r.__error; })[0];
+            if (err) { alert('部分绑定保存失败：' + err.__error); }
+            else { alert('绑定已保存'); }
+            closeBind();
+            load();
+        });
+    }
+
+    document.getElementById('createBtn').addEventListener('click', openCreate);
+    document.getElementById('refreshBtn').addEventListener('click', load);
+    document.getElementById('editClose').addEventListener('click', closeEdit);
+    document.getElementById('editSaveBtn').addEventListener('click', saveEdit);
+    document.getElementById('editClearBtn').addEventListener('click', openCreate);
+    document.getElementById('bindClose').addEventListener('click', closeBind);
+    document.getElementById('bindSaveBtn').addEventListener('click', saveBind);
+    document.getElementById('bindClearBtn').addEventListener('click', function () { BIND_PICK = []; renderBindCards(); });
+    document.getElementById('toolsClose').addEventListener('click', function () {
+        document.getElementById('toolsModal').hidden = true; document.body.style.overflow = '';
+    });
+    document.getElementById('editModal').addEventListener('click', function (e) {
+        if (e.target === document.getElementById('editModal')) { closeEdit(); }
+    });
+    document.getElementById('bindModal').addEventListener('click', function (e) {
+        if (e.target === document.getElementById('bindModal')) { closeBind(); }
+    });
+
+    Console.renderSidebar('mcp');
+    Console.ready(function () {
+        // OAuth 回调 302 回本页：auth=ok/fail 反馈授权结果，replaceState 清掉避免刷新重复弹
+        var q = new URLSearchParams(location.search);
+        var auth = q.get('auth');
+        if (auth === 'ok') {
+            alert('授权成功：连接 ' + (q.get('name') || '') + ' 已就绪，工具对绑定域可见');
+        } else if (auth === 'fail') {
+            alert('授权失败：' + (q.get('reason') || '未知原因'));
+        }
+        if (auth) { history.replaceState(null, '', location.pathname); }
+        loadDomains().then(load);
+    });
+</script>
+</body>
+</html>
