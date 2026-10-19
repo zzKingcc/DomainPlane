@@ -199,7 +199,7 @@
         var box = document.getElementById('connList');
         document.getElementById('connCount').textContent = CONNS.length + ' 个连接';
         if (!CONNS.length) {
-            box.innerHTML = '<div class="card"><span class="perm-none">还没有任何 MCP 连接。点「新增连接」接入一个外部 MCP server。</span></div>';
+            box.innerHTML = '<div class="dp-card"><span class="perm-none">还没有任何 MCP 连接。点「新增连接」接入一个外部 MCP server。</span></div>';
             return;
         }
         box.innerHTML = CONNS.map(function (c) {
@@ -207,7 +207,7 @@
             var boundTags = bound.length
                 ? bound.map(function (d) { return '<span class="tag public mono">' + esc(d) + '</span>'; }).join(' ')
                 : '<span class="perm-none">未绑定任何域（工具对谁都不可见）</span>';
-            return '<section class="card model-card">'
+            return '<section class="dp-card model-card">'
                 + '<header class="card-head">'
                 +   '<svg class="mcp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"'
                 +     ' stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/>'
@@ -277,13 +277,13 @@
         }).catch(function () { DOMAINS = []; });
     }
     function load() {
-        document.getElementById('connList').innerHTML = '<div class="card"><span class="perm-none">加载中…</span></div>';
+        document.getElementById('connList').innerHTML = '<div class="dp-card"><span class="perm-none">加载中…</span></div>';
         Console.request('/admin/mcp-connections').then(function (r) {
             CONNS = (r && r.connections) || [];
             return loadBindings();
         }).then(render).catch(function (e) {
             document.getElementById('connList').innerHTML =
-                '<div class="card" style="color:var(--red);">读取失败：' + esc(e.message) + '</div>';
+                '<div class="dp-card" style="color:var(--red);">读取失败：' + esc(e.message) + '</div>';
         });
     }
 
@@ -433,7 +433,7 @@
                     return;
                 }
                 document.getElementById('toolsBody').innerHTML = tools.map(function (t) {
-                    return '<div class="card" style="margin-bottom:8px;padding:10px 12px;">'
+                    return '<div class="dp-card" style="margin-bottom:8px;padding:10px 12px;">'
                         + '<div style="display:flex;gap:8px;align-items:center;">'
                         +   '<span class="mono" style="font-weight:600;">' + esc(t.originalName) + '</span>'
                         +   (t.allowed ? '' : '<span class="tag off" title="被工具白名单裁剪">已裁剪</span>')
@@ -447,7 +447,7 @@
             })
             .catch(function (e) {
                 document.getElementById('toolsBody').innerHTML =
-                    '<div class="card" style="color:var(--red);">读取失败：' + esc(e.message) + '</div>';
+                    '<div class="dp-card" style="color:var(--red);">读取失败：' + esc(e.message) + '</div>';
             });
     }
 

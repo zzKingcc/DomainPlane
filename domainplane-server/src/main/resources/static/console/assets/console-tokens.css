@@ -1,0 +1,40 @@
+/* ==========================================================================
+   V1 · Tabler 令牌接入层
+
+   只依赖 vendor/tabler-props.css（色板 / 字号 / 圆角 / 阴影，纯 token，
+   不含组件规则、不含 reboot，因此对现有 12 页零副作用）。
+
+   tabler-props.css 里没有「语义层」变量（body-bg / border-color 等），
+   这些只在 tabler.min.css 中定义。本项目不引 min.css（理由见方案 9.4），
+   所以在此按 Tabler 的 light 模式取值补齐。
+
+   方向只有一个：console.css 的既有变量 → Tabler 令牌。
+   不要反向再定义 --tblr-* 指向 --primary，会成环。
+   ========================================================================== */
+
+:root {
+    /* ---------- 补齐 min.css 的语义层（light 模式值，取自 tabler.min.css） ---------- */
+    --tblr-body-bg: var(--tblr-gray-50);
+    --tblr-body-color: var(--tblr-gray-800);
+    --tblr-border-color: var(--tblr-gray-200);
+    --tblr-border-color-translucent: color-mix(in oklab, var(--tblr-gray-800) 11.9%, transparent);
+    --tblr-bg-surface: #fff;
+    --tblr-bg-forms: #fff;
+
+    /* ---------- 既有变量吃 Tabler 色板 ---------- */
+    --bg: var(--tblr-body-bg);
+    --card: var(--tblr-bg-surface);
+    --primary: var(--tblr-primary);
+    --primary-dim: color-mix(in oklab, var(--tblr-primary) 8%, var(--tblr-white));
+    --text: var(--tblr-body-color);
+    --muted: var(--tblr-secondary);
+    --border: var(--tblr-border-color);
+    --green: var(--tblr-success);
+    --amber: var(--tblr-warning);
+    --red: var(--tblr-danger);
+    --slate: var(--tblr-gray-600);
+
+    /* ---------- 语义阴影：Tabler 卡片的「调性」主要来自这一层 ---------- */
+    --shadow-card: var(--tblr-shadow-card);
+    --shadow-input: var(--tblr-shadow-input);
+}

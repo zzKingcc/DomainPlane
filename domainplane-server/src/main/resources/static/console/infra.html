@@ -24,7 +24,7 @@
         <div id="infraStatus" class="status-line warn"><span>加载中…</span></div>
 
         <!-- ============ 一：Elasticsearch ============ -->
-        <section class="card model-card infra-es" id="card-es">
+        <section class="dp-card model-card infra-es" id="card-es">
             <header class="card-head">
                 <span class="model-dot"></span>
                 <h2>Elasticsearch</h2>
@@ -74,7 +74,7 @@
                     「知识库」页的检索也会报错。
                 </div>
             </div>
-            <div class="row">
+            <div class="dp-row">
                 <div class="field">
                     <label>端口</label>
                     <input id="esPort" type="number" min="1" max="65535" placeholder="9200">
@@ -88,7 +88,7 @@
                     </datalist>
                 </div>
             </div>
-            <div class="row">
+            <div class="dp-row">
                 <div class="field">
                     <label>用户名（未启用安全认证时留空）</label>
                     <input id="esUsername" class="mono" placeholder="如 elastic">
@@ -99,7 +99,7 @@
                     <div class="help" id="esKeyHelp">当前未配置</div>
                 </div>
             </div>
-            <div class="row">
+            <div class="dp-row">
                 <div class="field">
                     <label>连接超时（毫秒）</label>
                     <input id="esConnectTimeout" type="number" min="1" placeholder="5000">
@@ -126,7 +126,7 @@
         </section>
 
         <!-- ============ 二：Redis ============ -->
-        <section class="card model-card infra-redis" id="card-redis">
+        <section class="dp-card model-card infra-redis" id="card-redis">
             <header class="card-head">
                 <span class="model-dot"></span>
                 <h2>Redis</h2>
@@ -163,7 +163,7 @@
                     必填。不填则视为<b>未配置</b>：服务照常启动，但会话记忆与中断断点在首次使用时失败。
                 </div>
             </div>
-            <div class="row">
+            <div class="dp-row">
                 <div class="field">
                     <label>端口</label>
                     <input id="redisPort" type="number" min="1" max="65535" placeholder="6379">
@@ -199,7 +199,7 @@
         </section>
 
         <!-- ============ 说明（只读） ============ -->
-        <section class="card">
+        <section class="dp-card">
             <div class="hint" style="margin:0;">
                 「清空表单」只清本页输入框，<b>不发请求、不动线上配置</b>；清空后再保存 = 把本卡片回退到
                 服务端 yaml 配置。口令框清空后语义仍是"不修改"，不会抹掉服务端已存的密码。

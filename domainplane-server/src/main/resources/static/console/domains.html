@@ -275,7 +275,7 @@
         document.getElementById('domainCount').textContent = domains.length + ' 个域';
 
         if (!domains.length) {
-            box.innerHTML = '<div class="card"><span class="perm-none">'
+            box.innerHTML = '<div class="dp-card"><span class="perm-none">'
                 + '当前没有任何域。根域 <span class="mono">default</span> 是整棵域树的起点，'
                 + '其余域由上方人工创建或工具声明派生，标识须为从根域出发的完整路径。</span></div>';
             return;
@@ -322,7 +322,7 @@
                     }).join(' ') + '</div>'
                 : '';
 
-            return '<section class="card model-card">'
+            return '<section class="dp-card model-card">'
                 + '<header class="card-head">'
                 +   DOM_ICON
                 +   '<h2 class="mono">' + esc(d.name) + '</h2>'
@@ -652,19 +652,19 @@
             ]);
         }).then(render).catch(function (e) {
             document.getElementById('domainList').innerHTML =
-                '<div class="card" style="color:var(--red);">模型列表加载失败：' + esc(e.message) + '</div>';
+                '<div class="dp-card" style="color:var(--red);">模型列表加载失败：' + esc(e.message) + '</div>';
         });
     }
 
     function load() {
         document.getElementById('domainList').innerHTML =
-            '<div class="card"><span class="perm-none">加载中…</span></div>';
+            '<div class="dp-card"><span class="perm-none">加载中…</span></div>';
         Console.request('/admin/domains').then(function (r) {
             DATA = r || {};
             return loadBindings();
         }).catch(function (e) {
             document.getElementById('domainList').innerHTML =
-                '<div class="card" style="color:var(--red);">读取失败：' + esc(e.message) + '</div>';
+                '<div class="dp-card" style="color:var(--red);">读取失败：' + esc(e.message) + '</div>';
         });
     }
 

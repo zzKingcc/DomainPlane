@@ -148,7 +148,7 @@
         var root = document.getElementById(rootId || 'sidebar');
         if (!root) { return; }
         var items = NAV.map(function (n) {
-            var cls = 'nav-item' + (n.key === activeKey ? ' active' : '');
+            var cls = 'dp-nav-item' + (n.key === activeKey ? ' active' : '');
             var dot = n.warnAnchor
                 ? '<span class="dot-warn" data-role="models-warn" style="display:none;"'
                     + ' title="对话模型尚未配置完整"></span>'
@@ -164,7 +164,7 @@
             +   '<h1>DomainPlane 管控台</h1>'
             +   '<div class="sub">服务端运维 / 管理员控制面</div>'
             + '</div>'
-            + '<nav class="nav">' + items + '</nav>'
+            + '<nav class="dp-nav">' + items + '</nav>'
             + '<div class="sidebar-foot" id="sidebarFoot"></div>';
 
         renderAccountBox();

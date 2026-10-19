@@ -1,27 +1,22 @@
 /* ==========================================================================
    DomainPlane 管控台 · 共享样式
    零依赖、无 CDN：私有化 / 离线部署友好。配色跟随浅色主题。
+
+   V1：配色、圆角、阴影改由 console-tokens.css 提供（映射到 Tabler 令牌）。
+   变量在本文件之外定义，是为了让「换主题」只改一个文件。
    ========================================================================== */
 
+@import url("vendor/tabler-props.css");
+@import url("console-tokens.css");
+
 :root {
-    --bg: #f5f6f8;
-    --card: #fff;
-    --primary: #2563eb;
-    --primary-dim: #eff6ff;
-    --text: #1f2937;
-    --muted: #6b7280;
-    --border: #e5e7eb;
-    --green: #16a34a;
-    --amber: #d97706;
-    --red: #dc2626;
-    --slate: #475569;
     --sidebar-w: 248px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-family: var(--tblr-font-sans-serif), "PingFang SC", "Microsoft YaHei", sans-serif;
     background: var(--bg);
     color: var(--text);
     font-size: 14px;
@@ -56,9 +51,9 @@ body {
 .brand h1 { font-size: 15px; font-weight: 600; letter-spacing: .2px; }
 .brand .sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
 
-.nav { padding: 10px; display: flex; flex-direction: column; gap: 2px; }
+.dp-nav { padding: 10px; display: flex; flex-direction: column; gap: 2px; }
 
-.nav-item {
+.dp-nav-item {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -69,10 +64,10 @@ body {
     text-decoration: none;
     user-select: none;
 }
-.nav-item:hover { background: #f8fafc; color: var(--text); }
-.nav-item.active { background: var(--primary-dim); color: var(--primary); font-weight: 600; }
-.nav-item svg { width: 16px; height: 16px; flex: 0 0 16px; }
-.nav-item .dot-warn {
+.dp-nav-item:hover { background: #f8fafc; color: var(--text); }
+.dp-nav-item.active { background: var(--primary-dim); color: var(--primary); font-weight: 600; }
+.dp-nav-item svg { width: 16px; height: 16px; flex: 0 0 16px; }
+.dp-nav-item .dot-warn {
     width: 7px; height: 7px; border-radius: 50%;
     background: var(--amber); margin-left: auto; flex: 0 0 7px;
 }
@@ -121,13 +116,16 @@ body {
     white-space: nowrap;
 }
 
-/* ===== 卡片 ===== */
-.card {
+/* ===== 卡片 =====
+   V1：边框改用 Tabler 的半透明边框色 + 极轻阴影（--tblr-shadow-card），
+   这两条是「看起来像 Tabler」的主要来源，其余几何参数保持不变。 */
+.dp-card {
     background: var(--card);
-    border: 1px solid var(--border);
+    border: 1px solid var(--tblr-border-color-translucent);
     border-radius: 8px;
     padding: 20px;
     margin-bottom: 20px;
+    box-shadow: var(--shadow-card);
 }
 .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 /* min-width:0 + overflow-wrap：域路径 / 模型名可能很长，让标题自己折行，
@@ -136,12 +134,12 @@ body {
 /* 卡片头里的短状态文字（"工具 12 · 需确认 3"、更新时间）同样不许逐字断行。
    .card-note 的长说明段落都不是 .card-head 的直接子元素，不会被这条波及。 */
 .card-head > .card-note { white-space: nowrap; flex: 0 0 auto; }
-.card h3 {
+.dp-card h3 {
     font-size: 13px; color: var(--muted); font-weight: 600;
     margin: 20px 0 10px; padding-top: 16px; border-top: 1px solid var(--border);
 }
-.card h3:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
-.card > p { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+.dp-card h3:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+.dp-card > p { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
 
 /* ===== 按钮 ===== */
 /* 按钮文案一律不折行：这些标签都是「保存」「设为可调用」这类短中文，而中文可以在任意两字
@@ -183,13 +181,14 @@ button.danger { background: var(--red); }
    垂直居中的「上传」按钮看起来浮在文字上面。 */
 input:not([type="checkbox"]):not([type="radio"]), select {
     padding: 8px 12px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--tblr-border-color-translucent);
     border-radius: 6px;
     font-size: 13px;
     font-family: inherit;
     width: 100%;
     color: var(--text);
-    background: #fff;
+    background: var(--tblr-bg-forms);
+    box-shadow: var(--shadow-input);
 }
 /* 勾选类控件恢复原生尺寸，不再被当成文本框 */
 input[type="checkbox"], input[type="radio"] {
@@ -208,12 +207,12 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
 .field .help { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.6; }
 
-.row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-/* .row 是 grid、[hidden] 是 UA 低优先级样式会被盖掉，隐藏时需显式覆盖 */
-.row[hidden], .field[hidden] { display: none; }
+.dp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+/* .dp-row 是 grid、[hidden] 是 UA 低优先级样式会被盖掉，隐藏时需显式覆盖 */
+.dp-row[hidden], .field[hidden] { display: none; }
 
-.card-body { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
-.card-body > .model-meta { flex: 1 1 220px; min-width: 0; }
+.dp-card-body { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+.dp-card-body > .model-meta { flex: 1 1 220px; min-width: 0; }
 
 /* ===== 状态行 ===== */
 .status-line {
@@ -427,7 +426,7 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td {
     text-align: left; padding: 8px 10px;
-    border-bottom: 1px solid var(--border); vertical-align: top;
+    border-bottom: 1px solid var(--tblr-border-color-translucent); vertical-align: top;
 }
 th { color: var(--muted); font-weight: 500; background: #fafafa; white-space: nowrap; }
 tbody tr:last-child td { border-bottom: none; }
@@ -528,11 +527,11 @@ tbody tr:hover { background: #fcfcfd; }
         width: auto; flex: none; height: auto; position: static;
         border-right: none; border-bottom: 1px solid var(--border);
     }
-    .nav { flex-direction: row; overflow-x: auto; }
-    .nav-item .dot-warn { margin-left: 6px; }
+    .dp-nav { flex-direction: row; overflow-x: auto; }
+    .dp-nav-item .dot-warn { margin-left: 6px; }
     .main { padding: 20px 16px 40px; }
     .stats { grid-template-columns: 1fr; }
-    .row { grid-template-columns: 1fr; }
+    .dp-row { grid-template-columns: 1fr; }
     .modal-mask { padding: 24px 12px; }
     .modal-panel { padding: 16px 16px 14px; }
 }

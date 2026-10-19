@@ -33,7 +33,7 @@
                   title="已登记的向量档案数（含尚未选用的，它们在下方的选择框里）">—</span>
         </div>
         <div id="embeddingList">
-            <div class="card perm-none">加载中…</div>
+            <div class="dp-card perm-none">加载中…</div>
         </div>
 
         <!-- ============ 分段二：模型（除当前向量模型外的全部档案） ============
@@ -49,7 +49,7 @@
                   title="本段列出的档案数（不参与域绑定的生图 / 语音等类型也计在内）">—</span>
         </div>
         <div id="modelList">
-            <div class="card perm-none">加载中…</div>
+            <div class="dp-card perm-none">加载中…</div>
         </div>
 
         <!-- ============ 添加模型：遮罩层弹窗 ============
@@ -243,7 +243,7 @@ Console.renderSidebar('models');
             pfEl('settingsFileHint').textContent = (r && r.settingsFile) || '—';
             renderProfiles();
         }).catch(function (e) {
-            pfEl('modelList').innerHTML = '<div class="card" style="color:var(--red);">'
+            pfEl('modelList').innerHTML = '<div class="dp-card" style="color:var(--red);">'
                 + '加载失败：' + Console.escapeHtml(e.message) + '</div>';
         });
     }
@@ -410,7 +410,7 @@ Console.renderSidebar('models');
         /* 端点族小签与「模型」段同款，向量段的卡片头部原来是两张卡片里唯一没有类型标识的
            （标题被统一成「模型：<模型名>」，不再自带类型），"它到底是不是向量模型"
            只能靠卡片落在哪一段去猜。 */
-        return '<section class="card model-card emb">'
+        return '<section class="dp-card model-card emb">'
             + '<header class="card-head">'
             +   '<span class="model-dot"></span>'
             +   '<h2>' + modelTitle(p.modelName || p.alias) + '</h2>'
@@ -422,7 +422,7 @@ Console.renderSidebar('models');
             +   tuneCtl
             +   actions
             + '</header>'
-            + '<div class="card-body">'
+            + '<div class="dp-card-body">'
             + '<div class="model-meta">'
             +   kv('向量维度', p.dimensions == null
                     ? '<span class="perm-none">按模型默认</span>' : p.dimensions + '')
@@ -462,7 +462,7 @@ Console.renderSidebar('models');
             b.addEventListener('click', function () { probeProfile(b.getAttribute('data-probe'), b); });
         });
         /* 向量卡片的绿色调优框：与对话段同款绑定（改动检测 → 更新按钮 → PUT 保存） */
-        box.querySelectorAll('.card.model-card').forEach(bindTuneBox);
+        box.querySelectorAll('.dp-card.model-card').forEach(bindTuneBox);
     }
 
     /* 换向量模型共用的二次确认。
@@ -562,7 +562,7 @@ Console.renderSidebar('models');
                 /* 「是否回写思考内容」开关：只出现在对话档案上（思考是对话流的概念），
                    放在「更新」左边。拨动即存，不与调优参数共用同一个保存动作，见 saveReturnThinking。 */
                 var thinkCtl = chat ? thinkSwitch(p) : '';
-                return '<section class="card model-card">'
+                return '<section class="dp-card model-card">'
                     + '<header class="card-head">'
                     +   '<span class="model-dot"></span>'
                     +   '<h2>' + modelTitle(p.modelName || p.alias) + '</h2>'
@@ -577,7 +577,7 @@ Console.renderSidebar('models');
                     +   '<button class="ghost" data-probe="' + Console.escapeHtml(p.alias) + '">探测</button>'
                     +   '<button class="ghost" data-del="' + Console.escapeHtml(p.alias) + '">删除</button>'
                     + '</header>'
-                    + '<div class="card-body">'
+                    + '<div class="dp-card-body">'
                     + '<div class="model-meta">'
                     +   '<div><span class="k">输入模态</span>'
                     +      modalityCell(p, p.input) + '</div>'
@@ -622,7 +622,7 @@ Console.renderSidebar('models');
         /* 绿色调优框：每框自己维护「已保存值 → 当前值」的比较，改动即让「更新」按钮变可点。
            绑在**卡片**上而不是调优框上，「更新」按钮已提到卡片头部，与参数控件不在同一棵子树里。
            绑定放在重建 innerHTML 之后，旧监听随旧节点一起丢掉，不会泄漏。 */
-        box.querySelectorAll('.card.model-card').forEach(bindTuneBox);
+        box.querySelectorAll('.dp-card.model-card').forEach(bindTuneBox);
 
         /* 各段计数 = 该段实际列出的卡片数。两段之和不再等于"档案总数"：
            双类型档案两边各出现一次，它本来就有两个角色，计数各归各段。 */
@@ -1213,8 +1213,7 @@ Console.renderSidebar('models');
         /* 中文名后挂上英文（wire = 实际发给服务商的字段名），填表时能直接对上官方文档，
            不写"（温度）"这类括号注解：英文本身就是最好的注解。
            分档进度条要横排 4–5 档，窄列会把档名截断，故让它独占一行（见 .tune-field-wide）。 */
-        return '<div class="field tune-field'
-            + (spec.display === 'bar' ? ' tune-field-wide' : '') + '">'
+        return '<div class="field tune-field' + (spec.display === 'bar' ? ' tune-field-wide' : '') + '">'
             + '<label>' + Console.escapeHtml(spec.label)
             + (spec.wire ? ' <span class="tune-en">' + Console.escapeHtml(spec.wire) + '</span>' : '')
             + '</label>'
@@ -1609,7 +1608,7 @@ Console.renderSidebar('models');
         box.innerHTML = CONNECTIONS.map(function (c) {
             /* 地址原样展示（不是凭据，排障时要看到真实地址）；密钥只给脱敏值 */
             var key = c.hasApiKey ? (c.maskedApiKey || '****') : '（无密钥）';
-            return '<div class="card"><div class="card-head">'
+            return '<div class="dp-card"><div class="card-head">'
                 + '<div><b>' + Console.escapeHtml(c.name) + '</b>'
                 + '<div class="mono hint" style="margin:2px 0 0;">' + Console.escapeHtml(c.baseUrl) + '</div></div>'
                 + '<span class="spacer"></span>'
