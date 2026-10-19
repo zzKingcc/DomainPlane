@@ -8,17 +8,20 @@
  *   node build.mjs --watch  增量监听
  */
 import { build, context } from 'esbuild';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.resolve(HERE, '../src/main/resources/static/console/assets');
 
-/** entry 名即产物名：console → console.js，page-login → page-login.js */
+/** entry 名即产物名：console → console.js，src/pages/login.js → page-login.js */
 const ENTRIES = {
     console: path.join(HERE, 'src/console.js'),
-    'page-login': path.join(HERE, 'src/pages/login.js'),
 };
+for (const f of fs.readdirSync(path.join(HERE, 'src/pages')).filter((f) => f.endsWith('.js')).sort()) {
+    ENTRIES['page-' + f.replace(/\.js$/, '')] = path.join(HERE, 'src/pages', f);
+}
 
 const options = {
     entryPoints: ENTRIES,
