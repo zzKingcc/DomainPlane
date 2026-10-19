@@ -15,9 +15,13 @@ const files = {
     'console-tokens.css': fs.readFileSync(`${A}/assets/console-tokens.css`, 'utf8'),
     'vendor/tabler.min.css': min,
 };
+// 只统计「全局作用域」定义的变量：:root（含 :root,:host 形式）块内的才是到处可用的；
+// 定义在 .badge{} / .empty{} 这类组件规则里的变量，别处引用会静默失效。
 const defined = new Set();
 for (const css of Object.values(files)) {
-    for (const m of css.matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)) { defined.add(m[1]); }
+    for (const m of css.matchAll(/:root[^{]*\{([^}]*)\}/g)) {
+        for (const v of m[1].matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)) { defined.add(v[1]); }
+    }
 }
 const used = new Set();
 for (const name of ['console.css', 'console-tokens.css']) {

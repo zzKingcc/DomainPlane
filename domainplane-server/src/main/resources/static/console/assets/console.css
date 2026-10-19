@@ -115,9 +115,10 @@ body {
 
 /* ===== 页头模型数量统计（绿色背景框） ===== */
 .count-badge {
-    background: var(--green); color: #fff;
-    font-size: 12px; font-weight: 600;
-    padding: 4px 12px; border-radius: 999px;
+    display: inline-flex; align-items: center;
+    background: var(--tblr-success); color: var(--tblr-success-fg);
+    font-size: .75rem; font-weight: 500; line-height: 1;
+    padding: .25rem .625rem; border-radius: var(--tblr-border-radius-pill);
     white-space: nowrap;
 }
 
@@ -210,9 +211,13 @@ input:focus, select:focus { outline: 2px solid var(--primary-dim); border-color:
 input:disabled { background: #f8fafc; color: var(--muted); }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 
-.field { margin-bottom: 14px; }
-.field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
-.field .help { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.6; }
+/* V2 收尾：字段与标签对齐 Tabler 的 .form-label（14px / 500 / 8px 下距 / 正文色） */
+.field { margin-bottom: 1rem; }
+.field label {
+    display: block; font-size: .875rem; font-weight: var(--tblr-font-weight-medium);
+    color: var(--text); margin-bottom: .5rem;
+}
+.field .help { font-size: .75rem; color: var(--muted); margin-top: .25rem; line-height: 1.6; }
 
 .dp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 /* .dp-row 是 grid、[hidden] 是 UA 低优先级样式会被盖掉，隐藏时需显式覆盖 */
@@ -319,16 +324,16 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 
 /* 空状态：一个虚线框说明"没有"并给出下一步。
    刻意不给可编辑的表单框，没有配置时最该做的是告诉用户"还没有"，而不是摆一个空输入框等着被填错。 */
+/* V2 收尾：对齐 Tabler 的 .empty —— 无边框、无底色、垂直居中，标题 20px。
+   Tabler 的空状态靠留白和字号分层，不靠虚框，故去掉原来的 dashed 边框。 */
 .empty-box {
-    border: 1px dashed var(--border);
-    background: #fafbfc;
-    border-radius: 8px;
-    padding: 26px 20px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 3rem 1rem;   /* Tabler 的 --tblr-empty-padding-md 定义在 .empty 内部，全局取不到，写字面值 */
     text-align: center;
 }
-.empty-box .empty-title { font-size: 14px; color: var(--text); font-weight: 600; }
-.empty-box .empty-sub { font-size: 12.5px; color: var(--muted); margin-top: 6px; line-height: 1.7; }
-.empty-box .btn-primary { margin-top: 14px; }
+.empty-box .empty-title { font-size: 1.25rem; font-weight: 600; line-height: 1.75rem; margin: 0 0 .5rem; }
+.empty-box .empty-sub { font-size: .875rem; color: var(--muted); line-height: 1.7; }
+.empty-box .btn-primary { margin-top: 1.5rem; }
 
 /* 模型卡片内的信息行（键值对） */
 .model-meta { display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.6; }
@@ -339,12 +344,14 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 .model-meta .ctx-unit { margin-left: 6px; color: var(--muted); font-size: 12.5px; }
 
 .mbadge {
-    font-size: 12px; padding: 2px 8px; border-radius: 10px;
-    background: #f1f5f9; color: var(--slate); white-space: nowrap;
+    display: inline-flex; align-items: center;
+    padding: .25rem .5rem; border-radius: var(--tblr-border-radius-sm);
+    font-size: .75rem; font-weight: 500; line-height: 1;
+    background: var(--tblr-secondary-lt); color: var(--text); white-space: nowrap;
 }
-.mbadge.ok { background: #ecfdf5; color: var(--green); }
-.mbadge.off { background: #fffbeb; color: var(--amber); }
-.dirty { font-size: 12px; color: var(--amber); white-space: nowrap; }
+.mbadge.ok { background: var(--tblr-success-lt); }
+.mbadge.off { background: var(--tblr-warning-lt); }
+.dirty { font-size: .75rem; color: var(--amber); white-space: nowrap; }
 
 .card-foot {
     display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
@@ -440,27 +447,39 @@ tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: #fcfcfd; }
 .table-wrap { overflow-x: auto; }
 
-/* ===== 标签 ===== */
-.tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; white-space: nowrap; }
-.tag.read { background: #ecfdf5; color: var(--green); }
-.tag.write { background: #fffbeb; color: var(--amber); }
-.tag.destructive { background: #fef2f2; color: var(--red); }
-.tag.approval { background: var(--primary-dim); color: var(--primary); }
-.tag.perm { background: #f1f5f9; color: var(--slate); font-family: monospace; margin: 0 4px 4px 0; }
-.tag.public { background: #ecfdf5; color: var(--green); }
+/* ===== 标签 =====
+   V2 收尾：对齐 Tabler badge 的视觉（padding .25/.5rem、字号 .75rem、字重 500、圆角 4px），
+   语义色改用 Tabler 的 *-lt 浅底变量。类名不动 —— .tag 的 read/write 等后缀是 JS 动态拼的，
+   换类名会打断拼接逻辑。 */
+.tag {
+    display: inline-flex; align-items: center;
+    padding: .25rem .5rem; border-radius: var(--tblr-border-radius-sm);
+    font-size: .75rem; font-weight: 500; line-height: 1;
+    color: var(--text); white-space: nowrap;
+}
+.tag.read, .tag.public { background: var(--tblr-success-lt); }
+.tag.write { background: var(--tblr-warning-lt); }
+.tag.destructive { background: var(--tblr-danger-lt); }
+.tag.approval { background: var(--tblr-primary-lt); }
+.tag.perm {
+    background: var(--tblr-secondary-lt);
+    font-family: ui-monospace, Consolas, monospace; margin: 0 4px 4px 0;
+}
 .perm-none { color: var(--muted); }
 
 /* 可点选的声明 chip：与 .tag 同一套视觉，但「未选 / 已选」必须一眼分得开，
    模型类型与模态现在由用户声明，看不清"哪些选了"就等于没声明。 */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .chip {
-    padding: 3px 10px; border-radius: 10px; font-size: 12px; cursor: pointer;
-    border: 1px solid var(--border); background: #fff; color: var(--muted);
-    font-family: inherit; line-height: 1.6;
+    padding: .25rem .5rem; border-radius: var(--tblr-border-radius-sm);
+    font-size: .75rem; font-weight: 500; line-height: 1.2;
+    cursor: pointer; font-family: inherit;
+    border: 1px solid var(--tblr-border-color-translucent);
+    background: #fff; color: var(--muted);
 }
-.chip:hover { border-color: var(--primary); color: var(--primary); }
+.chip:hover { border-color: var(--tblr-primary); color: var(--primary); }
 .chip.on {
-    background: var(--primary-dim); border-color: var(--primary);
+    background: var(--tblr-primary-lt); border-color: var(--tblr-primary);
     color: var(--primary); font-weight: 600;
 }
 
