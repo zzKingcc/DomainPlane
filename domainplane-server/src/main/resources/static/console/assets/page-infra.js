@@ -145,7 +145,7 @@
     }
     function loadInfra() {
       setStatus("<span>\u52A0\u8F7D\u4E2D\u2026</span>", "warn");
-      Console.request("/admin/infra").then(function(s) {
+      Console.api.get("/admin/infra").then(function(s) {
         el("esHost").value = s.es.host || "";
         el("esPort").value = s.es.port == null ? "" : s.es.port;
         el("esScheme").value = s.es.scheme || "";
@@ -177,20 +177,15 @@
     function testConnection(which, btn) {
       btn.disabled = true;
       showResult(RESULT[which], "\u6D4B\u8BD5\u4E2D\u2026\uFF08\u4F1A\u771F\u5B9E\u5EFA\u7ACB\u4E00\u6B21\u8FDE\u63A5\uFF0C\u5E76\u63A2\u6D4B\u7248\u672C\u4E0E\u80FD\u529B\uFF09", "");
-      Console.jsonRequest("/admin/infra/test?type=" + encodeURIComponent(which), "POST", collectAll()).then(function(data) {
-        if (data.success) {
-          showHtmlResult(
-            RESULT[which],
-            which === "redis" ? renderRedisProbe(data) : renderEsProbe(data),
-            "ok"
-          );
-        } else {
-          console.debug("[domainplane] \u8FDE\u63A5\u6D4B\u8BD5\u5931\u8D25\uFF1A", data.error);
-          showResult(RESULT[which], "\u8FDE\u63A5\u5931\u8D25\uFF1A" + Console.sanitizeError(data.error || "\u672A\u77E5\u539F\u56E0"), "err");
-        }
+      Console.api.post("/admin/infra/test?type=" + encodeURIComponent(which), collectAll()).then(function(data) {
+        showHtmlResult(
+          RESULT[which],
+          which === "redis" ? renderRedisProbe(data) : renderEsProbe(data),
+          "ok"
+        );
       }).catch(function(e) {
         console.debug("[domainplane] \u8FDE\u63A5\u6D4B\u8BD5\u5931\u8D25\uFF1A", e);
-        showResult(RESULT[which], "\u8FDE\u63A5\u5931\u8D25\uFF1A\u65E0\u6CD5\u8BBF\u95EE\u7BA1\u63A7\u63A5\u53E3", "err");
+        showResult(RESULT[which], "\u8FDE\u63A5\u5931\u8D25\uFF1A" + e.message, "err");
       }).then(function() {
         btn.disabled = false;
       });
@@ -239,16 +234,12 @@
       }
       btn.disabled = true;
       showResult(RESULT[which], "\u4FDD\u5B58\u4E2D\u2026", "");
-      Console.jsonRequest("/admin/infra", "POST", buildPayload(which)).then(function(data) {
-        if (!data.success) {
-          showResult(RESULT[which], "\u274C \u4FDD\u5B58\u5931\u8D25\uFF1A" + Console.sanitizeError(data.error || "\u672A\u77E5\u539F\u56E0"), "err");
-          return;
-        }
+      Console.api.post("/admin/infra", buildPayload(which)).then(function(data) {
         afterSaved(which, data);
         var msg = "\u2705 \u300C" + LABEL[which] + "\u300D\u5DF2\u4FDD\u5B58\u5E76\u7ACB\u5373\u751F\u6548\uFF08\u6765\u6E90\uFF1A" + (which === "es" ? data.esSource : data.redisSource) + "\uFF09\u3002";
         showResult(RESULT[which], msg, "ok");
       }).catch(function(e) {
-        showResult(RESULT[which], "\u274C \u8BF7\u6C42\u5931\u8D25\uFF1A" + e.message, "err");
+        showResult(RESULT[which], "\u274C \u4FDD\u5B58\u5931\u8D25\uFF1A" + e.message, "err");
       }).then(function() {
         btn.disabled = false;
       });

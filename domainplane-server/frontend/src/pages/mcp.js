@@ -98,20 +98,22 @@ var esc = Console.escapeHtml;
         });
     }
 
-    /* ===== 列表 / 绑定加载 ===== */
+    /* ===== 列表 / 绑定加载 =====
+       P2：/admin/mcp-bindings 与 /admin/mcp-connections 都是 A 类（只有 code），
+           /admin/domains 是 D 类。原来这页读接口一律没判 code，失败会静默走 then。 */
     function loadBindings() {
-        return Console.request('/admin/mcp-bindings').then(function (r) {
+        return Console.api.get('/admin/mcp-bindings').then(function (r) {
             BINDINGS = r || { domainBindings: {}, connectionBindings: {} };
         });
     }
     function loadDomains() {
-        return Console.request('/admin/domains').then(function (r) {
+        return Console.api.get('/admin/domains').then(function (r) {
             DOMAINS = (r && r.domains) || [];
         }).catch(function () { DOMAINS = []; });
     }
     function load() {
         document.getElementById('connList').innerHTML = '<div class="dp-card"><span class="perm-none">加载中…</span></div>';
-        Console.request('/admin/mcp-connections').then(function (r) {
+        Console.api.get('/admin/mcp-connections').then(function (r) {
             CONNS = (r && r.connections) || [];
             return loadBindings();
         }).then(render).catch(function (e) {
@@ -197,9 +199,10 @@ var esc = Console.escapeHtml;
             oauthScope: document.getElementById('f_oauth_scope').value.trim(),
             oauthRedirectUri: document.getElementById('f_oauth_redirect').value.trim()
         };
-        Console.jsonRequest('/admin/mcp-connections', 'POST', body)
+        /* P2：/admin/mcp-connections POST 是 B 类（code + success），统一按 code 判。
+           api.post 返回 data，所以 r.message 照旧能取到。 */
+        Console.api.post('/admin/mcp-connections', body)
             .then(function (r) {
-                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '保存失败'); }
                 alert(r && r.message ? r.message : '已保存');
                 closeEdit();
                 load();
@@ -209,28 +212,21 @@ var esc = Console.escapeHtml;
 
     /* ===== 启停 / 删除 / 测试 ===== */
     function toggle(name, enabled) {
-        Console.jsonRequest('/admin/mcp-connections/' + encodeURIComponent(name) + '/toggle',
-                            'POST', null)
-            .then(function (r) {
-                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '操作失败'); }
-                load();
-            })
+        Console.api.post('/admin/mcp-connections/' + encodeURIComponent(name) + '/toggle', null)
+            .then(function () { load(); })
             .catch(function (e) { alert('操作失败：' + e.message); });
     }
     function delConn(name) {
         if (!confirm('确认删除 MCP 连接 ' + name + '？\n\n其工具会被摘除、绑定会解绑（不删域）。')) { return; }
-        Console.jsonRequest('/admin/mcp-connections?name=' + encodeURIComponent(name), 'DELETE')
-            .then(function (r) {
-                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '删除失败'); }
-                load();
-            })
+        Console.api.del('/admin/mcp-connections?name=' + encodeURIComponent(name))
+            .then(function () { load(); })
             .catch(function (e) { alert('删除失败：' + e.message); });
     }
     function testConn(name) {
         if (!confirm('对 ' + name + ' 发起连通性测试（initialize + tools/list）？')) { return; }
-        Console.jsonRequest('/admin/mcp-connections/' + encodeURIComponent(name) + '/test', 'POST', null)
+        /* P2：/admin/mcp-connections/{name}/test 是 A 类 */
+        Console.api.post('/admin/mcp-connections/' + encodeURIComponent(name) + '/test', null)
             .then(function (r) {
-                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '测试失败'); }
                 alert((r && r.message) + (r && r.tools ? '\n工具：' + r.tools.join(', ') : ''));
                 load();
             })
@@ -239,12 +235,8 @@ var esc = Console.escapeHtml;
 
     /* ===== OAuth 授权：拿授权 URL 后浏览器跳转，管理员登录同意，回调落 token 并建连 ===== */
     function startOAuth(name) {
-        Console.jsonRequest('/admin/mcp-connections/' + encodeURIComponent(name) + '/oauth/start',
-                            'POST', null)
+        Console.api.post('/admin/mcp-connections/' + encodeURIComponent(name) + '/oauth/start', null)
             .then(function (r) {
-                if (r && r.code && r.code !== 0) {
-                    throw new Error(Console.sanitizeError(r.detail || r.error) || '发起授权失败');
-                }
                 if (r && r.authorizeUrl) { location.href = r.authorizeUrl; return; }
                 throw new Error('授权端点未返回授权链接');
             })
@@ -257,7 +249,8 @@ var esc = Console.escapeHtml;
         document.getElementById('toolsBody').innerHTML = '加载中…';
         document.getElementById('toolsModal').hidden = false;
         document.body.style.overflow = 'hidden';
-        Console.request('/admin/mcp-connections/' + encodeURIComponent(name) + '/tools')
+        /* P2：/admin/mcp-connections/{name}/tools 是 A 类 */
+        Console.api.get('/admin/mcp-connections/' + encodeURIComponent(name) + '/tools')
             .then(function (r) {
                 var tools = (r && r.tools) || [];
                 if (!tools.length) {
@@ -337,7 +330,10 @@ var esc = Console.escapeHtml;
             var has = current.indexOf(BIND_CONN) >= 0;
             if (want === has) { return; }
             var next = want ? current.concat([BIND_CONN]) : current.filter(function (x) { return x !== BIND_CONN; });
-            promises.push(Console.jsonRequest('/admin/mcp-bindings/' + encodeURIComponent(d.name), 'PUT', { connections: next }));
+            /* P2：/admin/mcp-bindings/{domain} 是 B 类。这里刻意保留批量语义：
+               每个域的 PUT 各自 catch 成 { __error }，最后统一汇总提示，
+               与「一个失败就整体回滚」是两种取舍，前者能保存成功的部分。 */
+            promises.push(Console.api.put('/admin/mcp-bindings/' + encodeURIComponent(d.name), { connections: next }));
         });
         Promise.all(promises.map(function (p) {
             return p.catch(function (e) { return { __error: e.message }; });

@@ -93,7 +93,7 @@
       setDirty();
     }
     function load() {
-      Console.request("/admin/prompts").then(function(r) {
+      Console.api.get("/admin/prompts").then(function(r) {
         baseline = { prompts: Object.assign({}, r.prompts || {}) };
         model = { prompts: Object.assign({}, baseline.prompts) };
         domains = r.domains || [];
@@ -142,12 +142,7 @@
       el.textContent = "\u6B63\u5728\u4FDD\u5B58\u2026";
       el.className = "result show ok";
       var payload = { prompts: model.prompts };
-      Console.jsonRequest("/admin/prompts", "POST", payload).then(function(r) {
-        if (!r.success) {
-          el.textContent = r.message || "\u4FDD\u5B58\u5931\u8D25";
-          el.className = "result show err";
-          return;
-        }
+      Console.api.post("/admin/prompts", payload).then(function(r) {
         el.textContent = r.message || "\u5DF2\u4FDD\u5B58\u5E76\u751F\u6548";
         el.className = "result show ok";
         load();

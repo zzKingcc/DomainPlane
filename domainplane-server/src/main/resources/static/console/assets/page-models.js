@@ -32,7 +32,7 @@
       return v === "" ? null : v;
     }
     function loadSettings() {
-      return Console.request("/admin/settings").then(function(s) {
+      return Console.api.get("/admin/settings").then(function(s) {
         SETTINGS = s;
         Console.setModelsWarn(!s.chatConfigured);
         renderProfiles();
@@ -41,7 +41,7 @@
       });
     }
     function loadProfiles() {
-      return Console.request("/admin/model-profiles").then(function(r) {
+      return Console.api.get("/admin/model-profiles").then(function(r) {
         PROFILES = r && r.profiles || [];
         EMBEDDING = { alias: r && r.embeddingAlias || null };
         VECTOR_PROFILES = r && r.embeddingProfiles || [];
@@ -172,29 +172,22 @@
       return purge ? "purge" : null;
     }
     function applyEmbedding(alias) {
-      Console.jsonRequest("/admin/embedding-model", "PUT", { alias }).then(function(r) {
+      Console.api.put("/admin/embedding-model", { alias }).then(function(r) {
         if (r && r.requiresConfirmation) {
           var choice = askRebuildOrPurge(r.message || "\u77E5\u8BC6\u5E93\u5DF2\u6709\u5185\u5BB9\u3002");
           if (!choice) {
             loadProfiles();
             return;
           }
-          return Console.jsonRequest(
+          return Console.api.put(
             "/admin/embedding-model",
-            "PUT",
             { alias, mode: choice }
           );
-        }
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error || r.message) || "\u5207\u6362\u5931\u8D25");
         }
         return r;
       }).then(function(r) {
         if (!r) {
           return;
-        }
-        if (r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error || r.message) || "\u5207\u6362\u5931\u8D25");
         }
         alert(r.message || "\u5DF2\u5207\u6362");
         loadProfiles();
@@ -279,7 +272,7 @@
       if (PRESETS !== null) {
         return Promise.resolve(PRESETS);
       }
-      return Console.jsonRequest("/admin/provider-presets", "GET").then(function(r) {
+      return Console.api.get("/admin/provider-presets").then(function(r) {
         PRESETS = r && r.presets || [];
         return PRESETS;
       });
@@ -337,8 +330,8 @@
       });
     }
     function applyConnection(name) {
-      Console.jsonRequest("/admin/provider-connections/resolve?name=" + encodeURIComponent(name), "POST").then(function(r) {
-        if (!r || r.code !== 0 || !r.baseUrl) {
+      Console.api.post("/admin/provider-connections/resolve?name=" + encodeURIComponent(name), null).then(function(r) {
+        if (!r || !r.baseUrl) {
           throw new Error(Console.sanitizeError(r && (r.detail || r.error) || "\u53D6\u914D\u7F6E\u5931\u8D25"));
         }
         pfEl("pfBaseUrl").value = r.baseUrl;
@@ -444,18 +437,13 @@
       combo.loading = true;
       comboState("\u52A0\u8F7D\u4E2D\u2026");
       comboOpen();
-      Console.jsonRequest("/admin/models?type=chat", "POST", catalogPayload()).then(function(data) {
-        if (!data || !data.success) {
-          combo.items = [];
-          comboState("\u62C9\u53D6\u5019\u9009\u5931\u8D25\uFF1A" + Console.sanitizeError(data && data.error || "\u672A\u77E5\u539F\u56E0"));
-          return;
-        }
+      Console.api.post("/admin/models?type=chat", catalogPayload()).then(function(data) {
         combo.items = data.models || [];
         comboRender();
         comboOpen();
-      }).catch(function() {
+      }).catch(function(e) {
         combo.items = [];
-        comboState("\u62C9\u53D6\u5019\u9009\u5931\u8D25\uFF1A\u65E0\u6CD5\u8BBF\u95EE\u7BA1\u63A7\u63A5\u53E3");
+        comboState("\u62C9\u53D6\u5019\u9009\u5931\u8D25\uFF1A" + e.message);
       }).then(function() {
         combo.loading = false;
       });
@@ -568,11 +556,7 @@
         applyAdapter(null);
         return;
       }
-      Console.jsonRequest(
-        "/admin/model-adapters/match",
-        "POST",
-        { baseUrl, modelName }
-      ).then(function(r) {
+      Console.api.post("/admin/model-adapters/match", { baseUrl, modelName }).then(function(r) {
         applyAdapter(r && r.matched ? r.adapter : null);
       }).catch(function() {
         applyAdapter(null);
@@ -944,10 +928,7 @@
           payload.dimensions = pf.dimensions;
         }
       }
-      Console.jsonRequest("/admin/model-profiles/tuning", "PUT", payload).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u4FDD\u5B58\u5931\u8D25");
-        }
+      Console.api.put("/admin/model-profiles/tuning", payload).then(function(r) {
         if (onDone) {
           onDone(true, r && r.message || "\u5DF2\u4FDD\u5B58");
         }
@@ -959,14 +940,7 @@
     }
     function saveReturnThinking(alias, on, input) {
       input.disabled = true;
-      Console.jsonRequest(
-        "/admin/model-profiles/return-thinking",
-        "PUT",
-        { alias, returnThinking: on }
-      ).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u4FDD\u5B58\u5931\u8D25");
-        }
+      Console.api.put("/admin/model-profiles/return-thinking", { alias, returnThinking: on }).then(function() {
         var p = findProfile(alias);
         if (p) {
           p.returnThinking = on;
@@ -991,14 +965,7 @@
         }
       }
       input.disabled = true;
-      Console.jsonRequest(
-        "/admin/model-profiles/context-window",
-        "PUT",
-        { alias, contextWindow: value }
-      ).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u4FDD\u5B58\u5931\u8D25");
-        }
+      Console.api.put("/admin/model-profiles/context-window", { alias, contextWindow: value }).then(function() {
         var p = findProfile(alias);
         if (p) {
           p.contextWindow = value;
@@ -1047,10 +1014,7 @@
       if (tuning.dimensions != null) {
         body.dimensions = tuning.dimensions;
       }
-      Console.jsonRequest("/admin/model-profiles", "POST", body).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u4FDD\u5B58\u5931\u8D25");
-        }
+      Console.api.post("/admin/model-profiles", body).then(function() {
         closeModal();
         return loadProfiles();
       }).catch(function(e) {
@@ -1072,10 +1036,7 @@
       if (!confirm(text)) {
         return;
       }
-      Console.jsonRequest("/admin/model-profiles?alias=" + encodeURIComponent(alias), "DELETE").then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u5220\u9664\u5931\u8D25");
-        }
+      Console.api.del("/admin/model-profiles?alias=" + encodeURIComponent(alias)).then(function(r) {
         if (r && r.message) {
           alert(r.message);
         }
@@ -1092,10 +1053,7 @@
       if (btn) {
         btn.disabled = true;
       }
-      Console.jsonRequest("/admin/model-profiles/detect?alias=" + encodeURIComponent(alias), "POST").then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u63A2\u6D4B\u5931\u8D25");
-        }
+      Console.api.post("/admin/model-profiles/detect?alias=" + encodeURIComponent(alias), null).then(function(r) {
         return loadProfiles().then(function() {
           if (r && r.note && r.note.indexOf("\u672A\u786E\u8BA4") >= 0) {
             alert("\u63A2\u6D4B\u5B8C\u6210\uFF0C\u4F46\u6709\u4E9B\u9879\u6CA1\u80FD\u786E\u8BA4\uFF1A\n\n" + r.note);
@@ -1113,7 +1071,7 @@
       if (CONNECTIONS !== null && !force) {
         return Promise.resolve(CONNECTIONS);
       }
-      return Console.jsonRequest("/admin/provider-connections", "GET").then(function(r) {
+      return Console.api.get("/admin/provider-connections").then(function(r) {
         CONNECTIONS = r && r.connections || [];
         return CONNECTIONS;
       }).catch(function(e) {
@@ -1169,14 +1127,7 @@
       }
       var btn = pfEl("cnAddBtn");
       btn.disabled = true;
-      Console.jsonRequest(
-        "/admin/provider-connections",
-        "POST",
-        { name, baseUrl, apiKey: secret }
-      ).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u6DFB\u52A0\u5931\u8D25");
-        }
+      Console.api.post("/admin/provider-connections", { name, baseUrl, apiKey: secret }).then(function(r) {
         pfEl("cnName").value = "";
         pfEl("cnBaseUrl").value = "";
         pfEl("cnApiKey").value = "";
@@ -1195,10 +1146,7 @@
       if (!confirm("\u5220\u9664\u81EA\u5B9A\u4E49\u914D\u7F6E\u300C" + name + "\u300D\uFF1F\n\n\u5DF2\u4FDD\u5B58\u7684\u6A21\u578B\u6863\u6848\u4E0D\u53D7\u5F71\u54CD\uFF1A\u5B83\u4EEC\u5404\u81EA\u4FDD\u5B58\u7684\u662F\u72EC\u7ACB\u526F\u672C\uFF0C\u4E0D\u662F\u5BF9\u8FD9\u4E00\u6761\u7684\u5F15\u7528\u3002")) {
         return;
       }
-      Console.jsonRequest("/admin/provider-connections?name=" + encodeURIComponent(name), "DELETE").then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u5220\u9664\u5931\u8D25");
-        }
+      Console.api.del("/admin/provider-connections?name=" + encodeURIComponent(name)).then(function(r) {
         cnSay(true, r && r.message || "\u5DF2\u5220\u9664\u300C" + name + "\u300D");
         return loadConnections(true);
       }).then(function() {

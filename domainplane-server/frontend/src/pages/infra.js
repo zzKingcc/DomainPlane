@@ -158,7 +158,8 @@
 
     function loadInfra() {
         setStatus('<span>加载中…</span>', 'warn');
-        Console.request('/admin/infra').then(function (s) {
+        /* P2：/admin/infra GET 是 D 类裸对象 */
+        Console.api.get('/admin/infra').then(function (s) {
             el('esHost').value = s.es.host || '';
             el('esPort').value = s.es.port == null ? '' : s.es.port;
             el('esScheme').value = s.es.scheme || '';
@@ -197,21 +198,18 @@
     function testConnection(which, btn) {
         btn.disabled = true;
         showResult(RESULT[which], '测试中…（会真实建立一次连接，并探测版本与能力）', '');
-        Console.jsonRequest('/admin/infra/test?type=' + encodeURIComponent(which), 'POST', collectAll())
+        /* P2：/admin/infra/test 是 C 类（只有 success）。
+           原来的 success 两态合并：业务失败由 api.post 的 reject 承担，
+           message 已由 normalize 的 pick() 走过 sanitizeError（detail||error||message），
+           所以这里直接显示 e.message，不必再手动洗 data.error。 */
+        Console.api.post('/admin/infra/test?type=' + encodeURIComponent(which), collectAll())
             .then(function (data) {
-                if (data.success) {
-                    showHtmlResult(RESULT[which],
-                        which === 'redis' ? renderRedisProbe(data) : renderEsProbe(data), 'ok');
-                } else {
-                    console.debug('[domainplane] 连接测试失败：', data.error);
-                    /* data.error 是后端捕获的原始异常（ES/Redis 连接失败时最可能带 userinfo），
-                       经 Console.request 的清洗之外再兜一层，这条路径不经过 request 的错误分支。 */
-                    showResult(RESULT[which], '连接失败：' + Console.sanitizeError(data.error || '未知原因'), 'err');
-                }
+                showHtmlResult(RESULT[which],
+                    which === 'redis' ? renderRedisProbe(data) : renderEsProbe(data), 'ok');
             })
             .catch(function (e) {
                 console.debug('[domainplane] 连接测试失败：', e);
-                showResult(RESULT[which], '连接失败：无法访问管控接口', 'err');
+                showResult(RESULT[which], '连接失败：' + e.message, 'err');
             })
             .then(function () { btn.disabled = false; });
     }
@@ -269,19 +267,16 @@
         }
         btn.disabled = true;
         showResult(RESULT[which], '保存中…', '');
-        Console.jsonRequest('/admin/infra', 'POST', buildPayload(which))
+        /* P2：/admin/infra POST 是 C 类，`if (!data.success)` 两态由 reject 承担 */
+        Console.api.post('/admin/infra', buildPayload(which))
             .then(function (data) {
-                if (!data.success) {
-                    showResult(RESULT[which], '❌ 保存失败：' + Console.sanitizeError(data.error || '未知原因'), 'err');
-                    return;
-                }
                 afterSaved(which, data);
                 var msg = '✅ 「' + LABEL[which] + '」已保存并立即生效（来源：'
                     + (which === 'es' ? data.esSource : data.redisSource) + '）。';
                 showResult(RESULT[which], msg, 'ok');
             })
             .catch(function (e) {
-                showResult(RESULT[which], '❌ 请求失败：' + e.message, 'err');
+                showResult(RESULT[which], '❌ 保存失败：' + e.message, 'err');
             })
             .then(function () { btn.disabled = false; });
     }

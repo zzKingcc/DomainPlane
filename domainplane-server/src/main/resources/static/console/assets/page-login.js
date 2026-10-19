@@ -75,7 +75,7 @@
       submitBtn.disabled = true;
       showResult(mode === "init" ? "\u6B63\u5728\u521D\u59CB\u5316\u2026" : "\u6B63\u5728\u767B\u5F55\u2026", true);
       var path = mode === "init" ? "/admin/init" : "/admin/login";
-      Console.jsonRequest(path, "POST", { username, password }).then(function(r) {
+      Console.api.post(path, { username, password }).then(function(r) {
         if (r && r.defaultCredential) {
           try {
             sessionStorage.setItem("domainplane.defaultCredential", "1");
@@ -83,7 +83,7 @@
           }
         }
         showResult(r && r.message || "\u767B\u5F55\u6210\u529F\uFF0C\u6B63\u5728\u8FDB\u5165\u7BA1\u63A7\u53F0\u2026", true);
-        return Console.request("/admin/session").then(function(s) {
+        return Console.api.get("/admin/session").then(function(s) {
           if (s && s.authenticated) {
             enterConsole();
             return;
@@ -98,7 +98,7 @@
       });
     });
     Console.warnIfCrossOrigin();
-    Console.request("/admin/session").then(applyMode).catch(function(e) {
+    Console.api.get("/admin/session").then(applyMode).catch(function(e) {
       document.getElementById("modeSub").textContent = "\u65E0\u6CD5\u8FDE\u63A5\u670D\u52A1\u7AEF";
       showResult(e.message, false);
     });

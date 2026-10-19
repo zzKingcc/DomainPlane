@@ -87,7 +87,9 @@
         showResult(mode === 'init' ? '正在初始化…' : '正在登录…', true);
 
         var path = mode === 'init' ? '/admin/init' : '/admin/login';
-        Console.jsonRequest(path, 'POST', { username: username, password: password })
+        /* P2：/admin/login 与 /admin/init 返回 code:0 + message。
+           失败（含密码错误）走 reject，message 已清洗。 */
+        Console.api.post(path, { username: username, password: password })
             .then(function (r) {
                 if (r && r.defaultCredential) {
                     try { sessionStorage.setItem('domainplane.defaultCredential', '1'); } catch (e) { }
@@ -96,7 +98,8 @@
                 /* ⚠️ 服务端说"成功"不等于浏览器把 Cookie 存下了：跨站响应里的 Set-Cookie 会被直接丢弃，
                    于是出现"登录成功 + 随后每个接口都 401「未携带凭证」"这种最容易被误判成服务端 bug 的现象。
                    这里用 /admin/session 复核一次，把问题在源头点破，而不是跳进一个必然 401 的页面。 */
-                return Console.request('/admin/session').then(function (s) {
+                /* P2：/admin/session 是 A 类（code:0） */
+                return Console.api.get('/admin/session').then(function (s) {
                     if (s && s.authenticated) {
                         enterConsole();
                         return;
@@ -117,7 +120,7 @@
     /* 不同源打开时先在页面上说明（此时连登录都不会生效），避免只留一行服务端日志 */
     Console.warnIfCrossOrigin();
 
-    Console.request('/admin/session').then(applyMode).catch(function (e) {
+    Console.api.get('/admin/session').then(applyMode).catch(function (e) {
         document.getElementById('modeSub').textContent = '无法连接服务端';
         showResult(e.message, false);
     });

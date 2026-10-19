@@ -33,7 +33,7 @@ Console.renderSidebar('models');
 
     /* ---------- 加载 ---------- */
     function loadSettings() {
-        return Console.request('/admin/settings').then(function (s) {
+        return Console.api.get('/admin/settings').then(function (s) {
             SETTINGS = s;
             Console.setModelsWarn(!s.chatConfigured);
             renderProfiles();
@@ -43,7 +43,7 @@ Console.renderSidebar('models');
     }
 
     function loadProfiles() {
-        return Console.request('/admin/model-profiles').then(function (r) {
+        return Console.api.get('/admin/model-profiles').then(function (r) {
             PROFILES = (r && r.profiles) || [];
             EMBEDDING = { alias: (r && r.embeddingAlias) || null };
             VECTOR_PROFILES = (r && r.embeddingProfiles) || [];
@@ -291,7 +291,10 @@ Console.renderSidebar('models');
 
        别名一律由调用方给出，唯一入口是卡片上的「启用」。 */
     function applyEmbedding(alias) {
-        Console.jsonRequest('/admin/embedding-model', 'PUT', { alias: alias })
+        /* P2：/admin/embedding-model 是 B 类（code + success 双写）。
+           注意 requiresConfirmation 是「成功但需要二次确认」的业务字段，不是信封：
+           code 仍为 0，所以要另外 PUT 一次带 mode 的请求，两次都可能失败。 */
+        Console.api.put('/admin/embedding-model', { alias: alias })
             .then(function (r) {
                 if (r && r.requiresConfirmation) {
                     var choice = askRebuildOrPurge(r.message
@@ -300,19 +303,13 @@ Console.renderSidebar('models');
                         loadProfiles();
                         return;
                     }
-                    return Console.jsonRequest('/admin/embedding-model', 'PUT',
+                    return Console.api.put('/admin/embedding-model',
                         { alias: alias, mode: choice });
-                }
-                if (r && r.code && r.code !== 0) {
-                    throw new Error(Console.sanitizeError(r.detail || r.error || r.message) || '切换失败');
                 }
                 return r;
             })
             .then(function (r) {
                 if (!r) { return; }
-                if (r.code && r.code !== 0) {
-                    throw new Error(Console.sanitizeError(r.detail || r.error || r.message) || '切换失败');
-                }
                 alert(r.message || '已切换');
                 loadProfiles();
                 loadSettings();
@@ -466,7 +463,7 @@ Console.renderSidebar('models');
 
     function loadPresets() {
         if (PRESETS !== null) { return Promise.resolve(PRESETS); }
-        return Console.jsonRequest('/admin/provider-presets', 'GET')
+        return Console.api.get('/admin/provider-presets')
             .then(function (r) {
                 PRESETS = (r && r.presets) || [];
                 return PRESETS;
@@ -524,9 +521,11 @@ Console.renderSidebar('models');
     /* 选中自定义配置：地址 + 密钥一起填入。明文只在这里按名取一次。
        该条没配密钥时只填地址，不去动已经填好的 Key，静默清空用户手填的密钥比不填更糟。 */
     function applyConnection(name) {
-        Console.jsonRequest('/admin/provider-connections/resolve?name=' + encodeURIComponent(name), 'POST')
+        /* P2：/admin/provider-connections/resolve 是 B 类，且是 POST（无 body）。
+           信封判断交给 api.post，这里只留业务判断（没拿到 baseUrl 也算失败）。 */
+        Console.api.post('/admin/provider-connections/resolve?name=' + encodeURIComponent(name), null)
             .then(function (r) {
-                if (!r || r.code !== 0 || !r.baseUrl) {
+                if (!r || !r.baseUrl) {
                     throw new Error(Console.sanitizeError((r && (r.detail || r.error)) || '取配置失败'));
                 }
                 pfEl('pfBaseUrl').value = r.baseUrl;
@@ -640,20 +639,18 @@ Console.renderSidebar('models');
         combo.loading = true;
         comboState('加载中…');
         comboOpen();
-        Console.jsonRequest('/admin/models?type=chat', 'POST', catalogPayload())
+        /* P2：/admin/models 是 C 类（只有 success）。
+           原来的 `if (!data.success)` 分支合并进 catch：message 已由 normalize 的
+           pick() 清洗过（detail||error||message），所以直接显示 e.message。 */
+        Console.api.post('/admin/models?type=chat', catalogPayload())
             .then(function (data) {
-                if (!data || !data.success) {
-                    combo.items = [];
-                    comboState('拉取候选失败：' + Console.sanitizeError((data && data.error) || '未知原因'));
-                    return;
-                }
                 combo.items = data.models || [];
                 comboRender();
                 comboOpen();
             })
             /* 用「拉取候选」而不是「连接」：页面里另有「预设配置信息」这个功能名，
                再说"连接失败"会被读成那边的配置出错 */
-            .catch(function () { combo.items = []; comboState('拉取候选失败：无法访问管控接口'); })
+            .catch(function (e) { combo.items = []; comboState('拉取候选失败：' + e.message); })
             .then(function () { combo.loading = false; });
     }
 
@@ -775,8 +772,7 @@ Console.renderSidebar('models');
         var baseUrl = pfEl('pfBaseUrl').value.trim();
         var modelName = pfEl('pfModelName').value.trim();
         if (!baseUrl && !modelName) { applyAdapter(null); return; }
-        Console.jsonRequest('/admin/model-adapters/match', 'POST',
-                            { baseUrl: baseUrl, modelName: modelName })
+        Console.api.post('/admin/model-adapters/match', { baseUrl: baseUrl, modelName: modelName })
             .then(function (r) { applyAdapter(r && r.matched ? r.adapter : null); })
             /* 匹配失败不打扰填表：按未命中处理（保存时后端仍会复核，拦得住） */
             .catch(function () { applyAdapter(null); });
@@ -1198,11 +1194,8 @@ Console.renderSidebar('models');
             var pf = findProfile(alias);
             if (pf && pf.dimensions != null) { payload.dimensions = pf.dimensions; }
         }
-        Console.jsonRequest('/admin/model-profiles/tuning', 'PUT', payload)
+        Console.api.put('/admin/model-profiles/tuning', payload)
             .then(function (r) {
-                if (r && r.code && r.code !== 0) {
-                    throw new Error(Console.sanitizeError(r.detail || r.error) || '保存失败');
-                }
                 if (onDone) { onDone(true, (r && r.message) || '已保存'); }
             })
             .catch(function (e) { if (onDone) { onDone(false, Console.sanitizeError(e.message)); } });
@@ -1215,12 +1208,8 @@ Console.renderSidebar('models');
        界面上开着、实际没存上，比保存失败本身更糟。 */
     function saveReturnThinking(alias, on, input) {
         input.disabled = true;
-        Console.jsonRequest('/admin/model-profiles/return-thinking', 'PUT',
-                { alias: alias, returnThinking: on })
-            .then(function (r) {
-                if (r && r.code && r.code !== 0) {
-                    throw new Error(Console.sanitizeError(r.detail || r.error) || '保存失败');
-                }
+        Console.api.put('/admin/model-profiles/return-thinking', { alias: alias, returnThinking: on })
+            .then(function () {
                 /* 就地更新本地档案：重拉整张列表会把它处的状态一起冲掉 */
                 var p = findProfile(alias);
                 if (p) { p.returnThinking = on; }
@@ -1251,12 +1240,8 @@ Console.renderSidebar('models');
             }
         }
         input.disabled = true;
-        Console.jsonRequest('/admin/model-profiles/context-window', 'PUT',
-                { alias: alias, contextWindow: value })
-            .then(function (r) {
-                if (r && r.code && r.code !== 0) {
-                    throw new Error(Console.sanitizeError(r.detail || r.error) || '保存失败');
-                }
+        Console.api.put('/admin/model-profiles/context-window', { alias: alias, contextWindow: value })
+            .then(function () {
                 /* 就地更新本地档案：重拉整张列表会把它处的状态一起冲掉 */
                 var p = findProfile(alias);
                 if (p) { p.contextWindow = value; }
@@ -1304,9 +1289,8 @@ Console.renderSidebar('models');
         if (tuning.maxTokens != null) { body.maxTokens = tuning.maxTokens; }
         /* 向量维度：适配了 embedding 族的模型才会填出来；留空则由服务端按模型原生维度回填 */
         if (tuning.dimensions != null) { body.dimensions = tuning.dimensions; }
-        Console.jsonRequest('/admin/model-profiles', 'POST', body)
-            .then(function (r) {
-                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '保存失败'); }
+        Console.api.post('/admin/model-profiles', body)
+            .then(function () {
                 closeModal();
                 return loadProfiles();
             })
@@ -1333,9 +1317,9 @@ Console.renderSidebar('models');
                 + '这些域将立即变为「无可调用模型」。\n\n';
         }
         if (!confirm(text)) { return; }
-        Console.jsonRequest('/admin/model-profiles?alias=' + encodeURIComponent(alias), 'DELETE')
+        /* P2：B 类。信封判断已由 api.del 承担 */
+        Console.api.del('/admin/model-profiles?alias=' + encodeURIComponent(alias))
             .then(function (r) {
-                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '删除失败'); }
                 if (r && r.message) { alert(r.message); }
                 loadProfiles();
             })
@@ -1358,11 +1342,9 @@ Console.renderSidebar('models');
         if (!ok) { return; }
 
         if (btn) { btn.disabled = true; }
-        Console.jsonRequest('/admin/model-profiles/detect?alias=' + encodeURIComponent(alias), 'POST')
+        /* P2：A 类，POST 无 body */
+        Console.api.post('/admin/model-profiles/detect?alias=' + encodeURIComponent(alias), null)
             .then(function (r) {
-                if (r && r.code && r.code !== 0) {
-                    throw new Error(Console.sanitizeError(r.detail || r.error) || '探测失败');
-                }
                 return loadProfiles().then(function () {
                     /* 有探针没确认到，就把服务商的原话摆出来，只报"没探到"等于没说；
                        看到「broken PNG file」「model is not a VLM」这类原文，才知道下一步该改什么 */
@@ -1390,7 +1372,7 @@ Console.renderSidebar('models');
 
     function loadConnections(force) {
         if (CONNECTIONS !== null && !force) { return Promise.resolve(CONNECTIONS); }
-        return Console.jsonRequest('/admin/provider-connections', 'GET')
+        return Console.api.get('/admin/provider-connections')
             .then(function (r) {
                 CONNECTIONS = (r && r.connections) || [];
                 return CONNECTIONS;
@@ -1454,12 +1436,8 @@ Console.renderSidebar('models');
         if (!baseUrl) { cnSay(false, '服务商地址不能为空'); return; }
         var btn = pfEl('cnAddBtn');
         btn.disabled = true;
-        Console.jsonRequest('/admin/provider-connections', 'POST',
-                            { name: name, baseUrl: baseUrl, apiKey: secret })
+        Console.api.post('/admin/provider-connections', { name: name, baseUrl: baseUrl, apiKey: secret })
             .then(function (r) {
-                if (r && r.code && r.code !== 0) {
-                    throw new Error(Console.sanitizeError(r.detail || r.error) || '添加失败');
-                }
                 /* 成功就把明文从表单里抹掉：它已经落盘，继续留在输入框只会多一处副本 */
                 pfEl('cnName').value = '';
                 pfEl('cnBaseUrl').value = '';
@@ -1475,11 +1453,9 @@ Console.renderSidebar('models');
     function deleteConnection(name) {
         if (!confirm('删除自定义配置「' + name + '」？\n\n'
             + '已保存的模型档案不受影响：它们各自保存的是独立副本，不是对这一条的引用。')) { return; }
-        Console.jsonRequest('/admin/provider-connections?name=' + encodeURIComponent(name), 'DELETE')
+        /* P2：B 类。信封判断已由 api.del 承担 */
+        Console.api.del('/admin/provider-connections?name=' + encodeURIComponent(name))
             .then(function (r) {
-                if (r && r.code && r.code !== 0) {
-                    throw new Error(Console.sanitizeError(r.detail || r.error) || '删除失败');
-                }
                 cnSay(true, (r && r.message) || ('已删除「' + name + '」'));
                 return loadConnections(true);
             })

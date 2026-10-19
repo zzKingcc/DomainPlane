@@ -224,15 +224,10 @@
       var domain = input.getAttribute("data-echo");
       var on = input.checked;
       input.disabled = true;
-      Console.jsonRequest(
+      Console.api.put(
         "/admin/domains/" + encodeURIComponent(domain) + "/tool-call-echo",
-        "PUT",
         { echo: on }
-      ).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u4FDD\u5B58\u5931\u8D25");
-        }
-      }).catch(function(e) {
+      ).catch(function(e) {
         input.checked = !on;
         alert("\u4FDD\u5B58\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message));
       }).then(function() {
@@ -309,14 +304,10 @@
       BIND_FAMILIES.forEach(function(family) {
         capabilities[family] = pick[family] || [];
       });
-      Console.jsonRequest(
+      Console.api.put(
         "/admin/model-bindings/" + encodeURIComponent(BIND_DOMAIN),
-        "PUT",
         { aliases: pick.chat || [], capabilities }
-      ).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u8BBE\u7F6E\u5931\u8D25");
-        }
+      ).then(function() {
         closeBind();
         loadBindings();
       }).catch(function(e) {
@@ -389,14 +380,10 @@
       });
     }
     function saveMcpBind(connections) {
-      Console.jsonRequest(
+      Console.api.put(
         "/admin/mcp-bindings/" + encodeURIComponent(MCP_BIND_DOMAIN),
-        "PUT",
         { connections }
-      ).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u8BBE\u7F6E\u5931\u8D25");
-        }
+      ).then(function() {
         closeMcpBind();
         loadBindings();
       }).catch(function(e) {
@@ -412,10 +399,7 @@
         return;
       }
       var callable = document.getElementById("newDomainCallable").checked;
-      Console.jsonRequest("/admin/domains", "POST", { id, callable }).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u521B\u5EFA\u5931\u8D25");
-        }
+      Console.api.post("/admin/domains", { id, callable }).then(function() {
         input.value = "";
         load();
       }).catch(function(e) {
@@ -427,14 +411,10 @@
       if (!confirm(tip)) {
         return;
       }
-      Console.jsonRequest(
+      Console.api.put(
         "/admin/domains/" + encodeURIComponent(id) + "/callable",
-        "PUT",
         { callable }
-      ).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u5207\u6362\u5931\u8D25");
-        }
+      ).then(function() {
         load();
       }).catch(function(e) {
         alert("\u5207\u6362\u5931\u8D25\uFF1A" + e.message);
@@ -445,26 +425,23 @@
       if (!ok) {
         return;
       }
-      Console.jsonRequest("/admin/domains/" + encodeURIComponent(id), "DELETE").then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u5220\u9664\u5931\u8D25");
-        }
+      Console.api.del("/admin/domains/" + encodeURIComponent(id)).then(function() {
         load();
       }).catch(function(e) {
         alert("\u5220\u9664\u5931\u8D25\uFF1A" + e.message);
       });
     }
     function loadBindings() {
-      return Console.request("/admin/model-profiles").then(function(r) {
+      return Console.api.get("/admin/model-profiles").then(function(r) {
         PROFILES = r && r.profiles || [];
         BINDINGS = r && r.domainBindings || {};
         return Promise.all([
-          Console.request("/admin/mcp-bindings").then(function(m) {
+          Console.api.get("/admin/mcp-bindings").then(function(m) {
             MCP_BINDINGS = m && m.domainBindings || {};
           }).catch(function() {
             MCP_BINDINGS = {};
           }),
-          Console.request("/admin/mcp-connections").then(function(m) {
+          Console.api.get("/admin/mcp-connections").then(function(m) {
             MCP_CONNS = m && m.connections || [];
           }).catch(function() {
             MCP_CONNS = [];
@@ -476,7 +453,7 @@
     }
     function load() {
       document.getElementById("domainList").innerHTML = '<div class="dp-card"><span class="perm-none">\u52A0\u8F7D\u4E2D\u2026</span></div>';
-      Console.request("/admin/domains").then(function(r) {
+      Console.api.get("/admin/domains").then(function(r) {
         DATA = r || {};
         return loadBindings();
       }).catch(function(e) {

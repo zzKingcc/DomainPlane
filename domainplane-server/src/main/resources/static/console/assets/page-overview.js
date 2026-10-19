@@ -4,7 +4,7 @@
     function loadRegistryStats() {
       var tools = document.getElementById("statTools");
       var domains = document.getElementById("statDomains");
-      Console.request("/admin/domains").then(function(r) {
+      Console.api.get("/admin/domains").then(function(r) {
         var s = r && r.stats || {};
         var toolCount = s.toolCount || 0;
         var domainCount = s.domainCount || 0;

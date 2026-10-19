@@ -3,7 +3,7 @@
   (function() {
     var esc = Console.escapeHtml;
     function loadSession() {
-      Console.request("/admin/session").then(function(s) {
+      Console.api.get("/admin/session").then(function(s) {
         document.getElementById("acName").textContent = s.username || "\u2014";
         document.getElementById("acLastAt").textContent = s.lastLoginAt || "\u2014";
         document.getElementById("acLastFrom").textContent = s.lastLoginFrom || "\u2014";
@@ -44,7 +44,7 @@
       }
       el.textContent = "\u6B63\u5728\u4FDD\u5B58\u2026";
       el.className = "result show ok";
-      Console.jsonRequest("/admin/password", "POST", {
+      Console.api.post("/admin/password", {
         oldPassword,
         newPassword
       }).then(function(r) {

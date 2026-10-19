@@ -297,11 +297,10 @@ var esc = Console.escapeHtml;
         var domain = input.getAttribute('data-echo');
         var on = input.checked;
         input.disabled = true;
-        Console.jsonRequest('/admin/domains/' + encodeURIComponent(domain) + '/tool-call-echo', 'PUT',
-                            { echo: on })
-            .then(function (r) {
-                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '保存失败'); }
-            })
+        /* P2：/admin/domains/{id}/tool-call-echo 是 A 类（只有 code），
+           `if (r.code !== 0) throw` 由 api.put 的 reject 承担，这里不再手判。 */
+        Console.api.put('/admin/domains/' + encodeURIComponent(domain) + '/tool-call-echo',
+                        { echo: on })
             .catch(function (e) {
                 input.checked = !on;
                 alert('保存失败：' + Console.sanitizeError(e.message));
@@ -406,10 +405,10 @@ var esc = Console.escapeHtml;
         BIND_FAMILIES.forEach(function (family) {
             capabilities[family] = pick[family] || [];
         });
-        Console.jsonRequest('/admin/model-bindings/' + encodeURIComponent(BIND_DOMAIN), 'PUT',
-                            { aliases: pick.chat || [], capabilities: capabilities })
-            .then(function (r) {
-                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '设置失败'); }
+        /* P2：/admin/model-bindings/{domain} 是 B 类（code + success 双写），统一按 code 判 */
+        Console.api.put('/admin/model-bindings/' + encodeURIComponent(BIND_DOMAIN),
+                        { aliases: pick.chat || [], capabilities: capabilities })
+            .then(function () {
                 closeBind();
                 loadBindings();
             })
@@ -490,10 +489,10 @@ var esc = Console.escapeHtml;
     }
 
     function saveMcpBind(connections) {
-        Console.jsonRequest('/admin/mcp-bindings/' + encodeURIComponent(MCP_BIND_DOMAIN), 'PUT',
-                            { connections: connections })
-            .then(function (r) {
-                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '设置失败'); }
+        /* P2：/admin/mcp-bindings/{domain} 是 B 类 */
+        Console.api.put('/admin/mcp-bindings/' + encodeURIComponent(MCP_BIND_DOMAIN),
+                        { connections: connections })
+            .then(function () {
                 closeMcpBind();
                 loadBindings();
             })
@@ -505,9 +504,9 @@ var esc = Console.escapeHtml;
         var id = (input.value || '').trim();
         if (!id) { alert('请先填写域标识'); input.focus(); return; }
         var callable = document.getElementById('newDomainCallable').checked;
-        Console.jsonRequest('/admin/domains', 'POST', { id: id, callable: callable })
-            .then(function (r) {
-                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '创建失败'); }
+        /* P2：/admin/domains POST 是 D 类裸对象，api.post 直接放行 */
+        Console.api.post('/admin/domains', { id: id, callable: callable })
+            .then(function () {
                 input.value = '';
                 load();
             })
@@ -521,12 +520,10 @@ var esc = Console.escapeHtml;
             : '把 ' + id + ' 设为装配节点？之后它不能再作为入口，'
                 + '只给后代提供工具 / 提示词 / 模型 / 知识。';
         if (!confirm(tip)) { return; }
-        Console.jsonRequest('/admin/domains/' + encodeURIComponent(id) + '/callable', 'PUT',
-                            { callable: callable })
-            .then(function (r) {
-                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '切换失败'); }
-                load();
-            })
+        /* P2：/admin/domains/{id}/callable 是 D 类 */
+        Console.api.put('/admin/domains/' + encodeURIComponent(id) + '/callable',
+                        { callable: callable })
+            .then(function () { load(); })
             .catch(function (e) { alert('切换失败：' + e.message); });
     }
 
@@ -537,24 +534,24 @@ var esc = Console.escapeHtml;
             + '· 该域及其子域的知识库索引与切片预览文件会被删除\n'
             + '· 该域及其子域的提示词、模型绑定、工具声明记录会一并清理');
         if (!ok) { return; }
-        Console.jsonRequest('/admin/domains/' + encodeURIComponent(id), 'DELETE')
-            .then(function (r) {
-                if (r && r.code && r.code !== 0) { throw new Error(Console.sanitizeError(r.detail || r.error) || '删除失败'); }
-                load();
-            })
+        /* P2：/admin/domains/{id} DELETE 是 A 类 */
+        Console.api.del('/admin/domains/' + encodeURIComponent(id))
+            .then(function () { load(); })
             .catch(function (e) { alert('删除失败：' + e.message); });
     }
 
     function loadBindings() {
-        return Console.request('/admin/model-profiles').then(function (r) {
+        /* P2：三个 GET 都是 A 类（只有 code）。原来这页读接口也没判 code，
+           失败会静默走 then 渲染空列表；api.get 后失败统一落到最外层 catch。 */
+        return Console.api.get('/admin/model-profiles').then(function (r) {
             PROFILES = (r && r.profiles) || [];
             BINDINGS = (r && r.domainBindings) || {};
             // MCP 绑定与连接列表：即便端点异常也不阻塞本页（MCP 是可选能力）
             return Promise.all([
-                Console.request('/admin/mcp-bindings')
+                Console.api.get('/admin/mcp-bindings')
                     .then(function (m) { MCP_BINDINGS = (m && m.domainBindings) || {}; })
                     .catch(function () { MCP_BINDINGS = {}; }),
-                Console.request('/admin/mcp-connections')
+                Console.api.get('/admin/mcp-connections')
                     .then(function (m) { MCP_CONNS = (m && m.connections) || []; })
                     .catch(function () { MCP_CONNS = []; })
             ]);
@@ -567,7 +564,8 @@ var esc = Console.escapeHtml;
     function load() {
         document.getElementById('domainList').innerHTML =
             '<div class="dp-card"><span class="perm-none">加载中…</span></div>';
-        Console.request('/admin/domains').then(function (r) {
+        /* P2：/admin/domains GET 是 D 类裸对象 */
+        Console.api.get('/admin/domains').then(function (r) {
             DATA = r || {};
             return loadBindings();
         }).catch(function (e) {

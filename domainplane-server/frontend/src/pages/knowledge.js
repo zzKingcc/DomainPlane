@@ -17,7 +17,8 @@ var esc = Console.escapeHtml;
        根域＝source === 'BUILTIN'（即 default）。 */
     function loadDomainOptions() {
         var select = document.getElementById('domainSelect');
-        Console.request('/admin/domains').then(function (data) {
+        /* P2：/admin/domains 是 D 类裸对象，api.get 直接返回 data */
+        Console.api.get('/admin/domains').then(function (data) {
             (data.domains || []).forEach(function (d) {
                 var name = (typeof d === 'string') ? d : d.name;
                 if (!name || name === 'default') return;
@@ -37,7 +38,8 @@ var esc = Console.escapeHtml;
 
     function loadEmbeddingStatus() {
         var el = document.getElementById('embStatus');
-        Console.request('/admin/settings').then(function (s) {
+        /* P2：/admin/settings GET 是 D 类裸对象 */
+        Console.api.get('/admin/settings').then(function (s) {
             var ok = !!s.embeddingConfigured;
             /* 名称缺省时不渲染空的 <code>：那看起来像"配上了但没显示出来" */
             var name = s.embeddingModelName ? '<code>' + esc(s.embeddingModelName) + '</code>' : '';
@@ -56,7 +58,9 @@ var esc = Console.escapeHtml;
 
     function loadDocuments() {
         var box = document.getElementById('docList');
-        Console.request('/admin/kb/documents').then(function (data) {
+        /* P2：/admin/kb/documents 是 A 类（只有 code）。原来这页没判 code，
+           失败会静默走 then 显示"暂无文档"，用 api.get 后失败会进 catch。 */
+        Console.api.get('/admin/kb/documents').then(function (data) {
             var docs = data.documents || [];
             if (!docs.length) {
                 box.className = 'hint';
@@ -94,7 +98,8 @@ var esc = Console.escapeHtml;
 
     function removeDoc(docId) {
         if (!confirm('确认删除该文档？删除后其文件名会被释放，可重新上传同名文档。')) return;
-        Console.request('/admin/kb/documents/' + encodeURIComponent(docId), { method: 'DELETE' })
+        /* P2：/admin/kb/documents/{id} DELETE 是 B 类（code + success 双写） */
+        Console.api.del('/admin/kb/documents/' + encodeURIComponent(docId))
             .then(function () { loadDocuments(); })
             .catch(function (e) { alert('删除失败：' + e.message); });
     }
@@ -147,9 +152,11 @@ var esc = Console.escapeHtml;
         btn.disabled = true;
         box.className = 'result show';
         box.textContent = '重建中…（会建立真实 ES 连接并调用 embedding，耗时较长）';
-        Console.request('/admin/kb/rebuild', { method: 'POST' }).then(function (data) {
+        /* P2：/admin/kb/rebuild 是 B 类。原来 `data.success ? ok : err` 的两态由
+           api.post 的 reject 承担，成功路径照旧 JSON.stringify 全量展示。 */
+        Console.api.post('/admin/kb/rebuild').then(function (data) {
             box.textContent = JSON.stringify(data, null, 2);
-            box.className = 'result show ' + (data.success ? 'ok' : 'err');
+            box.className = 'result show ok';
             loadDocuments();
         }).catch(function (e) {
             box.textContent = '请求失败: ' + e.message;

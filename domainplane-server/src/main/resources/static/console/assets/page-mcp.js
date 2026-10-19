@@ -83,12 +83,12 @@
       });
     }
     function loadBindings() {
-      return Console.request("/admin/mcp-bindings").then(function(r) {
+      return Console.api.get("/admin/mcp-bindings").then(function(r) {
         BINDINGS = r || { domainBindings: {}, connectionBindings: {} };
       });
     }
     function loadDomains() {
-      return Console.request("/admin/domains").then(function(r) {
+      return Console.api.get("/admin/domains").then(function(r) {
         DOMAINS = r && r.domains || [];
       }).catch(function() {
         DOMAINS = [];
@@ -96,7 +96,7 @@
     }
     function load() {
       document.getElementById("connList").innerHTML = '<div class="dp-card"><span class="perm-none">\u52A0\u8F7D\u4E2D\u2026</span></div>';
-      Console.request("/admin/mcp-connections").then(function(r) {
+      Console.api.get("/admin/mcp-connections").then(function(r) {
         CONNS = r && r.connections || [];
         return loadBindings();
       }).then(render).catch(function(e) {
@@ -188,10 +188,7 @@
         oauthScope: document.getElementById("f_oauth_scope").value.trim(),
         oauthRedirectUri: document.getElementById("f_oauth_redirect").value.trim()
       };
-      Console.jsonRequest("/admin/mcp-connections", "POST", body).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u4FDD\u5B58\u5931\u8D25");
-        }
+      Console.api.post("/admin/mcp-connections", body).then(function(r) {
         alert(r && r.message ? r.message : "\u5DF2\u4FDD\u5B58");
         closeEdit();
         load();
@@ -200,14 +197,7 @@
       });
     }
     function toggle(name, enabled) {
-      Console.jsonRequest(
-        "/admin/mcp-connections/" + encodeURIComponent(name) + "/toggle",
-        "POST",
-        null
-      ).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u64CD\u4F5C\u5931\u8D25");
-        }
+      Console.api.post("/admin/mcp-connections/" + encodeURIComponent(name) + "/toggle", null).then(function() {
         load();
       }).catch(function(e) {
         alert("\u64CD\u4F5C\u5931\u8D25\uFF1A" + e.message);
@@ -217,10 +207,7 @@
       if (!confirm("\u786E\u8BA4\u5220\u9664 MCP \u8FDE\u63A5 " + name + "\uFF1F\n\n\u5176\u5DE5\u5177\u4F1A\u88AB\u6458\u9664\u3001\u7ED1\u5B9A\u4F1A\u89E3\u7ED1\uFF08\u4E0D\u5220\u57DF\uFF09\u3002")) {
         return;
       }
-      Console.jsonRequest("/admin/mcp-connections?name=" + encodeURIComponent(name), "DELETE").then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u5220\u9664\u5931\u8D25");
-        }
+      Console.api.del("/admin/mcp-connections?name=" + encodeURIComponent(name)).then(function() {
         load();
       }).catch(function(e) {
         alert("\u5220\u9664\u5931\u8D25\uFF1A" + e.message);
@@ -230,10 +217,7 @@
       if (!confirm("\u5BF9 " + name + " \u53D1\u8D77\u8FDE\u901A\u6027\u6D4B\u8BD5\uFF08initialize + tools/list\uFF09\uFF1F")) {
         return;
       }
-      Console.jsonRequest("/admin/mcp-connections/" + encodeURIComponent(name) + "/test", "POST", null).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u6D4B\u8BD5\u5931\u8D25");
-        }
+      Console.api.post("/admin/mcp-connections/" + encodeURIComponent(name) + "/test", null).then(function(r) {
         alert((r && r.message) + (r && r.tools ? "\n\u5DE5\u5177\uFF1A" + r.tools.join(", ") : ""));
         load();
       }).catch(function(e) {
@@ -241,14 +225,7 @@
       });
     }
     function startOAuth(name) {
-      Console.jsonRequest(
-        "/admin/mcp-connections/" + encodeURIComponent(name) + "/oauth/start",
-        "POST",
-        null
-      ).then(function(r) {
-        if (r && r.code && r.code !== 0) {
-          throw new Error(Console.sanitizeError(r.detail || r.error) || "\u53D1\u8D77\u6388\u6743\u5931\u8D25");
-        }
+      Console.api.post("/admin/mcp-connections/" + encodeURIComponent(name) + "/oauth/start", null).then(function(r) {
         if (r && r.authorizeUrl) {
           location.href = r.authorizeUrl;
           return;
@@ -263,7 +240,7 @@
       document.getElementById("toolsBody").innerHTML = "\u52A0\u8F7D\u4E2D\u2026";
       document.getElementById("toolsModal").hidden = false;
       document.body.style.overflow = "hidden";
-      Console.request("/admin/mcp-connections/" + encodeURIComponent(name) + "/tools").then(function(r) {
+      Console.api.get("/admin/mcp-connections/" + encodeURIComponent(name) + "/tools").then(function(r) {
         var tools = r && r.tools || [];
         if (!tools.length) {
           document.getElementById("toolsBody").innerHTML = '<div class="perm-none">' + (r && r.ready ? "\u8BE5\u8FDE\u63A5\u6CA1\u6709\u5DE5\u5177" : "\u8FDE\u63A5\u672A\u5C31\u7EEA\uFF0C\u65E0\u6CD5\u8BFB\u53D6\u5DE5\u5177\u76EE\u5F55") + "</div>";
@@ -330,7 +307,7 @@
         var next = want ? current.concat([BIND_CONN]) : current.filter(function(x) {
           return x !== BIND_CONN;
         });
-        promises.push(Console.jsonRequest("/admin/mcp-bindings/" + encodeURIComponent(d.name), "PUT", { connections: next }));
+        promises.push(Console.api.put("/admin/mcp-bindings/" + encodeURIComponent(d.name), { connections: next }));
       });
       Promise.all(promises.map(function(p) {
         return p.catch(function(e) {

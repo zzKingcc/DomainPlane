@@ -115,7 +115,8 @@ var esc = Console.escapeHtml;
     }
 
     function load() {
-        Console.request('/admin/prompts').then(function (r) {
+        /* P2：/admin/prompts 是 D 类裸对象，api.get 直接返回 data */
+        Console.api.get('/admin/prompts').then(function (r) {
             baseline = { prompts: Object.assign({}, r.prompts || {}) };
             model = { prompts: Object.assign({}, baseline.prompts) };
             domains = r.domains || [];
@@ -168,12 +169,10 @@ var esc = Console.escapeHtml;
         el.className = 'result show ok';
 
         var payload = { prompts: model.prompts };
-        Console.jsonRequest('/admin/prompts', 'POST', payload).then(function (r) {
-            if (!r.success) {
-                el.textContent = r.message || '保存失败';
-                el.className = 'result show err';
-                return;
-            }
+        /* P2：/admin/prompts POST 是 C 类（只有 success）。
+           原来的 `if (!r.success) {...} else {...}` 两分支合并成一条成功路径：
+           失败由 api.post 的 reject 送进 catch，成功文案照旧取 r.message。 */
+        Console.api.post('/admin/prompts', payload).then(function (r) {
             el.textContent = r.message || '已保存并生效';
             el.className = 'result show ok';
             load();

@@ -12,7 +12,8 @@
     function loadRegistryStats() {
         var tools = document.getElementById('statTools');
         var domains = document.getElementById('statDomains');
-        Console.request('/admin/domains').then(function (r) {
+        /* P2：/admin/domains 是 D 类裸对象，api.get 直接返回 data */
+        Console.api.get('/admin/domains').then(function (r) {
             var s = (r && r.stats) || {};
             var toolCount = s.toolCount || 0;
             var domainCount = s.domainCount || 0;

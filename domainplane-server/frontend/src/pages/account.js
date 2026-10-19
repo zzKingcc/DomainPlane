@@ -6,7 +6,8 @@
 var esc = Console.escapeHtml;
 
     function loadSession() {
-        Console.request('/admin/session').then(function (s) {
+        /* P2：/admin/session 返回 code:0（A 类），api.get 按 code 判定 */
+        Console.api.get('/admin/session').then(function (s) {
             document.getElementById('acName').textContent = s.username || '—';
             document.getElementById('acLastAt').textContent = s.lastLoginAt || '—';
             document.getElementById('acLastFrom').textContent = s.lastLoginFrom || '—';
@@ -41,7 +42,8 @@ var esc = Console.escapeHtml;
         el.textContent = '正在保存…';
         el.className = 'result show ok';
 
-        Console.jsonRequest('/admin/password', 'POST', {
+        /* P2：/admin/password 是 C 类（只有 success），失败会 reject 进 catch */
+        Console.api.post('/admin/password', {
             oldPassword: oldPassword,
             newPassword: newPassword
         }).then(function (r) {

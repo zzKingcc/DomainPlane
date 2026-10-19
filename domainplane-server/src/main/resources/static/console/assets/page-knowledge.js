@@ -8,7 +8,7 @@
     }
     function loadDomainOptions() {
       var select = document.getElementById("domainSelect");
-      Console.request("/admin/domains").then(function(data) {
+      Console.api.get("/admin/domains").then(function(data) {
         (data.domains || []).forEach(function(d) {
           var name = typeof d === "string" ? d : d.name;
           if (!name || name === "default") return;
@@ -25,7 +25,7 @@
     }
     function loadEmbeddingStatus() {
       var el = document.getElementById("embStatus");
-      Console.request("/admin/settings").then(function(s) {
+      Console.api.get("/admin/settings").then(function(s) {
         var ok = !!s.embeddingConfigured;
         var name = s.embeddingModelName ? "<code>" + esc(s.embeddingModelName) + "</code>" : "";
         el.className = "status-line " + (ok ? "ok" : "warn");
@@ -38,7 +38,7 @@
     }
     function loadDocuments() {
       var box = document.getElementById("docList");
-      Console.request("/admin/kb/documents").then(function(data) {
+      Console.api.get("/admin/kb/documents").then(function(data) {
         var docs = data.documents || [];
         if (!docs.length) {
           box.className = "hint";
@@ -69,7 +69,7 @@
     }
     function removeDoc(docId) {
       if (!confirm("\u786E\u8BA4\u5220\u9664\u8BE5\u6587\u6863\uFF1F\u5220\u9664\u540E\u5176\u6587\u4EF6\u540D\u4F1A\u88AB\u91CA\u653E\uFF0C\u53EF\u91CD\u65B0\u4E0A\u4F20\u540C\u540D\u6587\u6863\u3002")) return;
-      Console.request("/admin/kb/documents/" + encodeURIComponent(docId), { method: "DELETE" }).then(function() {
+      Console.api.del("/admin/kb/documents/" + encodeURIComponent(docId)).then(function() {
         loadDocuments();
       }).catch(function(e) {
         alert("\u5220\u9664\u5931\u8D25\uFF1A" + e.message);
@@ -125,9 +125,9 @@
       btn.disabled = true;
       box.className = "result show";
       box.textContent = "\u91CD\u5EFA\u4E2D\u2026\uFF08\u4F1A\u5EFA\u7ACB\u771F\u5B9E ES \u8FDE\u63A5\u5E76\u8C03\u7528 embedding\uFF0C\u8017\u65F6\u8F83\u957F\uFF09";
-      Console.request("/admin/kb/rebuild", { method: "POST" }).then(function(data) {
+      Console.api.post("/admin/kb/rebuild").then(function(data) {
         box.textContent = JSON.stringify(data, null, 2);
-        box.className = "result show " + (data.success ? "ok" : "err");
+        box.className = "result show ok";
         loadDocuments();
       }).catch(function(e) {
         box.textContent = "\u8BF7\u6C42\u5931\u8D25: " + e.message;
