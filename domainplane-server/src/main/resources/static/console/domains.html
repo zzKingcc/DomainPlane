@@ -38,7 +38,7 @@
                 <span class="count-badge" id="domainCount">—</span>
             </div>
             <div class="actions">
-                <input type="text" id="newDomain" placeholder="完整路径域，如 default.customer-service"
+                <input class="form-control" type="text" id="newDomain" placeholder="完整路径域，如 default.customer-service"
                        style="width:240px; font-family:ui-monospace,Consolas,monospace;">
                 <!-- nowrap 必须写在这里：label 是 inline-flex，里面的「可调用」是匿名 flex 项，
                      中文可在任意两字间断行，行内空间一紧就会被挤成竖排三个字；
@@ -48,8 +48,8 @@
                        title="勾选=可调用单元（能作为入口）；不勾选=只做装配，供后代继承工具 / 提示词 / 模型 / 知识">
                     <input type="checkbox" id="newDomainCallable" checked> 可调用
                 </label>
-                <button id="createDomainBtn">新建域</button>
-                <button class="ghost" id="refreshBtn">重新读取</button>
+                <button class="btn btn-primary" id="createDomainBtn">新建域</button>
+                <button class="ghost btn btn-sm btn-outline-primary" id="refreshBtn">重新读取</button>
             </div>
         </div>
 
@@ -64,13 +64,13 @@
         <div class="modal-head">
             <h3>配置 <span class="mono" id="bindDomainName"></span> 的模型</h3>
             <span class="spacer"></span>
-            <button class="ghost" id="bindModalClose">关闭</button>
+            <button class="ghost btn btn-sm btn-outline-primary" id="bindModalClose">关闭</button>
         </div>
         <div id="bindCardList" class="pick-grid"></div>
         <div id="bindEmpty" class="perm-none" style="margin-top:10px; display:none;"></div>
         <footer class="card-foot">
-            <button id="bindSaveBtn">保存</button>
-            <button class="ghost" id="bindClearBtn">清空（置为无可调用）</button>
+            <button class="btn btn-primary" id="bindSaveBtn">保存</button>
+            <button class="ghost btn btn-sm btn-outline-primary" id="bindClearBtn">清空（置为无可调用）</button>
         </footer>
     </div>
 </div>
@@ -82,13 +82,13 @@
         <div class="modal-head">
             <h3>配置 <span class="mono" id="mcpBindDomainName"></span> 的 MCP 连接</h3>
             <span class="spacer"></span>
-            <button class="ghost" id="mcpBindModalClose">关闭</button>
+            <button class="ghost btn btn-sm btn-outline-primary" id="mcpBindModalClose">关闭</button>
         </div>
         <div id="mcpBindCardList" class="pick-grid"></div>
         <div id="mcpBindEmpty" class="perm-none" style="margin-top:10px; display:none;"></div>
         <footer class="card-foot">
-            <button id="mcpBindSaveBtn">保存</button>
-            <button class="ghost" id="mcpBindClearBtn">全部解绑</button>
+            <button class="btn btn-primary" id="mcpBindSaveBtn">保存</button>
+            <button class="ghost btn btn-sm btn-outline-primary" id="mcpBindClearBtn">全部解绑</button>
         </footer>
     </div>
 </div>
@@ -336,13 +336,13 @@
                 +     num(d.approvalCount) + '</span>'
                 +   (d.hasChildren
                         ? ''
-                        : '<button class="ghost" data-callable="' + esc(d.name) + '" data-to="'
+                        : '<button class="ghost btn btn-sm btn-outline-primary" data-callable="' + esc(d.name) + '" data-to="'
                           + (d.callable ? 'false' : 'true') + '">'
                           + (d.callable ? '设为装配节点' : '设为可调用') + '</button>')
-                +   '<button class="ghost" data-cfg="' + esc(d.name) + '">配置模型</button>'
-                +   '<button class="ghost" data-mcpcfg="' + esc(d.name) + '">配置 MCP</button>'
+                +   '<button class="ghost btn btn-sm btn-outline-primary" data-cfg="' + esc(d.name) + '">配置模型</button>'
+                +   '<button class="ghost btn btn-sm btn-outline-primary" data-mcpcfg="' + esc(d.name) + '">配置 MCP</button>'
                 +   (d.deletable
-                        ? '<button class="ghost" data-del="' + esc(d.name) + '">删除</button>'
+                        ? '<button class="ghost btn btn-sm btn-outline-primary" data-del="' + esc(d.name) + '">删除</button>'
                         : '')
                 + '</header>'
                 + (d.hasChildren

@@ -67,7 +67,7 @@
             </div>
 
             <div class="toolbar">
-                <button class="ghost" id="refreshBtn" type="button">重新读取</button>
+                <button class="ghost btn btn-sm btn-outline-primary" id="refreshBtn" type="button">重新读取</button>
                 <label class="auto">
                     <input type="checkbox" id="autoRefresh" checked>
                     每 10 秒自动刷新
@@ -76,7 +76,7 @@
             </div>
 
             <div class="table-wrap" id="tableWrap" style="display:none;">
-                <table>
+                <table class="table">
                     <thead>
                     <tr>
                         <th>实例</th>
@@ -205,10 +205,10 @@
             return '<span class="muted">已吊销（只能由接口恢复）</span>';
         }
         if (it.muted) {
-            return '<button class="primary" data-act="restore" data-id="' + id
+            return '<button class="primary btn btn-primary" data-act="restore" data-id="' + id
                 + '" title="实例仍在心跳，恢复即等待下次心跳重建副本">恢复工具调用</button>';
         }
-        return '<button class="write" data-act="mute" data-id="' + id
+        return '<button class="write btn btn-primary" data-act="mute" data-id="' + id
             + '" title="摘除工具副本，心跳照常受理">断开工具调用</button>';
     }
 

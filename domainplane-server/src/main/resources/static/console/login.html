@@ -34,18 +34,18 @@
         <form id="loginForm" autocomplete="off" onsubmit="return false;">
             <div class="field">
                 <label for="username">账号</label>
-                <input id="username" name="username" type="text" autocomplete="username" placeholder="服务端配置的账号">
+                <input class="form-control" id="username" name="username" type="text" autocomplete="username" placeholder="服务端配置的账号">
             </div>
             <div class="field">
                 <label for="password">密码</label>
-                <input id="password" name="password" type="password" autocomplete="current-password" placeholder="登录密码">
+                <input class="form-control" id="password" name="password" type="password" autocomplete="current-password" placeholder="登录密码">
             </div>
             <div class="field" id="confirmField" style="display:none;">
                 <label for="password2">确认密码</label>
-                <input id="password2" name="password2" type="password" autocomplete="new-password" placeholder="再输一遍">
+                <input class="form-control" id="password2" name="password2" type="password" autocomplete="new-password" placeholder="再输一遍">
             </div>
             <div class="result" id="result"></div>
-            <button class="btn-primary" id="submitBtn" type="submit">登录</button>
+            <button class="btn-primary btn" id="submitBtn" type="submit">登录</button>
         </form>
 
         <div class="login-note" id="note"></div>

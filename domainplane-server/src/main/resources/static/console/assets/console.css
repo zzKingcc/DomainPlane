@@ -6,7 +6,7 @@
    变量在本文件之外定义，是为了让「换主题」只改一个文件。
    ========================================================================== */
 
-@import url("vendor/tabler-props.css");
+@import url("vendor/tabler.min.css");
 @import url("console-tokens.css");
 
 :root {
@@ -146,7 +146,9 @@ body {
    之间断行，所在 flex 行一紧就会被挤成「设/为/可/调/用」竖排。宁可让整行换行
    （.page-head .actions / .btn-row / .card-foot 都已 flex-wrap: wrap）。
    这与 .tag / .count-badge / .mbadge / .dirty 已有的 nowrap 是同一条规矩。 */
-button {
+/* V2：带 .btn 的按钮交给 Tabler 接管，下面这组只兜住尚未改造的元素型按钮
+   （modal-close / combo-btn / tune-bar-seg 这类结构型按钮仍走这套）。 */
+button:not(.btn) {
     background: var(--primary);
     color: #fff;
     border: none;
@@ -157,19 +159,19 @@ button {
     cursor: pointer;
     white-space: nowrap;
 }
-button:hover { opacity: .9; }
-button:disabled { opacity: .5; cursor: not-allowed; }
-button.ghost {
+button:not(.btn):hover { opacity: .9; }
+button:not(.btn):disabled { opacity: .5; cursor: not-allowed; }
+button:not(.btn).ghost {
     background: #fff; color: var(--primary);
     border: 1px solid var(--border); font-size: 12px; padding: 4px 10px;
 }
-button.ghost:hover { background: var(--primary-dim); }
-button.sec {
+button:not(.btn).ghost:hover { background: var(--primary-dim); }
+button:not(.btn).sec {
     background: #fff; color: var(--text);
     border: 1px solid var(--border); font-size: 13px; padding: 8px 14px;
 }
-button.sec:hover { background: #f8fafc; }
-button.danger { background: var(--red); }
+button:not(.btn).sec:hover { background: #f8fafc; }
+button:not(.btn).danger { background: var(--red); }
 
 .btn-row { display: flex; gap: 10px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
 
@@ -275,7 +277,7 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 .compat-box summary::-webkit-details-marker { display: none; }
 .compat-box summary::before { content: '▸ '; }
 .compat-box details[open] summary::before { content: '▾ '; }
-.compat-box ul { margin: 8px 0 0 18px; font-size: 12px; color: var(--muted); line-height: 1.7; }
+.compat-box ul { margin: 8px 0 0 18px; padding-inline-start: 0; font-size: 12px; color: var(--muted); line-height: 1.7; }
 .compat-box li { margin-bottom: 4px; }
 .compat-box code {
     background: var(--primary-dim); color: var(--primary);

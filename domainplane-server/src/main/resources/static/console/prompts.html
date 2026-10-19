@@ -59,10 +59,10 @@
             <div class="card-head">
                 <h2>域</h2>
                 <span class="spacer"></span>
-                <button class="ghost" id="refreshBtn">重新读取</button>
+                <button class="ghost btn btn-sm btn-outline-primary" id="refreshBtn">重新读取</button>
             </div>
             <div class="table-wrap">
-                <table>
+                <table class="table">
                     <thead>
                     <tr>
                         <th>域</th>
@@ -94,7 +94,7 @@
                     <span class="dom" id="edDomain">—</span>
                     <span class="card-note" id="edTools"></span>
                 </div>
-                <textarea id="domainText" placeholder="该域自己的片段，例如口吻、该场景下何时调用哪类能力。留空 = 只用祖先链上的内容。"></textarea>
+                <textarea class="form-control" id="domainText" placeholder="该域自己的片段，例如口吻、该场景下何时调用哪类能力。留空 = 只用祖先链上的内容。"></textarea>
                 <div class="meta">
                     <span>字数 <b id="domainLen">0</b></span>
                     <span class="card-note" id="edChain"></span>
@@ -104,8 +104,8 @@
         </div>
 
         <div class="sticky-actions">
-            <button class="btn-primary" id="saveBtn">保存并生效</button>
-            <button class="ghost" id="clearBtn">清空表单</button>
+            <button class="btn-primary btn" id="saveBtn">保存并生效</button>
+            <button class="ghost btn btn-sm btn-outline-primary" id="clearBtn">清空表单</button>
             <span class="dirty" id="dirtyFlag" style="display:none;">● 有未保存修改</span>
             <span class="result" id="saveResult" style="margin:0;"></span>
         </div>

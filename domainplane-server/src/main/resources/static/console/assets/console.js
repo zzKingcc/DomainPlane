@@ -182,7 +182,7 @@
                 +   '<span class="foot-name">' + escapeHtml(s.username || '未登录') + '</span>'
                 + '</div>'
                 + '<a class="foot-link" href="account.html">账号与密码</a>'
-                + '<button class="foot-out" id="logoutBtn" type="button">退出登录</button>';
+                + '<button class="foot-out btn btn-sm btn-outline-secondary" id="logoutBtn" type="button">退出登录</button>';
             var btn = document.getElementById('logoutBtn');
             if (btn) {
                 btn.addEventListener('click', function () {

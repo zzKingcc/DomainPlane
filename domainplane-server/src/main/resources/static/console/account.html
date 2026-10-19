@@ -44,24 +44,24 @@
 
             <div class="field">
                 <label for="oldPassword">当前密码</label>
-                <input id="oldPassword" type="password" autocomplete="current-password">
+                <input class="form-control" id="oldPassword" type="password" autocomplete="current-password">
             </div>
             <div class="dp-row">
                 <div class="field">
                     <label for="newPassword">新密码</label>
-                    <input id="newPassword" type="password" autocomplete="new-password">
+                    <input class="form-control" id="newPassword" type="password" autocomplete="new-password">
                     <div class="help">不超过 72 字节（UTF-8 下中文约 24 个字符）。BCrypt 的硬上限，超出会被拒。</div>
                 </div>
                 <div class="field">
                     <label for="newPassword2">确认新密码</label>
-                    <input id="newPassword2" type="password" autocomplete="new-password">
+                    <input class="form-control" id="newPassword2" type="password" autocomplete="new-password">
                 </div>
             </div>
 
             <div class="result" id="pwdResult"></div>
             <div class="btn-row">
-                <button class="btn-primary" id="savePwdBtn">保存并生效</button>
-                <button class="ghost" id="clearPwdBtn">清空表单</button>
+                <button class="btn-primary btn" id="savePwdBtn">保存并生效</button>
+                <button class="ghost btn btn-sm btn-outline-primary" id="clearPwdBtn">清空表单</button>
             </div>
             <details class="disclose">
                 <summary>为什么改完会被踢下线？</summary>

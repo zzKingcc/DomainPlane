@@ -17,7 +17,7 @@
                     <h2>存储配置</h2>
                     <p>平台自己连接的 Elasticsearch 与 Redis。此处配置优先级高于服务端 yaml，保存后立即生效、无需重启，两张卡片各自独立保存。口令留空表示不修改。</p>
                 </div>
-                <button class="ghost" id="reloadBtn">刷新</button>
+                <button class="ghost btn btn-sm btn-outline-primary" id="reloadBtn">刷新</button>
             </div>
         </div>
 
@@ -68,7 +68,7 @@
 
             <div class="field">
                 <label>地址</label>
-                <input id="esHost" class="mono" placeholder="如 192.168.1.10 或 es.example.com">
+                <input id="esHost" class="mono form-control" placeholder="如 192.168.1.10 或 es.example.com">
                 <div class="help">
                     必填。不填则视为<b>未配置</b>：服务照常启动，但会跳过启动期建索引与灌库，
                     「知识库」页的检索也会报错。
@@ -77,11 +77,11 @@
             <div class="dp-row">
                 <div class="field">
                     <label>端口</label>
-                    <input id="esPort" type="number" min="1" max="65535" placeholder="9200">
+                    <input class="form-control" id="esPort" type="number" min="1" max="65535" placeholder="9200">
                 </div>
                 <div class="field">
                     <label>协议</label>
-                    <input id="esScheme" class="mono" list="schemeOptions" placeholder="http">
+                    <input id="esScheme" class="mono form-control" list="schemeOptions" placeholder="http">
                     <datalist id="schemeOptions">
                         <option value="http"></option>
                         <option value="https"></option>
@@ -91,22 +91,22 @@
             <div class="dp-row">
                 <div class="field">
                     <label>用户名（未启用安全认证时留空）</label>
-                    <input id="esUsername" class="mono" placeholder="如 elastic">
+                    <input id="esUsername" class="mono form-control" placeholder="如 elastic">
                 </div>
                 <div class="field">
                     <label>密码</label>
-                    <input id="esPassword" type="password" class="mono" placeholder="留空表示不修改">
+                    <input id="esPassword" type="password" class="mono form-control" placeholder="留空表示不修改">
                     <div class="help" id="esKeyHelp">当前未配置</div>
                 </div>
             </div>
             <div class="dp-row">
                 <div class="field">
                     <label>连接超时（毫秒）</label>
-                    <input id="esConnectTimeout" type="number" min="1" placeholder="5000">
+                    <input class="form-control" id="esConnectTimeout" type="number" min="1" placeholder="5000">
                 </div>
                 <div class="field">
                     <label>读写超时（毫秒）</label>
-                    <input id="esSocketTimeout" type="number" min="1" placeholder="10000">
+                    <input class="form-control" id="esSocketTimeout" type="number" min="1" placeholder="10000">
                     <div class="help">跨公网访问时读超时建议适当调大。</div>
                 </div>
             </div>
@@ -114,10 +114,10 @@
             <div id="esResult" class="result"></div>
 
             <footer class="card-foot">
-                <button class="sec" id="testEsBtn">测试连接</button>
-                <button class="sec" id="clearEsBtn"
+                <button class="sec btn btn-outline-secondary" id="testEsBtn">测试连接</button>
+                <button class="sec btn btn-outline-secondary" id="clearEsBtn"
                         title="清空本卡片表单内容（仅影响本页，尚未生效）。保存后留空字段将回落到 yaml 配置">清空表单</button>
-                <button id="saveEsBtn">保存并生效</button>
+                <button class="btn btn-primary" id="saveEsBtn">保存并生效</button>
                 <span class="hint">
                     <b>只保存本卡片</b>，不影响 Redis。保存成功后会顺带看一眼目标索引在不在；
                     「测试连接」会额外报出版本、发行版、兼容性判读与 <b>IK 分词器</b>状态。
@@ -158,7 +158,7 @@
 
             <div class="field">
                 <label>地址</label>
-                <input id="redisHost" class="mono" placeholder="如 192.168.1.10 或 redis.example.com">
+                <input id="redisHost" class="mono form-control" placeholder="如 192.168.1.10 或 redis.example.com">
                 <div class="help">
                     必填。不填则视为<b>未配置</b>：服务照常启动，但会话记忆与中断断点在首次使用时失败。
                 </div>
@@ -166,11 +166,11 @@
             <div class="dp-row">
                 <div class="field">
                     <label>端口</label>
-                    <input id="redisPort" type="number" min="1" max="65535" placeholder="6379">
+                    <input class="form-control" id="redisPort" type="number" min="1" max="65535" placeholder="6379">
                 </div>
                 <div class="field">
                     <label>库号</label>
-                    <input id="redisDatabase" type="number" min="0" placeholder="0">
+                    <input class="form-control" id="redisDatabase" type="number" min="0" placeholder="0">
                     <div class="help">
                         库号，默认 0。平台数据靠 <code>domainplane:</code> key 前缀隔离，与业务同库也不冲突；
                         集群模式或云托管只提供 0 号库时，保持默认即可。
@@ -180,17 +180,17 @@
             </div>
             <div class="field">
                 <label>密码（无密码模式留空）</label>
-                <input id="redisPassword" type="password" class="mono" placeholder="留空表示不修改">
+                <input id="redisPassword" type="password" class="mono form-control" placeholder="留空表示不修改">
                 <div class="help" id="redisKeyHelp">当前未配置</div>
             </div>
 
             <div id="redisResult" class="result"></div>
 
             <footer class="card-foot">
-                <button class="sec" id="testRedisBtn">测试连接</button>
-                <button class="sec" id="clearRedisBtn"
+                <button class="sec btn btn-outline-secondary" id="testRedisBtn">测试连接</button>
+                <button class="sec btn btn-outline-secondary" id="clearRedisBtn"
                         title="清空本卡片表单内容（仅影响本页，尚未生效）。保存后留空字段将回落到 yaml 配置">清空表单</button>
-                <button id="saveRedisBtn">保存并生效</button>
+                <button class="btn btn-primary" id="saveRedisBtn">保存并生效</button>
                 <span class="hint">
                     <b>只保存本卡片</b>，不影响 Elasticsearch。连接池与命令超时仍取服务端 yaml；
                     「测试连接」会额外报出版本、拓扑与库号范围。

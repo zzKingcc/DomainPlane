@@ -44,8 +44,8 @@
                 <span class="count-badge" id="connCount">—</span>
             </div>
             <div class="actions">
-                <button id="createBtn">新增连接</button>
-                <button class="ghost" id="refreshBtn">重新读取</button>
+                <button class="btn btn-primary" id="createBtn">新增连接</button>
+                <button class="ghost btn btn-sm btn-outline-primary" id="refreshBtn">重新读取</button>
             </div>
         </div>
 
@@ -59,28 +59,28 @@
         <div class="modal-head">
             <h3 id="editTitle">新增 MCP 连接</h3>
             <span class="spacer"></span>
-            <button class="ghost" id="editClose">关闭</button>
+            <button class="ghost btn btn-sm btn-outline-primary" id="editClose">关闭</button>
         </div>
         <div class="modal-body" style="padding:6px 2px;">
             <div class="form-row">
                 <label>连接名（唯一，工具命名空间前缀；禁止连续双下划线）</label>
-                <input id="f_name" placeholder="如 qqmail">
+                <input class="form-control" id="f_name" placeholder="如 qqmail">
             </div>
             <div class="form-row">
                 <label>MCP server 地址（Streamable HTTP 端点）</label>
-                <input id="f_url" placeholder="https://api.mail.qq.com/mcp">
+                <input class="form-control" id="f_url" placeholder="https://api.mail.qq.com/mcp">
             </div>
             <div class="form-2">
                 <div class="form-row">
                     <label>传输类型</label>
-                    <select id="f_transport">
+                    <select class="form-select" id="f_transport">
                         <option value="STREAMABLE_HTTP">STREAMABLE_HTTP（2025-03-26，已实装）</option>
                         <option value="LEGACY_SSE">LEGACY_SSE（2024-11-05，预留）</option>
                     </select>
                 </div>
                 <div class="form-row">
                     <label>审批策略</label>
-                    <select id="f_approval">
+                    <select class="form-select" id="f_approval">
                         <option value="ALL">ALL（全部需人工批准，推荐默认）</option>
                         <option value="DESTRUCTIVE_ONLY">DESTRUCTIVE_ONLY（仅破坏性需批准）</option>
                         <option value="READ_ONLY_FREE">READ_ONLY_FREE（只读免批准）</option>
@@ -90,51 +90,51 @@
             </div>
             <div class="form-row">
                 <label>自定义请求头（JSON 对象，如鉴权；不回显，留空=保持不变）</label>
-                <textarea id="f_headers" placeholder='{"Authorization":"Bearer xxxx"}'></textarea>
+                <textarea class="form-control" id="f_headers" placeholder='{"Authorization":"Bearer xxxx"}'></textarea>
             </div>
             <div class="form-row">
                 <label>OAuth 客户端（服务器要求授权时才需要；动态注册被拒时填预登记的 client_id）</label>
-                <input id="f_oauth_cid" placeholder="client_id（留空=动态注册）">
+                <input class="form-control" id="f_oauth_cid" placeholder="client_id（留空=动态注册）">
             </div>
             <div class="form-row">
                 <label>client_secret（不回显，留空=保持不变；公共客户端可留空）</label>
-                <input id="f_oauth_secret" type="password" placeholder="••••••（已配置则留空保持不变）">
+                <input class="form-control" id="f_oauth_secret" type="password" placeholder="••••••（已配置则留空保持不变）">
             </div>
             <div class="form-2">
                 <div class="form-row">
                     <label>注册用 client 名称（留空=WorkBuddy）</label>
-                    <input id="f_oauth_cname" placeholder="WorkBuddy">
+                    <input class="form-control" id="f_oauth_cname" placeholder="WorkBuddy">
                 </div>
                 <div class="form-row">
                     <label>授权范围 scope（留空=服务器默认）</label>
-                    <input id="f_oauth_scope" placeholder="如 mail.read">
+                    <input class="form-control" id="f_oauth_scope" placeholder="如 mail.read">
                 </div>
             </div>
             <div class="form-row">
                 <label>固定回调地址 redirect_uri（留空=用当前管控台地址；服务商只认固定回调时才填）</label>
-                <input id="f_oauth_redirect" placeholder="https://你的域名/admin/mcp-connections/xxx/oauth/callback">
+                <input class="form-control" id="f_oauth_redirect" placeholder="https://你的域名/admin/mcp-connections/xxx/oauth/callback">
             </div>
             <div class="form-2">
                 <div class="form-row">
                     <label>单次调用超时（毫秒，默认 30000）</label>
-                    <input id="f_timeout" type="number" placeholder="30000">
+                    <input class="form-control" id="f_timeout" type="number" placeholder="30000">
                 </div>
                 <div class="form-row">
                     <label>工具白名单（逗号分隔原始工具名；留空=全部）</label>
-                    <input id="f_allow" placeholder="GetMe,ListMessages">
+                    <input class="form-control" id="f_allow" placeholder="GetMe,ListMessages">
                 </div>
             </div>
             <div class="form-row">
                 <label>备注</label>
-                <input id="f_remark" placeholder="可选">
+                <input class="form-control" id="f_remark" placeholder="可选">
             </div>
             <div class="form-row">
                 <label><input type="checkbox" id="f_enabled" checked style="width:auto;margin-right:6px;">启用（关=不连、不注册）</label>
             </div>
         </div>
         <footer class="card-foot">
-            <button id="editSaveBtn">保存</button>
-            <button class="ghost" id="editClearBtn">重置</button>
+            <button class="btn btn-primary" id="editSaveBtn">保存</button>
+            <button class="ghost btn btn-sm btn-outline-primary" id="editClearBtn">重置</button>
         </footer>
     </div>
 </div>
@@ -145,13 +145,13 @@
         <div class="modal-head">
             <h3>配置 <span class="mono" id="bindConnName"></span> 的域绑定</h3>
             <span class="spacer"></span>
-            <button class="ghost" id="bindClose">关闭</button>
+            <button class="ghost btn btn-sm btn-outline-primary" id="bindClose">关闭</button>
         </div>
         <div id="bindCardList" class="pick-grid" style="margin-top:10px;"></div>
         <div id="bindEmpty" class="perm-none" style="margin-top:10px; display:none;"></div>
         <footer class="card-foot">
-            <button id="bindSaveBtn">保存绑定</button>
-            <button class="ghost" id="bindClearBtn">全部解绑</button>
+            <button class="btn btn-primary" id="bindSaveBtn">保存绑定</button>
+            <button class="ghost btn btn-sm btn-outline-primary" id="bindClearBtn">全部解绑</button>
         </footer>
     </div>
 </div>
@@ -162,7 +162,7 @@
         <div class="modal-head">
             <h3><span class="mono" id="toolsConnName"></span> 的工具目录</h3>
             <span class="spacer"></span>
-            <button class="ghost" id="toolsClose">关闭</button>
+            <button class="ghost btn btn-sm btn-outline-primary" id="toolsClose">关闭</button>
         </div>
         <div id="toolsBody" style="margin-top:10px;"></div>
     </div>
@@ -217,16 +217,16 @@
                 +   '<span class="spacer"></span>'
                 +   '<span class="card-note">工具 ' + (c.ready ? c.toolCount : 0) + ' · 策略 ' + esc(c.approvalPolicy) + '</span>'
                 +   (c.enabled
-                        ? '<button class="ghost" data-toggle="' + esc(c.name) + '" data-to="false">停用</button>'
-                        : '<button class="ghost" data-toggle="' + esc(c.name) + '" data-to="true">启用</button>')
-                +   '<button class="ghost" data-test="' + esc(c.name) + '">测试</button>'
-                +   '<button class="ghost" data-tools="' + esc(c.name) + '">工具</button>'
+                        ? '<button class="ghost btn btn-sm btn-outline-primary" data-toggle="' + esc(c.name) + '" data-to="false">停用</button>'
+                        : '<button class="ghost btn btn-sm btn-outline-primary" data-toggle="' + esc(c.name) + '" data-to="true">启用</button>')
+                +   '<button class="ghost btn btn-sm btn-outline-primary" data-test="' + esc(c.name) + '">测试</button>'
+                +   '<button class="ghost btn btn-sm btn-outline-primary" data-tools="' + esc(c.name) + '">工具</button>'
                 +   (c.needsAuth
-                        ? '<button class="ghost" data-oauth="' + esc(c.name) + '">授权</button>'
+                        ? '<button class="ghost btn btn-sm btn-outline-primary" data-oauth="' + esc(c.name) + '">授权</button>'
                         : '')
-                +   '<button class="ghost" data-bind="' + esc(c.name) + '">绑定域</button>'
-                +   '<button class="ghost" data-edit="' + esc(c.name) + '">编辑</button>'
-                +   '<button class="ghost" data-del="' + esc(c.name) + '">删除</button>'
+                +   '<button class="ghost btn btn-sm btn-outline-primary" data-bind="' + esc(c.name) + '">绑定域</button>'
+                +   '<button class="ghost btn btn-sm btn-outline-primary" data-edit="' + esc(c.name) + '">编辑</button>'
+                +   '<button class="ghost btn btn-sm btn-outline-primary" data-del="' + esc(c.name) + '">删除</button>'
                 + '</header>'
                 + '<div class="kv">'
                 +   '<span class="k">地址</span><span class="v">' + esc(c.url) + '</span>'

@@ -34,7 +34,7 @@
                  不再被「覆盖更新」这类选项文字隔开 -->
             <div class="btn-row">
                 <input type="file" id="fileInput" accept=".txt,.md,.markdown,.docx,.doc,.pdf,.xls,.xlsx">
-                <button id="uploadBtn">上传</button>
+                <button class="btn btn-primary" id="uploadBtn">上传</button>
             </div>
             <!-- 选项一行：覆盖策略 + 归属域 -->
             <div class="btn-row">
@@ -43,7 +43,7 @@
                 </label>
                 <label class="hint" style="margin:0; white-space:nowrap; flex:0 0 auto;">
                     归属域：
-                    <select id="domainSelect" style="min-width:14rem;">
+                    <select class="form-select" id="domainSelect" style="min-width:14rem;">
                         <option value="">default（根域，全域可见）</option>
                     </select>
                 </label>
@@ -71,7 +71,7 @@
                 <b>重建会清空索引，已有文档需重新上传。</b>
             </p>
             <div class="btn-row">
-                <button id="rebuildBtn" class="danger">触发重建</button>
+                <button id="rebuildBtn" class="danger btn btn-danger">触发重建</button>
             </div>
             <div id="rebuildResult" class="result"></div>
         </div>
@@ -149,11 +149,11 @@
                     + '<td>' + (d.exportPath
                         ? '<code class="path" title="点击复制">' + esc(d.exportPath) + '</code>'
                         : '<span class="hint">—</span>') + '</td>'
-                    + '<td><button class="danger" data-doc="' + esc(d.docId || '') + '">删除</button></td>'
+                    + '<td><button class="danger btn btn-danger" data-doc="' + esc(d.docId || '') + '">删除</button></td>'
                     + '</tr>';
             }).join('');
             box.className = '';
-            box.innerHTML = '<table><thead><tr><th>docId</th><th>文件名</th><th>归属域</th><th>切片数</th><th>切片文件</th><th>操作</th>'
+            box.innerHTML = '<table class="table"><thead><tr><th>docId</th><th>文件名</th><th>归属域</th><th>切片数</th><th>切片文件</th><th>操作</th>'
                 + '</tr></thead><tbody>' + rows + '</tbody></table>';
             box.querySelectorAll('button[data-doc]').forEach(function (btn) {
                 btn.addEventListener('click', function () { removeDoc(btn.getAttribute('data-doc')); });

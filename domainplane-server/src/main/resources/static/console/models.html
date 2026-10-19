@@ -14,8 +14,8 @@
         <div class="page-head">
             <div class="head-line">
                 <div><h2>模型设置</h2></div>
-                <button id="openConnBtn">预设配置信息</button>
-                <button id="addModelBtn">+ 添加模型</button>
+                <button class="btn btn-primary" id="openConnBtn">预设配置信息</button>
+                <button class="btn btn-primary" id="addModelBtn">+ 添加模型</button>
             </div>
         </div>
 
@@ -74,7 +74,7 @@
                 <div class="field" id="fPreset">
                     <label>预设配置</label>
                     <div class="combo" id="pfPresetCombo">
-                        <input id="pfPreset" placeholder="选择常见服务商…"
+                        <input class="form-control" id="pfPreset" placeholder="选择常见服务商…"
                                autocomplete="off" role="combobox" aria-expanded="false"
                                aria-controls="pfPresetMenu">
                         <button type="button" class="combo-btn" id="pfPresetBtn"
@@ -89,7 +89,7 @@
 
                 <div class="field" id="fBaseUrl">
                     <label>服务商地址（baseUrl）</label>
-                    <input id="pfBaseUrl" class="mono" placeholder="https://api.example.com/v1"
+                    <input id="pfBaseUrl" class="mono form-control" placeholder="https://api.example.com/v1"
                            autocomplete="off">
                     <!-- 预设 / 连接回填后的状态提示（readSay 写这里） -->
                     <div class="help" id="readResult" style="white-space: pre-wrap; margin-top:10px;"></div>
@@ -97,14 +97,14 @@
 
                 <div class="field">
                     <label>API Key</label>
-                    <input id="pfApiKey" type="password" class="mono" placeholder="必填"
+                    <input id="pfApiKey" type="password" class="mono form-control" placeholder="必填"
                            autocomplete="off">
                 </div>
 
                 <div class="field">
                     <label>模型名</label>
                     <div class="combo" id="pfModelCombo">
-                        <input id="pfModelName" class="mono" placeholder="gpt-4o"
+                        <input id="pfModelName" class="mono form-control" placeholder="gpt-4o"
                                autocomplete="off" role="combobox" aria-expanded="false"
                                aria-controls="pfModelMenu" aria-autocomplete="list">
                         <button type="button" class="combo-btn" id="pfModelBtn"
@@ -131,8 +131,8 @@
                 <div id="profileResult" class="result"></div>
 
                 <footer class="card-foot">
-                    <button class="sec" id="resetProfileFormBtn">清空表单</button>
-                    <button id="saveProfileBtn">保存</button>
+                    <button class="sec btn btn-outline-secondary" id="resetProfileFormBtn">清空表单</button>
+                    <button class="btn btn-primary" id="saveProfileBtn">保存</button>
                 </footer>
             </div>
         </div>
@@ -164,20 +164,20 @@
 
                 <div class="field">
                     <label>名称（与内置配置项合起来唯一）</label>
-                    <input id="cnName" placeholder="如：硅基流动-主 / 内网 vLLM / openrouter-免费档">
+                    <input class="form-control" id="cnName" placeholder="如：硅基流动-主 / 内网 vLLM / openrouter-免费档">
                 </div>
                 <div class="field">
                     <label>服务商地址（baseUrl）</label>
-                    <input id="cnBaseUrl" class="mono" placeholder="https://api.example.com/v1" autocomplete="off">
+                    <input id="cnBaseUrl" class="mono form-control" placeholder="https://api.example.com/v1" autocomplete="off">
                 </div>
                 <div class="field">
                     <label>API Key（可空）</label>
-                    <input id="cnApiKey" type="password" class="mono" placeholder="自建端点可留空；模型档案侧仍需一个非空占位" autocomplete="off">
+                    <input id="cnApiKey" type="password" class="mono form-control" placeholder="自建端点可留空；模型档案侧仍需一个非空占位" autocomplete="off">
                 </div>
 
                 <footer class="card-foot">
-                    <button class="sec" id="cnClearBtn">清空</button>
-                    <button id="cnAddBtn">添加</button>
+                    <button class="sec btn btn-outline-secondary" id="cnClearBtn">清空</button>
+                    <button class="btn btn-primary" id="cnAddBtn">添加</button>
                 </footer>
 
                 <div id="cnResult" class="result"></div>
@@ -368,7 +368,7 @@ Console.renderSidebar('models');
        这类最常见的档案恰恰不命中，放那儿等于多数人根本看不到这个框。 */
     function ctxCell(p) {
         var v = p.contextWindow == null ? '' : String(p.contextWindow);
-        return '<input type="number" class="mono model-ctx" data-ctx="'
+        return '<input type="number" class="mono model-ctx form-control" data-ctx="'
             + Console.escapeHtml(p.alias) + '" min="1" step="1"'
             + ' value="' + Console.escapeHtml(v) + '" placeholder="未声明">'
             + '<span class="ctx-unit">token</span>';
@@ -394,17 +394,17 @@ Console.renderSidebar('models');
            向量档案同样会停在"未识别"而进不了向量槽位，得靠探测把 embedding 端点与模态实测出来。
            按钮排在「删除」之前，与对话卡片一致。 */
         var actions = (active ? ''
-                : '<button class="ghost" data-enable="' + Console.escapeHtml(p.alias) + '"'
+                : '<button class="ghost btn btn-sm btn-outline-primary" data-enable="' + Console.escapeHtml(p.alias) + '"'
                     + (p.usable ? '' : ' disabled') + '>启用</button>')
-            + '<button class="ghost" data-probe="' + Console.escapeHtml(p.alias) + '">探测</button>'
-            + '<button class="ghost" data-del="' + Console.escapeHtml(p.alias) + '">删除</button>';
+            + '<button class="ghost btn btn-sm btn-outline-primary" data-probe="' + Console.escapeHtml(p.alias) + '">探测</button>'
+            + '<button class="ghost btn btn-sm btn-outline-primary" data-del="' + Console.escapeHtml(p.alias) + '">删除</button>';
         /* 「已适配」徽标 + 绿框 + 更新按钮，与对话卡片同一套件（见 renderProfiles） */
         var adapterBadge = p.adapter ? '<span class="mbadge">已适配</span>' : '';
         var hasTune = !!(p.adapter && (p.adapter.params || []).length);
         var tuneBox = hasTune ? adapterTuneBox(p, prefix) : '';
         var tuneCtl = hasTune
             ? '<span class="tune-status"></span>'
-              + '<button type="button" class="tune-save" disabled>更新</button>'
+              + '<button type="button" class="tune-save btn btn-sm btn-primary" disabled>更新</button>'
             : '';
 
         /* 端点族小签与「模型」段同款，向量段的卡片头部原来是两张卡片里唯一没有类型标识的
@@ -557,7 +557,7 @@ Console.renderSidebar('models');
                    头部已有「删除」，「更新」放它左边（先改后删，误点代价小）。没调优框则两者都不出现。 */
                 var tuneCtl = hasTune
                     ? '<span class="tune-status"></span>'
-                      + '<button type="button" class="tune-save" disabled>更新</button>'
+                      + '<button type="button" class="tune-save btn btn-sm btn-primary" disabled>更新</button>'
                     : '';
                 /* 「是否回写思考内容」开关：只出现在对话档案上（思考是对话流的概念），
                    放在「更新」左边。拨动即存，不与调优参数共用同一个保存动作，见 saveReturnThinking。 */
@@ -574,8 +574,8 @@ Console.renderSidebar('models');
                     +   '<span class="spacer"></span>'
                     +   thinkCtl
                     +   tuneCtl
-                    +   '<button class="ghost" data-probe="' + Console.escapeHtml(p.alias) + '">探测</button>'
-                    +   '<button class="ghost" data-del="' + Console.escapeHtml(p.alias) + '">删除</button>'
+                    +   '<button class="ghost btn btn-sm btn-outline-primary" data-probe="' + Console.escapeHtml(p.alias) + '">探测</button>'
+                    +   '<button class="ghost btn btn-sm btn-outline-primary" data-del="' + Console.escapeHtml(p.alias) + '">删除</button>'
                     + '</header>'
                     + '<div class="dp-card-body">'
                     + '<div class="model-meta">'
@@ -1093,7 +1093,7 @@ Console.renderSidebar('models');
             var cls = 'tune-bar-seg';
             if (on && i <= active) { cls += ' on'; }
             if (on && i === active) { cls += ' active'; }
-            return '<button type="button" class="' + cls + '"' + (on ? '' : ' disabled')
+            return '<button type="button" class="' + cls + ' btn btn-primary"' + (on ? '' : ' disabled')
                 + ' data-bar-val="' + Console.escapeHtml(o.value) + '"'
                 + ' title="' + Console.escapeHtml(o.label || o.value) + '">'
                 + Console.escapeHtml(o.value) + '</button>';
@@ -1188,14 +1188,14 @@ Console.renderSidebar('models');
         } else if (spec.type === 'enum' && spec.display === 'bar') {
             control = renderBar(id, spec, value, on);
         } else if (spec.type === 'enum') {
-            control = '<select id="' + id + '"' + dis + '><option value="">' + ph + '</option>'
+            control = '<select class="form-select" id="' + id + '"' + dis + '><option value="">' + ph + '</option>'
                 + (spec.options || []).map(function (o) {
                     return '<option value="' + Console.escapeHtml(o.value) + '"'
                         + (v === o.value ? ' selected' : '') + '>'
                         + Console.escapeHtml(o.label || o.value) + '</option>';
                   }).join('') + '</select>';
         } else if (spec.type === 'number' || spec.type === 'int') {
-            control = '<input type="number" class="mono" id="' + id + '"'
+            control = '<input type="number" class="mono form-control" id="' + id + '"'
                 + (v === '' ? '' : ' value="' + Console.escapeHtml(v) + '"')
                 + (spec.min != null ? ' min="' + spec.min + '"' : '')
                 + (spec.max != null ? ' max="' + spec.max + '"' : '')
@@ -1203,10 +1203,10 @@ Console.renderSidebar('models');
                 + dis + ' placeholder="' + ph + '">';
         } else if (spec.type === 'stringList') {
             /* 一行一条：min / max 在这类参数上是**条数**区间，不能当 input 的数值属性使 */
-            control = '<textarea class="mono" id="' + id + '" rows="2"' + dis
+            control = '<textarea class="mono form-control" id="' + id + '" rows="2"' + dis
                 + ' placeholder="' + ph + '">' + (v === '' ? '' : Console.escapeHtml(v)) + '</textarea>';
         } else {
-            control = '<input type="text" class="mono" id="' + id + '"'
+            control = '<input type="text" class="mono form-control" id="' + id + '"'
                 + (v === '' ? '' : ' value="' + Console.escapeHtml(v) + '"')
                 + dis + ' placeholder="' + ph + '">';
         }
@@ -1613,7 +1613,7 @@ Console.renderSidebar('models');
                 + '<div class="mono hint" style="margin:2px 0 0;">' + Console.escapeHtml(c.baseUrl) + '</div></div>'
                 + '<span class="spacer"></span>'
                 + '<span class="mono hint" style="margin:0;">' + Console.escapeHtml(key) + '</span>'
-                + '<button class="ghost" data-cn-del="' + Console.escapeHtml(c.name) + '">删除</button>'
+                + '<button class="ghost btn btn-sm btn-outline-primary" data-cn-del="' + Console.escapeHtml(c.name) + '">删除</button>'
                 + '</div></div>';
         }).join('');
     }
