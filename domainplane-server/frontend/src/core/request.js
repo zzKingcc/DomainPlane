@@ -13,12 +13,13 @@
    所以必须按 code → success → 裸对象 三级降级。
    ========================================================================== */
 
-/** 文案优先级与 console.js 现状一致：detail 优先于 error，再优于 message */
-function pick(raw) {
+/** 文案优先级与 console.js 现状一致：detail 优先于 error，再优于 message。
+ *  helpers.sanitizeError 由 console.js 注入，负责抹掉响应里可能带出的凭据。 */
+function pick(raw, helpers) {
     if (!raw || typeof raw !== 'object') { return ''; }
     var text = raw.detail || raw.error || raw.message || '';
-    if (typeof raw.sanitizeError === 'function') {
-        return raw.sanitizeError(text);
+    if (helpers && typeof helpers.sanitizeError === 'function') {
+        return helpers.sanitizeError(text);
     }
     return String(text || '');
 }
@@ -33,14 +34,14 @@ export function normalize(raw, helpers) {
         return {
             ok: raw.code === 0,
             code: raw.code,
-            message: helpers ? pick(raw) : '',
+            message: pick(raw, helpers),
             data: raw,
         };
     }
     if (raw && typeof raw.success === 'boolean') {
         return {
             ok: raw.success,
-            message: helpers ? pick(raw) : '',
+            message: pick(raw, helpers),
             data: raw,
         };
     }

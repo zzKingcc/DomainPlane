@@ -1,12 +1,12 @@
 (() => {
   // domainplane-server/frontend/src/core/request.js
-  function pick(raw) {
+  function pick(raw, helpers) {
     if (!raw || typeof raw !== "object") {
       return "";
     }
     var text = raw.detail || raw.error || raw.message || "";
-    if (typeof raw.sanitizeError === "function") {
-      return raw.sanitizeError(text);
+    if (helpers && typeof helpers.sanitizeError === "function") {
+      return helpers.sanitizeError(text);
     }
     return String(text || "");
   }
@@ -15,14 +15,14 @@
       return {
         ok: raw.code === 0,
         code: raw.code,
-        message: helpers ? pick(raw) : "",
+        message: pick(raw, helpers),
         data: raw
       };
     }
     if (raw && typeof raw.success === "boolean") {
       return {
         ok: raw.success,
-        message: helpers ? pick(raw) : "",
+        message: pick(raw, helpers),
         data: raw
       };
     }
