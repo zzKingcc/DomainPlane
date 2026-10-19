@@ -164,11 +164,11 @@
       { key: "overview", label: "\u6982\u89C8", href: "overview.html", icon: "overview" },
       { key: "models", label: "\u6A21\u578B\u8BBE\u7F6E", href: "models.html", icon: "models", warnAnchor: true },
       { key: "infra", label: "\u5B58\u50A8\u914D\u7F6E", href: "infra.html", icon: "infra" },
+      { key: "mcp", label: "MCP \u8FDE\u63A5", href: "mcp.html", icon: "mcp" },
       { key: "domains", label: "\u57DF\u7A7A\u95F4", href: "domains.html", icon: "domains" },
-      { key: "instances", label: "\u7194\u65AD\u5DE5\u5177\u8C03\u7528", href: "instances.html", icon: "instances" },
       { key: "prompts", label: "\u63D0\u793A\u8BCD\u8BBE\u5B9A", href: "prompts.html", icon: "prompts" },
       { key: "knowledge", label: "\u77E5\u8BC6\u5E93", href: "knowledge.html", icon: "knowledge" },
-      { key: "mcp", label: "MCP \u8FDE\u63A5", href: "mcp.html", icon: "mcp" },
+      { key: "instances", label: "\u7194\u65AD\u5DE5\u5177\u8C03\u7528", href: "instances.html", icon: "instances" },
       { key: "account", label: "\u8D26\u53F7", href: "account.html", icon: "account" }
     ];
     function renderSidebar(activeKey, rootId) {

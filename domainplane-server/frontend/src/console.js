@@ -137,15 +137,26 @@ import { createApi } from './core/request.js';
         account: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/>'
     };
 
+    /* ===== 侧栏顺序（方案 A：按配置依赖链排，不加分组）=====
+       概览（每次先看状态）
+       → 底座：模型 / 存储 / MCP 连接（不配这三样，后面全白跑）
+       → 领域：域空间 / 提示词 / 知识库（提示词与知识都挂在域上）
+       → 运行：熔断工具调用（看实例，是观测不是配置）
+       → 账号
+
+       底座内部也有顺序：模型最先（没模型后面全废），存储次之，
+       MCP 最后（连接本身是底座，但绑定动作发生在域空间页）。
+       之前 instances 夹在域空间与提示词之间、mcp 掉到知识库之后，
+       底座被拆成两截，看着乱。 */
     var NAV = [
         { key: 'overview', label: '概览', href: 'overview.html', icon: 'overview' },
         { key: 'models', label: '模型设置', href: 'models.html', icon: 'models', warnAnchor: true },
         { key: 'infra', label: '存储配置', href: 'infra.html', icon: 'infra' },
+        { key: 'mcp', label: 'MCP 连接', href: 'mcp.html', icon: 'mcp' },
         { key: 'domains', label: '域空间', href: 'domains.html', icon: 'domains' },
-        { key: 'instances', label: '熔断工具调用', href: 'instances.html', icon: 'instances' },
         { key: 'prompts', label: '提示词设定', href: 'prompts.html', icon: 'prompts' },
         { key: 'knowledge', label: '知识库', href: 'knowledge.html', icon: 'knowledge' },
-        { key: 'mcp', label: 'MCP 连接', href: 'mcp.html', icon: 'mcp' },
+        { key: 'instances', label: '熔断工具调用', href: 'instances.html', icon: 'instances' },
         { key: 'account', label: '账号', href: 'account.html', icon: 'account' }
     ];
 
