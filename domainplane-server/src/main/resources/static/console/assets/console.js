@@ -1,4 +1,66 @@
 (() => {
+  // domainplane-server/frontend/src/core/request.js
+  function pick(raw) {
+    if (!raw || typeof raw !== "object") {
+      return "";
+    }
+    var text = raw.detail || raw.error || raw.message || "";
+    if (typeof raw.sanitizeError === "function") {
+      return raw.sanitizeError(text);
+    }
+    return String(text || "");
+  }
+  function normalize(raw, helpers) {
+    if (raw && typeof raw.code === "number") {
+      return {
+        ok: raw.code === 0,
+        code: raw.code,
+        message: helpers ? pick(raw) : "",
+        data: raw
+      };
+    }
+    if (raw && typeof raw.success === "boolean") {
+      return {
+        ok: raw.success,
+        message: helpers ? pick(raw) : "",
+        data: raw
+      };
+    }
+    return { ok: true, message: "", data: raw };
+  }
+  function createApi(request, jsonRequest, helpers) {
+    function settle(raw) {
+      var n = normalize(raw, helpers);
+      if (!n.ok) {
+        throw new Error(n.message || "\u64CD\u4F5C\u5931\u8D25");
+      }
+      return n.data;
+    }
+    return {
+      /** 成功返回 data，失败 reject（页面 .then 里不再出现信封判断） */
+      get: function(path) {
+        return request(path).then(settle);
+      },
+      post: function(path, body) {
+        return jsonRequest(path, "POST", body).then(settle);
+      },
+      put: function(path, body) {
+        return jsonRequest(path, "PUT", body).then(settle);
+      },
+      del: function(path) {
+        return jsonRequest(path, "DELETE").then(settle);
+      },
+      /** 需要自己拼文案 / 判断的场景：返回归一化后的完整对象 */
+      raw: function(path) {
+        return request(path).then(function(raw) {
+          var n = normalize(raw, helpers);
+          return { ok: n.ok, code: n.code, message: n.message, data: n.data };
+        });
+      },
+      normalize
+    };
+  }
+
   // domainplane-server/frontend/src/console.js
   (function(global) {
     "use strict";
@@ -215,6 +277,7 @@
     function lastSettings() {
       return lastStatus;
     }
+    var api = createApi(request, jsonRequest, { sanitizeError });
     global.Console = {
       baseUrl,
       sameOrigin: function() {
@@ -222,6 +285,7 @@
       },
       request,
       jsonRequest,
+      api,
       escapeHtml,
       sanitizeError,
       renderSidebar,

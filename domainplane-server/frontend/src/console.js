@@ -4,7 +4,12 @@
    - 侧栏导航渲染（只写一遍，各页面复用）
    - 模型配置状态探测（驱动侧栏提示点）
    零依赖，直接用 <script src="assets/console.js"></script> 引入。
+
+   P2：信封归一化拆到 core/request.js，这里只负责注入 request/jsonRequest 与
+   sanitizeError，避免两处各写一遍 10002 分流逻辑。
    ========================================================================== */
+import { createApi } from './core/request.js';
+
 (function (global) {
     'use strict';
 
@@ -289,11 +294,16 @@
 
     function lastSettings() { return lastStatus; }
 
+    /* P2：api 层。request / jsonRequest / sanitizeError 注入进去，
+       normalize 与两个出口的实现在 core/request.js（那里有两套信封的处理规则）。 */
+    var api = createApi(request, jsonRequest, { sanitizeError: sanitizeError });
+
     global.Console = {
         baseUrl: baseUrl,
         sameOrigin: function () { return SERVED_BY_HTTP; },
         request: request,
         jsonRequest: jsonRequest,
+        api: api,
         escapeHtml: escapeHtml,
         sanitizeError: sanitizeError,
         renderSidebar: renderSidebar,

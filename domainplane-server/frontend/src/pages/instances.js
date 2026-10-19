@@ -120,7 +120,9 @@
     function load() {
         var state = document.getElementById('loadState');
         var seq = ++loadSeq;
-        return Console.request('/admin/instances').then(function (data) {
+        /* P2：/admin/instances 是 D 类裸对象（无 code/success），
+           api.get 的 normalize 会把它判为成功，直接返回 data。 */
+        return Console.api.get('/admin/instances').then(function (data) {
             if (seq !== loadSeq) { return; }
             render(data);
             state.textContent = '更新于 ' + fmtTime(Date.now());
@@ -154,7 +156,10 @@
         if (!spec || !confirm(spec.text.replace('%s', instanceId))) {
             return;
         }
-        Console.jsonRequest('/admin/instances/' + encodeURIComponent(instanceId) + '/' + action).then(function (r) {
+        /* P2：/admin/instances/{id}/{action} 是 C 类（只有 success）。
+           原来是「拿到响应就 alert(r.message)」，后端 success:false 时页面照样走成功分支；
+           改 api.post 后失败会 reject 进 catch，与 mute/restore 的语义对齐。 */
+        Console.api.post('/admin/instances/' + encodeURIComponent(instanceId) + '/' + action).then(function (r) {
             alert(r.message || '已提交');
             load();
         }).catch(function (e) {

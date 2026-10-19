@@ -106,7 +106,7 @@
     function load() {
       var state = document.getElementById("loadState");
       var seq = ++loadSeq;
-      return Console.request("/admin/instances").then(function(data) {
+      return Console.api.get("/admin/instances").then(function(data) {
         if (seq !== loadSeq) {
           return;
         }
@@ -132,7 +132,7 @@
       if (!spec || !confirm(spec.text.replace("%s", instanceId))) {
         return;
       }
-      Console.jsonRequest("/admin/instances/" + encodeURIComponent(instanceId) + "/" + action).then(function(r) {
+      Console.api.post("/admin/instances/" + encodeURIComponent(instanceId) + "/" + action).then(function(r) {
         alert(r.message || "\u5DF2\u63D0\u4EA4");
         load();
       }).catch(function(e) {
