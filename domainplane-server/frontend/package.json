@@ -1,0 +1,14 @@
+{
+  "name": "domainplane-console-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DomainPlane 管控台前端源码：esbuild 多 entry 构建，产物直写 Spring Boot 静态目录",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "check": "node tools/selfcheck.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
