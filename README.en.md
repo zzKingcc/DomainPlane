@@ -6,9 +6,10 @@ A scenario is a dotted path string — a *domain*, such as `default.customer.aft
 
 > For teams that need LLMs across many business scenarios without running one agent service per scenario.
 
-![version](assets/badge-version.svg)
-![Java](assets/badge-java.svg)
-![Spring Boot](assets/badge-spring-boot.svg)
+![version](docs/assets/badge-version.svg)
+![Java](docs/assets/badge-java.svg)
+![Spring Boot](docs/assets/badge-spring-boot.svg)
+[![license](docs/assets/badge-license.svg)](LICENSE)
 
 [English](README.en.md) · [中文](README.md)
 
@@ -28,7 +29,7 @@ DomainPlane takes a third route: **isolation is neither deployment nor a filter 
 
 In most "multi-scenario" systems the scenario is a filter field. Here the domain is both the **assembly dimension** and the **storage boundary**. A turn enters domain D, and the four dimensions are resolved along `D → parent → … → default`.
 
-![How a turn is assembled](assets/diagrams/fig-1-assembly.svg)
+![How a turn is assembled](docs/assets/diagrams/fig-1-assembly.svg)
 
 | Dimension | Semantics along the chain | What does *not* hold |
 | --- | --- | --- |
@@ -45,7 +46,7 @@ Three additive dimensions and one override is not arbitrary. Tools, knowledge an
 
 ## Highlight 2: eleven modules, two disjoint lines
 
-![Module layers and dependency direction](assets/diagrams/fig-2-layers.svg)
+![Module layers and dependency direction](docs/assets/diagrams/fig-2-layers.svg)
 
 The server line runs upward from `api`. The SDK line branches off `api` to the side. **The two only talk over HTTP.**
 
@@ -63,7 +64,7 @@ There are exactly three extension seams, and each one is judged by "did the trun
 
 ## Highlight 3: knowledge retrieval — isolation at the physical layer
 
-![Retrieval pipeline](assets/diagrams/fig-3-retrieval.svg)
+![Retrieval pipeline](docs/assets/diagrams/fig-3-retrieval.svg)
 
 Three questions are kept strictly apart:
 
@@ -99,25 +100,25 @@ Everything is configured in the browser and **takes effect on save** — Elastic
 
 ### Domains: one card, the whole picture
 
-![Domains](assets/screenshots/console-domains.png)
+![Domains](docs/assets/screenshots/console-domains.png)
 
 Callable models, visible tools and bound MCP connections sit on the same card. The root domain is an **assembly node** (it only passes capabilities down and cannot be an entry point); leaf domains are the **callable units**. "Visible tools (including inherited)" answers the only question that matters: what can this domain actually do?
 
 ### Models: the embedding model is managed separately
 
-![Models](assets/screenshots/console-models.png)
+![Models](docs/assets/screenshots/console-models.png)
 
 There is exactly one embedding model platform-wide (both ingestion and retrieval depend on it), so it gets its own section. Other profiles are grouped by type, and "used by which domains" is printed on the card — no page jumping to change a binding. Context window and thinking-output toggles are edited in place.
 
 ### Storage: connections and knowledge bodies, saved independently
 
-![Storage](assets/screenshots/console-infra.png)
+![Storage](docs/assets/screenshots/console-infra.png)
 
 Keyword and vector connections have separate tables, each row showing **which knowledge bodies reference it**. Bodies then combine two connections. Saving also runs capability validation and a Redis persistence self-check — as **warnings, never a rejection**.
 
 ### Knowledge base: two slots per body, landing spots visible
 
-![Knowledge base](assets/screenshots/console-knowledge.png)
+![Knowledge base](docs/assets/screenshots/console-knowledge.png)
 
 The body table flattens keyword slot, vector slot, retrieval mode, bound domains and document/chunk counts. Switching the embedding model offers three explicit actions — re-ingest, purge, rebuild — instead of silently recomputing.
 
@@ -190,25 +191,54 @@ Java 21 · Spring Boot 3.5.7 · LangChain4j 1.18.1 · LangGraph4j 1.8.17 · Elas
 
 ---
 
+## Contributing
+
+```bash
+mvn clean package   # full build
+mvn -o test         # full test suite (1,313 tests / 2 skipped, measured 2026-11-02)
+```
+
+Before opening a PR:
+
+- [ ] `mvn clean package` passes and the affected module's tests pass
+- [ ] New or changed behaviour has test coverage
+- [ ] External contracts or error codes are reflected in [`docs/11-鉴权与错误码.md`](docs/11-鉴权与错误码.md)
+- [ ] No "silent degradation": missing capability, denied access and unconfigured dependencies all fail loudly
+
+Four conventions:
+
+1. **One contract source**: cross-process types (requests, events, tool metadata, error codes) live only in `domainplane-api`. Never copy them into an SDK or the server. `AgentService` has two implementations pointing in opposite directions (runtime and chat-client) — adding a method means changing both.
+2. **Error codes are registered centrally**: add new codes to `api.code.ErrorCode` in the right segment (10xxx auth / 20xxx capacity / 30xxx session / 40xxx input / 50xxx system / 60xxx knowledge / 70xxx memory / 80xxx tools / 90xxx external / 91xxx multimodal); each code carries `message` (operators) and `userMessage` (end users) — only the latter leaves the server.
+3. **One document per module**: every file under `docs/` explains one module's mechanism, trade-offs and traps; cross-references point, they do not repeat. Update the matching document when behaviour changes.
+4. **Commits**: branch off `master`, one topic per branch, and say *what changed and why* in the message.
+
+---
+
+## License
+
+[Apache License 2.0](LICENSE)
+
+---
+
 ## Documentation
 
-The module docs are currently written in Chinese. One document per module: constraints, decisions, and the price paid — cross-references point, they do not repeat.
+The module docs are currently written in Chinese. One document per module: constraints, decisions, and the price paid — cross-references point, they do not repeat. Start with 01 if you are new, 02 if you are taking over.
 
 | # | Document | What it answers |
 | --- | --- | --- |
-| 01 | [Getting started](01-快速上手.md) | Prerequisites, build and run, first four configuration steps, verification, failure table |
-| 02 | [Architecture](02-架构总览.md) | Module responsibilities and dependency direction, where a turn lands, where state lives |
-| 03 | [Domains and capability assembly](03-域与能力装配.md) | Domain rules, four-dimension merge, callability, version history, three-stage deletion |
-| 04 | [Conversation orchestration](04-对话编排.md) | State graph, nine events, approval and resume, stop semantics, planning, timeouts, failure exits |
-| 05 | [Memory and context](05-记忆与上下文.md) | Append-only memory, the 24k budget and degradation order, summaries, history recall |
-| 06 | [Tool system](06-工具体系.md) | Four annotations, visibility algorithm, approval and masking, remote instances and heartbeats |
-| 07 | [Knowledge base](07-知识库.md) | Connection / body / domain model, index isolation, retrieval fusion, ingestion and chunking |
-| 08 | [Models and multimodal](08-模型与多模态.md) | Profiles and endpoint families, capability probing, protocol dispatch, parameter passthrough |
-| 09 | [MCP integration](09-MCP接入.md) | Transports, tool bridging and naming, default approval, OAuth |
-| 10 | [Admin console](10-管控台.md) | Eleven pages, page-to-endpoint map, how to change the front end |
-| 11 | [Auth and error codes](11-鉴权与错误码.md) | HMAC credentials, two carriers, 60 error codes with dual wording |
-| 12 | [SDK integration](12-SDK接入.md) | Three SDKs: configuration, usage, approval flow, wire contract |
-| 13 | [Configuration reference](13-配置参考.md) | Every yaml key and default, on-disk files, settings that must change together |
-| 14 | [Operations and limits](14-运维与边界.md) | Single-instance constraint, backup and restore, background jobs, upgrades, troubleshooting |
+| 01 | [Getting started](docs/01-快速上手.md) | Prerequisites, build and run, first four configuration steps, verification, failure table |
+| 02 | [Architecture](docs/02-架构总览.md) | Module responsibilities and dependency direction, where a turn lands, where state lives |
+| 03 | [Domains and capability assembly](docs/03-域与能力装配.md) | Domain rules, four-dimension merge, callability, version history, three-stage deletion |
+| 04 | [Conversation orchestration](docs/04-对话编排.md) | State graph, nine events, approval and resume, stop semantics, planning, timeouts, failure exits |
+| 05 | [Memory and context](docs/05-记忆与上下文.md) | Append-only memory, the 24k budget and degradation order, summaries, history recall |
+| 06 | [Tool system](docs/06-工具体系.md) | Four annotations, visibility algorithm, approval and masking, remote instances and heartbeats |
+| 07 | [Knowledge base](docs/07-知识库.md) | Connection / body / domain model, index isolation, retrieval fusion, ingestion and chunking |
+| 08 | [Models and multimodal](docs/08-模型与多模态.md) | Profiles and endpoint families, capability probing, protocol dispatch, parameter passthrough |
+| 09 | [MCP integration](docs/09-MCP接入.md) | Transports, tool bridging and naming, default approval, OAuth |
+| 10 | [Admin console](docs/10-管控台.md) | Eleven pages, page-to-endpoint map, how to change the front end |
+| 11 | [Auth and error codes](docs/11-鉴权与错误码.md) | HMAC credentials, two carriers, 60 error codes with dual wording |
+| 12 | [SDK integration](docs/12-SDK接入.md) | Three SDKs: configuration, usage, approval flow, wire contract |
+| 13 | [Configuration reference](docs/13-配置参考.md) | Every yaml key and default, on-disk files, settings that must change together |
+| 14 | [Operations and limits](docs/14-运维与边界.md) | Single-instance constraint, backup and restore, background jobs, upgrades, troubleshooting |
 
-Project overview and SDK examples also live in the repository root [`README.md`](../README.md). Pre-refactor long-form documents are in [`docs-archive/`](../docs-archive/) and are kept for historical reference only.
+Pre-refactor long-form documents (design doc, architecture review, L1–L4 plans, deep-dive analysis) are no longer tracked in the repository; they are kept locally only and must not be treated as current truth.

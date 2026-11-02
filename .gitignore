@@ -52,6 +52,9 @@ ddoc/
 !/tools/.gitignore
 !/tools/shots/.keep.txt
 
+### 旧版长文档（已被 docs/ 取代，仅本地留存，不进版本库） ###
+/docs-archive/
+
 
 
 
