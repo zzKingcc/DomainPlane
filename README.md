@@ -10,7 +10,7 @@
 | 项 | 值 |
 | --- | --- |
 | 技术栈 | Java 21 · Spring Boot 3.5.7 · LangChain4j 1.18.1 · LangGraph4j 1.8.17 · Elasticsearch 9.x · Redis |
-| 文档 | [文档索引](docs/README.md) · [架构总览](docs/02-架构总览.md) · [快速上手](docs/01-快速上手.md) |
+| 文档 | [文档索引](docs/README.md) · [English](docs/README.en.md) · [架构总览](docs/02-架构总览.md) · [快速上手](docs/01-快速上手.md) |
 | 最后更新 | 2026-11-02 |
 
 ## 目录
