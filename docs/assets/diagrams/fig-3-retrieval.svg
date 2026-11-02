@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 500" width="1100" height="500" role="img" aria-label="知识检索链路">
+  <defs>
+    <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <style>
+      .t { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #0f172a; }
+      .m { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #64748b; }
+      .box { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
+      .accent { fill: #eef2ff; stroke: #c7d2fe; stroke-width: 1.5; }
+      .teal { fill: #ecfdf5; stroke: #99f6e4; stroke-width: 1.5; }
+      .amber { fill: #fffbeb; stroke: #fde68a; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect width="1100" height="520" fill="#ffffff"/>
+  <text class="t" x="40" y="44" font-size="20" font-weight="700">检索：沿域链向上召回，物理隔离</text>
+  <text class="m" x="40" y="70" font-size="13">能查到什么由"域链"决定；查在哪台机器由"域绑的知识体"决定。这两件事分开，才不会出现"子域文档写进父域的库"。</text>
+
+  <!-- domains -->
+  <text class="m" x="40" y="104" font-size="12" font-weight="600">检索域（自身 + 祖先）</text>
+
+  <rect class="accent" x="40" y="116" width="250" height="58" rx="8"/>
+  <text class="t" x="58" y="140" font-size="12">default.customer.aftersale</text>
+  <text class="m" x="58" y="160" font-size="10">depth 0 · 本轮入口</text>
+
+  <rect class="box" x="40" y="190" width="250" height="58" rx="8"/>
+  <text class="t" x="58" y="214" font-size="12">default.customer</text>
+  <text class="m" x="58" y="234" font-size="10">depth 1 · 衰减 0.7</text>
+
+  <rect class="box" x="40" y="264" width="250" height="58" rx="8"/>
+  <text class="t" x="58" y="288" font-size="12">default</text>
+  <text class="m" x="58" y="308" font-size="10">depth 2 · 未绑知识体</text>
+
+  <!-- bodies -->
+  <text class="m" x="330" y="104" font-size="12" font-weight="600">域绑的知识体（不继承）</text>
+
+  <rect class="teal" x="330" y="116" width="300" height="86" rx="8"/>
+  <text class="t" x="348" y="140" font-size="12" font-weight="600">kb-aftersale</text>
+  <text class="m" x="348" y="160" font-size="10">向量槽 → qdrant-vec（topK 30）</text>
+  <text class="m" x="348" y="178" font-size="10">关键字槽 → es-main（topK 20）</text>
+  <text class="m" x="348" y="194" font-size="10">索引 domainplane_kb_&lt;域&gt;_&lt;hash8&gt;</text>
+
+  <rect class="teal" x="330" y="216" width="300" height="70" rx="8"/>
+  <text class="t" x="348" y="240" font-size="12" font-weight="600">kb-order</text>
+  <text class="m" x="348" y="260" font-size="10">只有关键字槽 → es-main</text>
+  <text class="m" x="348" y="276" font-size="10">单路召回 = 分数制融合</text>
+
+  <rect class="amber" x="330" y="300" width="300" height="52" rx="8"/>
+  <text class="m" x="348" y="322" font-size="11">未绑体的域</text>
+  <text class="m" x="348" y="340" font-size="11">不开通道、不下发检索工具（不报错）</text>
+
+  <line x1="290" y1="145" x2="324" y2="145" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="290" y1="219" x2="324" y2="240" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="290" y1="293" x2="324" y2="322" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#a3)"/>
+
+  <!-- pipeline -->
+  <text class="m" x="700" y="104" font-size="12" font-weight="600">召回与融合</text>
+
+  <rect class="box" x="700" y="116" width="360" height="58" rx="8"/>
+  <text class="t" x="718" y="140" font-size="12" font-weight="600">通道并发召回</text>
+  <text class="m" x="718" y="160" font-size="10">每域每路一条通道；单路超时 5s 不影响其他路</text>
+
+  <rect class="box" x="700" y="190" width="360" height="72" rx="8"/>
+  <text class="t" x="718" y="214" font-size="12" font-weight="600">融合（auto）</text>
+  <text class="m" x="718" y="234" font-size="10">单来源 → min-max 分数制，向量 0.6 / 关键字 0.4</text>
+  <text class="m" x="718" y="251" font-size="10">多来源 → RRF（k=10），带层级衰减 0.7</text>
+
+  <rect class="accent" x="700" y="278" width="360" height="74" rx="8"/>
+  <text class="t" x="718" y="302" font-size="12" font-weight="600">注入模型</text>
+  <text class="m" x="718" y="322" font-size="10">取前 8 片、正文 ≤ 3000 字符（首条必留）</text>
+  <text class="m" x="718" y="339" font-size="10">标题命中 ×1.15，文件名命中 ×1.10（乘法增益）</text>
+
+  <line x1="630" y1="150" x2="694" y2="145" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="630" y1="240" x2="694" y2="220" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="880" y1="174" x2="880" y2="186" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="880" y1="262" x2="880" y2="274" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a3)"/>
+
+  <rect class="box" x="40" y="392" width="1020" height="96" rx="10"/>
+  <text class="m" x="60" y="418" font-size="11" font-weight="600">为什么隔离成立</text>
+  <text class="m" x="60" y="440" font-size="11">索引名由域路径确定性派生（前缀 + 安全化 + 8 位哈希），检索请求不带域过滤条件——查错域就是查了另一个索引。</text>
+  <text class="m" x="60" y="460" font-size="11">切片原文放 BlobStore（kb/chunks/索引名/文档.json，写入前剥离向量），索引是可重建的派生数据；换后端 = 重灌，不是迁移。</text>
+  <text class="m" x="60" y="478" font-size="11">同一知识体被多个域共用时，各域在同一集群上各占各的索引，物理隔离。</text>
+</svg>

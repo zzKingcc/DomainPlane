@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DomainPlane 架构演化分析</title>
+<style>
+:root{
+  --bg:#f3f5f4; --surface:#ffffff; --surface-subtle:#f7f8f7;
+  --ink:#17201c; --muted:#68736d; --line:#dfe4e1; --line-strong:#cbd3ce;
+  --green:#156b4a; --green-dark:#0e5238; --green-soft:#e7f2ec;
+  --red:#b83b35; --red-soft:#f8e9e7; --amber:#9a6418; --amber-soft:#f8eedc;
+  --blue:#356a91; --blue-soft:#e7eff5;
+  --code-bg:#0f1a16; --code-ink:#d9e6df;
+  --mono:ui-monospace,SFMono-Regular,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  color:var(--ink); background:var(--bg);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;line-height:1.7;font-size:15px}
+a{color:var(--green);text-decoration:none}
+a:hover{text-decoration:underline}
+.layout{display:grid;grid-template-columns:250px minmax(0,1fr);min-height:100vh}
+/* ---------- 侧边 TOC ---------- */
+.toc{position:sticky;top:0;height:100vh;overflow-y:auto;background:#17231e;color:#edf4f0;padding:22px 16px;border-right:1px solid #25362e}
+.toc .brand{display:flex;align-items:center;gap:11px;padding:0 6px 22px}
+.toc .brand-mark{display:grid;place-items:center;width:38px;height:38px;background:#e7f2ec;color:var(--green-dark);font-weight:800;border-radius:8px;font-size:12px;letter-spacing:.5px}
+.toc .brand strong{display:block;font-size:14px}
+.toc .brand span{display:block;margin-top:2px;color:#97a89f;font-size:11px}
+.toc nav{display:grid;gap:2px}
+.toc a{display:block;padding:7px 10px;border-radius:6px;color:#aebdb5;font-size:13px;border-left:2px solid transparent;transition:.15s}
+.toc a:hover{color:#fff;background:rgba(255,255,255,.06);text-decoration:none}
+.toc a.active{color:#fff;background:#274337;border-left-color:#4fbf8d}
+.toc a.l2{padding-left:24px;font-size:12.5px;color:#8fa29a}
+.toc .toc-label{padding:14px 10px 6px;font-size:10.5px;letter-spacing:1.5px;color:#6f8379;text-transform:uppercase}
+main{min-width:0}
+/* ---------- Hero ---------- */
+.hero{background:linear-gradient(135deg,#0e5238 0%,#14573f 45%,#1d3b30 100%);color:#edf4f0;padding:56px 0 44px}
+.hero .wrap{max-width:940px;margin:0 auto;padding:0 32px}
+.hero .kicker{display:inline-flex;align-items:center;gap:8px;font-size:12px;letter-spacing:2px;color:#9dcdb6;text-transform:uppercase;font-weight:600}
+.hero .kicker::before{content:"";width:26px;height:2px;background:#4fbf8d}
+.hero h1{margin:14px 0 10px;font-size:32px;line-height:1.25}
+.hero p{margin:0;color:#b9c9c1;max-width:74ch;font-size:15px}
+.hero .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}
+.hero .chip{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);padding:6px 12px;border-radius:999px;font-size:12px;color:#d8e5de}
+.hero .chip b{color:#fff;font-weight:600}
+.hero .conclusion{margin-top:24px;padding:16px 18px;border-radius:10px;background:rgba(255,255,255,.07);border-left:3px solid #4fbf8d;font-size:14px;color:#cfe0d7}
+/* ---------- 正文 ---------- */
+.content{max-width:940px;margin:0 auto;padding:48px 32px 90px}
+section{margin-top:52px}
+section:first-child{margin-top:0}
+h2{font-size:24px;margin:0 0 6px;display:flex;align-items:center;gap:12px}
+h2 .sec-no{font-size:13px;font-weight:700;color:#fff;background:var(--green);width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none}
+h3{font-size:17.5px;margin:34px 0 10px;color:#14352a}
+h4{font-size:15px;margin:22px 0 8px;color:#0e5238}
+p{margin:10px 0;color:#2c3731}
+.lead{border-left:3px solid var(--green);padding:10px 16px;background:var(--green-soft);border-radius:0 8px 8px 0;font-size:14.5px;color:#173b2d;margin:14px 0}
+/* ---------- 代码框 ---------- */
+.codebox{margin:16px 0;border-radius:10px;overflow:hidden;border:1px solid #1c2d25;background:var(--code-bg);box-shadow:0 6px 18px rgba(20,40,32,.12)}
+.codebox .bar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:#14221c;border-bottom:1px solid #22352c;color:#7f9a8e;font-size:11.5px}
+.codebox .bar .dot{width:9px;height:9px;border-radius:50%}
+.codebox .bar .dot:nth-child(1){background:#f0635c}.codebox .bar .dot:nth-child(2){background:#e2b25c}.codebox .bar .dot:nth-child(3){background:#5fc98a}
+.codebox .bar .fname{margin-left:6px;font-family:var(--mono);color:#9fb6ab}
+.codebox pre{margin:0;padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:12.8px;line-height:1.65;color:var(--code-ink)}
+.codebox pre code{font-family:inherit;background:none;color:inherit;padding:0}
+.tok-c{color:#6d8a7e;font-style:italic}
+.tok-s{color:#e6c97a}
+.tok-k{color:#7fd6a8;font-weight:600}
+.tok-n{color:#86c5e8}
+.tok-f{color:#d9a7f0}
+.tok-p{color:#c88fd8}
+/* ---------- 表格 ---------- */
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px;background:var(--surface);border-radius:10px;overflow:hidden;box-shadow:0 2px 10px rgba(28,41,34,.06)}
+th{background:#eef3f0;color:#24402f;text-align:left;padding:10px 14px;font-size:12.5px;letter-spacing:.3px;border-bottom:1px solid var(--line)}
+td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td code,li code,p code{font-family:var(--mono);font-size:12px;background:#e9efec;border:1px solid #dbe2de;border-radius:5px;padding:1.5px 6px;color:#0e5238}
+/* ---------- 卡片 / Callout ---------- */
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:16px 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:0 2px 10px rgba(28,41,34,.05)}
+.card h4{margin:0 0 8px}
+.card p{margin:6px 0;font-size:13.5px}
+.card .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.5px;padding:3px 9px;border-radius:999px;margin-bottom:8px}
+.callout{border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;border:1px solid}
+.callout.info{background:var(--blue-soft);border-color:#c9dbe8;color:#234a66}
+.callout.warn{background:var(--amber-soft);border-color:#e8d9b8;color:#6d4712}
+.callout.ok{background:var(--green-soft);border-color:#c4e0d1;color:#14543a}
+.callout.red{background:var(--red-soft);border-color:#ecc9c6;color:#7c2b27}
+.callout .t{font-weight:700;display:block;margin-bottom:4px}
+/* ---------- 分层图 ---------- */
+.layers{display:grid;gap:0;margin:20px 0;border:1px solid var(--line-strong);border-radius:14px;overflow:hidden;background:var(--surface)}
+.layer{padding:16px 20px;border-top:1px solid var(--line)}
+.layer:first-child{border-top:none}
+.layer .lname{font-weight:700;font-size:15px;display:flex;align-items:center;gap:10px}
+.layer .lname .badge{font-size:10.5px;font-weight:800;letter-spacing:1px;padding:3px 8px;border-radius:6px}
+.layer .ldesc{font-size:13px;color:var(--muted);margin-top:4px}
+.layer .lfiles{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.layer .lfiles span{font-family:var(--mono);font-size:11.5px;background:#f0f3f1;border:1px solid var(--line);border-radius:6px;padding:3px 8px;color:#33453c}
+.l-base{background:#e7f2ec}.l-domain{background:#fff}.l-agent{background:#e7eff5}
+.badge-base{background:#c4e0d1;color:#14543a}.badge-domain{background:#e8d9b8;color:#6d4712}.badge-agent{background:#c9dbe8;color:#234a66}
+/* ---------- 流程图 ---------- */
+.flow{display:grid;gap:10px;margin:18px 0}
+.flow .step{display:grid;grid-template-columns:46px 1fr auto;gap:14px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.flow .idx{width:46px;height:46px;border-radius:11px;display:grid;place-items:center;font-weight:800;font-size:16px;color:#fff}
+.flow .step .st{font-weight:700;font-size:14px}
+.flow .step .sd{font-size:12.8px;color:var(--muted)}
+.flow .side{font-family:var(--mono);font-size:11px;color:#3f5249;background:#eef2ef;border-radius:7px;padding:4px 9px;white-space:nowrap}
+.flow .join{text-align:center;color:var(--green);font-weight:700;font-size:13px;letter-spacing:3px}
+/* ---------- 时间线 ---------- */
+.master-tl{position:relative;margin:24px 0;padding-left:34px}
+.master-tl::before{content:"";position:absolute;left:13px;top:8px;bottom:8px;width:3px;background:linear-gradient(#156b4a,#356a91)}
+.master-tl .mt{position:relative;margin:0 0 14px}
+.master-tl .mt .dot{position:absolute;left:-32px;top:8px;width:15px;height:15px;border-radius:50%;background:#fff;border:3px solid var(--green)}
+.master-tl .mt .ph{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.master-tl .mt .ph .badge{font-size:11px;font-weight:800;letter-spacing:1px;padding:3px 10px;border-radius:6px}
+.master-tl .mt .ph .date{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.master-tl .mt .ph .commit{font-family:var(--mono);font-size:11.5px;color:#4a5c53;background:#eef2ef;border-radius:6px;padding:2px 8px}
+.master-tl .mt .ph .title{font-weight:700;font-size:15px}
+.master-tl .mt .desc{font-size:13px;color:#3a4a42;margin-top:3px}
+.b-a{background:#e7f2ec;color:#14543a}.b-b{background:#dcefe4;color:#14543a}.b-c{background:#f8eedc;color:#6d4712}
+.b-d{background:#f3e8c9;color:#6d4712}.b-e{background:#e7eff5;color:#234a66}.b-f{background:#e8d9b8;color:#6d4712}
+.b-g{background:#c9dbe8;color:#234a66}.b-h{background:#d9c9e8;color:#4a2a66}
+/* ---------- 巧思可折叠卡 ---------- */
+.clever{display:grid;gap:14px;margin:14px 0}
+.cv{background:var(--surface);border:1px solid var(--line);border-radius:13px;overflow:hidden;box-shadow:0 2px 10px rgba(28,41,34,.05)}
+.cv .cv-h{display:grid;grid-template-columns:44px 1fr auto;gap:14px;align-items:center;padding:13px 18px;background:#fafbfa;border-bottom:1px solid var(--line);cursor:pointer;user-select:none}
+.cv .cv-n{width:44px;height:44px;border-radius:11px;display:grid;place-items:center;font-weight:800;font-size:15px;color:#fff}
+.cv .cv-t{font-weight:800;font-size:14.5px;line-height:1.4}
+.cv .cv-f{font-family:var(--mono);font-size:11px;color:var(--muted);background:#eef2ef;border-radius:6px;padding:2px 8px;white-space:nowrap}
+.cv .cv-b{display:none;padding:6px 18px 16px}
+.cv.open .cv-b{display:block}
+.cv .cv-b p{font-size:13.6px;color:#33423b}
+.cv .cv-b .why{margin-top:10px;padding:10px 14px;border-radius:9px;background:var(--green-soft);border-left:3px solid var(--green);font-size:13px;color:#173b2d}
+.cv .toggle{color:var(--muted);font-size:18px;transition:.2s}
+.cv.open .toggle{transform:rotate(45deg)}
+/* ---------- 双栏 / 列表 / 响应式 ---------- */
+.dual{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0}
+.check li{margin:6px 0;list-style:none;padding-left:28px;position:relative}
+.check li::before{content:"✓";position:absolute;left:2px;top:0;color:var(--green);font-weight:800}
+@media(max-width:860px){
+  .layout{grid-template-columns:1fr}
+  .toc{display:none}
+  .hero h1{font-size:25px}
+  .dual{grid-template-columns:1fr}
+  .cv .cv-h{grid-template-columns:40px 1fr}
+  .cv .cv-f{display:none}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="brand">
+      <div class="brand-mark">演化</div>
+      <div><strong>架构演化分析</strong><span>102 个提交、85 天，从一份 RAG 练习代码长成一个分层中间件</span></div>
+    </div>
+    <nav id="tocNav"></nav>
+  </aside>
+  <main>
+    <header class="hero">
+      <div class="wrap">
+        <div class="kicker">Analysis · Git 演化</div>
+        <h1>DomainPlane 架构演化分析</h1>
+        <p>102 个提交、85 天，从一份 RAG 练习代码长成一个分层中间件</p>
+        <div class="meta"><span class="chip">范围 · 2026-08-06 → 2026-10-19（已提交）</span><span class="chip">体量 · 32 → 425 个 Java 文件</span><span class="chip">方法 · 全量 git log + 四次决定性重构逐文件回看</span></div>
+        <div class="conclusion"><b>结论先行：</b>演化不是"越写越多"，而是四次范式切换：单体 RAG 练习 → 模块化单体（08-24）→ 域模型入场（09-27）→ 命名与语义收敛（10-04），外加一次尚未入库的存储抽象升级（10-19 起，至今 21 天只在工作区）。真正的驱动力始终是同一个问题——「怎么让一套能力服务多个业务场景而不互相污染」，答案从"多模块"逐层收敛成"域"。</div>
+      </div>
+    </header>
+    <div class="content">
+<section id="s1">
+<h2><span class="sec-no">1</span>规模曲线：四个台阶</h2>
+<table>
+<thead><tr>
+<th>里程碑</th>
+<th>日期</th>
+<th>Java 文件</th>
+<th>当次提交在做什么</th>
+</tr></thead><tbody>
+<tr><td><code>b610678</code></td><td>2026-08-12</td><td>32</td><td>把 langchain 的隐式 ReAct 循环改成 LangGraph 显式图</td></tr>
+<tr><td><code>8fb8706</code></td><td>2026-08-24</td><td>44</td><td>单体平铺目录拆成 6 个 Maven 模块</td></tr>
+<tr><td><code>61da30f</code></td><td>2026-09-27</td><td>185</td><td>域模型入场，SDK 三个坐标，注解收敛</td></tr>
+<tr><td><code>de9e751</code></td><td>2026-10-04</td><td>288</td><td>全量改名 stringer → DomainPlane（357 个文件）</td></tr>
+<tr><td><code>c49bc46</code></td><td>2026-10-19</td><td>425</td><td>管控台工程化收尾（最后一个提交）</td></tr>
+<tr><td>工作区</td><td>2026-10-29</td><td>543</td><td>L1-L4 升级：142 改 + 144 增，未提交</td></tr>
+</tbody></table>
+<p>规模的四次跃迁各有不同的性质：32→44 是<strong>切分</strong>（文件搬位置，总量不变）；44→185 是<strong>建模</strong>（域、SDK、注解、发布文档一起进来）；185→288 主要是<strong>改名</strong>（不是新功能）；288→425 是<strong>填功能</strong>（模型层、MCP、多模态、管控台）。看清这一点很重要——单看文件数增长会误判"架构一直在膨胀"，其实是三类完全不同的动作叠在一起。</p>
+</section>
+<section id="s2">
+<h2><span class="sec-no">2</span>演化时间线</h2>
+<div class="master-tl">
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-a">A</span><span class="date">2026-08-06</span><span class="commit">cd1a59e</span><span class="title">空仓库</span></div><div class="desc">Initial commit，只有 2 个文件，无 Java</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-b">A</span><span class="date">2026-08-08</span><span class="commit">1fb4121</span><span class="title">RAG 起步</span></div><div class="desc">文档切分策略、单文本模型、Redis 持久化记忆</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-c">A</span><span class="date">2026-08-12</span><span class="commit">b610678</span><span class="title">范式切换</span></div><div class="desc">隐式 ReAct 循环 → LangGraph 显式图（单类 +265 行）</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-d">A</span><span class="date">2026-08-14</span><span class="commit">fb4ed0f</span><span class="title">状态机</span></div><div class="desc">图节点状态机、授权调用确认、中断输出</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-e">B</span><span class="date">2026-08-24</span><span class="commit">8fb8706</span><span class="title">模块化</span></div><div class="desc">平铺 src/main/java → stringer-{common,core,infrastructure,capability,agent,example}</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-f">C</span><span class="date">2026-09-18</span><span class="commit">cd03bf6</span><span class="title">首个发布</span></div><div class="desc">stringer 0.1.0 + README 重写</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-g">C</span><span class="date">2026-09-19</span><span class="commit">ee178b8</span><span class="title">预发布</span></div><div class="desc">v1.0-beta，文档与代码对齐</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-h">D</span><span class="date">2026-09-27</span><span class="commit">61da30f</span><span class="title">域模型入场</span></div><div class="desc">DomainAgent / Domains / DomainRegistry / @Tool 家族 + 9 份设计稿</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-a">D</span><span class="date">2026-09-29</span><span class="commit">483a62b</span><span class="title">注解收敛</span></div><div class="desc">注解收口到 @Tool 家族，@ToolAdvanced 真正生效</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-b">D</span><span class="date">2026-09-30</span><span class="commit">fd0e3df</span><span class="title">兼容清零</span></div><div class="desc">清理全部兼容残留，文档以新设计为唯一出发点</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-c">E</span><span class="date">2026-10-01</span><span class="commit">0b615c6</span><span class="title">域树</span></div><div class="desc">扁平同层级域 → 父子域树（完整路径 + 沿链补齐）</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-d">E</span><span class="date">2026-10-01</span><span class="commit">a235ac6</span><span class="title">一域一索引</span></div><div class="desc">知识库改「一域一索引」，检索融合按来源数自适应</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-e">E</span><span class="date">2026-10-02</span><span class="commit">8abc654</span><span class="title">多格式</span></div><div class="desc">pdf / docx / doc / excel 摄取全部落地</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-f">F</span><span class="date">2026-10-02</span><span class="commit">8d5373f</span><span class="title">单实例守卫</span></div><div class="desc">把「会话协调状态全在进程内」变成启动期强制假设</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-g">F</span><span class="date">2026-10-02</span><span class="commit">31bbb52</span><span class="title">fail-closed</span></div><div class="desc">断点读失败改为 fail-closed，不再静默覆盖历史</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-h">F</span><span class="date">2026-10-03</span><span class="commit">79bec65</span><span class="title">删除顺序</span></div><div class="desc">删域先清记忆与检查点，再动索引；级联失败即中止</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-a">G</span><span class="date">2026-10-03</span><span class="commit">79c9b3f</span><span class="title">双槽模型</span></div><div class="desc">向量档案单独存放，与对话模型彻底分开</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-b">G</span><span class="date">2026-10-04</span><span class="commit">de9e751</span><span class="title">全量改名</span></div><div class="desc">stringer → DomainPlane，357 个文件一次性 rename</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-c">H</span><span class="date">2026-10-08</span><span class="commit">6f50a63</span><span class="title">适配路由</span></div><div class="desc">档案按服务商协议路由到对应 langchain4j 适配器</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-d">H</span><span class="date">2026-10-08</span><span class="commit">e912b7b</span><span class="title">增量记忆</span></div><div class="desc">会话记忆改增量存取，消除每条消息全量读写</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-e">H</span><span class="date">2026-10-14</span><span class="commit">a23418d</span><span class="title">端点探测</span></div><div class="desc">模型档案支持端点探测、控制台模型页重做</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-f">H</span><span class="date">2026-10-14</span><span class="commit">64da40f</span><span class="title">beta.2</span></div><div class="desc">v1.0-beta.2</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-g">I</span><span class="date">2026-10-19</span><span class="commit">8abf8dc</span><span class="title">管控台工程化</span></div><div class="desc">P1：esbuild 脚手架，10 个页面的内联脚本全部抽出</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-h">I</span><span class="date">2026-10-19</span><span class="commit">2b620ec</span><span class="title">信封归一化</span></div><div class="desc">api 层三层信封归一化，10 个页面迁移完</div></div>
+<div class="mt"><div class="dot"></div><div class="ph"><span class="badge b-a">I</span><span class="date">2026-10-19</span><span class="commit">c49bc46</span><span class="title">侧边栏重排</span></div><div class="desc">按配置依赖链排序</div></div>
+</div>
+</section>
+<section id="s3">
+<h2><span class="sec-no">3</span>决定性重构 I：单体 → 模块化（8fb8706）</h2>
+<p>这是全项目第一次结构性动作，也是唯一一次"不改功能只改形状"的提交。<code>git show --stat</code> 显示 <code>pom.xml</code> 一次性 ±160 行、新增 6 个模块 pom，原 <code>src/main/java/com/zxcSpringAI/**</code> 全部搬进模块并按职责重新分包：</p>
+<table>
+<thead><tr>
+<th>原位置</th>
+<th>新位置</th>
+<th>语义变化</th>
+</tr></thead><tbody>
+<tr><td><code>src/main/java/com/zxcSpringAI/aiService/AgentOrchestrationService.java</code></td><td><code>stringer-agent/.../agent/orchestration/</code></td><td>编排从"AI 服务"里独立成一层</td></tr>
+<tr><td><code>src/main/java/com/zxcSpringAI/tools/ToolRouter.java</code></td><td><code>stringer-agent/.../agent/tools/</code></td><td>工具与编排同层，仍是"运行时"概念</td></tr>
+<tr><td><code>src/main/java/com/zxcSpringAI/common/**</code></td><td><code>stringer-common/**</code></td><td>异常、清洗、计量独立，成为最底层</td></tr>
+<tr><td><code>.../core/spi/{ChatMemoryStore,CheckpointSaver,ContentRetriever,ToolProvider}.java</code></td><td><code>stringer-core/.../core/spi/</code></td><td><strong>SPI 第一次成为独立模块</strong>，这是后来一切可替换设计的地基</td></tr>
+<tr><td><code>.../infrastructure/{checkpoint,ingestion,memory}/**</code></td><td><code>stringer-infrastructure/**</code></td><td>外部实现与 SPI 分离，方向固定为 infra → core</td></tr>
+<tr><td><code>.../capability/service/{RagService,WeatherService}.java</code></td><td><code>stringer-capability/**</code></td><td>业务能力单独一模块（后来被删除）</td></tr>
+<tr><td><code>src/main/resources/test.txt</code>（314 行）</td><td>删除</td><td>原型期样本数据出仓</td></tr>
+</tbody></table>
+<p>值得注意的两个细节：</p>
+<ol><li><strong><code>stringer-core</code> 里只有 7 个文件</strong>（4 个 SPI + 注解 + package-info），但它是整个架构的支点。后续 8 次重构（域模型、存储抽象、MCP 桥接）全部建立在这条"内核定义接口、外层提供实现"的轴上。</li><li><strong><code>stringer-example</code> 模块同时建、后来又被删</strong>（<code>6c1698f</code> 移除 example 模块）。这是典型的"先留个出口，等 SDK 成熟后砍掉"——最终出口变成了 <code>domainplane-chat-client</code> / <code>kb-client</code> / <code>tool-provider</code> 三个真实 SDK。</li></ol>
+</section>
+<section id="s4">
+<h2><span class="sec-no">4</span>决定性重构 II：域模型入场（61da30f）</h2>
+<p><code>61da30f</code> 是整个项目语义密度最高的一次提交：新增 <code>DomainAgent</code> / <code>DomainAgentFactory</code> / <code>Domains</code> / <code>DomainRegistry</code>（199 行）/ <code>@Tool</code> 四注解家族 / <code>ParamSchemaResolver</code>（258 行），同时 <code>AnnotatedToolScanner</code> 被整体重写（260 行改动），并一次性堆进 9 份设计文档（<code>DOMAIN-MODEL.md</code> 314 行、<code>SDK-REDESIGN.md</code> 501 行、<code>INTERVIEW-PREP.md</code> 988 行……）。</p>
+<p>它解决的是模块化之后暴露出来的真问题：模块分开了，但<strong>一次调用该拿哪些工具、查哪些知识、用哪个模型</strong>仍然散在配置和代码分支里。域作为"三维坐标"一次性收掉了这件事：</p>
+<div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">text</span></div><pre><code data-lang="text">调用 = (域, sessionId)
+域 → 沿链累加：工具可见性、知识索引、提示词
+域 → 就近覆盖：模型绑定
+域 → 必须叶子：可调用单元</code></pre></div>
+<p>此后所有提交都在把这三条语义钉死：<code>0b615c6</code>（扁平 → 父子树）、<code>c896c05</code>（工具可见性/知识库/提示词统一为沿链累加）、<code>0f3aeb5</code>（模型绑定改为沿域链回落的就近覆盖）、<code>f9336cb</code>（只有叶子域可调用，根域不再豁免）。到 <code>f9336cb</code> 时，"四维继承"才完整。</p>
+</section>
+<section id="s5">
+<h2><span class="sec-no">5</span>决定性重构 III：改名与语义收敛（de9e751）</h2>
+<p><code>de9e751</code> 动 357 个文件，其中绝大多数是<strong>纯 rename</strong>：<code>{stringer-api =&gt; domainplane-api}/pom.xml</code>、<code>com/zzkingcc/stringer/<strong></code> → <code>com/zzkingcc/domainplane/</strong></code>。它没有改逻辑，但影响很大——所有外部文档、SDK 用法、Docker 镜像名、日志前缀一次性换掉。</p>
+<p>这次提交前后还夹着一次<strong>语义清理</strong>（<code>fd0e3df</code>「清理全部兼容残留，文档以新设计为唯一出发点」、<code>c8f76b6</code>「统一 prompt-chain 命名，去掉 legacy Profile 术语」）。这两步合起来说明一件事：项目在 10-04 前后主动放弃了"向后兼容旧命名"的选项，选择让文档与代码只描述一种现实。代价是外部使用者要跟着改，收益是此后所有讨论只有一个词汇表——这对一个语义密集的中间件是划算的。</p>
+</section>
+<section id="s6">
+<h2><span class="sec-no">6</span>决定性重构 IV：未入库的存储抽象升级（2026-10-19 → 10-29）</h2>
+<p><code>c49bc46</code> 之后<strong>没有任何提交</strong>，而工作区里有 286 处改动（142 改 + 144 增，+7,392 / −5,674 行）。按目录看，这次升级做了四件事：</p>
+<table>
+<thead><tr>
+<th>方向</th>
+<th>可见证据</th>
+<th>性质</th>
+</tr></thead><tbody>
+<tr><td>存储抽象（F05）</td><td>删除 <code>infrastructure/elasticsearch/**</code>（含 7 个类 + 4 个测试），新增 <code>infrastructure/kb/es</code>（7 类）与 <code>infrastructure/kb/qdrant</code>（9 类）；<code>domain/rag/store</code> 新增 16 类 SPI</td><td>去 ES 强依赖，首个第二后端落地</td></tr>
+<tr><td>编排拆分（F07）</td><td><code>runtime/orchestration</code> 从 2 个类变 8 个（GraphFactory / TurnInputFactory / TurnLifecycle / TurnContextFactory / TurnFailureHandler / OrchestrationDeps / ConcurrencyGate）；<code>AgentOrchestrationService</code> 2,330 → 1,203 行</td><td>把 1 个巨型服务拆成模板 + 5 个协作者</td></tr>
+<tr><td>工具域（F08）</td><td>新增 <code>runtime/domain/ToolDomainRegistry</code>（声明史 + 撤销态分离）</td><td>修"心跳把已撤销的域加回来"</td></tr>
+<tr><td>模型适配（F10）</td><td><code>resources/adapters/</code> 下 29 份 <code>.json.txt</code> 归档进 <code>disabled/</code>，只留 <code>deepseek-flash.json</code> + <code>siliconflow-embedding.json</code> 启用</td><td>停止"替每家厂商写适配"，改样板 + 用户自助填参</td></tr>
+</tbody></table>
+<p>这次升级的形态很特别：<strong>它不是一次提交，而是一整段没有入库的工作</strong>。从工程风险看这是当前最该处理的问题（见下节）。</p>
+</section>
+<section id="s7">
+<h2><span class="sec-no">7</span>演化规律</h2>
+<table>
+<thead><tr>
+<th>维度</th>
+<th>08-06 原型</th>
+<th>10-19 现状</th>
+<th>驱动力</th>
+</tr></thead><tbody>
+<tr><td>包名</td><td><code>com.zxcSpringAI</code>（无组织含义）</td><td><code>com.zzkingcc.domainplane</code>（域名 + 产品）</td><td>开源化</td></tr>
+<tr><td>模块数</td><td>1（平铺）</td><td>11（严格单向）</td><td>拆分</td></tr>
+<tr><td>场景隔离</td><td>代码分支 / 配置项</td><td>域树（点分路径，四维继承）</td><td><strong>需求反向驱动</strong>：一套能力服务多场景</td></tr>
+<tr><td>工具声明</td><td>Spring <code>@Tool</code> 单注解</td><td>四注解家族 + 域声明 + 审批标注 + schema 自动产出</td><td>schema 双端统一</td></tr>
+<tr><td>检索</td><td>单索引 + ES 脚本打分</td><td>一域一索引 + 双路召回 + 可插拔融合 + 可换后端</td><td>越权边界 + 后端可替换</td></tr>
+<tr><td>存储耦合</td><td>直接 <code>ElasticsearchClient</code></td><td>SPI（<code>KnowledgeStore</code> / <code>KeywordSearcher</code> / <code>VectorSearcher</code> + <code>StoreCapabilities</code>）</td><td>去强依赖（未完全收口）</td></tr>
+<tr><td>并发模型</td><td>平台线程池（core 8 / max 32）</td><td>虚拟线程 + 显式 <code>ConcurrencyGate</code></td><td>每轮一个线程等模型</td></tr>
+<tr><td>会话状态键</td><td>裸 sessionId</td><td><code>(域, sessionId)</code></td><td>同域隔离，防跨域串号</td></tr>
+<tr><td>测试规模</td><td>个位数</td><td>1,230 例（12 模块全绿）</td><td>回归压力</td></tr>
+<tr><td>文档形态</td><td>README</td><td>设计文档（16 块 / 225KB）+ 4 份分阶段改造计划</td><td>先设计后实现</td></tr>
+</tbody></table>
+<p>规律有三条值得记下来：</p>
+<ol><li><strong>先拆分，再建模，最后收敛命名</strong>。顺序颠倒会有两种失败：先建模会得到一个"一个模块里的超大模型"，先收敛命名会反复改名。这个项目的顺序是对的。</li><li><strong>需求反向驱动基础层</strong>。域树（业务需求）逼出了 SPI（基础设施抽象）：因为要"一域一索引、后端可换"，<code>KnowledgeStore</code> 才必须存在。反过来做的项目通常会把 ES 类型泄漏到业务层，然后改不动。</li><li><strong>每次范式切换都伴随一次大规模文档动作</strong>。<code>61da30f</code> 带 9 份设计稿、<code>de9e751</code> 带 20+ 份文档改动、本轮升级带 4 份 20 万字的改造计划。文档在这个项目里不是产物，是设计的执行载体。</li></ol>
+</section>
+<section id="s8">
+<h2><span class="sec-no">8</span>结论与风险</h2>
+<div class="callout red"><span class="t">风险一：21 天的工作没有入库</span><p><code>c49bc46</code>（10-19）之后所有 L1-L4 升级都在工作区。单次 <code>git checkout</code>、一次误 stash drop、一台机器坏掉，损失的是"存储抽象 + 编排拆分 + 工具域 + 模型适配"四块升级（+7,392 行）。这是当前最高优先级工程风险，与代码质量无关。</p></div>
+<div class="callout warn"><span class="t">风险二：提交信息编码不一致，考古成本高</span><p>10-04 之前的提交信息是 GBK 字节流（<code>git log</code> 在 UTF-8 终端下全是乱码，必须加 <code>--encoding=GBK</code> 才能读）。这直接抬高"为什么当初这么改"的追溯成本——上面这份时间线里 10-04 前的阶段名，全部是重新解码后人工读出来的。</p></div>
+<div class="callout info"><span class="t">结论</span><p>这条演化线的价值不在"用了什么技术"，而在于它记录了一个判断被反复验证的过程：<strong>多场景共用一个 Agent 平台，靠的不是配置项和代码分支，而是把业务边界提升成第一类对象（域），再让所有能力沿这个边界装配</strong>。四次重构里前三次都在为这个判断铺路，第四次（存储抽象）是它的直接推论——边界既然是一域一索引，后端就应该可换。</p></div>
+</section>
+      <footer style="margin-top:70px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <span>DomainPlane 架构演化分析 · 生成于 DomainPlane架构演化分析</span>
+        <span><a href="DomainPlane代码审计报告.html">DomainPlane代码审计报告</a> · <a href="DomainPlane架构实现分析.html">DomainPlane架构实现分析</a> · <a href="DomainPlane架构演化分析.html">DomainPlane架构演化分析</a> · <a href="DomainPlane第一性原理与设计巧思.html">DomainPlane第一性原理与设计巧思</a></span>
+      </footer>
+    </div>
+  </main>
+</div>
+<script>
+/* ---------- 目录生成 + scrollspy ---------- */
+(function(){
+  var nav = document.getElementById('tocNav');
+  var sections = document.querySelectorAll('section[id]');
+  var html = '<div class="toc-label">目录</div>';
+  sections.forEach(function(s){
+    var no = s.querySelector('.sec-no');
+    var t = s.querySelector('h2');
+    if(!t) return;
+    var label = (no ? no.textContent + ' · ' : '') + t.textContent.replace(no ? no.textContent : '', '').trim();
+    html += '<a href="#' + s.id + '" data-target="' + s.id + '">' + label + '</a>';
+    s.querySelectorAll('h3').forEach(function(h3){
+      var id = s.id + '-' + h3.textContent.replace(/\s+/g,'').slice(0,8);
+      h3.id = id;
+      html += '<a class="l2" href="#' + id + '" data-target="' + id + '">' + h3.textContent + '</a>';
+    });
+  });
+  nav.innerHTML = html;
+  var links = nav.querySelectorAll('a');
+  var map = {};
+  links.forEach(function(a){ map[a.dataset.target] = a; });
+  var targets = [];
+  document.querySelectorAll('h2[id],h3[id],section[id]').forEach(function(el){ if(el.id) targets.push(el); });
+  window.addEventListener('scroll', function(){
+    var pos = window.scrollY + 90, current = null;
+    for(var i=0;i<targets.length;i++){
+      if(targets[i].offsetTop <= pos) current = targets[i];
+    }
+    links.forEach(function(a){ a.classList.remove('active'); });
+    if(current && map[current.id]) map[current.id].classList.add('active');
+  }, {passive:true});
+})();
+
+/* ---------- 巧思卡展开 ---------- */
+(function(){
+  document.querySelectorAll('.cv .cv-h').forEach(function(header){
+    header.addEventListener('click', function(){
+      header.parentElement.classList.toggle('open');
+    });
+  });
+})();
+
+/* ---------- 轻量代码高亮（Python / YAML） ---------- */
+(function(){
+  var KEYWORDS = new Set(("def class return import from if elif else for in not and or raise with try except lambda "+
+    "yield pass break continue global nonlocal del assert async await is None True False self super").split(' '));
+  var YAML_KEYS = new Set(("schema name version description objects relations functions actions properties type required "+
+    "from to ref runtime implementation model property_definitions object_types relation_types interaction_policies "+
+    "presentation_tools available_on context_input requires confirmation handler icon inputs effects summary params "+
+    "status details role code amount period date datetime string number boolean json money open mutable source "+
+    "id_field config database kind display_name type_policy mutability data_source instructions acyclic from_types "+
+    "to_types default message create_object update_object delete_object create_relation update_relation delete_relation").split(' '));
+  function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function colorize(code, lang){
+    var out = '', i = 0, n = code.length;
+    var isYaml = lang === 'yaml';
+    while(i < n){
+      var c = code[i];
+      if(c === '#' && (i === 0 || code[i-1] === '\n')){
+        var j = code.indexOf('\n', i); if(j === -1) j = n;
+        out += '<span class="tok-c">' + esc(code.slice(i, j)) + '</span>'; i = j; continue;
+      }
+      if(c === '"' || c === "'"){
+        var q = c, j = i + 1;
+        while(j < n){ if(code[j] === q){ j++; break; } if(code[j] === '\\') j++; j++; }
+        out += '<span class="tok-s">' + esc(code.slice(i, j)) + '</span>'; i = j; continue;
+      }
+      if(/[0-9]/.test(c) || (c === '-' && /[0-9]/.test(code[i+1]||''))){
+        var j = i; while(j < n && /[0-9.\-]/.test(code[j])) j++;
+        out += '<span class="tok-n">' + esc(code.slice(i, j)) + '</span>'; i = j; continue;
+      }
+      if(/[A-Za-z_\u4e00-\u9fa5]/.test(c)){
+        var j = i; while(j < n && /[A-Za-z0-9_\u4e00-\u9fa5]/.test(code[j])) j++;
+        var word = code.slice(i, j);
+        var next = code[j] || '';
+        if(isYaml && next === ':' && YAML_KEYS.has(word)) out += '<span class="tok-k">' + esc(word) + '</span>';
+        else if(!isYaml && KEYWORDS.has(word)) out += '<span class="tok-k">' + esc(word) + '</span>';
+        else if(/^[A-Z]/.test(word)) out += '<span class="tok-f">' + esc(word) + '</span>';
+        else out += esc(word);
+        i = j; continue;
+      }
+      if(c === '(' || c === ')' || c === '[' || c === ']' || c === '{' || c === '}'){
+        out += '<span class="tok-p">' + c + '</span>'; i++; continue;
+      }
+      out += esc(c); i++;
+    }
+    return out;
+  }
+  document.querySelectorAll('pre code[data-lang]').forEach(function(el){
+    el.innerHTML = colorize(el.textContent, el.dataset.lang);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 600" width="1100" height="600" role="img" aria-label="模块分层与依赖方向">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <style>
+      .t { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #0f172a; }
+      .m { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #64748b; }
+      .box { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
+      .server { fill: #eef2ff; stroke: #c7d2fe; stroke-width: 1.5; }
+      .sdk { fill: #f0fdfa; stroke: #99f6e4; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect width="1100" height="600" fill="#ffffff"/>
+  <text class="t" x="40" y="44" font-size="20" font-weight="700">十一个模块，两条不相交的线</text>
+  <text class="m" x="40" y="70" font-size="13">服务端线从 api 一路向上；SDK 线从 api 旁支出去，两侧只靠报文说话。基础设施与运行时是兄弟，不是上下级。</text>
+
+  <!-- dependency arrow -->
+  <line x1="24" y1="556" x2="24" y2="112" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a2)"/>
+  <text class="m" x="40" y="592" font-size="11">依赖只向上：server → runtime / infrastructure → domain → common → api</text>
+
+  <!-- server -->
+  <rect class="server" x="40" y="96" width="680" height="84" rx="10"/>
+  <text class="t" x="60" y="124" font-size="14" font-weight="600">domainplane-server　156 类</text>
+  <text class="m" x="60" y="148" font-size="11">装配 · 16 Controller / 94 端点 · 鉴权 · 模型层 · MCP · 管控台静态资源 · 7 个定时任务</text>
+  <text class="m" x="60" y="166" font-size="11">唯一可执行产物：domainplane-v1.0-beta.2.jar</text>
+
+  <!-- runtime / infra -->
+  <rect class="box" x="40" y="204" width="330" height="84" rx="10"/>
+  <text class="t" x="60" y="232" font-size="14" font-weight="600">domainplane-runtime　49 类</text>
+  <text class="m" x="60" y="254" font-size="11">编排图 · 上下文装配 · 工具路由</text>
+  <text class="m" x="60" y="272" font-size="11">取消 / 流注册 · 能力工具 binder</text>
+
+  <rect class="box" x="390" y="204" width="330" height="84" rx="10"/>
+  <text class="t" x="410" y="232" font-size="14" font-weight="600">domainplane-infrastructure　60 类</text>
+  <text class="m" x="410" y="254" font-size="11">ES / Qdrant 适配 · Redis 三类存储</text>
+  <text class="m" x="410" y="272" font-size="11">8 种格式摄取与切片</text>
+
+  <text class="m" x="365" y="248" font-size="10" text-anchor="middle">并列</text>
+
+  <!-- domain -->
+  <rect class="box" x="40" y="312" width="680" height="76" rx="10"/>
+  <text class="t" x="60" y="340" font-size="14" font-weight="600">domainplane-domain　32 类</text>
+  <text class="m" x="60" y="362" font-size="11">纯领域：记忆双约束 · 检索计划与通道 · 分数制 / RRF 融合 · 存储 SPI（KnowledgeBackend 三件套）</text>
+
+  <!-- common -->
+  <rect class="box" x="40" y="412" width="680" height="70" rx="10"/>
+  <text class="t" x="60" y="440" font-size="14" font-weight="600">domainplane-common　16 类</text>
+  <text class="m" x="60" y="462" font-size="11">异常体系 · 输入清洗 · CJK 度量 · 原子落盘</text>
+
+  <!-- api -->
+  <rect class="box" x="40" y="506" width="680" height="64" rx="10"/>
+  <text class="t" x="60" y="534" font-size="14" font-weight="600">domainplane-api　42 类</text>
+  <text class="m" x="60" y="556" font-size="11">跨进程契约：AgentService · AgentEvent · 四条工具注解 · ErrorCode（60 条）· 域与索引名规则</text>
+
+  <!-- SDK column -->
+  <rect class="sdk" x="770" y="204" width="290" height="62" rx="10"/>
+  <text class="t" x="790" y="230" font-size="13" font-weight="600">domainplane-sdk-core　1 类</text>
+  <text class="m" x="790" y="250" font-size="11">server / username / password</text>
+
+  <rect class="sdk" x="770" y="286" width="290" height="62" rx="10"/>
+  <text class="t" x="790" y="312" font-size="13" font-weight="600">domainplane-client-core　8 类</text>
+  <text class="m" x="790" y="332" font-size="11">WebClient · 凭证缓存 · 错误翻译</text>
+
+  <rect class="sdk" x="770" y="368" width="138" height="62" rx="10"/>
+  <text class="t" x="786" y="392" font-size="12" font-weight="600">chat-client</text>
+  <text class="m" x="786" y="412" font-size="10">4 类</text>
+
+  <rect class="sdk" x="922" y="368" width="138" height="62" rx="10"/>
+  <text class="t" x="938" y="392" font-size="12" font-weight="600">kb-client</text>
+  <text class="m" x="938" y="412" font-size="10">2 类</text>
+
+  <rect class="sdk" x="770" y="450" width="290" height="62" rx="10"/>
+  <text class="t" x="790" y="476" font-size="12" font-weight="600">domainplane-tool-provider　12 类</text>
+  <text class="m" x="790" y="496" font-size="11">注册 + 心跳 + 回调执行</text>
+
+  <line x1="915" y1="266" x2="915" y2="282" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a2)"/>
+  <line x1="845" y1="348" x2="845" y2="364" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a2)"/>
+  <line x1="995" y1="348" x2="995" y2="364" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a2)"/>
+
+  <path d="M915,204 L915,190 L720,190" fill="none" stroke="#0d9488" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#a2)"/>
+  <text class="m" x="915" y="184" font-size="10" fill="#0f766e" text-anchor="middle">只走 HTTP / SSE，不共享类型之外的代码</text>
+
+  <text class="m" x="770" y="546" font-size="11">接入方只要三行配置即可启动；</text>
+  <text class="m" x="770" y="564" font-size="11">工具实例另需 tools=true 与 instance-id。</text>
+</svg>

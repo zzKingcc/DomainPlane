@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DomainPlane 第一性原理与设计巧思</title>
+<style>
+:root{
+  --bg:#f3f5f4; --surface:#ffffff; --surface-subtle:#f7f8f7;
+  --ink:#17201c; --muted:#68736d; --line:#dfe4e1; --line-strong:#cbd3ce;
+  --green:#156b4a; --green-dark:#0e5238; --green-soft:#e7f2ec;
+  --red:#b83b35; --red-soft:#f8e9e7; --amber:#9a6418; --amber-soft:#f8eedc;
+  --blue:#356a91; --blue-soft:#e7eff5;
+  --code-bg:#0f1a16; --code-ink:#d9e6df;
+  --mono:ui-monospace,SFMono-Regular,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  color:var(--ink); background:var(--bg);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;line-height:1.7;font-size:15px}
+a{color:var(--green);text-decoration:none}
+a:hover{text-decoration:underline}
+.layout{display:grid;grid-template-columns:250px minmax(0,1fr);min-height:100vh}
+/* ---------- 侧边 TOC ---------- */
+.toc{position:sticky;top:0;height:100vh;overflow-y:auto;background:#17231e;color:#edf4f0;padding:22px 16px;border-right:1px solid #25362e}
+.toc .brand{display:flex;align-items:center;gap:11px;padding:0 6px 22px}
+.toc .brand-mark{display:grid;place-items:center;width:38px;height:38px;background:#e7f2ec;color:var(--green-dark);font-weight:800;border-radius:8px;font-size:12px;letter-spacing:.5px}
+.toc .brand strong{display:block;font-size:14px}
+.toc .brand span{display:block;margin-top:2px;color:#97a89f;font-size:11px}
+.toc nav{display:grid;gap:2px}
+.toc a{display:block;padding:7px 10px;border-radius:6px;color:#aebdb5;font-size:13px;border-left:2px solid transparent;transition:.15s}
+.toc a:hover{color:#fff;background:rgba(255,255,255,.06);text-decoration:none}
+.toc a.active{color:#fff;background:#274337;border-left-color:#4fbf8d}
+.toc a.l2{padding-left:24px;font-size:12.5px;color:#8fa29a}
+.toc .toc-label{padding:14px 10px 6px;font-size:10.5px;letter-spacing:1.5px;color:#6f8379;text-transform:uppercase}
+main{min-width:0}
+/* ---------- Hero ---------- */
+.hero{background:linear-gradient(135deg,#0e5238 0%,#14573f 45%,#1d3b30 100%);color:#edf4f0;padding:56px 0 44px}
+.hero .wrap{max-width:940px;margin:0 auto;padding:0 32px}
+.hero .kicker{display:inline-flex;align-items:center;gap:8px;font-size:12px;letter-spacing:2px;color:#9dcdb6;text-transform:uppercase;font-weight:600}
+.hero .kicker::before{content:"";width:26px;height:2px;background:#4fbf8d}
+.hero h1{margin:14px 0 10px;font-size:32px;line-height:1.25}
+.hero p{margin:0;color:#b9c9c1;max-width:74ch;font-size:15px}
+.hero .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}
+.hero .chip{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);padding:6px 12px;border-radius:999px;font-size:12px;color:#d8e5de}
+.hero .chip b{color:#fff;font-weight:600}
+.hero .conclusion{margin-top:24px;padding:16px 18px;border-radius:10px;background:rgba(255,255,255,.07);border-left:3px solid #4fbf8d;font-size:14px;color:#cfe0d7}
+/* ---------- 正文 ---------- */
+.content{max-width:940px;margin:0 auto;padding:48px 32px 90px}
+section{margin-top:52px}
+section:first-child{margin-top:0}
+h2{font-size:24px;margin:0 0 6px;display:flex;align-items:center;gap:12px}
+h2 .sec-no{font-size:13px;font-weight:700;color:#fff;background:var(--green);width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none}
+h3{font-size:17.5px;margin:34px 0 10px;color:#14352a}
+h4{font-size:15px;margin:22px 0 8px;color:#0e5238}
+p{margin:10px 0;color:#2c3731}
+.lead{border-left:3px solid var(--green);padding:10px 16px;background:var(--green-soft);border-radius:0 8px 8px 0;font-size:14.5px;color:#173b2d;margin:14px 0}
+/* ---------- 代码框 ---------- */
+.codebox{margin:16px 0;border-radius:10px;overflow:hidden;border:1px solid #1c2d25;background:var(--code-bg);box-shadow:0 6px 18px rgba(20,40,32,.12)}
+.codebox .bar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:#14221c;border-bottom:1px solid #22352c;color:#7f9a8e;font-size:11.5px}
+.codebox .bar .dot{width:9px;height:9px;border-radius:50%}
+.codebox .bar .dot:nth-child(1){background:#f0635c}.codebox .bar .dot:nth-child(2){background:#e2b25c}.codebox .bar .dot:nth-child(3){background:#5fc98a}
+.codebox .bar .fname{margin-left:6px;font-family:var(--mono);color:#9fb6ab}
+.codebox pre{margin:0;padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:12.8px;line-height:1.65;color:var(--code-ink)}
+.codebox pre code{font-family:inherit;background:none;color:inherit;padding:0}
+.tok-c{color:#6d8a7e;font-style:italic}
+.tok-s{color:#e6c97a}
+.tok-k{color:#7fd6a8;font-weight:600}
+.tok-n{color:#86c5e8}
+.tok-f{color:#d9a7f0}
+.tok-p{color:#c88fd8}
+/* ---------- 表格 ---------- */
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px;background:var(--surface);border-radius:10px;overflow:hidden;box-shadow:0 2px 10px rgba(28,41,34,.06)}
+th{background:#eef3f0;color:#24402f;text-align:left;padding:10px 14px;font-size:12.5px;letter-spacing:.3px;border-bottom:1px solid var(--line)}
+td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td code,li code,p code{font-family:var(--mono);font-size:12px;background:#e9efec;border:1px solid #dbe2de;border-radius:5px;padding:1.5px 6px;color:#0e5238}
+/* ---------- 卡片 / Callout ---------- */
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:16px 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:0 2px 10px rgba(28,41,34,.05)}
+.card h4{margin:0 0 8px}
+.card p{margin:6px 0;font-size:13.5px}
+.card .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.5px;padding:3px 9px;border-radius:999px;margin-bottom:8px}
+.callout{border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14px;border:1px solid}
+.callout.info{background:var(--blue-soft);border-color:#c9dbe8;color:#234a66}
+.callout.warn{background:var(--amber-soft);border-color:#e8d9b8;color:#6d4712}
+.callout.ok{background:var(--green-soft);border-color:#c4e0d1;color:#14543a}
+.callout.red{background:var(--red-soft);border-color:#ecc9c6;color:#7c2b27}
+.callout .t{font-weight:700;display:block;margin-bottom:4px}
+/* ---------- 分层图 ---------- */
+.layers{display:grid;gap:0;margin:20px 0;border:1px solid var(--line-strong);border-radius:14px;overflow:hidden;background:var(--surface)}
+.layer{padding:16px 20px;border-top:1px solid var(--line)}
+.layer:first-child{border-top:none}
+.layer .lname{font-weight:700;font-size:15px;display:flex;align-items:center;gap:10px}
+.layer .lname .badge{font-size:10.5px;font-weight:800;letter-spacing:1px;padding:3px 8px;border-radius:6px}
+.layer .ldesc{font-size:13px;color:var(--muted);margin-top:4px}
+.layer .lfiles{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.layer .lfiles span{font-family:var(--mono);font-size:11.5px;background:#f0f3f1;border:1px solid var(--line);border-radius:6px;padding:3px 8px;color:#33453c}
+.l-base{background:#e7f2ec}.l-domain{background:#fff}.l-agent{background:#e7eff5}
+.badge-base{background:#c4e0d1;color:#14543a}.badge-domain{background:#e8d9b8;color:#6d4712}.badge-agent{background:#c9dbe8;color:#234a66}
+/* ---------- 流程图 ---------- */
+.flow{display:grid;gap:10px;margin:18px 0}
+.flow .step{display:grid;grid-template-columns:46px 1fr auto;gap:14px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.flow .idx{width:46px;height:46px;border-radius:11px;display:grid;place-items:center;font-weight:800;font-size:16px;color:#fff}
+.flow .step .st{font-weight:700;font-size:14px}
+.flow .step .sd{font-size:12.8px;color:var(--muted)}
+.flow .side{font-family:var(--mono);font-size:11px;color:#3f5249;background:#eef2ef;border-radius:7px;padding:4px 9px;white-space:nowrap}
+.flow .join{text-align:center;color:var(--green);font-weight:700;font-size:13px;letter-spacing:3px}
+/* ---------- 时间线 ---------- */
+.master-tl{position:relative;margin:24px 0;padding-left:34px}
+.master-tl::before{content:"";position:absolute;left:13px;top:8px;bottom:8px;width:3px;background:linear-gradient(#156b4a,#356a91)}
+.master-tl .mt{position:relative;margin:0 0 14px}
+.master-tl .mt .dot{position:absolute;left:-32px;top:8px;width:15px;height:15px;border-radius:50%;background:#fff;border:3px solid var(--green)}
+.master-tl .mt .ph{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.master-tl .mt .ph .badge{font-size:11px;font-weight:800;letter-spacing:1px;padding:3px 10px;border-radius:6px}
+.master-tl .mt .ph .date{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.master-tl .mt .ph .commit{font-family:var(--mono);font-size:11.5px;color:#4a5c53;background:#eef2ef;border-radius:6px;padding:2px 8px}
+.master-tl .mt .ph .title{font-weight:700;font-size:15px}
+.master-tl .mt .desc{font-size:13px;color:#3a4a42;margin-top:3px}
+.b-a{background:#e7f2ec;color:#14543a}.b-b{background:#dcefe4;color:#14543a}.b-c{background:#f8eedc;color:#6d4712}
+.b-d{background:#f3e8c9;color:#6d4712}.b-e{background:#e7eff5;color:#234a66}.b-f{background:#e8d9b8;color:#6d4712}
+.b-g{background:#c9dbe8;color:#234a66}.b-h{background:#d9c9e8;color:#4a2a66}
+/* ---------- 巧思可折叠卡 ---------- */
+.clever{display:grid;gap:14px;margin:14px 0}
+.cv{background:var(--surface);border:1px solid var(--line);border-radius:13px;overflow:hidden;box-shadow:0 2px 10px rgba(28,41,34,.05)}
+.cv .cv-h{display:grid;grid-template-columns:44px 1fr auto;gap:14px;align-items:center;padding:13px 18px;background:#fafbfa;border-bottom:1px solid var(--line);cursor:pointer;user-select:none}
+.cv .cv-n{width:44px;height:44px;border-radius:11px;display:grid;place-items:center;font-weight:800;font-size:15px;color:#fff}
+.cv .cv-t{font-weight:800;font-size:14.5px;line-height:1.4}
+.cv .cv-f{font-family:var(--mono);font-size:11px;color:var(--muted);background:#eef2ef;border-radius:6px;padding:2px 8px;white-space:nowrap}
+.cv .cv-b{display:none;padding:6px 18px 16px}
+.cv.open .cv-b{display:block}
+.cv .cv-b p{font-size:13.6px;color:#33423b}
+.cv .cv-b .why{margin-top:10px;padding:10px 14px;border-radius:9px;background:var(--green-soft);border-left:3px solid var(--green);font-size:13px;color:#173b2d}
+.cv .toggle{color:var(--muted);font-size:18px;transition:.2s}
+.cv.open .toggle{transform:rotate(45deg)}
+/* ---------- 双栏 / 列表 / 响应式 ---------- */
+.dual{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0}
+.check li{margin:6px 0;list-style:none;padding-left:28px;position:relative}
+.check li::before{content:"✓";position:absolute;left:2px;top:0;color:var(--green);font-weight:800}
+@media(max-width:860px){
+  .layout{grid-template-columns:1fr}
+  .toc{display:none}
+  .hero h1{font-size:25px}
+  .dual{grid-template-columns:1fr}
+  .cv .cv-h{grid-template-columns:40px 1fr}
+  .cv .cv-f{display:none}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <div class="brand">
+      <div class="brand-mark">原理</div>
+      <div><strong>第一性原理与巧思</strong><span>这个系统在为谁解决什么不可回避的问题，以及代码里 12 处把它焊死的设计</span></div>
+    </div>
+    <nav id="tocNav"></nav>
+  </aside>
+  <main>
+    <header class="hero">
+      <div class="wrap">
+        <div class="kicker">Analysis · 第一性原理</div>
+        <h1>DomainPlane 第一性原理与设计巧思</h1>
+        <p>这个系统在为谁解决什么不可回避的问题，以及代码里 12 处把它焊死的设计</p>
+        <div class="meta"><span class="chip">根本问题 · 不可靠的模型 + 多业务场景</span><span class="chip">基本事实 · 4 条</span><span class="chip">巧思 · 12 项，覆盖 6 层</span></div>
+        <div class="conclusion"><b>结论先行：</b>根本问题只有一句话：要把"会撒谎、会超时、会中断"的模型，装进"多业务场景共用一套能力"的容器里，且任何一次越权、静默降级、状态撒谎都不能发生。四条不可再分的事实决定了四类必然设计（域链装配、失败可区分、状态可恢复且不撒谎、进程内状态必须显式化）。代码里 12 处设计之所以精妙，是因为它们不是"最佳实践"，而是这四条事实的直接推论——换成别的写法，故障会以"看起来正常"的方式出现。</div>
+      </div>
+    </header>
+    <div class="content">
+<section id="s1">
+<h2><span class="sec-no">1</span>根本问题</h2>
+<p>一句话：<strong>在一个进程里，让多个业务场景共用同一套 Agent 能力，而每次调用的能力边界、数据边界、失败语义都必须由业务结构决定，不能由代码分支决定。</strong></p>
+<p>拆开看，这个容器要同时容纳四种矛盾：</p>
+<ul><li>模型不可信（会编、会超时、会被提示词注入带走）；</li><li>检索不可靠（外部存储会挂、会慢、会在换了嵌入模型后全废）；</li><li>交互是长事务（一轮几十秒、可能人工审批挂起数小时、可能被用户中途停止）；</li><li>部署是单机的（没有分布式事务，没有跨节点状态，没有一致性协议可用）。</li></ul>
+</section>
+<section id="s2">
+<h2><span class="sec-no">2</span>四条不可再分的基本事实</h2>
+<div class="callout info"><span class="t">事实一（本体论）：业务边界先于调用存在，而且是一棵树</span><p>一个客服场景、一个工单场景、一个内网运维场景，它们的边界不是"调用时才决定"的——它在上线时就以组织结构存在，并且有公共父级（公司级政策、通用话术）。所以"能力如何装配"只能有一个答案：<strong>沿一棵已存在的树继承，而不是在调用处拼 if-else</strong>。</p><p>它推翻了什么表面答案：配置项 + 开关。"给每个场景加一堆 <code>xxx.enabled</code>"在场景数到 3 之后必然失控，因为公共部分会被复制三遍。</p></div>
+<div class="callout info"><span class="t">事实二（认识论）：模型和检索的输出不可信，但"没命中"与"链路坏了"必须可区分</span><p>对模型而言，"我不知道"和"我出错了"是两种完全不同的回答；对检索而言，"库里没有"和"库连不上"也是。如果系统把两者揉成同一个空结果，用户会得到一个看起来正常、实际错误的答案，而且<strong>没有人会去查配置</strong>——这是最贵的一类故障：不报错、不留痕、只让人做错事。</p><p>它推翻了什么表面答案：把所有异常 catch 住返回空列表（"优雅降级"）。</p></div>
+<div class="callout info"><span class="t">事实三（工程论）：长事务必须可恢复，且恢复时的状态不能撒谎</span><p>一轮对话跨几十秒到几小时，中间可能人工审批、可能断连、可能被停止。可恢复意味着状态要落盘；而不撒谎意味着：<strong>落盘失败必须让这一轮失败，不能假装成功</strong>。半截回答被当成完整回答、被清空的断点被当成"没有会话"，都是状态撒谎。</p><p>它推翻了什么表面答案：失败即吞、下次重试。</p></div>
+<div class="callout info"><span class="t">事实四（运维论）：单进程内存是唯一不需要一致性的存储，多实例之前任何跨节点状态都是假承诺</span><p>停止标志、SSE 连接、远程工具实例在线表，全在 JVM 堆里。这不是疏忽，是当前部署形态的直接结果。若假装它们能跨实例，得到的是"偶尔停不掉、偶尔路由到已死实例"——比诚实地只支持单实例更糟。</p><p>它推翻了什么表面答案：先上 Redis 把状态"分布式化"，再考虑一致性。</p></div>
+</section>
+<section id="s3">
+<h2><span class="sec-no">3</span>从事实到必然设计</h2>
+<table>
+<thead><tr>
+<th>事实</th>
+<th>必然设计</th>
+<th>代码证据</th>
+</tr></thead><tbody>
+<tr><td>一</td><td>域树 + 四维继承（工具/知识/提示词沿链累加，模型就近覆盖，只有叶子可调用）</td><td><code>DomainRegistry.isEffectiveCallable:444-446</code>、<code>Domains.validatePath:106-112</code></td></tr>
+<tr><td>一</td><td>一域一索引：边界不改由"查哪些索引"保证</td><td><code>KbIndexes.nameOf</code>、<code>DomainChannelProvider:35-47</code></td></tr>
+<tr><td>一</td><td>会话状态键 = <code>(域, sessionId)</code>，断点/记忆/停止同键</td><td><code>CancellationRegistry:36</code>、<code>SessionKeys:24-26</code></td></tr>
+<tr><td>二</td><td>检索"全通道失败"抛异常，不与"没命中"同形</td><td><code>CompositeRetriever:206-211</code></td></tr>
+<tr><td>二</td><td>存储读写方法逐个钉死异常姿态（fail-closed / fail-open 各有理由）</td><td><code>KnowledgeStore:13-20</code> 类注释、<code>exists:35</code>、<code>write:77</code></td></tr>
+<tr><td>二</td><td>工具执行前 fail-closed 复核域可见性，区分"没权限"与"不存在"</td><td><code>AgentGraphFactory:457-478</code>、<code>ToolRouter:138-142</code></td></tr>
+<tr><td>三</td><td>检查点读失败抛 <code>CheckpointCorruptedException</code>，绝不当空列表</td><td><code>RedisCheckpointSaver:253-270</code></td></tr>
+<tr><td>三</td><td>记忆只追加 + 尾部回滚锚点（先记条数再写）</td><td><code>AgentOrchestrationService:972-979</code></td></tr>
+<tr><td>三</td><td>SSE 关掉容器 30s 异步超时，客户端校验终止事件</td><td><code>application.yaml:20-27</code>、<code>DefaultDomainPlaneAgent</code> 终止校验</td></tr>
+<tr><td>四</td><td>单实例守卫：抢不到租约直接中断启动</td><td><code>SingleInstanceGuard:86-107</code></td></tr>
+<tr><td>四</td><td>虚拟线程 + 显式 <code>ConcurrencyGate</code>（执行器不再有队列上限）</td><td><code>GraphConfiguration:86-92,126-127</code>、<code>ConcurrencyGate:42-55</code></td></tr>
+</tbody></table>
+</section>
+<section id="s4">
+<h2><span class="sec-no">4</span>巧思全景</h2>
+<p>以下 12 项按"防住了什么不可靠性"排列，覆盖存储层、会话层、编排层、工具体系、模型层、鉴权层六个层次。</p>
+<div class="clever">
+<div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--green)">1</span><span class="cv-t">越权边界写在"查哪些索引"上</span><span class="cv-f">KbIndexes.java / DomainChannelProvider.java</span><span class="toggle">+</span></div><div class="cv-b">
+<p>检索域 D 时，通道集合 = D 自身 + 全部祖先域，每个域各召回关键词与向量两路。文档归属由"上传到哪个域的索引"决定，<code>metadata.domain</code> 只用于管控台展示，<strong>不参与过滤</strong>。</p>
+<div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">server/knowledge/DomainChannelProvider.java</span></div><pre><code data-lang="java">// 通道 = 域链 × 2 路；不在链上的索引根本不会被构造出来
+List&lt;Channel&gt; channels() { /* 沿域链向上，逐域产出 keyword + vector */ }</code></pre></div>
+<div class="why"><b>为什么必然：</b>事实一要求边界随业务结构走。用过滤条件（<code>WHERE domain IN (...)</code>）意味着每次新增字段、每次改 SQL 都有一次漏写的机会；用索引选择意味着漏写不可能——不存在的通道不会返回结果。</div>
+</div></div>
+<div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--amber)">2</span><span class="cv-t">全部通道失败 ≠ 没有相关内容</span><span class="cv-f">CompositeRetriever.java:206-211</span><span class="toggle">+</span></div><div class="cv-b">
+<div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">java</span></div><pre><code data-lang="java">if (succeeded == 0) {
+    // 全部通道失败 ≠ 没有相关内容：这里若返回空列表，
+    // "检索链路坏了"会和"真没命中"长得一模一样
+    throw new IllegalStateException("知识库检索全部通道失败（通道数 " + channels.size() + "）");
+}</code></pre></div>
+<div class="why"><b>为什么必然：</b>事实二。这条 if 是整个 RAG 链路上最便宜的一行代码，也是唯一能把"配置错了"和"库里是空的"分开的地方。</div>
+</div></div>
+<div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--blue)">3</span><span class="cv-t">检查点读失败必须炸，不能当空列表</span><span class="cv-f">RedisCheckpointSaver.java:253-270</span><span class="toggle">+</span></div><div class="cv-b">
+<p>断点写入是"读全部 → 加一条 → 写回整份"。如果读失败被当成空列表，下一次写入就会把整段会话历史覆盖成一条，全程无异常，用户收到的是"会话不存在，请新建会话"。</p>
+<div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">java</span></div><pre><code data-lang="java">private CheckpointCorruptedException corrupt(String key, Exception cause) {
+    // fail-closed 与记忆侧一致：数据存疑时宁可不提供，
+    // 也不能提供一份被清空过的"正确答案"
+    return new CheckpointCorruptedException("检查点数据损坏，已中止本轮读写…", cause);
+}</code></pre></div>
+<div class="why"><b>为什么必然：</b>事实三。可恢复性的前提是"状态没被悄悄改过"。降级成空在这里不是容错，是数据销毁。</div>
+</div></div>
+<div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--green-dark)">4</span><span class="cv-t">写扇出、读只走 primary</span><span class="cv-f">FanOutStore.java:67-113</span><span class="toggle">+</span></div><div class="cv-b">
+<p>多后端时写入扇出到全部 target（任一失败即整体失败），去重只问 primary，<code>capabilities()</code>、<code>documents()</code>、<code>readByDocId()</code> 全部以 primary 为准。删集合尤其严格：任一后端删不掉即整体失败，因为集合名是域路径哈希，<strong>域重建后同名集合会把旧知识原样复活</strong>。</p>
+<div class="why"><b>为什么必然：</b>事实二 + 事实一。"多副本"最容易犯的错是把读也摊开——副本落后就会让同一个域在不同请求里看到不同的知识，而这种不一致没有任何报错。</div>
+</div></div>
+<div class="cv"><div class="cv-h"><span class="cv-n" style="background:#356a91">5</span><span class="cv-t">切片原文剥离向量后当权威源</span><span class="cv-f">ChunkArchive.java:70-94</span><span class="toggle">+</span></div><div class="cv-b">
+<p>归档时把 <code>vector</code> 置空再落 JSON（768 维 ≈ 6KB/条，而重灌反正要重新 embed），载体是 <code>BlobStore</code>，键 <code>kb/chunks/{index}/{docId}.json</code>。归档失败只告警 + 打指标，由对账补写。</p>
+<div class="why"><b>为什么必然：</b>事实二。换嵌入模型 = 索引全废，此时"能不能取回原文"决定了这件事是一次重灌还是一次数据迁移。存向量等于存一份注定作废的复印件。</div>
+</div></div>
+<div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--green)">6</span><span class="cv-t">撤销先于清除：心跳加不回来</span><span class="cv-f">ToolDomainRegistry.java:97-113</span><span class="toggle">+</span></div><div class="cv-b">
+<div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">java</span></div><pre><code data-lang="java">public void forget(Collection&lt;String&gt; domains) {
+    synchronized (lock) {
+        revoked.addAll(...);      // 先记撤销
+        declared.removeAll(domains); // 再清声明
+    }
+}</code></pre></div>
+<div class="why"><b>为什么必然：</b>事实一。顺序反过来的话，"剥离完成"到"记下撤销"之间的一次心跳就能把域加回来，删域当场失效——而且失败方式是"偶尔删不掉"，不报错、不留痕。</div>
+</div></div>
+<div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--amber)">7</span><span class="cv-t">可调用性：写入存意图，读取算生效</span><span class="cv-f">DomainRegistry.java:436-446</span><span class="toggle">+</span></div><div class="cv-b">
+<div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">java</span></div><pre><code data-lang="java">public boolean isCallable(String domainId) {
+    Domain domain = domains.get(Domains.normalize(domainId));
+    return domain != null &amp;&amp; isEffectiveCallable(domain);
+}
+/** 生效的可调用性 = 显式标记 ∧ 无子域。读取侧一律走这里 */
+private boolean isEffectiveCallable(Domain domain) {
+    return domain.callable() &amp;&amp; !hasChildren(domain.id());
+}</code></pre></div>
+<p>落盘文件里只有"意图"（显式标记），"现在能不能当入口"是读取时派生的。写盘时反向写回<strong>生效值</strong>，保证文件、管控台展示、入口判据三者一致。</p>
+<div class="why"><b>为什么必然：</b>事实一。状态一旦有两个来源（标记 + 子域列表），就必须选一个作为唯一判据；把派生值也落盘，等于给自己留了一条"文件与内存不一致"的暗道。</div>
+</div></div>
+<div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--blue)">8</span><span class="cv-t">改密即吊销：密钥 = HMAC(主密钥, 密码哈希)</span><span class="cv-f">CredentialService.java:102-105</span><span class="toggle">+</span></div><div class="cv-b">
+<div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">java</span></div><pre><code data-lang="java">private byte[] deriveKey(AccountSettings account) {
+    byte[] master = Base64.getDecoder().decode(account.getSigningKey());
+    return hmac(master, account.getPasswordHash());
+}</code></pre></div>
+<p>凭证本身无状态、不设有效期（<code>payload = {sub, iat}</code>），但签名密钥由密码哈希派生——改一次密码，全部旧凭证立刻失效，不需要任何吊销表。</p>
+<div class="why"><b>为什么必然：</b>事实四。单机部署不需要 token 存储；而"无状态"最容易变成"永远有效"，把吊销成本转移给运维。用密码哈希参与派生，等于把"改密"这个已有动作免费升级成全局吊销。</div>
+</div></div>
+<div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--green-dark)">9</span><span class="cv-t">单实例守卫：把进程内状态变成启动期契约</span><span class="cv-f">SingleInstanceGuard.java:86-107</span><span class="toggle">+</span></div><div class="cv-b">
+<p>启动时抢 Redis 租约，抢不到直接抛异常中断启动。理由写在代码注释里："多实例的失败方式是不报错的错误结果"。</p>
+<div class="why"><b>为什么必然：</b>事实四。既然停止标志、SSE、实例在线表都在堆里，多实例就会表现为"偶尔停不掉、偶尔路由到死实例"。与其让人在事故里发现，不如让第二个进程起不来。</div>
+</div></div>
+<div class="cv"><div class="cv-h"><span class="cv-n" style="background:#356a91">10</span><span class="cv-t">一轮一次 embed，全部向量通道复用</span><span class="cv-f">CompositeRetriever.java:149-166</span><span class="toggle">+</span></div><div class="cv-b">
+<div class="codebox"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">java</span></div><pre><code data-lang="java">if (queryVectorResolver != null &amp;&amp; hasVectorChannel(channels)) {
+    try { embedded = queryVectorResolver.embed(query.text()); }
+    catch (Exception e) { failed = true; /* 向量通道降级，关键词照常 */ }
+}</code></pre></div>
+<p>embed 失败时本轮向量通道全部标记失败、关键词通道继续，且整轮共享一个 deadline（域链深 5 = 10 条通道，按通道各等 5s 会拖到 50s）。</p>
+<div class="why"><b>为什么必然：</b>事实二 + 工程成本。一次 embed 失败不该让整轮检索抛异常（那会与"没命中"再次同形），但也不该每条通道各 embed 一遍。这里同时修掉了"失败语义"和"成本"两个问题。</div>
+</div></div>
+<div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--green)">11</span><span class="cv-t">硬删级联：中止点必须落在还没有东西被删的位置</span><span class="cv-f">DomainPurgeService.java:138-232</span><span class="toggle">+</span></div><div class="cv-b">
+<p>顺序是：停/强杀在飞会话 → 清 Redis（记忆/检查点/归档/倒排/摘要）→ 删知识索引（同时 evict 检索器缓存）→ 清域属性（提示词/模型绑定/MCP 绑定/工具声明）→ 才删注册表条目 → 清软删标记并落盘。</p>
+<div class="why"><b>为什么必然：</b>事实三。级联删除失败后的重试必须安全，所以第一个可能失败的点必须出现在"什么都没删"的位置。反过来先删注册表，一次失败就留下"域已删、知识还在"的孤儿，而孤儿无人认领。</div>
+</div></div>
+<div class="cv"><div class="cv-h"><span class="cv-n" style="background:var(--amber)">12</span><span class="cv-t">适配三级降级 + id 字典序，确定性优先</span><span class="cv-f">ModelAdapterRegistry.java:35-41</span><span class="toggle">+</span></div><div class="cv-b">
+<p>模型名精确 → 模型名正则（全串匹配）→ 服务商 host；同级多个命中按 <code>id</code> 字典序取第一个，不依赖文件列举顺序。坏文件只记 ERROR 并跳过，不影响启动与其余文件。</p>
+<div class="why"><b>为什么必然：</b>事实二 + 可运维性。适配文件是 curated 数据，一个手误不该让服务起不来；但匹配结果必须确定，否则同一个模型在两台机器上可能套用不同参数，故障无法复现。</div>
+</div></div>
+</div>
+</section>
+<section id="s5">
+<h2><span class="sec-no">5</span>巧思 → 基本事实 映射</h2>
+<table>
+<thead><tr>
+<th>巧思</th>
+<th>主要服务的事实</th>
+<th>防住的具体故障</th>
+</tr></thead><tbody>
+<tr><td>索引选择即边界</td><td>一</td><td>漏写过滤条件导致跨场景串数据</td></tr>
+<tr><td>全通道失败要抛</td><td>二</td><td>"库连不上"被当成"库里没有"，模型开始编</td></tr>
+<tr><td>检查点 fail-closed</td><td>三</td><td>一次读失败把整段会话历史覆盖成一条</td></tr>
+<tr><td>写扇出 / 读 primary</td><td>一、二</td><td>副本落后导致同域不同答案</td></tr>
+<tr><td>原文剥离向量归档</td><td>二</td><td>换模型 = 数据迁移而非重灌</td></tr>
+<tr><td>撤销先于清除</td><td>一</td><td>心跳把已撤销的域加回来，删域偶发失效</td></tr>
+<tr><td>意图与生效分离</td><td>一</td><td>文件与内存不一致，入口判据漂移</td></tr>
+<tr><td>密钥派生自密码哈希</td><td>四</td><td>凭证永久有效、无吊销手段</td></tr>
+<tr><td>单实例守卫</td><td>四</td><td>多实例静默半坏（停不掉、路由到死实例）</td></tr>
+<tr><td>一轮一次 embed</td><td>二</td><td>embed 失败整轮检索崩 / 重复嵌入</td></tr>
+<tr><td>级联删除顺序</td><td>三</td><td>删除失败留下无人认领的孤儿数据</td></tr>
+<tr><td>适配三级降级</td><td>二</td><td>一次配置手误让服务起不来 / 匹配不确定</td></tr>
+</tbody></table>
+</section>
+<section id="s6">
+<h2><span class="sec-no">6</span>代价与边界</h2>
+<div class="callout warn"><span class="t">代价一：一致性靠"人读懂注释"，不靠编译期</span><p>上面 12 项里有 6 项的成立条件是"调用方按约定走"：<code>ChunkArchive</code> 归档失败只告警（靠对账兜底）、<code>ToolDomainRegistry.forget</code> 的顺序、<code>isEffectiveCallable</code> 是唯一判据、<code>FanOutStore</code> 读只走 primary、<code>KnowledgeStore</code> 各方法的 fail-closed 姿态、<code>SessionKeys</code> 的键拼法。这些约定没有类型系统保护，写在新代码里的偏离不会被编译捕获。</p></div>
+<div class="callout warn"><span class="t">代价二：fail-closed 的可用性账单</span><p>"读失败就抛"在测试环境很好看，在生产是一张账单：Redis 抖动一次，所有进行中的会话一起报 70004（检查点错误），而不是静默降级。项目用"单实例 + Redis RDB+AOF"作为对冲，但这意味着部署方必须把 Redis 当一级依赖维护。</p></div>
+<div class="callout warn"><span class="t">代价三：抽象密度高，学习曲线陡</span><p>域的语义（沿链累加 / 就近覆盖 / 只有叶子可调用 / 软删宽限期 / 撤销态）分布在 <code>DomainStore</code>、<code>DomainRegistry</code>、<code>ToolDomainRegistry</code>、<code>DomainPurgeService</code> 四处，新人要同时读四个文件才能回答"删了这个域会怎样"。抽象省掉了租户表，但把复杂度转移到了概念数量上。</p></div>
+<div class="callout info"><span class="t">边界：多实例之前，这些巧思有一半要重写</span><p><code>CancellationRegistry</code>、<code>StreamSinkRegistry</code>、<code>InstanceRegistry</code> 是纯内存态；<code>SingleInstanceGuard</code> 只是把这条限制显式化，并没有解决它。真要水平扩展，停止语义、SSE 续传、实例路由三处都得改成"跨节点可寻址"，而不是把 Map 换成 Redis 就完事——因为"等它真的停下"这类操作在分布式下需要的是协调，不是共享存储。</p></div>
+</section>
+<section id="s7">
+<h2><span class="sec-no">7</span>结论</h2>
+<p>这个项目的设计密度不在"用了 LangGraph4j"或"上了虚拟线程"，而在于它把四个很朴素的事实各自推出了必然结论，并且愿意为结论付代价：</p>
+<ol><li><strong>边界是结构，不是参数</strong>——所以有域树、一域一索引、<code>(域, sessionId)</code> 会话键。</li><li><strong>"不知道"和"出错了"必须分开</strong>——所以有一整套 fail-closed 姿态、全通道失败抛异常、错误码 11 个段位。</li><li><strong>状态可以丢，但不能撒谎</strong>——所以检查点读失败要炸、记忆先记锚点再写、SSE 关掉容器超时并校验终止事件。</li><li><strong>没做到的事要显式承认</strong>——所以有单实例守卫：第二个进程起不来，而不是起来后偶尔出错。</li></ol>
+<p>反过来说，这套设计最脆弱的地方也在这里：它的正确性依赖"后来的人继续按约定走"。12 项巧思中，注释承担了 6 项的约束力——这是这个项目最值得补的一件事，比再拆一个类更重要。</p>
+</section>
+      <footer style="margin-top:70px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <span>DomainPlane 第一性原理与设计巧思 · 生成于 DomainPlane第一性原理与设计巧思</span>
+        <span><a href="DomainPlane代码审计报告.html">DomainPlane代码审计报告</a> · <a href="DomainPlane架构实现分析.html">DomainPlane架构实现分析</a> · <a href="DomainPlane架构演化分析.html">DomainPlane架构演化分析</a> · <a href="DomainPlane第一性原理与设计巧思.html">DomainPlane第一性原理与设计巧思</a></span>
+      </footer>
+    </div>
+  </main>
+</div>
+<script>
+/* ---------- 目录生成 + scrollspy ---------- */
+(function(){
+  var nav = document.getElementById('tocNav');
+  var sections = document.querySelectorAll('section[id]');
+  var html = '<div class="toc-label">目录</div>';
+  sections.forEach(function(s){
+    var no = s.querySelector('.sec-no');
+    var t = s.querySelector('h2');
+    if(!t) return;
+    var label = (no ? no.textContent + ' · ' : '') + t.textContent.replace(no ? no.textContent : '', '').trim();
+    html += '<a href="#' + s.id + '" data-target="' + s.id + '">' + label + '</a>';
+    s.querySelectorAll('h3').forEach(function(h3){
+      var id = s.id + '-' + h3.textContent.replace(/\s+/g,'').slice(0,8);
+      h3.id = id;
+      html += '<a class="l2" href="#' + id + '" data-target="' + id + '">' + h3.textContent + '</a>';
+    });
+  });
+  nav.innerHTML = html;
+  var links = nav.querySelectorAll('a');
+  var map = {};
+  links.forEach(function(a){ map[a.dataset.target] = a; });
+  var targets = [];
+  document.querySelectorAll('h2[id],h3[id],section[id]').forEach(function(el){ if(el.id) targets.push(el); });
+  window.addEventListener('scroll', function(){
+    var pos = window.scrollY + 90, current = null;
+    for(var i=0;i<targets.length;i++){
+      if(targets[i].offsetTop <= pos) current = targets[i];
+    }
+    links.forEach(function(a){ a.classList.remove('active'); });
+    if(current && map[current.id]) map[current.id].classList.add('active');
+  }, {passive:true});
+})();
+
+/* ---------- 巧思卡展开 ---------- */
+(function(){
+  document.querySelectorAll('.cv .cv-h').forEach(function(header){
+    header.addEventListener('click', function(){
+      header.parentElement.classList.toggle('open');
+    });
+  });
+})();
+
+/* ---------- 轻量代码高亮（Python / YAML） ---------- */
+(function(){
+  var KEYWORDS = new Set(("def class return import from if elif else for in not and or raise with try except lambda "+
+    "yield pass break continue global nonlocal del assert async await is None True False self super").split(' '));
+  var YAML_KEYS = new Set(("schema name version description objects relations functions actions properties type required "+
+    "from to ref runtime implementation model property_definitions object_types relation_types interaction_policies "+
+    "presentation_tools available_on context_input requires confirmation handler icon inputs effects summary params "+
+    "status details role code amount period date datetime string number boolean json money open mutable source "+
+    "id_field config database kind display_name type_policy mutability data_source instructions acyclic from_types "+
+    "to_types default message create_object update_object delete_object create_relation update_relation delete_relation").split(' '));
+  function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function colorize(code, lang){
+    var out = '', i = 0, n = code.length;
+    var isYaml = lang === 'yaml';
+    while(i < n){
+      var c = code[i];
+      if(c === '#' && (i === 0 || code[i-1] === '\n')){
+        var j = code.indexOf('\n', i); if(j === -1) j = n;
+        out += '<span class="tok-c">' + esc(code.slice(i, j)) + '</span>'; i = j; continue;
+      }
+      if(c === '"' || c === "'"){
+        var q = c, j = i + 1;
+        while(j < n){ if(code[j] === q){ j++; break; } if(code[j] === '\\') j++; j++; }
+        out += '<span class="tok-s">' + esc(code.slice(i, j)) + '</span>'; i = j; continue;
+      }
+      if(/[0-9]/.test(c) || (c === '-' && /[0-9]/.test(code[i+1]||''))){
+        var j = i; while(j < n && /[0-9.\-]/.test(code[j])) j++;
+        out += '<span class="tok-n">' + esc(code.slice(i, j)) + '</span>'; i = j; continue;
+      }
+      if(/[A-Za-z_\u4e00-\u9fa5]/.test(c)){
+        var j = i; while(j < n && /[A-Za-z0-9_\u4e00-\u9fa5]/.test(code[j])) j++;
+        var word = code.slice(i, j);
+        var next = code[j] || '';
+        if(isYaml && next === ':' && YAML_KEYS.has(word)) out += '<span class="tok-k">' + esc(word) + '</span>';
+        else if(!isYaml && KEYWORDS.has(word)) out += '<span class="tok-k">' + esc(word) + '</span>';
+        else if(/^[A-Z]/.test(word)) out += '<span class="tok-f">' + esc(word) + '</span>';
+        else out += esc(word);
+        i = j; continue;
+      }
+      if(c === '(' || c === ')' || c === '[' || c === ']' || c === '{' || c === '}'){
+        out += '<span class="tok-p">' + c + '</span>'; i++; continue;
+      }
+      out += esc(c); i++;
+    }
+    return out;
+  }
+  document.querySelectorAll('pre code[data-lang]').forEach(function(el){
+    el.innerHTML = colorize(el.textContent, el.dataset.lang);
+  });
+})();
+</script>
+</body>
+</html>
