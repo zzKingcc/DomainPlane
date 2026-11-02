@@ -11,81 +11,232 @@
     <aside class="sidebar" id="sidebar"></aside>
 
     <main class="main">
-        <div class="page-head">
-            <div class="head-line">
-                <div>
-                    <h2>存储配置</h2>
-                    <p>平台自己连接的 Elasticsearch 与 Redis。此处配置优先级高于服务端 yaml，保存后立即生效、无需重启，两张卡片各自独立保存。口令留空表示不修改。</p>
+        <div class="page-header">
+            <div class="page-head">
+                <div class="head-line">
+                    <div>
+                        <h2>存储配置</h2>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" id="reloadBtn">刷新</button>
                 </div>
-                <button class="ghost btn btn-sm btn-outline-primary" id="reloadBtn">刷新</button>
             </div>
         </div>
+        <div class="page-body">
 
-        <div id="infraStatus" class="status-line warn"><span>加载中…</span></div>
+            <div id="infraStatus" class="status-line warn"><span>加载中…</span></div>
 
-        <!-- ============ 一：Elasticsearch ============ -->
-        <section class="dp-card model-card infra-es" id="card-es">
-            <header class="card-head">
-                <span class="model-dot"></span>
-                <h2>Elasticsearch</h2>
-                <span class="mbadge" id="esBadge">—</span>
-                <span class="dirty" id="esDirty" style="display:none;">● 有未保存修改</span>
-                <span class="spacer"></span>
-                <span class="card-note">知识库索引 / 向量检索</span>
-            </header>
+            <!-- ==================== 01 运行状态存储 ==================== -->
+            <section class="panel panel-redis infra-redis" id="card-redis">
+                <header class="panel-head">
+                    <span class="panel-no">01</span>
+                    <div class="panel-title">
+                        <h3>运行状态存储</h3>
+                    </div>
+                    <span class="spacer"></span>
+                    <span class="panel-flag flag-required">必需</span>
+                </header>
+
+                <div class="panel-body">
+                    <header class="card-head">
+                        <span class="model-dot"></span>
+                        <h2>Redis</h2>
+                        <span class="mbadge" id="redisBadge">—</span>
+                        <span class="dirty" id="redisDirty" style="display:none;">● 有未保存修改</span>
+                        <span class="spacer"></span>
+                        <span class="card-note">会话记忆 / 断点 / 归档</span>
+                    </header>
+
+                    <div class="dp-row">
+                        <div class="field">
+                            <label>地址</label>
+                            <input id="redisHost" class="mono form-control" placeholder="如 192.168.1.10 或 redis.example.com">
+                        </div>
+                        <div class="field">
+                            <label>端口</label>
+                            <input class="form-control" id="redisPort" type="number" min="1" max="65535" placeholder="6379">
+                        </div>
+                    </div>
+                    <div class="dp-row">
+                        <div class="field">
+                            <label>库号</label>
+                            <input class="form-control" id="redisDatabase" type="number" min="0" placeholder="0">
+                            <div class="help">默认 0</div>
+                        </div>
+                        <div class="field">
+                            <label>密码（无密码模式留空）</label>
+                            <input id="redisPassword" type="password" class="mono form-control" placeholder="留空表示不修改">
+                            <div class="help" id="redisKeyHelp">当前未配置</div>
+                        </div>
+                    </div>
+
+                    <div id="redisResult" class="result"></div>
+
+                    <footer class="card-foot">
+                        <button class="btn btn-outline-secondary" id="testRedisBtn">测试连接</button>
+                        <button class="btn btn-outline-secondary" id="clearRedisBtn"
+                                title="清空本卡片表单内容（仅影响本页，尚未生效）。保存后留空字段将回落到 yaml 配置">清空表单</button>
+                        <button class="btn btn-outline-primary" id="saveRedisBtn">保存并生效</button>
+                    </footer>
+                </div>
+            </section>
+
+            <!-- ==================== 02 连接 ==================== -->
+            <section class="panel panel-conn">
+                <header class="panel-head">
+                    <span class="panel-no">02</span>
+                    <div class="panel-title">
+                        <h3>连接</h3>
+                    </div>
+                    <span class="spacer"></span>
+                    <span class="panel-flag" id="connCount">3 个连接</span>
+                </header>
+
+                <div class="panel-body">
+
+                    <!-- ---------- 2-1 关键字 ---------- -->
+                    <div class="sub-seg sub-es">
+                        <h4><span class="sub-no">2-1</span>关键字<span class="sub-type">Elasticsearch</span></h4>
+                        <span class="spacer"></span>
+                        <span class="sub-meta">索引名 = domainplane_kb_{域}_{hash}</span>
+                        <button class="linkbtn" data-add-conn="es">+ 新增</button>
+                    </div>
+                    <table class="conn-table">
+                        <thead>
+                        <tr>
+                            <th style="width:22%">名称</th>
+                            <th style="width:36%">地址</th>
+                            <th style="width:12%">状态</th>
+                            <th style="width:16%">被引用</th>
+                            <th style="width:14%" class="ta-r">操作</th>
+                        </tr>
+                        </thead>
+                        <tbody id="connBodyEs">
+                        <tr><td colspan="5" class="muted-sm">加载中…</td></tr>
+                        </tbody>
+                    </table>
+
+                    <!-- ---------- 2-2 向量 ---------- -->
+                    <div class="sub-seg sub-vec">
+                        <h4><span class="sub-no">2-2</span>向量<span class="sub-type">向量库</span></h4>
+                        <span class="spacer"></span>
+                        <span class="sub-meta">集合名 = domainplane_kb_{域}_{hash}</span>
+                        <button class="linkbtn" data-add-conn="vector">+ 新增</button>
+                    </div>
+                    <table class="conn-table">
+                        <thead>
+                        <tr>
+                            <th style="width:22%">名称</th>
+                            <th style="width:36%">地址</th>
+                            <th style="width:12%">状态</th>
+                            <th style="width:16%">被引用</th>
+                            <th style="width:14%" class="ta-r">操作</th>
+                        </tr>
+                        </thead>
+                        <tbody id="connBodyVec">
+                        <tr><td colspan="5" class="muted-sm">加载中…</td></tr>
+                        </tbody>
+                    </table>
+
+                    <!-- ---------- 2-3 原文 ---------- -->
+                    <div class="sub-seg sub-txt">
+                        <h4><span class="sub-no">2-3</span>原文<span class="sub-type">对象存储</span></h4>
+                        <span class="spacer"></span>
+                        <span class="sub-meta">对象键 = kb/chunks/{索引名}/{docId}.json</span>
+                    </div>
+                    <table class="conn-table">
+                        <thead>
+                        <tr>
+                            <th style="width:24%">名称</th>
+                            <th style="width:38%">位置</th>
+                            <th style="width:14%">状态</th>
+                            <th style="width:16%">被引用</th>
+                            <th style="width:8%" class="ta-r">操作</th>
+                        </tr>
+                        </thead>
+                        <tbody id="connBodyTxt">
+                        <tr class="conn-row">
+                            <td><span class="conn-name"><i class="conn-dot dot-blob"></i>blob-local</span></td>
+                            <td class="mono">本地磁盘 · 应用数据目录</td>
+                            <td><span class="mbadge ok">已启用</span></td>
+                            <td><span class="muted-sm">内置</span></td>
+                            <td class="ta-r"><span class="muted-sm">内置</span></td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- ==================== 03 知识体 ==================== -->
+            <section class="panel panel-prof">
+                <header class="panel-head">
+                    <span class="panel-no">03</span>
+                    <div class="panel-title">
+                        <h3>知识体</h3>
+                    </div>
+                    <span class="spacer"></span>
+                    <span class="panel-flag" id="profCount">1 个知识体</span>
+                    <button class="btn btn-sm btn-outline-secondary" id="addProfileBtn">+ 新增知识体</button>
+                    <button class="btn btn-sm btn-outline-primary" id="saveProfileBtn">保存并生效</button>
+                </header>
+
+                <div class="panel-body" id="profileList"></div>
+            </section>
+        </div>
+    </main>
+</div>
+
+<!-- ==================== 2-1 关键字：新增 / 编辑弹窗（只属于这一段） ==================== -->
+<div class="modal-mask" id="connModalEs" hidden>
+    <div class="modal-panel modal-panel-wide" role="dialog" aria-modal="true" aria-labelledby="connModalEsTitle">
+        <div class="modal-head">
+            <h3 id="connModalEsTitle">新增关键字连接</h3>
+            <span class="spacer"></span>
+            <button type="button" class="modal-close" id="connModalEsClose" aria-label="关闭">×</button>
+        </div>
+
+        <!-- 第一步：选预设。关键字存储现在只有 Elasticsearch 一种实现；
+             以后接别的关键字后端（如 OpenSearch）就在这里加一张卡，选谁铺谁的表单。 -->
+        <div class="preset-pick" id="esPresetPick">
+            <button type="button" class="preset-card" data-preset="es">
+                <i class="conn-dot dot-es"></i>
+                <b>Elasticsearch</b>
+                <span class="pc-sub">关键字索引 · BM25 + IK 分词</span>
+                <span class="pc-note ok">当前唯一支持</span>
+            </button>
+        </div>
+
+        <!-- 第二步：配置。选中预设后才出现 -->
+        <div id="esFormWrap" hidden>
+            <div class="field" id="esNameRow" hidden>
+                <label>连接名称</label>
+                <input class="form-control mono" id="esConnName" placeholder="如 es-arch" autocomplete="off">
+                <div class="help" id="esConnNameHelp">同类型内不能重名。</div>
+            </div>
 
             <div class="compat-box">
                 <div class="cb-head">
-                    <span class="cb-title">ES 版本支持范围</span>
                     <span class="compat ok">9.x 已验证</span>
                     <span class="compat maybe">8.x 大概率可用</span>
                     <span class="compat risky">7.17 存疑</span>
                     <span class="compat no">7.x 及更早 / OpenSearch 不承诺</span>
                 </div>
-                <details>
-                    <summary>为什么不按版本号拦截？缺 IK 分词器会怎样？</summary>
-                    <ul>
-                        <li><b>版本号不等于能力。</b>平台真正依赖的只有少数接口：
-                            <code>info</code> / <code>ping</code> / <code>count</code> / <code>search</code> /
-                            <code>indices.*</code> / <code>bulk</code>，以及 <code>index: true</code> 的
-                            <code>dense_vector</code>。而且版本号可能<i>合法地</i>拿不到（只读账号没有
-                            cluster monitor 权限）。"读不到就拒绝"等于逼你换成高权限账号。</li>
-                        <li><b>9.x</b>：与平台内置客户端（Elasticsearch Java Client 9.4.4）同主版本，官方兼容矩阵保证。</li>
-                        <li><b>8.x</b>：上面那些接口在 8.x 全部具备（<code>index: true</code> 的
-                            <code>dense_vector</code> 正是 8.0 起的特性），但官方矩阵只保证同主版本，
-                            8.x 未经实测，以「测试连接」和一次知识库重建的实测结果为准。</li>
-                        <li><b>7.17 及更低</b>：<code>dense_vector</code> 不支持 <code>index: true</code>，
-                            维度上限也只有 1024，索引 mapping 会创建失败。</li>
-                        <li><b>IK 分词器是插件，任何版本的 ES 都要单独安装。</b>缺它的后果最隐蔽：
-                            IK mapping 创建失败后会回退到 ES 默认分词器：索引照样建、灌库照样成功，
-                            <b>只有中文检索质量下降，而且不报错</b>。
-                            点「测试连接」会直接告诉你 IK 是否可用；<b>换 ES 实例后务必点一次</b>。</li>
-                        <li><b>ES 8.x 起默认启用 HTTPS 与安全认证</b>：协议要填 <code>https</code> 且必须带账号；
-                            对方若用自签证书，当前会报 TLS 握手失败（暂不支持导入自签证书）。</li>
-                    </ul>
-                </details>
             </div>
 
-            <div class="field">
-                <label>地址</label>
-                <input id="esHost" class="mono form-control" placeholder="如 192.168.1.10 或 es.example.com">
-                <div class="help">
-                    必填。不填则视为<b>未配置</b>：服务照常启动，但会跳过启动期建索引与灌库，
-                    「知识库」页的检索也会报错。
-                </div>
-            </div>
             <div class="dp-row">
                 <div class="field">
-                    <label>端口</label>
-                    <input class="form-control" id="esPort" type="number" min="1" max="65535" placeholder="9200">
+                    <label>地址</label>
+                    <input id="esHost" class="mono form-control" placeholder="如 192.168.1.10 或 es.example.com">
                 </div>
                 <div class="field">
-                    <label>协议</label>
-                    <input id="esScheme" class="mono form-control" list="schemeOptions" placeholder="http">
-                    <datalist id="schemeOptions">
-                        <option value="http"></option>
-                        <option value="https"></option>
-                    </datalist>
+                    <label>端口 / 协议</label>
+                    <div class="inline-pair">
+                        <input class="form-control" id="esPort" type="number" min="1" max="65535" placeholder="9200">
+                        <input id="esScheme" class="mono form-control" list="schemeOptions" placeholder="http">
+                        <datalist id="schemeOptions">
+                            <option value="http"></option>
+                            <option value="https"></option>
+                        </datalist>
+                    </div>
                 </div>
             </div>
             <div class="dp-row">
@@ -107,106 +258,154 @@
                 <div class="field">
                     <label>读写超时（毫秒）</label>
                     <input class="form-control" id="esSocketTimeout" type="number" min="1" placeholder="10000">
-                    <div class="help">跨公网访问时读超时建议适当调大。</div>
                 </div>
             </div>
 
             <div id="esResult" class="result"></div>
 
             <footer class="card-foot">
-                <button class="sec btn btn-outline-secondary" id="testEsBtn">测试连接</button>
-                <button class="sec btn btn-outline-secondary" id="clearEsBtn"
-                        title="清空本卡片表单内容（仅影响本页，尚未生效）。保存后留空字段将回落到 yaml 配置">清空表单</button>
-                <button class="btn btn-primary" id="saveEsBtn">保存并生效</button>
-                <span class="hint">
-                    <b>只保存本卡片</b>，不影响 Redis。保存成功后会顺带看一眼目标索引在不在；
-                    「测试连接」会额外报出版本、发行版、兼容性判读与 <b>IK 分词器</b>状态。
-                </span>
-            </footer>
-        </section>
-
-        <!-- ============ 二：Redis ============ -->
-        <section class="dp-card model-card infra-redis" id="card-redis">
-            <header class="card-head">
-                <span class="model-dot"></span>
-                <h2>Redis</h2>
-                <span class="mbadge" id="redisBadge">—</span>
-                <span class="dirty" id="redisDirty" style="display:none;">● 有未保存修改</span>
+                <button class="btn btn-outline-secondary" id="testEsBtn">测试连接</button>
+                <button class="btn btn-outline-secondary" id="clearEsBtn"
+                        title="清空本连接表单内容（仅影响本页，尚未生效）。保存后留空字段将回落到 yaml 配置">清空表单</button>
                 <span class="spacer"></span>
-                <span class="card-note">会话记忆 / 中断断点</span>
-            </header>
+                <button class="btn btn-outline-secondary" id="cancelEsBtn">取消</button>
+                <button class="btn btn-outline-primary" id="saveEsBtn">保存并生效</button>
+            </footer>
+        </div>
+    </div>
+</div>
 
+<!-- ==================== 2-2 向量：新增 / 编辑弹窗（与 2-1 互不共用） ==================== -->
+<div class="modal-mask" id="connModalVec" hidden>
+    <div class="modal-panel modal-panel-wide" role="dialog" aria-modal="true" aria-labelledby="connModalVecTitle">
+        <div class="modal-head">
+            <h3 id="connModalVecTitle">新增向量连接</h3>
+            <span class="spacer"></span>
+            <button type="button" class="modal-close" id="connModalVecClose" aria-label="关闭">×</button>
+        </div>
+
+        <!-- 第一步：选预设。向量存储现在有两种落法，各自填各自的实例配置；
+             是否与关键字 ES 是同一台机器由系统在保存时判断，用户不用管。 -->
+        <div class="preset-pick" id="vecPresetPick">
+            <button type="button" class="preset-card" data-preset="qdrant">
+                <i class="conn-dot dot-vec"></i>
+                <b>Qdrant</b>
+                <span class="pc-sub">独立向量库 · v1.x</span>
+                <span class="pc-note ok">独立实例</span>
+            </button>
+            <button type="button" class="preset-card" data-preset="es">
+                <i class="conn-dot dot-es"></i>
+                <b>Elasticsearch</b>
+                <span class="pc-sub">dense_vector · 8+/9.x</span>
+                <span class="pc-note ok">ES 集群</span>
+            </button>
+        </div>
+
+        <div class="field" id="vecNameRow" hidden>
+            <label>连接名称</label>
+            <input class="form-control mono" id="vecConnName" placeholder="如 qdrant-arch / es-kw-main" autocomplete="off">
+            <div class="help" id="vecConnNameHelp">同类型内不能重名。</div>
+        </div>
+
+        <!-- ---------- 预设一：Qdrant（独立实例） ---------- -->
+        <div id="vecFormQdrant" hidden>
             <div class="compat-box">
                 <div class="cb-head">
-                    <span class="cb-title">Redis 支持范围</span>
-                    <span class="compat ok">2.6 及以上全部支持</span>
-                    <span class="compat maybe">集群模式需用 0 号库</span>
+                    <span class="compat ok">Qdrant v1.x 已验证</span>
+                    <span class="compat maybe">其他向量库待接适配器</span>
                 </div>
-                <details>
-                    <summary>为什么 Redis 不判版本、只看拓扑？</summary>
-                    <ul>
-                        <li>平台只用到 <code>GET</code> / <code>SET</code> / <code>PING</code> /
-                            <code>INFO</code> / <code>DBSIZE</code>，Redis 2.6 以上全都支持，
-                            版本号没有判读价值，只做展示。</li>
-                        <li>真正的断点是<b>拓扑</b>：集群模式与多数云托管只提供 0 号库，
-                            填别的库号会直接失败，而且报错看不出是"这个实例没有多库"。
-                            「测试连接」会报出实例拓扑与库号范围。</li>
-                        <li>数据靠 <code>domainplane:</code> key 前缀隔离，与业务共用同一个库也不冲突。</li>
-                    </ul>
-                </details>
             </div>
 
             <div class="field">
-                <label>地址</label>
-                <input id="redisHost" class="mono form-control" placeholder="如 192.168.1.10 或 redis.example.com">
-                <div class="help">
-                    必填。不填则视为<b>未配置</b>：服务照常启动，但会话记忆与中断断点在首次使用时失败。
+                <label>服务地址</label>
+                <input id="vectorUri" class="mono form-control" placeholder="如 http://qdrant.internal:6333">
+            </div>
+            <div class="field">
+                <label>API Key / Token（未启用鉴权时留空）</label>
+                <input id="vectorToken" type="password" class="mono form-control" placeholder="留空表示不修改">
+                <div class="help" id="vectorKeyHelp">当前未配置</div>
+            </div>
+            <div class="dp-row">
+                <div class="field">
+                    <label>集合名前缀</label>
+                    <input id="vectorCollectionPrefix" class="mono form-control" placeholder="留空则直接用索引原名">
+                </div>
+                <div class="field">
+                    <label>距离度量</label>
+                    <input id="vectorMetric" class="mono form-control" list="vectorMetricOptions" placeholder="cosine">
+                    <datalist id="vectorMetricOptions">
+                        <option value="cosine"></option>
+                        <option value="dot"></option>
+                        <option value="euclid"></option>
+                    </datalist>
+                </div>
+            </div>
+
+            <div id="vectorResult" class="result"></div>
+
+            <footer class="card-foot">
+                <button class="btn btn-outline-secondary" id="testVectorBtn">测试连接</button>
+                <button class="btn btn-outline-secondary" id="clearVectorBtn"
+                        title="清空本连接表单内容（仅影响本页，尚未生效）。保存后留空字段将回落默认">清空表单</button>
+                <span class="spacer"></span>
+                <button class="btn btn-outline-secondary" id="cancelVectorBtn">取消</button>
+                <button class="btn btn-outline-primary" id="saveVectorBtn">保存并生效</button>
+            </footer>
+        </div>
+
+        <!-- ---------- 预设二：ES（正常的实例配置；与关键字是否同机由系统判断，页面上不出现） ---------- -->
+        <div id="vecFormEs" hidden>
+            <div class="compat-box">
+                <div class="cb-head">
+                    <span class="compat ok">dense_vector · 8+/9.x 已验证</span>
+                    <span class="compat risky">7.17 及更早不支持</span>
+                </div>
+            </div>
+
+            <div class="dp-row">
+                <div class="field">
+                    <label>地址</label>
+                    <input id="vesHost" class="mono form-control" placeholder="如 192.168.1.10 或 es.example.com">
+                </div>
+                <div class="field">
+                    <label>端口 / 协议</label>
+                    <div class="inline-pair">
+                        <input class="form-control" id="vesPort" type="number" min="1" max="65535" placeholder="9200">
+                        <input id="vesScheme" class="mono form-control" list="schemeOptions" placeholder="http">
+                    </div>
                 </div>
             </div>
             <div class="dp-row">
                 <div class="field">
-                    <label>端口</label>
-                    <input class="form-control" id="redisPort" type="number" min="1" max="65535" placeholder="6379">
+                    <label>用户名（未启用安全认证时留空）</label>
+                    <input id="vesUsername" class="mono form-control" placeholder="如 elastic">
                 </div>
                 <div class="field">
-                    <label>库号</label>
-                    <input class="form-control" id="redisDatabase" type="number" min="0" placeholder="0">
-                    <div class="help">
-                        库号，默认 0。平台数据靠 <code>domainplane:</code> key 前缀隔离，与业务同库也不冲突；
-                        集群模式或云托管只提供 0 号库时，保持默认即可。
-                        ⚠️ <b>换地址或换库号等于换数据源</b>：历史会话与未完成的断点留在旧库，不会迁移。
-                    </div>
+                    <label>密码</label>
+                    <input id="vesPassword" type="password" class="mono form-control" placeholder="留空表示不修改">
+                    <div class="help" id="vesKeyHelp">当前未配置</div>
                 </div>
             </div>
-            <div class="field">
-                <label>密码（无密码模式留空）</label>
-                <input id="redisPassword" type="password" class="mono form-control" placeholder="留空表示不修改">
-                <div class="help" id="redisKeyHelp">当前未配置</div>
+            <div class="dp-row">
+                <div class="field">
+                    <label>连接超时（毫秒）</label>
+                    <input class="form-control" id="vesConnectTimeout" type="number" min="1" placeholder="5000">
+                </div>
+                <div class="field">
+                    <label>读写超时（毫秒）</label>
+                    <input class="form-control" id="vesSocketTimeout" type="number" min="1" placeholder="10000">
+                </div>
             </div>
 
-            <div id="redisResult" class="result"></div>
+            <div id="vesResult" class="result"></div>
 
             <footer class="card-foot">
-                <button class="sec btn btn-outline-secondary" id="testRedisBtn">测试连接</button>
-                <button class="sec btn btn-outline-secondary" id="clearRedisBtn"
-                        title="清空本卡片表单内容（仅影响本页，尚未生效）。保存后留空字段将回落到 yaml 配置">清空表单</button>
-                <button class="btn btn-primary" id="saveRedisBtn">保存并生效</button>
-                <span class="hint">
-                    <b>只保存本卡片</b>，不影响 Elasticsearch。连接池与命令超时仍取服务端 yaml；
-                    「测试连接」会额外报出版本、拓扑与库号范围。
-                </span>
+                <span class="spacer"></span>
+                <button class="btn btn-outline-secondary" id="cancelVecEsBtn">取消</button>
+                <button class="btn btn-outline-primary" id="saveVecEsBtn">加入连接</button>
             </footer>
-        </section>
-
-        <!-- ============ 说明（只读） ============ -->
-        <section class="dp-card">
-            <div class="hint" style="margin:0;">
-                「清空表单」只清本页输入框，<b>不发请求、不动线上配置</b>；清空后再保存 = 把本卡片回退到
-                服务端 yaml 配置。口令框清空后语义仍是"不修改"，不会抹掉服务端已存的密码。
-            </div>
-            <div class="hint" id="settingsFileHint"></div>
-        </section>
-    </main>
+        </div>
+    </div>
 </div>
 
 <script src="assets/console.js"></script>

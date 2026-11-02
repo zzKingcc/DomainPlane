@@ -111,6 +111,16 @@ public class DomainRegistry {
      */
     private final Map<String, Boolean> explicitCallable = new ConcurrentHashMap<>();
 
+    /**
+     * 软删标记：域标识 → deletedAt（毫秒 epoch）。
+     *
+     * 与 {@link #domains} 的关系是**叠加不是替换**：软删的域完整留在注册表里
+     * （结构判据 {@link #isCallable} 一个字都不改），只多一个生命周期标记。
+     * 消费方只有新开轮入口（{@code AgentOrchestrationService#chat}）：宽限期内
+     * 拒新会话、放行 resume 收尾。硬删（{@link #delete}）时标记随域一起消失。
+     */
+    private final Map<String, Long> pendingDeletes = new ConcurrentHashMap<>();
+
     public DomainRegistry() {
         // 根域恒为可调用：调用方不传域时会被归一化到它，若它不可调用会让"不传域"直接变成硬错误
         domains.put(Domains.DEFAULT,
@@ -319,9 +329,87 @@ public class DomainRegistry {
         }
         removed.forEach(domains::remove);
         removed.forEach(explicitCallable::remove);
+        // 硬删 = 标记随域一起消失：留着的话同路径域重建后会莫名拒新会话
+        removed.forEach(pendingDeletes::remove);
         removed.sort(Comparator.naturalOrder());
         log.info("[域注册表] 已删除域 {} 及其 {} 个子孙 {}", id, removed.size() - 1, removed);
         return DomainDeleteResult.ok(removed);
+    }
+
+    // ==================== 软删标记 ====================
+
+    /**
+     * 载入软删标记（启动期从落盘恢复，与 {@link #loadManual} 同源）。
+     *
+     * 只恢复标记、不恢复域本身：域由 {@code domains} / {@code explicitCallable}
+     * 沿同一条登记链建出，标记是叠加在上的生命周期状态。
+     */
+    public void loadPendingDeletes(Map<String, Long> markers) {
+        if (markers == null || markers.isEmpty()) {
+            return;
+        }
+        markers.forEach((id, deletedAt) -> {
+            if (id != null && !id.isBlank() && deletedAt != null && deletedAt > 0) {
+                pendingDeletes.put(id.trim(), deletedAt);
+            }
+        });
+        if (!pendingDeletes.isEmpty()) {
+            log.info("[域注册表] 已恢复 {} 个软删标记 {}（宽限期内拒新会话、放行 resume 收尾）",
+                    pendingDeletes.size(), pendingDeletes.keySet());
+        }
+    }
+
+    /** 打软删标记（管控台删除 = 软删，见 L1-L4 计划 F03 附注） */
+    public void markPendingDelete(String domainId, long deletedAt) {
+        pendingDeletes.put(Domains.normalize(domainId), deletedAt);
+    }
+
+    /** 撤销软删（清除标记即恢复，域本来就在注册表里） */
+    public void clearPendingDelete(String domainId) {
+        pendingDeletes.remove(Domains.normalize(domainId));
+    }
+
+    /** 该域是否处于软删宽限期 */
+    public boolean isPendingDelete(String domainId) {
+        return pendingDeletes.containsKey(Domains.normalize(domainId));
+    }
+
+    /** 软删时间戳（毫秒）；未软删返回 {@code null} */
+    public Long pendingDeleteAt(String domainId) {
+        return pendingDeletes.get(Domains.normalize(domainId));
+    }
+
+    /** 全部软删标记（域 → deletedAt 毫秒），按标识排序，供管控台展示 */
+    public Map<String, Long> pendingDeletes() {
+        Map<String, Long> snapshot = new java.util.LinkedHashMap<>();
+        pendingDeletes.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(e -> snapshot.put(e.getKey(), e.getValue()));
+        return Map.copyOf(snapshot);
+    }
+
+    /**
+     * 用一份历史快照整体替换声明状态（回滚）。
+     *
+     * 为什么是"清空重载"而不是逐个 diff 对齐：注册表有三个来源（内置根域 / 管控台声明 /
+     * 工具派生），逐个对齐要为每种组合决定去留，漏一种就是"回滚后注册表与文件不一致"——
+     * 而这两者不一致正是本方案要消除的问题。清空重载只有一条路径，与启动恢复同规则。
+     *
+     * 派生域不在此重建：调用方（server 侧回滚服务）紧接着
+     * {@link #ensureChains} 当前工具声明即可，与启动时序一致。
+     */
+    public synchronized void replaceDeclarations(Map<String, Boolean> callableById,
+                                                 Map<String, Long> markers) {
+        domains.clear();
+        explicitCallable.clear();
+        pendingDeletes.clear();
+        // 根域恒为可调用：调用方不传域时会被归一化到它，若它不可调用会让"不传域"直接变成硬错误
+        domains.put(Domains.DEFAULT,
+                new Domain(Domains.DEFAULT, null, Source.BUILTIN, true, System.currentTimeMillis()));
+        loadManual(callableById);
+        loadPendingDeletes(markers);
+        log.info("[域注册表] 已按历史快照重建声明状态：{} 个域（可调用 {} 个），软删标记 {} 个",
+                domains.size(), callableIds().size(), pendingDeletes.size());
     }
 
     // ==================== 查询 ====================

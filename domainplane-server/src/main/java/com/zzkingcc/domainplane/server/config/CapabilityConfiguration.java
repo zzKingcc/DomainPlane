@@ -1,5 +1,6 @@
 package com.zzkingcc.domainplane.server.config;
 
+import com.zzkingcc.domainplane.runtime.config.Timeouts;
 import com.zzkingcc.domainplane.server.capability.CapabilityCallExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,8 +34,8 @@ public class CapabilityConfiguration {
     @Bean(destroyMethod = "close")
     public CapabilityCallExecutor capabilityCallExecutor(
             @Value("${domainplane.capability.pool-size:8}") int poolSize,
-            @Value("${domainplane.capability.timeout-ms:120000}") long timeoutMs) {
-        CapabilityCallExecutor executor = new CapabilityCallExecutor(poolSize, timeoutMs);
+            Timeouts timeouts) {
+        CapabilityCallExecutor executor = new CapabilityCallExecutor(poolSize, timeouts.capabilityCallMs());
         log.info("[能力调用] 专用隔离池 {} 线程（零队列，满即拒），单次调用上限 {}ms",
                 Math.max(1, poolSize), executor.timeoutMs());
         return executor;

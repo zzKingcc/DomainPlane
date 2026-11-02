@@ -3,6 +3,7 @@ package com.zzkingcc.domainplane.server.vision;
 import com.zzkingcc.domainplane.api.annotation.Tool;
 import com.zzkingcc.domainplane.api.annotation.ToolParam;
 import com.zzkingcc.domainplane.api.support.RetrievalScope;
+import com.zzkingcc.domainplane.api.tool.ToolDescriptor;
 import com.zzkingcc.domainplane.runtime.model.ModelResolver;
 import com.zzkingcc.domainplane.runtime.model.VisionTarget;
 import com.zzkingcc.domainplane.runtime.tool.ToolExecutorService;
@@ -48,10 +49,11 @@ import java.util.Optional;
  * 并说明原因：放过去就是把那段字节按错的模态推给上游，而上游可能报错、也可能静默返回胡话。
  * "把音视频重新送进上下文"目前没有通道，那是另一件事，不该由本工具假装能做。</p>
  *
- * <p><b>可见性</b>：挂根域（全树可见），执行时按本轮域校验有没有可用的视觉模型。
- * 让所有域的模型都看到这个工具，比"只有配了视觉模型的域才看见"更好排障：
- * 后者在没配的域上表现为"模型根本不知道有这条路"，用户看到的是模型答非所问，
- * 而不是一句明确的"本域没有视觉模型"。</p>
+ * <p><b>可见性</b>：由「该域（链上）有没有可用的视觉模型」决定，不写死在注解里——
+ * 初始声明哨兵 {@link ToolDescriptor#UNBOUND_DOMAIN}（对任何域都不可见），由
+ * {@code ModelCapabilityToolBinder} 在启动与模型配置变更时重算：主模型绑定链上有可用档案
+ * 且其中声明了图片输入的域才拿到它。判据与 {@code ModelResolver#visionModel} 的取舍逐字对齐，
+ * 两处口径分叉的话就会出现"看得见工具却委派失败"或"明明能看图却看不见工具"。</p>
  *
  * <p><b>域从哪来</b>：读 {@link RetrievalScope}。本地工具执行被挪到隔离线程后
  * ThreadLocal 不跟随，但工具执行的隔离层已经显式把它搬运过去了（见
@@ -69,8 +71,8 @@ public class VisionDelegateTool {
 
     private static final Logger log = LoggerFactory.getLogger(VisionDelegateTool.class);
 
-    /** 工具名：与 {@code seeImage} 的调用约定一致，事件与提示里都用它 */
-    private static final String TOOL_NAME = "seeImage";
+    /** 工具名：与 {@code seeImage} 的调用约定一致，事件与提示里都用它。{@code ModelCapabilityToolBinder} 按它改可用域 */
+    public static final String TOOL_NAME = "seeImage";
 
     /**
      * 子模型的系统提示词 —— 固定，不由域提示词覆盖。
@@ -103,7 +105,8 @@ public class VisionDelegateTool {
                     + "参数 question 填你要从图里得到什么（如'这张发票的金额是多少'）。"
                     + "本工具会把图交给同域的视觉模型，返回对图片的文字描述或它对你问题的回答。"
                     + "凡涉及图片中具体内容而你又看不到像素时，必须先调用本工具取证，不要凭猜测作答。",
-            effect = Tool.Effect.READ)
+            effect = Tool.Effect.READ,
+            domains = ToolDescriptor.UNBOUND_DOMAIN)
     public String see(@ToolParam("本轮附件清单里的图片引用名（形如 img_xxxxxxxx）；"
             + "不接受图片地址") String image,
                       @ToolParam("你要从图片中获取什么内容：一个具体的问题或描述要求，"

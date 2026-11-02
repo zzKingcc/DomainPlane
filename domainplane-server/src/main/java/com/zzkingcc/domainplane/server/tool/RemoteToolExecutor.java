@@ -36,7 +36,13 @@ public class RemoteToolExecutor implements ToolExecutor {
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(CONNECT_TIMEOUT)
+            // 显式关掉重定向：回流地址是实例自己上报的，跟随 3xx 等于让对端把请求引到它指定的第二跳。
+            // JDK 默认就是 NEVER，这里写出来是为了让"不跟随"成为可见的约定而不是默认值。
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
+
+    /** 回流地址准入策略：注册期已校验一次，调用期再校验（防线不依赖注册表是否被污染） */
+    private final ToolEndpointPolicy endpointPolicy;
 
     /** 单次调用超时（毫秒） */
     private final int timeoutMillis;
@@ -45,9 +51,15 @@ public class RemoteToolExecutor implements ToolExecutor {
     private final int maxAttempts;
 
     public RemoteToolExecutor(ToolRegistry registry, int timeoutMillis, int maxAttempts) {
+        this(registry, timeoutMillis, maxAttempts, new ToolEndpointPolicy());
+    }
+
+    public RemoteToolExecutor(ToolRegistry registry, int timeoutMillis, int maxAttempts,
+                              ToolEndpointPolicy endpointPolicy) {
         this.registry = registry;
         this.timeoutMillis = timeoutMillis;
         this.maxAttempts = Math.max(1, maxAttempts);
+        this.endpointPolicy = endpointPolicy == null ? new ToolEndpointPolicy() : endpointPolicy;
     }
 
     @Override
@@ -101,6 +113,16 @@ public class RemoteToolExecutor implements ToolExecutor {
         String requestId = UUID.randomUUID().toString();
         String endpoint = replica.endpoint();
 
+        /* 调用期再校验一次：注册表里的地址来自心跳报文，不能假设它一定过了注册期那道闸
+           （进程内注册、将来新增的写入路径、测试桩都可能绕过）。被拒时一个字节都没发出去，
+           因此换副本是安全的。 */
+        String rejected = endpointPolicy.rejectReason(endpoint);
+        if (rejected != null) {
+            log.error("[远程工具] {} 的回流地址被策略拒绝（实例 {}，地址 {}）：{}",
+                    toolName, replica.instanceId(), endpoint, rejected);
+            throw new TransportFailure("回流地址不可用：" + rejected, null, true);
+        }
+
         ObjectNode body = mapper.createObjectNode();
         body.put("requestId", requestId);
         body.put("toolName", toolName);
@@ -135,17 +157,28 @@ public class RemoteToolExecutor implements ToolExecutor {
         }
 
         if (response.statusCode() / 100 != 2) {
+            // 响应体只进服务端日志，绝不进工具结果：这条请求的目标由上报方指定，
+            // 把响应体回喂模型等于给对方一个"读内网页面"的回显通道——那正是 SSRF 的收益端。
+            // 运维需要内容时看日志，这里只回状态码与"去查日志"的指向。
+            log.warn("[远程工具] {} 在实例 {}（{}）上返回 HTTP {}，响应体仅记日志：{}",
+                    toolName, replica.instanceId(), endpoint, response.statusCode(),
+                    abbreviate(response.body()));
             // 服务端可能已经受理并执行了这次调用（5xx 尤其如此），不可重试
             throw new TransportFailure("实例返回 HTTP " + response.statusCode()
-                    + "：" + abbreviate(response.body()), null, false);
+                    + "（响应体不回传给调用方，详见服务端日志）", null, false);
         }
 
         JsonNode parsed;
         try {
             parsed = mapper.readTree(response.body());
         } catch (Exception e) {
+            // 同上：非 JSON 响应体同样可能承载任意内网页面内容，只记日志不回显
+            String contentType = response.headers().firstValue("Content-Type").orElse("(未声明)");
+            log.warn("[远程工具] {} 在实例 {}（{}）上的响应不是合法 JSON（Content-Type={}，{} 字节），"
+                            + "内容仅记日志：{}", toolName, replica.instanceId(), endpoint, contentType,
+                    response.body() == null ? 0 : response.body().length(), abbreviate(response.body()));
             // 响应体不合规说明请求已被处理过，不可重试
-            throw new TransportFailure("实例响应不是合法 JSON：" + abbreviate(response.body()), e, false);
+            throw new TransportFailure("实例响应不是合法 JSON（Content-Type=" + contentType + "）", e, false);
         }
 
         log.info("[远程工具] {} ← 实例 {}{}，耗时 {}ms", toolName, replica.instanceId(),

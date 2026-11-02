@@ -42,7 +42,7 @@
 
         var online = document.getElementById('statOnline');
         online.textContent = stats.onlineCount || 0;
-        online.className = 'v' + ((stats.onlineCount || 0) ? ' ok' : ' warn');
+        online.className = 'dp-stat-value' + ((stats.onlineCount || 0) ? '' : ' warn');
         var note = [];
         if (stats.mutedCount) { note.push(stats.mutedCount + ' 个已熔断'); }
         if (stats.drainingCount) { note.push(stats.drainingCount + ' 个清理中'); }
@@ -51,15 +51,15 @@
         document.getElementById('statOnlineNote').textContent = note.join('，');
 
         document.getElementById('statReplica').textContent = stats.remoteReplicaCount || 0;
-        document.getElementById('statReplica').className = 'v' + ((stats.remoteReplicaCount || 0) ? ' ok' : ' warn');
+        document.getElementById('statReplica').className = 'dp-stat-value' + ((stats.remoteReplicaCount || 0) ? '' : ' warn');
         document.getElementById('statReplicaNote').textContent = '同名多实例 = 多副本，调用时随机选一个';
 
         document.getElementById('statTools').textContent = stats.registeredToolCount || 0;
-        document.getElementById('statTools').className = 'v';
+        document.getElementById('statTools').className = 'dp-stat-value';
         document.getElementById('statToolsNote').textContent = '逻辑工具条目数（含本地 Bean 工具）';
 
         document.getElementById('statTimeout').textContent = (stats.timeoutSeconds || 0) + ' 秒';
-        document.getElementById('statTimeout').className = 'v';
+        document.getElementById('statTimeout').className = 'dp-stat-value';
 
         var body = document.getElementById('instanceBody');
         var wrap = document.getElementById('tableWrap');
@@ -92,7 +92,7 @@
 
         body.querySelectorAll('button[data-act]').forEach(function (btn) {
             btn.addEventListener('click', function () {
-                act(btn.getAttribute('data-act'), btn.getAttribute('data-id'));
+                act(btn.getAttribute('data-act'), btn.getAttribute('data-id'), btn);
             });
         });
     }
@@ -105,10 +105,10 @@
             return '<span class="muted">已吊销（只能由接口恢复）</span>';
         }
         if (it.muted) {
-            return '<button class="primary btn btn-primary" data-act="restore" data-id="' + id
+            return '<button class="btn btn-sm btn-outline-secondary" data-act="restore" data-id="' + id
                 + '" title="实例仍在心跳，恢复即等待下次心跳重建副本">恢复工具调用</button>';
         }
-        return '<button class="write btn btn-primary" data-act="mute" data-id="' + id
+        return '<button class="btn btn-sm btn-outline-secondary" data-act="mute" data-id="' + id
             + '" title="摘除工具副本，心跳照常受理">断开工具调用</button>';
     }
 
@@ -116,14 +116,25 @@
        晚发出的请求不一定后返回。只让"最后一次发出"的结果落地，否则旧数据会覆盖新数据，
        表现出来就是"点了刷新但表格没变"。 */
     var loadSeq = 0;
+    var LOADED = false;          /* 首次加载是否已完成（决定要不要放占位行） */
 
     function load() {
         var state = document.getElementById('loadState');
         var seq = ++loadSeq;
+        /* 首次加载：表格区是 display:none 的，什么都不显示像页面坏了。
+           先把表壳亮出来放一行转圈占位，数据到了 render() 自己接管显示切换。 */
+        if (!LOADED) {
+            var wrap0 = document.getElementById('tableWrap');
+            if (wrap0) { wrap0.style.display = 'block'; }
+            var body0 = document.getElementById('instanceBody');
+            if (body0) { body0.innerHTML = Console.loadingRowHtml(7, '正在读取实例…'); }
+            if (state) { state.textContent = '正在读取…'; }
+        }
         /* P2：/admin/instances 是 D 类裸对象（无 code/success），
            api.get 的 normalize 会把它判为成功，直接返回 data。 */
         return Console.api.get('/admin/instances').then(function (data) {
             if (seq !== loadSeq) { return; }
+            LOADED = true;
             render(data);
             state.textContent = '更新于 ' + fmtTime(Date.now());
         }).catch(function (e) {
@@ -151,20 +162,27 @@
         }
     };
 
-    function act(action, instanceId) {
+    async function act(action, instanceId, btn) {
         var spec = ACTIONS[action];
-        if (!spec || !confirm(spec.text.replace('%s', instanceId))) {
-            return;
-        }
+        if (!spec) { return; }
+        var ok = await Console.confirm(spec.text.replace('%s', instanceId), {
+            title: action === 'mute' ? '断开工具调用' : '恢复工具调用',
+            okText: '确认',
+            danger: action === 'mute'
+        });
+        if (!ok) { return; }
         /* P2：/admin/instances/{id}/{action} 是 C 类（只有 success）。
            原来是「拿到响应就 alert(r.message)」，后端 success:false 时页面照样走成功分支；
            改 api.post 后失败会 reject 进 catch，与 mute/restore 的语义对齐。 */
-        Console.api.post('/admin/instances/' + encodeURIComponent(instanceId) + '/' + action).then(function (r) {
-            alert(r.message || '已提交');
-            load();
-        }).catch(function (e) {
-            alert('操作失败：' + e.message);
-        });
+        Console.busy(btn, function () {
+            return Console.api.post('/admin/instances/' + encodeURIComponent(instanceId) + '/' + action)
+                .then(function (r) {
+                    Console.toast(r.message || '已提交', { type: 'success' });
+                    load();
+                }).catch(function (e) {
+                    Console.toast('操作失败：' + e.message, { type: 'error' });
+                });
+        }, action === 'mute' ? '断开中…' : '恢复中…');
     }
 
     function setupAutoRefresh() {

@@ -377,10 +377,19 @@ public class ModelProfileSettings {
          * 老文件没有这一字段 → 反序列化为 null → {@link ModelProfile} 归一为空 map，行为零变化。
          */
         private Map<String, Object> params;
+        /**
+         * 连接协议（{@code openai} / {@code anthropic}）。
+         *
+         * <p>老文件没有这一字段 → 反序列化为 null → {@link ModelProfile} 归一为
+         * {@code openai}，行为与该字段引入前完全一致（历史上有过这个字段、读盘时被忽略，
+         * 这里属于字段回归）。</p>
+         */
+        private String protocol;
 
         public ModelProfile toProfile(String alias) {
             return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey,
-                    modelName, temperature, maxTokens, contextWindow, thinking, returnThinking, dimensions, fallbacks, params);
+                    modelName, temperature, maxTokens, contextWindow, thinking, returnThinking, dimensions,
+                    fallbacks, params, protocol);
         }
 
         public static ProfileData from(ModelProfile profile) {
@@ -400,6 +409,8 @@ public class ModelProfileSettings {
             data.setFallbacks(new java.util.ArrayList<>(profile.fallbacks()));
             /* 空 map 写 null：不在 models.json 里留 params:{} 噪声 */
             data.setParams(profile.params().isEmpty() ? null : new LinkedHashMap<>(profile.params()));
+            /* 同 params：默认值不落盘，避免给所有老文件刷一遍新键 */
+            data.setProtocol(ModelProfile.PROTOCOL_OPENAI.equals(profile.protocol()) ? null : profile.protocol());
             return data;
         }
     }

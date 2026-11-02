@@ -20,6 +20,12 @@
             <artifactId>domainplane-common</artifactId>
         </dependency>
 
+        <!-- 知识库存储 SPI（domain.rag.store）：ES 适配器是实现方，方向是 infra → domain -->
+        <dependency>
+            <groupId>com.zzkingcc</groupId>
+            <artifactId>domainplane-domain</artifactId>
+        </dependency>
+
         <!-- LangChain4j  -->
         <dependency>
             <groupId>dev.langchain4j</groupId>

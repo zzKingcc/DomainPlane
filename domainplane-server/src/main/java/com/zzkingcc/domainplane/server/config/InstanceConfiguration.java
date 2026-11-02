@@ -4,6 +4,7 @@ import com.zzkingcc.domainplane.runtime.tool.InstanceLifecycle;
 import com.zzkingcc.domainplane.runtime.tool.InstanceRegistry;
 import com.zzkingcc.domainplane.runtime.tool.ToolRegistry;
 import com.zzkingcc.domainplane.server.tool.RemoteToolExecutor;
+import com.zzkingcc.domainplane.server.tool.ToolEndpointPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -58,10 +59,12 @@ public class InstanceConfiguration {
     @ConditionalOnMissingBean
     public RemoteToolExecutor remoteToolExecutor(
             ToolRegistry toolRegistry,
+            ToolEndpointPolicy endpointPolicy,
             @Value("${domainplane.instance.invoke-timeout-ms:30000}") int invokeTimeoutMillis,
             @Value("${domainplane.instance.invoke-max-attempts:2}") int invokeMaxAttempts) {
-        log.info("[工具实例] 远程工具调用超时 {}ms，单次调用最多尝试 {} 个副本",
-                invokeTimeoutMillis, invokeMaxAttempts);
-        return new RemoteToolExecutor(toolRegistry, invokeTimeoutMillis, invokeMaxAttempts);
+        log.info("[工具实例] 远程工具调用超时 {}ms，单次调用最多尝试 {} 个副本{}",
+                invokeTimeoutMillis, invokeMaxAttempts,
+                endpointPolicy.hasAllowlist() ? "，回流地址白名单已启用" : "");
+        return new RemoteToolExecutor(toolRegistry, invokeTimeoutMillis, invokeMaxAttempts, endpointPolicy);
     }
 }

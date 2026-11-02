@@ -1,0 +1,46 @@
+# 依赖与 CI 动作的版本更新机器人
+#
+# 三条刻意的配置：
+#   1. maven 每周一 04:00 开一批，且 open-pull-requests-limit 设 10 ——
+#      我们是 11 模块的多模块工程，不限量的话一次能开 40 个 PR，没人看得过来。
+#   2. 提交信息带 scope：看 git log 时"这是一次依赖升级"要一眼可辨，
+#      否则和手写提交混在一起，回滚时找不到边界。
+#   3. github-actions 与 docker 一起管：CI 用的 action 也是依赖，
+#      而且它们带写权限（GHCR 推送），比 maven 依赖更该盯。
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    labels:
+      - dependencies
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    labels:
+      - dependencies
+      - ci
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(docker)"
+    labels:
+      - dependencies

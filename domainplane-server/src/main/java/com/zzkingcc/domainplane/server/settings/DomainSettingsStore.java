@@ -105,12 +105,15 @@ public class DomainSettingsStore {
                 .removeIf(domain -> domains.contains(domain));
         boolean echoes = settings.getToolCallEcho().keySet()
                 .removeIf(domain -> domains.contains(domain));
-        if (!prompts && !echoes) {
+        // planDisplay 与 toolCallEcho 同一性质：不清会在同路径域重建时静默复活旧开关
+        boolean displays = settings.getPlanDisplay().keySet()
+                .removeIf(domain -> domains.contains(domain));
+        if (!prompts && !echoes && !displays) {
             return;
         }
         save(settings);
-        log.info("[域设置] 已清理 {} 个被删域的配置（提示词片段变更={}，工具回写开关变更={}）",
-                domains.size(), prompts, echoes);
+        log.info("[域设置] 已清理 {} 个被删域的配置（提示词片段变更={}，工具回写开关变更={}，计划展示开关变更={}）",
+                domains.size(), prompts, echoes, displays);
     }
 
     /**

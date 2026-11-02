@@ -1,11 +1,10 @@
 package com.zzkingcc.domainplane.infrastructure.ingestion;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import com.zzkingcc.domainplane.domain.rag.store.IngestTarget;
 import com.zzkingcc.domainplane.infrastructure.ingestion.processor.DocumentProcessStrategy;
 import com.zzkingcc.domainplane.infrastructure.ingestion.processor.DocumentProcessStrategyFactory;
 import com.zzkingcc.domainplane.infrastructure.ingestion.processor.IngestReport;
 import dev.langchain4j.model.embedding.EmbeddingModel;
-import dev.langchain4j.store.embedding.EmbeddingStore;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
@@ -25,38 +24,30 @@ public class DocumentIngestor {
      * 导入外部提交的文档（上传接口的唯一入口）。
      *
      * @param documents      待导入文档（文本类已统一字符集，二进制类持原始字节；metadata 需带 file_name / doc_id）
-     * @param esClient
-     * @param indexName
-     * @param embeddingStore
-     * @param embeddingModel
+     * @param target         写入目标（collection + store + 去重查询；SPI，本类不认识 ES）
+     * @param embeddingModel 向量模型（向量化在策略层分批做，后端只管存）
      * @return 处理报告（文档数 + 切片诊断计数）
      */
-    public static IngestReport ingestExternalDocuments(List<IngestSource> documents,
-                                                       ElasticsearchClient esClient,
-                                                       String indexName,
-                                                       EmbeddingStore embeddingStore,
-                                                       EmbeddingModel embeddingModel) {
+    public static IngestReport ingest(List<IngestSource> documents,
+                                      IngestTarget target,
+                                      EmbeddingModel embeddingModel) {
         if (documents == null || documents.isEmpty()) {
             return IngestReport.EMPTY;
         }
-        return doIngest(documents, esClient, indexName, embeddingStore, embeddingModel, "外部");
+        return doIngest(documents, target, embeddingModel, "外部");
     }
 
     /**
      * 策略分发
      *
      * @param documents      原始文档列表（可能混合多种文件类型）
-     * @param esClient
-     * @param indexName
-     * @param embeddingStore
-     * @param embeddingModel
+     * @param target         写入目标（collection + store + 去重查询）
+     * @param embeddingModel 向量模型
      * @param sourceTag      来源标签（"外部"）
      * @return 处理报告
      */
     private static IngestReport doIngest(List<IngestSource> documents,
-                                         ElasticsearchClient esClient,
-                                         String indexName,
-                                         EmbeddingStore embeddingStore,
+                                         IngestTarget target,
                                          EmbeddingModel embeddingModel,
                                          String sourceTag) {
         int docCount = documents.size();
@@ -84,7 +75,7 @@ public class DocumentIngestor {
             List<IngestSource> docsOfStrategy = e.getValue();
             try {
                 IngestReport report = strategy.process(
-                        docsOfStrategy, esClient, indexName, embeddingStore, embeddingModel, sourceTag);
+                        docsOfStrategy, target, embeddingModel, sourceTag);
                 total = total.plus(report);
                 log.debug("[知识库导入-{}] 策略[{}]处理完成：{} 个文档",
                         sourceTag, strategy.strategyName(), report.documents());

@@ -4,6 +4,8 @@ import com.zzkingcc.domainplane.api.conversation.ConversationArchive;
 import com.zzkingcc.domainplane.api.conversation.FlowEventType;
 import com.zzkingcc.domainplane.api.conversation.HistoryCard;
 import com.zzkingcc.domainplane.api.conversation.HistorySearch;
+import com.zzkingcc.domainplane.api.conversation.HistoryVectorIndex;
+import com.zzkingcc.domainplane.api.conversation.TextEmbedder;
 import com.zzkingcc.domainplane.api.conversation.TurnRecord;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.api.support.SessionKeys;
@@ -21,7 +23,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -63,9 +67,17 @@ public class RedisHistorySearch implements HistorySearch {
     /** 轮龄衰减半衰期（轮） */
     private static final double RECENCY_HALF_LIFE = 50.0;
 
+    /** RRF 融合的平滑常数（与知识库检索同取 10） */
+    private static final int RRF_K = 10;
+
     private final StringRedisTemplate redisTemplate;
     private final ConversationArchive archive;
     private final TokenizerProfile profile;
+
+    /** 语义路（F04-b）：向量索引 + 嵌入器；两者齐备且开关打开才走混合检索 */
+    private final HistoryVectorIndex vectorIndex;
+    private final TextEmbedder embedder;
+    private final boolean semanticEnabled;
 
     /** 按默认分词口径构造（权重 3/2/1，仅内置停用词表） */
     public RedisHistorySearch(StringRedisTemplate redisTemplate, ConversationArchive archive) {
@@ -78,9 +90,23 @@ public class RedisHistorySearch implements HistorySearch {
      */
     public RedisHistorySearch(StringRedisTemplate redisTemplate, ConversationArchive archive,
                               TokenizerProfile profile) {
+        this(redisTemplate, archive, profile, null, null, false);
+    }
+
+    /**
+     * @param vectorIndex     向量索引；{@code null} = 不建语义路
+     * @param embedder        文本嵌入器；{@code null} = 不建语义路
+     * @param semanticEnabled 混合检索开关；关掉或任一侧缺失都退回纯关键词（行为与改造前一字不变）
+     */
+    public RedisHistorySearch(StringRedisTemplate redisTemplate, ConversationArchive archive,
+                              TokenizerProfile profile, HistoryVectorIndex vectorIndex,
+                              TextEmbedder embedder, boolean semanticEnabled) {
         this.redisTemplate = redisTemplate;
         this.archive = archive;
         this.profile = profile == null ? TokenizerProfile.DEFAULT : profile;
+        this.vectorIndex = vectorIndex;
+        this.embedder = embedder;
+        this.semanticEnabled = semanticEnabled && vectorIndex != null && embedder != null;
     }
 
     /**
@@ -131,6 +157,7 @@ public class RedisHistorySearch implements HistorySearch {
             });
             raiseIfPipelineFailed(results, "写入索引");
             MetricsRegistry.indexed(terms.size());
+            indexVectorQuietly(sessionKey, record);
             log.debug("[会话检索] 会话[{}] turnId={} 已入索引，词根 {} 个", sessionKey, record.turnId(),
                     terms.size());
         } catch (Exception e) {
@@ -138,6 +165,36 @@ public class RedisHistorySearch implements HistorySearch {
             // 靠 FALLBACK_TAIL 子串扫描兜底。抛出去会让一次正常对话失败，不值当。
             MetricsRegistry.indexWriteFailure();
             log.warn("[会话检索] 会话[{}] turnId={} 写索引失败，该轮靠子串扫描兜底：{}",
+                    sessionKey, record.turnId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 同一回合的语义路写入（F04-b）。
+     *
+     * <p>只嵌 <b>digest</b>（问 60 字 + 答 140 字）而不是全文：嵌入是按字符计费的外部调用，
+     * 而"这一轮大概说了什么"这层语义 digest 已经够用；要细节走 {@code read_history} 取原文。
+     * 关键词路那边索引的是完整文本，两路素材不同是刻意的——<b>关键词认词形，给它全文才准；
+     * 向量认语义，给它噪声少的摘要才稳</b>。</p>
+     *
+     * <p>失败只告警：这一轮只是没有语义路，关键词路已经写好了。</p>
+     */
+    private void indexVectorQuietly(String sessionKey, TurnRecord record) {
+        if (!semanticEnabled) {
+            return;
+        }
+        String text = record.digest();
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        try {
+            float[] vector = embedder.embed(text);
+            if (vector == null || vector.length == 0) {
+                return;
+            }
+            vectorIndex.index(sessionKey, record.turnId(), vector);
+        } catch (Exception e) {
+            log.warn("[会话检索] 会话[{}] turnId={} 嵌入失败，该轮只有关键词路：{}",
                     sessionKey, record.turnId(), e.getMessage());
         }
     }
@@ -170,6 +227,15 @@ public class RedisHistorySearch implements HistorySearch {
 
     @Override
     public List<HistoryCard> search(String sessionKey, String query, int limit) {
+        List<HistoryCard> keywordCards = searchByKeyword(sessionKey, query, limit);
+        if (!semanticEnabled) {
+            return keywordCards;
+        }
+        return fuseWithVector(sessionKey, query, keywordCards, limit);
+    }
+
+    /** 纯关键词路（含子串扫描兜底）：语义路不可用时的全部行为，与改造前一字不变 */
+    private List<HistoryCard> searchByKeyword(String sessionKey, String query, int limit) {
         if (sessionKey == null || sessionKey.isBlank() || query == null || query.isBlank()
                 || limit <= 0) {
             return List.of();
@@ -200,6 +266,67 @@ public class RedisHistorySearch implements HistorySearch {
         // 索引给了候选、但卡片全被过滤掉（开放轮 / 读档失败）同样是空手
         MetricsRegistry.recallSearch(!cards.isEmpty(), false);
         return cards;
+    }
+
+    /**
+     * 关键词路 + 向量路的 RRF 融合（F04-b）。
+     *
+     * <p><b>为什么是 RRF 而不是加权</b>：两路的分数不可比——关键词分是"命中词根权重 + 新近衰减"，
+     * 向量分是余弦相似度，量纲与分布全不一样。加权求和等于让"哪一路数值恰好大"决定结果，
+     * 而 RRF 只认名次（{@code 1/(k+rank)}），把量纲问题整个绕开。与知识库检索同一取 k=10。</p>
+     *
+     * <p>向量路只有轮号，卡片实体必须回归档取（索引是派生数据，真相在归档）：
+     * 读不到的轮号直接跳过，一个孤儿轮号不该让整次检索失败。</p>
+     */
+    private List<HistoryCard> fuseWithVector(String sessionKey, String query,
+                                             List<HistoryCard> keywordCards, int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        float[] queryVector;
+        try {
+            queryVector = embedder.embed(query == null ? "" : query);
+        } catch (Exception e) {
+            log.warn("[会话检索] 会话[{}] 查询嵌入失败，本轮退化为纯关键词：{}", sessionKey, e.getMessage());
+            return keywordCards;
+        }
+        if (queryVector == null || queryVector.length == 0) {
+            return keywordCards;
+        }
+        List<Long> semanticIds = vectorIndex.search(sessionKey, queryVector, limit * 2);
+        if (semanticIds.isEmpty()) {
+            return keywordCards;
+        }
+        Map<Long, Double> scores = new HashMap<>();
+        Map<Long, HistoryCard> byId = new LinkedHashMap<>();
+        for (int i = 0; i < keywordCards.size(); i++) {
+            HistoryCard card = keywordCards.get(i);
+            byId.putIfAbsent(card.turnId(), card);
+            scores.merge(card.turnId(), 1.0 / (RRF_K + i + 1), Double::sum);
+        }
+        for (int i = 0; i < semanticIds.size(); i++) {
+            scores.merge(semanticIds.get(i), 1.0 / (RRF_K + i + 1), Double::sum);
+        }
+        List<Map.Entry<Long, Double>> ranked = new ArrayList<>(scores.entrySet());
+        ranked.sort(Comparator.<Map.Entry<Long, Double>>comparingDouble(Map.Entry::getValue)
+                .reversed()
+                .thenComparing(Map.Entry::getKey, Comparator.reverseOrder()));
+        List<HistoryCard> out = new ArrayList<>(limit);
+        for (Map.Entry<Long, Double> e : ranked) {
+            if (out.size() >= limit) {
+                break;
+            }
+            HistoryCard card = byId.get(e.getKey());
+            if (card == null) {
+                List<HistoryCard> fetched = cardsOf(readTurnsInOrder(sessionKey, List.of(e.getKey())));
+                if (fetched.isEmpty()) {
+                    continue;
+                }
+                card = fetched.get(0);
+            }
+            out.add(card);
+        }
+        return out;
     }
 
     /** 每词根取最新 {@link HistorySearch#CANDIDATES_PER_TERM} 轮，合并成"轮号 → 命中词根权重和" */
@@ -393,6 +520,10 @@ public class RedisHistorySearch implements HistorySearch {
                 Long removed = redisTemplate.delete(leftovers);
                 deleted += removed == null ? 0 : removed.intValue();
             }
+            // 语义路与关键词路是同一批轮次的两个影子：漏删一个，删域之后旧话还能被另一路勾回来
+            if (vectorIndex != null) {
+                deleted += vectorIndex.deleteByDomain(normalized);
+            }
             log.info("[会话检索] 已按域清理 {} 个索引键（域 {}）", deleted, normalized);
             return deleted;
         } catch (ChatMemoryException e) {
@@ -443,7 +574,7 @@ public class RedisHistorySearch implements HistorySearch {
      * <p>与运行层 {@code ContextAssembler.cardsOf} 同口径，但基础设施层看不到运行层，
      * 只能各写一份，两条规则必须同时改：排除开放轮与中止轮、工具名去重保序。</p>
      */
-    private static List<HistoryCard> cardsOf(List<TurnRecord> records) {
+    static List<HistoryCard> cardsOf(List<TurnRecord> records) {
         List<HistoryCard> out = new ArrayList<>(records.size());
         for (TurnRecord t : records) {
             if (t == null || t.isOpen()) {

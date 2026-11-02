@@ -2,21 +2,28 @@ package com.zzkingcc.domainplane.server.config;
 
 import com.zzkingcc.domainplane.api.agent.AgentService;
 import com.zzkingcc.domainplane.runtime.cancellation.CancellationRegistry;
+import com.zzkingcc.domainplane.runtime.config.Timeouts;
 import com.zzkingcc.domainplane.runtime.conversation.ContextAssembler;
 import com.zzkingcc.domainplane.runtime.conversation.RollingSummaryService;
 import com.zzkingcc.domainplane.runtime.model.ModelResolver;
 import com.zzkingcc.domainplane.runtime.orchestration.AgentOrchestrationService;
+import com.zzkingcc.domainplane.runtime.orchestration.ConcurrencyGate;
+import com.zzkingcc.domainplane.runtime.orchestration.OrchestrationDeps;
+import com.zzkingcc.domainplane.runtime.orchestration.PlanDisplayResolver;
+import com.zzkingcc.domainplane.runtime.orchestration.PlanningOptions;
 import com.zzkingcc.domainplane.runtime.prompt.SystemPromptResolver;
 import com.zzkingcc.domainplane.runtime.tool.ToolCallEchoResolver;
 import com.zzkingcc.domainplane.runtime.tool.ToolRouter;
 import com.zzkingcc.domainplane.runtime.vision.MediaAttachmentStore;
 import com.zzkingcc.domainplane.infrastructure.redis.checkpoint.RedisCheckpointSaver;
+import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisAssemblyReportStore;
 import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisConversationArchive;
 import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisConversationSummary;
 import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisHistorySearch;
 import com.zzkingcc.domainplane.server.conversation.ChatModelSummarizer;
 import com.zzkingcc.domainplane.server.prompt.DomainSystemPromptResolver;
 import com.zzkingcc.domainplane.server.settings.DomainSettingsStore;
+import com.zzkingcc.domainplane.server.tool.DomainPlanDisplayResolver;
 import com.zzkingcc.domainplane.server.tool.DomainToolCallEchoResolver;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
@@ -34,6 +41,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
 
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -45,16 +53,48 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author zzkingcc
  */
 @Configuration
-@EnableConfigurationProperties({PromptProperties.class, AgentProperties.class})
+@EnableConfigurationProperties({PromptProperties.class, AgentProperties.class, TimeoutsProperties.class,
+        PlanningProperties.class})
 public class GraphConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(GraphConfiguration.class);
 
     /**
-     * 图编排专用线程池
+     * 超时总表的唯一出口 bean。
+     *
+     * <p>编排 / 本地工具 / 看图 / 能力调用四处都从这里取值，于是"等多久算太长"
+     * 在平台里只可能有一份答案。绑定与校验分别在 {@link TimeoutsProperties} 与
+     * {@link Timeouts} 里，这里只搬运。</p>
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public Timeouts timeouts(TimeoutsProperties properties) {
+        Timeouts timeouts = properties.timeouts();
+        log.info("[超时总表] 等模型 {}ms（分片 {}ms）、规划 {}ms、本地工具 {}ms、看图 {}ms、能力调用 {}ms",
+                timeouts.modelWaitMs(), timeouts.modelWaitSliceMs(), timeouts.plannerWaitMs(),
+                timeouts.toolInvokeMs(), timeouts.visionCallMs(), timeouts.capabilityCallMs());
+        return timeouts;
+    }
+
+    /**
+     * 图编排执行器。
+     *
+     * <p>默认每轮一个<b>虚拟线程</b>：编排的主耗时是"等模型"，虚拟线程在阻塞时会被卸载，
+     * 不占载体线程，于是不再需要"开多少个线程才够"这种靠猜的参数。
+     * {@code domainplane.agent.virtual-threads=false} 时回落到平台线程池（旧参数仍在，
+     * 仅作兜底开关）。</p>
+     *
+     * <p><b>并发上限不在这里</b>：虚拟线程执行器没有队列上限，背压转由
+     * {@link ConcurrencyGate} 显式给出 —— 那是"服务过载"从快速失败变成 OOM 的分水岭。</p>
      */
     @Bean(destroyMethod = "shutdownNow")
     public ExecutorService agentExecutor(AgentProperties agentProperties) {
+        if (agentProperties.isVirtualThreads()) {
+            ThreadFactory factory = Thread.ofVirtual().name("domainplane-agent-", 0).factory();
+            log.info("[Agent编排配置] 编排执行器=虚拟线程（每轮一个），并发上限由闸门控制={}",
+                    agentProperties.getConcurrencyLimit());
+            return Executors.newThreadPerTaskExecutor(factory);
+        }
         ThreadFactory factory = new ThreadFactory() {
             private final AtomicLong seq = new AtomicLong();
 
@@ -74,10 +114,21 @@ public class GraphConfiguration {
                 new LinkedBlockingQueue<>(agentProperties.getQueueCapacity()),
                 factory);
 
-        log.info("[Agent编排配置] 编排线程池 core={}, max={}, queue={}",
+        log.info("[Agent编排配置] 编排执行器=平台线程池（回落模式） core={}, max={}, queue={}",
                 agentProperties.getCorePoolSize(), agentProperties.getMaxPoolSize(),
                 agentProperties.getQueueCapacity());
         return executor;
+    }
+
+    /**
+     * 并发闸门。
+     *
+     * <p>虚拟线程下它是唯一的过载保护：编排一轮要等模型几十秒，池/闸门满了必须快速失败，
+     * 让调用方退避重试，而不是让请求在内存里堆着。</p>
+     */
+    @Bean
+    public ConcurrencyGate orchestrationConcurrencyGate(AgentProperties agentProperties) {
+        return new ConcurrencyGate(agentProperties.getConcurrencyLimit());
     }
 
     /**
@@ -100,7 +151,12 @@ public class GraphConfiguration {
             RedisConversationArchive conversationArchive,
             MemoryProperties memoryProperties,
             RedisHistorySearch historySearch,
-            RollingSummaryService rollingSummaryService) {
+            RollingSummaryService rollingSummaryService,
+            RedisAssemblyReportStore assemblyReportStore,
+            ConcurrencyGate concurrencyGate,
+            Timeouts timeouts,
+            PlanningProperties planningProperties,
+            PlanDisplayResolver planDisplayResolver) {
 
         log.info("[Agent编排配置] 创建 AgentOrchestrationService，默认模型={}，会话记忆=Redis持久化，"
                         + "检查点=Redis(支持 interrupt/resume)，系统提示词解析器={}，模型解析器={}，"
@@ -129,10 +185,15 @@ public class GraphConfiguration {
                 memoryProperties.getAssemblyWindowTurns(),
                 memoryProperties.getAssemblyMaxCards());
 
-        return new AgentOrchestrationService(streamingChatModel, chatMemoryProvider, toolRouter,
-                promptResolver, checkpointSaver, graphStateSerializer, cancellationRegistry, agentExecutor,
-                modelResolver, toolCallEchoResolver, mediaAttachmentStore, conversationArchive, assembler,
-                historySearch, rollingSummaryService);
+        return new AgentOrchestrationService(
+                new OrchestrationDeps(streamingChatModel, chatMemoryProvider, toolRouter,
+                        promptResolver, checkpointSaver, graphStateSerializer, cancellationRegistry,
+                        agentExecutor, modelResolver, toolCallEchoResolver, mediaAttachmentStore,
+                        conversationArchive, assembler, historySearch, rollingSummaryService,
+                        assemblyReportStore, timeouts,
+                        new PlanningOptions(planningProperties.isEnabled()),
+                        planDisplayResolver),
+                concurrencyGate);
     }
 
     /**
@@ -179,5 +240,15 @@ public class GraphConfiguration {
     @ConditionalOnMissingBean(ToolCallEchoResolver.class)
     public ToolCallEchoResolver toolCallEchoResolver(DomainSettingsStore domainSettingsStore) {
         return new DomainToolCallEchoResolver(domainSettingsStore);
+    }
+
+    /**
+     * 域级「执行计划展示」开关解析器（默认关）：
+     * 规划是否<b>做</b>由 {@code domainplane.planning.enabled} 管，计划是否<b>给前端看</b>由这里管。
+     */
+    @Bean
+    @ConditionalOnMissingBean(PlanDisplayResolver.class)
+    public PlanDisplayResolver planDisplayResolver(DomainSettingsStore domainSettingsStore) {
+        return new DomainPlanDisplayResolver(domainSettingsStore);
     }
 }

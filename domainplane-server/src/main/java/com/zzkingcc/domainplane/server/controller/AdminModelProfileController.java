@@ -1,10 +1,14 @@
 package com.zzkingcc.domainplane.server.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzkingcc.domainplane.api.agent.Domains;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.common.exception.BaseException;
 import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
 import com.zzkingcc.domainplane.server.knowledge.KnowledgeBaseService;
+import com.zzkingcc.domainplane.server.model.CustomParamsGate;
 import com.zzkingcc.domainplane.server.model.ModelAdapterRegistry;
 import com.zzkingcc.domainplane.server.model.ModelCapabilityProbe;
 import com.zzkingcc.domainplane.server.model.ModelMetadataReader;
@@ -29,9 +33,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * 管理面：模型档案与「域 → 档案」绑定。
@@ -153,7 +159,7 @@ public class AdminModelProfileController {
                 body.getTemperature(), body.getMaxTokens(),
                 body.getContextWindow(),
                 body.getThinking(), body.getReturnThinking(),
-                body.getDimensions(), body.getFallbacks(), body.getParams());
+                body.getDimensions(), body.getFallbacks(), body.getParams(), body.getProtocol());
 
         /* 服务商适配复核：命中了才允许 params，且必须过 schema；没命中则 params 必须为空。
            前端可被绕过（直接调 API），"未适配不能调优"在这里强制成立 */
@@ -371,6 +377,171 @@ public class AdminModelProfileController {
     }
 
     /**
+     * 只改自定义参数（卡片上那个 JSON 文本框的保存口）。
+     *
+     * <p>这是"用户声明、我透传"那条路线的落点：厂商的参数面一直在变，而我们既没有足够的人
+     * 逐个实测，也没有办法保证写进去的 min / max / step 是对的 —— 与其给出一堆"看起来配了、
+     * 实际没验证过"的声明，不如把参数面交回给用户。<b>未命中适配的档案恰恰最需要这条路</b>，
+     * 而现在 30 个模型里 29 个走它。</p>
+     *
+     * <p>与 {@link #updateTuning} 并列而非合并：调优框是按适配 schema 渲染控件的，
+     * 只出现在按模型名命中适配的档案上；本接口不需要 schema，适用面正好互补。
+     * 两者都改 {@code params} 这一个字段，但判据不同 —— 合在一起就得在接口内部再判一次
+     * "这份档案走哪条路"，而那个判据前后端各存一份就会漂移。</p>
+     *
+     * <p>收**文本**而不是收 map：文本框里填的是 JSON，用户写错一个逗号时 Jackson 的
+     * 反序列化错误发生在参数绑定阶段，拿不到原始文本，也就没法回一句"第几行多了个逗号"。
+     * 收文本再自己解析，解析错误才能带上位置信息 —— 而"看不出哪里错了"正是这类
+     * 自助配置最容易劝退人的地方。</p>
+     *
+     * <p>连接信息 / 标准字段 / 端点族一律原样带走（{@link ModelProfile#withParams}），
+     * 客户端根本没有改它们的字段，而不是"前端不发、后端信任"。空白 = 清除。</p>
+     */
+    @PutMapping("/model-profiles/custom-params")
+    public Map<String, Object> updateCustomParams(@RequestBody(required = false) CustomParamsBody body) {
+        if (body == null || body.getAlias() == null || body.getAlias().isBlank()) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "别名不能为空");
+        }
+        String alias = body.getAlias().trim();
+        ModelProfile existing = registry.profile(alias)
+                .orElseThrow(() -> new BaseException(ErrorCode.INVALID_PARAMETER, "档案不存在：" + alias));
+
+        ModelProfile updated = existing.withParams(parseCustomParams(body.getParamsJson()));
+
+        String adapterError = checkAdapterTuning(updated);
+        if (adapterError != null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, adapterError);
+        }
+        String failure = registry.save(updated);
+        if (failure != null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, failure);
+        }
+        Map<String, Object> out = result("custom-params", alias);
+        out.put("message", updated.params().isEmpty()
+                ? "已清除 " + alias + " 的自定义参数"
+                : "已保存 " + alias + " 的自定义参数（" + updated.params().size() + " 个键）");
+        out.put("profile", profileView(updated));
+        return out;
+    }
+
+    /**
+     * 只改协议（卡片上那个下拉的保存口）。
+     *
+     * <p>与其余卡片级保存口分开，理由不是"又一个单薄接口"，而是它的副作用比看上去大：
+     * <b>换协议必然清空自定义参数</b>。同一个 {@code max_tokens} 在 OpenAI 下可选、
+     * 在 Anthropic 下必填，字段名相同、语义不同；留着旧值的后果是"我明明填了却不生效"，
+     * 而这个黑盒用户打不开 —— 他只能看到上游报错，看不到中间那条断层。
+     * 清空的代价只是一次重填。</p>
+     *
+     * <p>标准字段（温度 / 单次最大输出 / 思考回写）不动：两侧 builder 都有同名 setter，语义一致。
+     * 连接信息同样原样带走（{@link ModelProfile#withProtocol}）。</p>
+     *
+     * <p>协议进出指纹，客户端缓存按指纹失效，因此改完不必重启。</p>
+     */
+    @PutMapping("/model-profiles/protocol")
+    public Map<String, Object> updateProtocol(@RequestBody(required = false) ProtocolBody body) {
+        if (body == null || body.getAlias() == null || body.getAlias().isBlank()) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "别名不能为空");
+        }
+        String alias = body.getAlias().trim();
+        ModelProfile existing = registry.profile(alias)
+                .orElseThrow(() -> new BaseException(ErrorCode.INVALID_PARAMETER, "档案不存在：" + alias));
+
+        String target = body.getProtocol() == null || body.getProtocol().isBlank()
+                ? ModelProfile.PROTOCOL_OPENAI : body.getProtocol().trim();
+        if (!ModelProfile.PROTOCOL_OPENAI.equals(target) && !ModelProfile.PROTOCOL_ANTHROPIC.equals(target)) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "不支持的协议：" + target
+                    + "（可选：" + ModelProfile.PROTOCOL_OPENAI + " / " + ModelProfile.PROTOCOL_ANTHROPIC + "）");
+        }
+        if (target.equals(existing.protocol())) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, alias + " 的协议已经是 " + target);
+        }
+
+        ModelProfile updated = existing.withProtocol(target);
+        String failure = registry.save(updated);
+        if (failure != null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, failure);
+        }
+        Map<String, Object> out = result("protocol", alias);
+        /* 清空了自定义参数这件事必须说出口：静默清掉等于"我填的值自己消失了"，
+           与"保存失败"是同一种困惑，但前者连报错都没有。 */
+        out.put("message", existing.params().isEmpty()
+                ? "已将 " + alias + " 的协议切换为 " + target
+                : "已将 " + alias + " 的协议切换为 " + target + "，并清除了 "
+                + existing.params().size() + " 个自定义参数（同名键在两种协议下语义不同，请按新协议重填）");
+        out.put("clearedParams", !existing.params().isEmpty());
+        out.put("profile", profileView(updated));
+        return out;
+    }
+
+    /**
+     * 解析文本框里的 JSON：必须是一个扁平的对象，空 / 空白视作清除。
+     *
+     * <p>解析错误要带位置信息（"第 3 行第 8 个字符附近"），只说"JSON 格式错误"等于让用户
+     * 对着一坨文本自己找。顶层非对象（数组、标量）单独给一句：那些是"填法错了"，
+     * 不是"这一行写错了"，两类提示不该混成一句。</p>
+     */
+    private Map<String, Object> parseCustomParams(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Map.of();
+        }
+        ObjectMapper mapper = new ObjectMapper();
+        /* 禁用"未知键"之外的宽松特性：默认即严格（不注释、不单引号、不尾随逗号），
+           与用户心里的 JSON 一致。刻意不开 ALLOW_COMMENTS 之类 —— 编辑器里加注释看着方便，
+           存盘的却是注释剥掉后的一坨，用户回头看卡片会以为自己填的还在。 */
+        JsonNode tree;
+        try {
+            tree = mapper.readTree(raw);
+        } catch (JsonProcessingException e) {
+            String where = e.getLocation() == null ? "" : "（第 " + e.getLocation().getLineNr()
+                    + " 行第 " + e.getLocation().getColumnNr() + " 个字符附近）";
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "自定义参数不是合法 JSON" + where
+                    + "：" + firstLine(e.getOriginalMessage()));
+        }
+        if (tree.isNull() || (tree.isObject() && tree.isEmpty())) {
+            return Map.of();
+        }
+        if (!tree.isObject()) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER,
+                    "自定义参数必须是一个 JSON 对象（形如 {\"enable_thinking\": true}），当前是"
+                            + describeNode(tree));
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        Iterator<Map.Entry<String, JsonNode>> fields = tree.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            out.put(field.getKey(), mapper.convertValue(field.getValue(), Object.class));
+        }
+        return out;
+    }
+
+    private static String describeNode(JsonNode node) {
+        if (node.isArray()) {
+            return "数组";
+        }
+        if (node.isTextual()) {
+            return "字符串";
+        }
+        if (node.isNumber()) {
+            return "数字";
+        }
+        if (node.isBoolean()) {
+            return "布尔";
+        }
+        return "空值";
+    }
+
+    /** 只取首行：Jackson 的原始消息可能带整段 Jackson 类名，直接回给用户既长又无关 */
+    private static String firstLine(String message) {
+        if (message == null) {
+            return "";
+        }
+        int nl = message.indexOf('\n');
+        String head = nl < 0 ? message : message.substring(0, nl);
+        return head.length() > 160 ? head.substring(0, 160) + "…" : head;
+    }
+
+    /**
      * 读服务商元数据，拿到端点族与输入 / 输出模态：表单不再让用户选类型。
      *
      * 为什么读清单而不是发试探请求：试探要花 token（一条 chat + 一条 embeddings），成败还受配额 /
@@ -418,27 +589,34 @@ public class AdminModelProfileController {
      * 服务商适配复核（保存前的最后一道关）。
      *
      * 命中适配 → 全部调优值必须过 schema（未知键 / 类型 / 越界一律拒绝，文案带合法键）；
-     * 未命中 → params 必须为空。直接调 API 的请求也在这里被挡住。
+     * 未命中 → 走**用户自助填参**的四道闸门（{@link CustomParamsGate}）。直接调 API 的请求也在这里被挡住。
      *
-     * 这里用的是**更宽松**的 {@code matched()}（含 host 兜底），而绿框下发与
-     * {@link #updateTuning} 用的是 {@code byModelName()}。<b>刻意不一致</b>：
-     * 绿框 / 改调优收紧，是为了「未适配的模型不显示框、也不许改」；复核若同样收紧，
-     * 那些在旧口径下已被 host 兜底框存过 params 的档案会在任何一次保存时被拒，
-     * 而界面上已无绿框、用户无从清除 —— 直接死局。宽松放行不影响正确性：
-     * params 仍要过所命中适配的 schema（{@link ModelAdapterRegistry#validateParams}）。
+     * <p>未命中这条分支的口径在 2026-10-26 被改掉了：原先是"params 必须为空"，
+     * 现在 30 个模型里 29 个走这条路 —— <b>它从此是常态，不再是异常</b>。
+     * 服务的路线是"用户声明、我透传"：厂商参数面一直在变，而我们既没有足够的人逐个实测，
+     * 也没有办法保证写进去的 min / max / step 是对的，与其给出一堆"看起来配了、实际没验证过"
+     * 的声明，不如把参数面交回给用户，平台只守住不能交出去的那部分（模型名 / 地址 / 协议 / 凭证）。</p>
+     *
+     * <p>两条路的判据统一在 {@code byModelName()}（是否<b>按模型名</b>命中适配），
+     * 与绿框下发、{@link #updateTuning} 完全同一口径：</p>
+     * <ul>
+     *   <li>命中 → 按厂商 schema 复核（键 / 类型 / min / max / 条件参数），schema 比闸门精确；</li>
+     *   <li>未命中（含 host 兜底）→ 走四道闸门。<b>host 兜底走闸门是有意的</b>：它只说明
+     *       "这家服务商登记过"，把同 host 下另一模型的参数 schema 摆上来复核就是张冠李戴
+     *       （OpenRouter 这种聚合站上尤其明显）。旧口径在这里用 {@code matched()} 复核，
+     *       理由是"不然存量已存参数的档案会被任何一次保存拒死" —— 现在那条死局由闸门化解：
+     *       这些档案的自定义参数不再被 schema 拒，而是过闸门放行。</li>
+     * </ul>
      *
      * @return {@code null} = 通过；否则为可直接展示给用户的拒绝原因
      */
     private String checkAdapterTuning(ModelProfile profile) {
         ModelAdapterRegistry.MatchResult matched =
                 adapterRegistry.match(profile.baseUrl(), profile.modelName());
-        if (matched.matched()) {
+        if (matched.byModelName()) {
             return adapterRegistry.validateParams(matched, tuningValues(matched, profile));
         }
-        if (!profile.params().isEmpty()) {
-            return "服务商 / 模型「" + profile.modelName() + "」未做适配，不支持参数调优";
-        }
-        return null;
+        return CustomParamsGate.validate(profile.params());
     }
 
     /**
@@ -957,6 +1135,9 @@ public class AdminModelProfileController {
         item.put("usable", profile.isUsable());
         item.put("fallbacks", profile.fallbacks());
         item.put("params", profile.params());
+        /* 协议与可选项一并下发：卡片上的下拉照着渲染，前端不另存一份"有哪些协议"。 */
+        item.put("protocol", profile.protocol());
+        item.put("protocols", List.of(ModelProfile.PROTOCOL_OPENAI, ModelProfile.PROTOCOL_ANTHROPIC));
         /* 适配摘要：命中适配就下发 id / label 与当前生效的调优值（供卡片渲染绿色工具框）。
            
            门槛是 {@link ModelProfile#mayBeChat()} ——「**有可能**走对话端点」，不是「已确认是对话模型」：
@@ -969,9 +1150,9 @@ public class AdminModelProfileController {
                向量卡片要的就是"维度可就地改"，与 chat 档案的绿框同款交互、不同族参数；
              • 已声明为生图 / 语音 / 重排 / 视频 → 不下发：那些族的调优语义各不相同且尚未登记，
                把别的族的参数摆在它们上是张冠李戴。 */
+        ModelAdapterRegistry.MatchResult matched =
+                adapterRegistry.match(profile.baseUrl(), profile.modelName());
         if (profile.mayBeChat() || profile.isEmbedding()) {
-            ModelAdapterRegistry.MatchResult matched =
-                    adapterRegistry.match(profile.baseUrl(), profile.modelName());
             /* 两个条件都要满足才下发（卡片上才有绿框）：
                ① 按**模型名**命中（{@link ModelAdapterRegistry.MatchResult#byModelName()}）——
                   host 兜底只说明"这家服务商登记过"，把同 host 下 id 字典序最小的那条适配
@@ -983,6 +1164,11 @@ public class AdminModelProfileController {
                 item.put("adapter", adapterSummary(matched, profile));
             }
         }
+        /* 自定义参数（用户自助填参）的卡片入口：与 {@link #checkAdapterTuning} 同一份判据 ——
+           按模型名命中 → 走 schema 驱动的绿框，这里不给文本框（两条路都改 params，
+           同时给就是两个入口改一个字段，用户不知道哪个生效）；
+           未命中 → 给文本框 + 上限与提示，前端照着渲染，不自己另存一份判据。 */
+        item.put("customParams", customParamsView(profile, matched));
         item.put("usedByDomains", registry.domainsUsing(profile.alias()));
         /* 能不能绑到域上：服务端算好下发，前端只读，避免前端二次实现谓词再漂移
            （旧实现 models.html 自己的 isChatProfile() 就是 mirrors 了 mayBeChat()，口径一变就前后端打架）。 */
@@ -1059,6 +1245,50 @@ public class AdminModelProfileController {
         return ad;
     }
 
+    /**
+     * 卡片上「自定义参数（JSON）」文本框的视图数据。
+     *
+     * <p>把上限与提示一并下发，而不是让前端各写一份常量：闸门改一个数，卡片上的提示
+     * 必须跟着变，两处各存一份必然漂移（漂移的表现是"提示说 32 个，后端拒了 30 个"）。</p>
+     *
+     * @param schemaDriven 命中适配的档案走 schema 驱动的绿框，文本框不出现（两个入口改同一个
+     *                     字段时，用户无从判断哪个生效 —— 所以只留一条）
+     */
+    private Map<String, Object> customParamsView(ModelProfile profile,
+                                                 ModelAdapterRegistry.MatchResult matched) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("schemaDriven", matched.byModelName());
+        view.put("paramsJson", toPrettyJson(profile.params()));
+        Map<String, Object> limits = new LinkedHashMap<>();
+        limits.put("maxKeys", CustomParamsGate.MAX_KEYS);
+        limits.put("maxBytes", CustomParamsGate.MAX_BYTES);
+        limits.put("maxStringLength", CustomParamsGate.MAX_STRING_LENGTH);
+        limits.put("maxArrayItems", CustomParamsGate.MAX_ARRAY_ITEMS);
+        limits.put("maxObjectKeys", CustomParamsGate.MAX_OBJECT_KEYS);
+        view.put("limits", limits);
+        view.put("stdKeys", CustomParamsGate.stdKeys());
+        return view;
+    }
+
+    /**
+     * 回填文本框用的 JSON。空参数给**空字符串**而不是 {@code {}}：
+     * 卡片每次打开都先塞一对空括号，用户会以为"这里本来有内容、被我删了"。
+     */
+    private String toPrettyJson(Map<String, Object> params) {
+        if (params == null || params.isEmpty()) {
+            return "";
+        }
+        try {
+            return new ObjectMapper().writerWithDefaultPrettyPrinter().writeValueAsString(params);
+        } catch (JsonProcessingException e) {
+            /* 存盘的值理论上必然可序列化（保存时已过一遍 JSON 文本解析）；走到这里说明
+               有别的数据源写进了 params，如实记一笔并降级成 toString —— 宁可显示得难看，
+               也不能让"看一眼卡片"变成异常。 */
+            log.warn("[模型档案] 自定义参数序列化为 JSON 失败，卡片按原始文本回填：{}", e.getMessage());
+            return String.valueOf(new TreeMap<>(params));
+        }
+    }
+
     private Map<String, Object> result(String action, String target) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("code", 0);
@@ -1108,11 +1338,28 @@ public class AdminModelProfileController {
         private Integer dimensions;
         private List<String> fallbacks;
         /**
-         * 服务商适配的私有调优参数（如 {@code enable_thinking}）。
+         * 自定义参数（如 {@code enable_thinking}）。
          *
-         * 未命中适配的档案必须为空 / null；命中时由服务端按适配 schema 复核。
+         * 命中适配时按适配 schema 复核；未命中时由用户自助填写、原样透传
+         * （过 {@link CustomParamsGate} 的四道闸门）。
          */
         private Map<String, Object> params;
+        /**
+         * 上游协议：{@code openai}（默认）/ {@code anthropic}。
+         *
+         * 空白与 {@code null} 一律按 {@code openai} 处理：绝大多数档案属于这一类，
+         * 不填不该报错。填了不支持的值直接拒绝，不静默回落 —— 回落会让用户以为
+         * 选了 Anthropic 而实际在按 OpenAI 发请求，那种错在日志里也看不出来。
+         */
+        private String protocol;
+    }
+
+    /** 只改协议的请求体 */
+    @Data
+    public static class ProtocolBody {
+        private String alias;
+        /** {@code openai} / {@code anthropic}；空白按 {@code openai} */
+        private String protocol;
     }
 
     /**
@@ -1128,6 +1375,19 @@ public class AdminModelProfileController {
      * 不是"不修改"。卡片上把温度 / 维度清空再保存，就该真的不再发它们：
      * 若按"null = 不动"处理，用户会发现清不掉。
      */
+    /**
+     * 自定义参数的请求体：收**文本**而不是收 map。
+     *
+     * <p>收文本的理由写在本接口的说明里 —— 关键是 JSON 写错时要有位置信息，
+     * 而让 Spring 直接绑成 map 的话，解析错误发生在参数绑定阶段，原始文本已经拿不到了。</p>
+     */
+    @Data
+    public static class CustomParamsBody {
+        private String alias;
+        /** 「自定义参数（JSON）」文本框内容；空白 = 清除全部自定义参数 */
+        private String paramsJson;
+    }
+
     @Data
     public static class TuningBody {
         private String alias;

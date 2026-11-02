@@ -1,7 +1,10 @@
 package com.zzkingcc.domainplane.server.config;
 
+import com.zzkingcc.domainplane.runtime.config.Timeouts;
+import com.zzkingcc.domainplane.runtime.storage.BlobStore;
 import com.zzkingcc.domainplane.runtime.vision.MediaAttachmentStore;
-import com.zzkingcc.domainplane.server.vision.RedisMediaAttachmentStore;
+import com.zzkingcc.domainplane.server.storage.LocalBlobStore;
+import com.zzkingcc.domainplane.server.vision.BlobMediaAttachmentStore;
 import com.zzkingcc.domainplane.server.vision.VisionCallExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,27 +43,32 @@ public class VisionConfiguration {
     @Bean(destroyMethod = "close")
     public VisionCallExecutor visionCallExecutor(
             @Value("${domainplane.vision.pool-size:8}") int poolSize,
-            @Value("${domainplane.vision.timeout-ms:60000}") long timeoutMs) {
-        VisionCallExecutor executor = new VisionCallExecutor(poolSize, timeoutMs);
+            Timeouts timeouts) {
+        VisionCallExecutor executor = new VisionCallExecutor(poolSize, timeouts.visionCallMs());
         log.info("[视觉委派] 专用隔离池 {} 线程（零队列，满即拒），单次看图上限 {}ms",
                 Math.max(1, poolSize), executor.timeoutMs());
         return executor;
     }
 
     /**
-     * 媒体暂存区（Redis）—— 图 / 音 / 视都存。
+     * 媒体暂存区（Redis 登记表 + blob 存储字节）—— 图 / 音 / 视都存。
      *
-     * <p>TTL 是这个方案的清理机制本身：没有定时任务，也不需要"会话结束"这个事件：
-     * 媒体只在"本轮与紧随其后的几轮"里还有被引用的可能，过期即无主，Redis 自己回收。
-     * 活跃会话里被归档引用的那批由 M4-R4 活动续期保鲜（见
-     * {@code AgentOrchestrationService#renewActiveAttachments}），与媒体类型无关。</p>
+     * <p>与旧的纯 Redis 实现的分界：字节搬出 Redis（base64 大 value 是生产隐患），
+     * 登记表（引用名 → 键 / 类型 / 有效期）留在 Redis——TTL 与活动续期继续吃原生
+     * 能力，编排层 {@code renewActiveAttachments} 零改动。升级前的存量由新实现
+     * 内置回退读（老格式字节内联在登记表里）。</p>
+     *
+     * <p>返回具体类型而不是 {@link MediaAttachmentStore}：孤儿回收调度
+     * （{@code MediaBlobSweeper}）要按具体类型查登记表；编排层只认接口，
+     * 子类型 bean 照常注入，互不影响。</p>
      */
     @Bean
-    public MediaAttachmentStore mediaAttachmentStore(
+    public BlobMediaAttachmentStore mediaAttachmentStore(
             @Qualifier("domainplaneStringRedisTemplate") StringRedisTemplate stringRedisTemplate,
+            BlobStore blobStore,
             @Value("${domainplane.vision.attachment-ttl-minutes:30}") long ttlMinutes) {
         Duration ttl = Duration.ofMinutes(Math.max(1, ttlMinutes));
-        log.info("[附件暂存] 媒体暂存区 = Redis（前缀 domainplane:media:attachment:），引用 TTL={} 分钟", ttlMinutes);
-        return new RedisMediaAttachmentStore(stringRedisTemplate, ttl);
+        log.info("[附件暂存] 媒体暂存区 = Redis 登记表 + blob 存储，引用 TTL={} 分钟", ttlMinutes);
+        return new BlobMediaAttachmentStore(stringRedisTemplate, ttl, blobStore);
     }
 }

@@ -3,8 +3,11 @@ package com.zzkingcc.domainplane.server.controller;
 import com.zzkingcc.domainplane.api.agent.Domains;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.api.support.KbIndexes;
+import com.zzkingcc.domainplane.api.support.SessionKeys;
 import com.zzkingcc.domainplane.api.tool.ToolDescriptor;
 import com.zzkingcc.domainplane.common.exception.BaseException;
+import com.zzkingcc.domainplane.common.exception.KnowledgeBaseException;
+import com.zzkingcc.domainplane.runtime.cancellation.CancellationRegistry;
 import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
 import com.zzkingcc.domainplane.runtime.tool.InstanceLifecycle;
 import com.zzkingcc.domainplane.runtime.tool.InstanceRegistry;
@@ -16,6 +19,8 @@ import com.zzkingcc.domainplane.server.config.RedisProperties;
 import com.zzkingcc.domainplane.server.config.PromptProperties;
 import com.zzkingcc.domainplane.server.model.ModelProfile;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
+import com.zzkingcc.domainplane.server.model.ModelProfileSettings;
+import com.zzkingcc.domainplane.server.mcp.McpConnectionStore;
 import com.zzkingcc.domainplane.server.prompt.DomainSystemPromptResolver;
 import com.zzkingcc.domainplane.server.settings.EsCompatibility;
 import com.zzkingcc.domainplane.server.settings.InfraSettings;
@@ -28,13 +33,18 @@ import com.zzkingcc.domainplane.server.settings.LlmSettings;
 import com.zzkingcc.domainplane.server.settings.LlmSettingsStore;
 import com.zzkingcc.domainplane.server.settings.DomainSettings;
 import com.zzkingcc.domainplane.server.settings.DomainSettingsStore;
+import com.zzkingcc.domainplane.server.settings.DomainStore;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.zzkingcc.domainplane.server.env.RedisPersistenceAudit;
 import com.zzkingcc.domainplane.server.knowledge.ChunkExporter;
+import com.zzkingcc.domainplane.server.knowledge.KnowledgeBackendValidator;
 import com.zzkingcc.domainplane.server.knowledge.KnowledgeBaseService;
+import com.zzkingcc.domainplane.server.knowledge.KnowledgeStatsService;
+import com.zzkingcc.domainplane.server.knowledge.LiveKnowledgeBackendRegistry;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -93,7 +103,21 @@ public class AdminController {
     private final KnowledgeBaseService knowledgeBaseService;
     /** 切片预览导出：文档列表要展示导出文件路径与导出目录 */
     private final ChunkExporter chunkExporter;
+    /** 知识库统计（带缓存与熔断）：域空间页与删域预演的数字都从这里来 */
+    private final KnowledgeStatsService knowledgeStatsService;
+    /** 知识库能力校验器：启动不再校验，保存存储配置时反馈（AdminApiController#saveInfra） */
+    private final KnowledgeBackendValidator knowledgeBackendValidator;
+    /** 后端注册表：判"这次保存配没配知识库"，没配就不做能力校验 */
+    private final LiveKnowledgeBackendRegistry knowledgeBackendRegistry;
+    /** Redis 持久化自检：原启动自检移到"保存 Redis 配置时"执行 */
+    private final RedisPersistenceAudit redisPersistenceAudit;
     private final ModelProfileRegistry modelProfileRegistry;
+    /** MCP 连接库：域空间页要显示每个域直接绑定的连接（界面上不再自己按域链推继承） */
+    private final McpConnectionStore mcpConnectionStore;
+    /** 取消信号中心：域空间页要显示每个域有没有在飞的会话（只读 runningKeys，绝不发停止） */
+    private final CancellationRegistry cancellationRegistry;
+    /** 域存储：域空间页要显示每个域绑的知识体（绑定在域数据里，不在 InfraSettings 里） */
+    private final DomainStore domainStore;
 
     public AdminController(ToolRouter toolRouter,
                            @Qualifier("domainplaneElasticsearchClient") ElasticsearchClient esClient,
@@ -111,8 +135,15 @@ public class AdminController {
                            InstanceLifecycle instanceLifecycle,
                            KnowledgeBaseService knowledgeBaseService,
                            ChunkExporter chunkExporter,
+                           KnowledgeStatsService knowledgeStatsService,
+                           KnowledgeBackendValidator knowledgeBackendValidator,
+                           LiveKnowledgeBackendRegistry knowledgeBackendRegistry,
+                           RedisPersistenceAudit redisPersistenceAudit,
                            DomainRegistry domainRegistry,
-                           ModelProfileRegistry modelProfileRegistry) {
+                           ModelProfileRegistry modelProfileRegistry,
+                           McpConnectionStore mcpConnectionStore,
+                           CancellationRegistry cancellationRegistry,
+                           DomainStore domainStore) {
         this.toolRouter = toolRouter;
         this.esClient = esClient;
         this.embeddingModel = embeddingModel;
@@ -129,8 +160,15 @@ public class AdminController {
         this.instanceLifecycle = instanceLifecycle;
         this.knowledgeBaseService = knowledgeBaseService;
         this.chunkExporter = chunkExporter;
+        this.knowledgeStatsService = knowledgeStatsService;
+        this.knowledgeBackendValidator = knowledgeBackendValidator;
+        this.knowledgeBackendRegistry = knowledgeBackendRegistry;
+        this.redisPersistenceAudit = redisPersistenceAudit;
         this.domainRegistry = domainRegistry;
         this.modelProfileRegistry = modelProfileRegistry;
+        this.mcpConnectionStore = mcpConnectionStore;
+        this.cancellationRegistry = cancellationRegistry;
+        this.domainStore = domainStore;
     }
 
     /**
@@ -603,6 +641,18 @@ public class AdminController {
 
         int approvalTotal = 0;
         int missingPrompt = 0;
+        /* 在飞会话按域计数——只读 runningKeys 快照，与删域时的判定同源，但绝不发停止。
+           知识库文档 / 切片数不在这里算：那是唯一要碰存储的聚合，已拆到 GET /admin/kb/stats
+           （KnowledgeStatsService，带缓存与熔断），前端拿到树后异步补数——树不能被
+           存储故障拖住，这与 knowledgeByDomain 时代 fail-open 的意图一致，只是补上了
+           "不慢"这半边。 */
+        Map<String, Integer> runningByDomain = new LinkedHashMap<>();
+        for (String key : cancellationRegistry.runningKeys()) {
+            String domainOfKey = SessionKeys.domainOf(key);
+            if (domainOfKey != null) {
+                runningByDomain.merge(domainOfKey, 1, Integer::sum);
+            }
+        }
         List<Map<String, Object>> domains = new ArrayList<>();
         for (String domain : known) {
             Set<String> visibleNames = toolRouter.toolSpecifications(domain).stream()
@@ -620,7 +670,7 @@ public class AdminController {
             bySideEffect.put("DESTRUCTIVE", 0);
             int approval = 0;
             for (ToolDescriptor d : visible) {
-                tools.add(toolView(d));
+                tools.add(toolView(d, domain));
 
                 if (d.sideEffect() != null) {
                     bySideEffect.merge(d.sideEffect().name(), 1, Integer::sum);
@@ -653,6 +703,11 @@ public class AdminController {
             d.put("hasChildren", domainRegistry.hasChildren(domain));
             // 可调用单元 = 能当入口；装配节点只把工具 / 提示词 / 模型 / 知识传给后代
             d.put("callable", domainRegistry.isCallable(domain));
+            // 软删宽限期状态（F03）：标记与结构判据无关，管控台据此显示"待删除/可撤销"，
+            // 彻底删除时间由删除接口返回的 hardDeleteAt 为准
+            Long deletedAt = domainRegistry.pendingDeleteAt(domain);
+            d.put("pendingDelete", deletedAt != null);
+            d.put("deletedAt", deletedAt);
             d.put("toolCount", tools.size());
             d.put("exclusiveToolCount", tools.stream()
                     .filter(t -> Boolean.TRUE.equals(t.get("exclusive"))).count());
@@ -666,8 +721,42 @@ public class AdminController {
             d.put("promptLength", hasPrompt ? diff.trim().length() : 0);
             // 工具执行信息回写开关现值（默认关）；管控台只给可调用单元显示，这里全量带回
             d.put("toolCallEcho", console.toolCallEcho(domain));
+            // 执行计划展示开关现值（默认关）：规划结果发不给调用方，与 planning.enabled 互相独立
+            d.put("planDisplay", console.planDisplay(domain));
             // 该域实际生效的 SystemMessage 预览（preview 不打日志，见 DomainSystemPromptResolver）
             d.put("promptPreview", resolver.preview(domain, console));
+            // 生效提示词的链上构成（哪些祖先域拼了内容、各多少字）——沿链累加语义的可视化
+            List<Map<String, Object>> promptChain = new ArrayList<>();
+            for (DomainSystemPromptResolver.PromptSegment seg : resolver.chain(domain, console)) {
+                Map<String, Object> sv = new LinkedHashMap<>();
+                sv.put("domain", seg.domain());
+                sv.put("chars", seg.chars());
+                promptChain.add(sv);
+            }
+            d.put("promptChain", promptChain);
+            // 生效模型绑定（沿链解析 + 来源域）：前端不再用 JS 重实现「沿链覆盖」规则
+            d.put("modelBindings", modelBindingsView(domain));
+            // MCP：直接绑定的连接 + 继承来源（与模型同一套沿链语义）
+            Map<String, Object> mcp = new LinkedHashMap<>();
+            mcp.put("connections", mcpConnectionStore.connectionsOfDomain(domain));
+            mcp.put("inheritedFrom", nearestAncestorMcp(domain));
+            d.put("mcp", mcp);
+            // 知识库：文档 / 切片数由前端从 GET /admin/kb/stats 异步补（不在这里算）
+            Map<String, Object> knowledge = new LinkedHashMap<>();
+            // 该域绑的知识体（**不继承**：没绑就是没有知识库，不去父域借）。
+            // bodyMissing=true 表示绑的体已被删——前端据此提示"重新选一个"，而不是静默当成没配。
+            // bodyDead=true 是另一种：体还在，但它两路的连接都不可用（等于没有知识库）。
+            String bodyId = domainStore.bodyOf(domain);
+            InfraSettings.KnowledgeBody boundBody = infraHolder.current().body(bodyId);
+            knowledge.put("body", bodyId);
+            knowledge.put("bodyName", boundBody == null ? null : boundBody.effectiveName());
+            knowledge.put("bodyModes", boundBody == null ? null : boundBody.modes());
+            knowledge.put("bodyMissing", bodyId != null && boundBody == null);
+            knowledge.put("bodyDead", bodyId != null && boundBody != null
+                    && infraHolder.current().usableBody(bodyId) == null);
+            d.put("knowledge", knowledge);
+            // 在飞会话数：这个域下正在跑几轮对话（删域前最有意义的数）
+            d.put("runningSessions", runningByDomain.getOrDefault(domain, 0));
             d.put("tools", tools);
             domains.add(d);
         }
@@ -693,11 +782,228 @@ public class AdminController {
         body.put("stats", stats);
         body.put("domains", domains);
         body.put("globalTools", globalList);
+        /* 可绑的知识体清单：域卡片上那个下拉的选项。
+           原文不在这里——它不属于知识体。每个体带上它配了哪几路（modes），
+           前端据此把选项标成「关键字+向量」。 */
+        List<Map<String, Object>> bodyOptions = new ArrayList<>();
+        InfraSettings infra = infraHolder.current();
+        infra.bodiesOrEmpty().forEach((id, b) -> {
+            if (b == null || !b.configured()) {
+                return;
+            }
+            Map<String, Object> opt = new LinkedHashMap<>();
+            opt.put("id", id);
+            opt.put("name", b.effectiveName());
+            opt.put("modes", b.modes());
+            opt.put("hybrid", b.hybrid());
+            opt.put("usable", infra.usableBody(id) != null);
+            bodyOptions.add(opt);
+        });
+        body.put("knowledgeBodies", bodyOptions);
         List<String> orphans = new ArrayList<>(console.getPrompts().keySet());
         orphans.removeAll(known);
         Collections.sort(orphans);
         body.put("orphanPrompts", orphans);
         body.put("settingsFile", domainSettingsStore.filePath());
+        return body;
+    }
+
+    /**
+     * 知识库统计：<b>知识体总量</b> + <b>每个域可检索的量</b>（带缓存与熔断，见 {@link KnowledgeStatsService}）。
+     *
+     * <p>两个视图回答两个不同的问题，别混用：</p>
+     *
+     * <ul>
+     *   <li>{@code bodies}：这个知识体里有多少文档（基础设施视角，容量规划用）。
+     *       体可被多个域共用，所以它<b>不对应任何一个域</b>；{@code domainCount} 给出共用域数，
+     *       前端据此决定要不要提示"体共 N"。</li>
+     *   <li>{@code domains}：这个域一次检索能查到多少（本域 + 已绑体的祖先域，与
+     *       {@code RetrievalPlan.channels} 同口径）。域卡片上的主数字用这个。</li>
+     * </ul>
+     *
+     * <p>与 {@code /admin/domains} 拆开的原因：这是唯一要碰存储的聚合，ES 不可达时
+     * 不能把树接口一起拖住。前端拿到域树后异步补这里的数字；数字旧了（stale=true）
+     * 也照常展示，展示路径不值得为时效硬扛一次 connectTimeout。</p>
+     */
+    @GetMapping("/kb/stats")
+    public Map<String, Object> kbStats() {
+        KnowledgeStatsService.Stats stats = knowledgeStatsService.stats();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("stale", stats.stale());
+        /* 体 → 被几个域绑着（共用时要提示"体共 N"，否则用户会把体的总量当成这个域的量） */
+        Map<String, Integer> boundDomains = new LinkedHashMap<>();
+        domainStore.bodies().values().forEach(bodyId -> boundDomains.merge(bodyId, 1, Integer::sum));
+        /* 先把"配置里存在的知识体"按 0 铺一遍再让实测值覆盖：统计只产出有文档的体，
+           只按实测值出列表会让"绑了体但还没传文档"的域在卡片上落到"统计不可用"——
+           那是"取不到数"，不是"这里没有数"，两句话差别很大。 */
+        Map<String, long[]> merged = new LinkedHashMap<>();
+        infraHolder.current().bodiesOrEmpty().keySet()
+                .forEach(bodyId -> merged.put(bodyId, new long[2]));
+        merged.putAll(stats.byBody());
+        List<Map<String, Object>> bodies = new ArrayList<>();
+        for (Map.Entry<String, long[]> entry : merged.entrySet()) {
+            Map<String, Object> b = new LinkedHashMap<>();
+            b.put("id", entry.getKey());
+            b.put("name", knowledgeStatsService.bodyName(entry.getKey()));
+            b.put("documents", entry.getValue()[0]);
+            b.put("chunks", entry.getValue()[1]);
+            b.put("domainCount", boundDomains.getOrDefault(entry.getKey(), 0));
+            bodies.add(b);
+        }
+        body.put("bodies", bodies);
+        /* 域口径（可检索）：前端卡片的主数字。只给有数的域，缺省即 0 */
+        Map<String, Object> domains = new LinkedHashMap<>();
+        knowledgeStatsService.retrievableBy(toolRouter.knownDomains()).forEach((domain, acc) -> {
+            Map<String, Object> v = new LinkedHashMap<>();
+            v.put("documents", acc[0]);
+            v.put("chunks", acc[1]);
+            domains.put(domain, v);
+        });
+        body.put("domains", domains);
+        return body;
+    }
+
+    /**
+     * 域 → 该域知识库的 [文档数, 切片数]（一次全量聚合）。
+     *
+     * 数字来自 {@link KnowledgeStatsService} 的缓存快照：存储不可达时它返回空 map 或旧快照，
+     * 调用方按 0 展示——与 /kb/documents 读路径同口径。域空间页的核心是树与配置，
+     * 不该被一次存储故障把整页打红，也不该让它把整页拖慢。
+     */
+    private Map<String, long[]> knowledgeByDomain() {
+        return knowledgeStatsService.stats().byDomain();
+    }
+
+    /**
+     * 某域生效的模型绑定：主模型 + 各能力族，全部沿链解析并带来源域。
+     *
+     * 这是「写存意图、读取算生效」里"算"的那一半：空列表 = 整条链都没绑（不是"解绑了"）；
+     * sourceDomain 为空 = 确无可调用模型。前端据此显示「继承自 X」，不再自己沿链推。
+     */
+    private Map<String, Object> modelBindingsView(String domain) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        ModelProfileSettings.DomainBinding chat = modelProfileRegistry.resolve(domain);
+        view.put("chat", bindingView(chat.aliases(), chat.sourceDomain(), domain));
+        Map<String, Object> capabilities = new LinkedHashMap<>();
+        for (String family : ModelProfile.CAPABILITY_FAMILIES) {
+            ModelProfileSettings.CapabilityBinding cap =
+                    modelProfileRegistry.resolveCapability(domain, family);
+            capabilities.put(family, bindingView(cap.aliases(), cap.sourceDomain(), domain));
+        }
+        view.put("capabilities", capabilities);
+        return view;
+    }
+
+    /** 一条绑定解析结果的 JSON 视图：生效别名 + 来源域 + 是否继承而来 */
+    private Map<String, Object> bindingView(List<String> aliases, String sourceDomain, String domain) {
+        Map<String, Object> v = new LinkedHashMap<>();
+        v.put("aliases", aliases == null ? List.of() : aliases);
+        v.put("sourceDomain", sourceDomain);
+        v.put("inherited", sourceDomain != null && !sourceDomain.equals(domain));
+        return v;
+    }
+
+    /**
+     * 最近一个直接绑了 MCP 连接的祖先域（不含自身；沿链由近及远）。
+     *
+     * 与 MCP 绑定弹窗里「继承自 X」标签同口径，只是算在后端：
+     * 弹窗仍按自己的域链推（P3 再收敛），这里保证域空间页显示的是同一句话。
+     */
+    private String nearestAncestorMcp(String domain) {
+        List<String> chain = Domains.chainOf(Domains.normalize(domain));
+        for (int i = chain.size() - 2; i >= 0; i--) {
+            String step = chain.get(i);
+            if (!mcpConnectionStore.connectionsOfDomain(step).isEmpty()) {
+                return step;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 删域影响面预演（dry-run，只读）：删这个域会连带删掉什么、各多少。
+     *
+     * 与 DELETE /admin/domains/{id} 同一套判定与口径，但一个字节都不删：
+     * 删除确认框该显示真数，而不是让用户赌一把。特别注意：这里只统计在飞会话，
+     * 绝不做 requestStopAndAwait——停掉在飞会话是真删时才做的动作。
+     *
+     * 计数 fail-open（ES / 存储临时不可达按 0 报）：预演的价值在数量级，
+     * 为一次统计失败把预览整个打成 500，用户反而连"要删什么"都看不到。
+     */
+    @GetMapping("/domains/{id}/delete-impact")
+    public Map<String, Object> domainDeleteImpact(@PathVariable("id") String id) {
+        String normalized = Domains.normalize(id);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("domain", normalized);
+        if (!domainRegistry.contains(normalized)) {
+            body.put("removable", false);
+            body.put("reason", "域不存在：" + normalized);
+            return body;
+        }
+        if (domainRegistry.isBuiltin(normalized)) {
+            body.put("removable", false);
+            body.put("reason", "根域不可删除（它是整棵域树的起点）");
+            return body;
+        }
+        List<String> descendants = new ArrayList<>(domainRegistry.descendantsOf(normalized));
+        List<String> affected = new ArrayList<>(descendants);
+        affected.add(normalized);
+        Set<String> affectedSet = Set.copyOf(affected);
+
+        body.put("removable", true);
+        body.put("descendants", descendants);
+        // 知识库：连带删的索引 / 文档 / 切片（走统计缓存，存储不可达时 fail-open 按 0 报）
+        Map<String, long[]> kbByDomain = knowledgeByDomain();
+        long docs = 0;
+        long chunks = 0;
+        for (String domain : affected) {
+            long[] acc = kbByDomain.get(domain);
+            if (acc != null) {
+                docs += acc[0];
+                chunks += acc[1];
+            }
+        }
+        Set<String> existingIndices = knowledgeStatsService.stats().indices();
+        // 不用 stream：existingIndices 在 try/catch 两处赋值、不是 effectively final，lambda 捕获不了
+        long indices = 0;
+        for (String domain : affected) {
+            if (existingIndices.contains(KbIndexes.nameOf(domain))) {
+                indices++;
+            }
+        }
+        Map<String, Object> knowledge = new LinkedHashMap<>();
+        knowledge.put("indices", indices);
+        knowledge.put("documents", docs);
+        knowledge.put("chunks", chunks);
+        body.put("knowledge", knowledge);
+        // 会被级联清理的模型绑定 / MCP 绑定（删域只摘绑定，不删连接与档案本身）
+        List<String> modelBound = modelProfileRegistry.domainBindings().keySet().stream()
+                .filter(affectedSet::contains)
+                .sorted()
+                .toList();
+        List<String> mcpBound = mcpConnectionStore.allDomainBindings().keySet().stream()
+                .filter(affectedSet::contains)
+                .sorted()
+                .toList();
+        body.put("modelBindings", modelBound);
+        body.put("mcpBindings", mcpBound);
+        // 连带清理的提示词域数（提示词沿链拼接，少一段整条链的生效内容都会变）
+        DomainSettings consoleSettings = domainSettingsStore.load();
+        long prompts = consoleSettings.getPrompts().keySet().stream()
+                .filter(affectedSet::contains)
+                .count();
+        body.put("prompts", prompts);
+        // 声明里涉及这些域的工具条目数（删域会从声明里剥掉这些域，工具可能因此变不可见）
+        long toolDeclarations = toolRouter.toolDescriptors().stream()
+                .filter(t -> t.declaredDomains().stream().anyMatch(affectedSet::contains))
+                .count();
+        body.put("toolDeclarations", toolDeclarations);
+        // 在飞会话数（只计数；真删时先停再删，见 AdminDomainController#delete）
+        long running = cancellationRegistry.runningKeys().stream()
+                .map(SessionKeys::domainOf)
+                .filter(affectedSet::contains)
+                .count();
+        body.put("runningSessions", running);
         return body;
     }
 
@@ -837,9 +1143,18 @@ public class AdminController {
     }
 
     /**
-     * 「域空间」里一个工具的统一呈现字段。
+     * 「域空间」里一个工具的统一呈现字段（全局列表视角，无域上下文）。
      */
     private Map<String, Object> toolView(ToolDescriptor d) {
+        return toolView(d, null);
+    }
+
+    /**
+     * 「域空间」里一个工具的统一呈现字段（某域视角）。
+     *
+     * @param domain 当前展示的域；{@code null} = 全局列表（不解析继承来源）
+     */
+    private Map<String, Object> toolView(ToolDescriptor d, String domain) {
         Map<String, Object> t = new LinkedHashMap<>();
         t.put("name", d.name());
         t.put("description", d.description());
@@ -856,7 +1171,32 @@ public class AdminController {
         t.put("source", d.source());
         // 该工具是否"只声明了一个域"：一眼看出域的专属能力，还是全域通用能力
         t.put("exclusive", d.domains() != null && d.domains().size() == 1);
+        // 该工具对本域的授权来自链上哪一段：声明域 ∩ 域链的最深命中（含自身）。
+        // 恰好命中自身 = 本域直接授权；命中祖先 = 沿链继承（"挂父域、子域默认可用"）。
+        // null 只会出现在全局列表（无域上下文）——不可见的工具进不来这个列表。
+        t.put("inheritedFrom", deepestDeclared(d, domain));
         return t;
+    }
+
+    /**
+     * 工具声明域里，命中该域链最深的那一段（链由根向下，最后一个命中即最深）。
+     *
+     * 与 {@link ToolDescriptor#visibleIn} 同一套判定，只是把"是否可见"换成"授权来自哪一层"：
+     * 可见性是一票通过（任一声明命中即可见），归属取最具体的那个声明。
+     */
+    private String deepestDeclared(ToolDescriptor d, String domain) {
+        if (domain == null) {
+            return null;
+        }
+        List<String> chain = Domains.chainOf(Domains.normalize(domain));
+        List<String> declared = d.declaredDomains();
+        String hit = null;
+        for (String step : chain) {
+            if (declared.contains(step)) {
+                hit = step;
+            }
+        }
+        return hit;
     }
 
     // ===== 知识库文档（列表 / 上传 / 删除 / 状态） =====
@@ -899,6 +1239,8 @@ public class AdminController {
             throws IOException {
         KnowledgeBaseService.UploadResult result =
                 knowledgeBaseService.upload(file.getBytes(), file.getOriginalFilename(), replace, domain);
+        // 新文档入库：统计快照当场作废，否则域空间页 60s 内还是旧数字
+        knowledgeStatsService.invalidate();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("code", 0);
         body.put("success", true);
@@ -921,6 +1263,10 @@ public class AdminController {
     @DeleteMapping("/kb/documents/{docId}")
     public Map<String, Object> kbDelete(@PathVariable String docId) {
         boolean deleted = knowledgeBaseService.delete(docId);
+        if (deleted) {
+            // 删了一个文档：统计快照当场作废（删域 / 上传之外，这是第三个会改文档数的入口）
+            knowledgeStatsService.invalidate();
+        }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("code", 0);
         body.put("success", true);
@@ -951,6 +1297,8 @@ public class AdminController {
             int dimensions = modelHolder.effectiveEmbeddingDimension();
             log.info("[管控] 收到知识库重建请求，向量维度 = {}", dimensions);
             List<String> indices = knowledgeBaseService.rebuildAll(dimensions);
+            // 索引被清空重建：旧的统计快照（还带着重建前的文档 / 切片数）必须作废
+            knowledgeStatsService.invalidate();
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("code", 0);
             result.put("success", true);
@@ -968,27 +1316,165 @@ public class AdminController {
         }
     }
 
-    // ===== 存储配置（ES / Redis） =====
-    //
-    // 连接信息从 yaml 搬到管控台：先在页面上填 → 「测试连接」验证 → 「保存并生效」热替换。
-    // 保存的是"界面那一份"，yaml 留空回落；两者都空即"未配置"（服务照常启动，检索与上传报未配置）。
+    /**
+     * 已注册的知识库后端清单（含能力声明），供「重灌到新后端」下拉。
+     */
+    @GetMapping("/kb/backends")
+    public Map<String, Object> kbBackends() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("code", 0);
+        body.put("backends", knowledgeBaseService.listBackends());
+        return body;
+    }
 
     /**
-     * 读取 ES / Redis 存储配置（口令脱敏）
+     * 把当前全部知识库内容跨后端重灌到指定目标后端（换后端 = 从 archive 重灌到新后端，设计第 11 节）。
+     *
+     * 源是 keyword 后端（文档登记权威），目标是界面指定的后端；目标可以是当前 vector 后端
+     * （等价于「换向量模型保留原文重建」），也可以是另一个已注册、具备向量存储能力的后端。
+     *
+     * @param body 请求体：{@code targetBackendId} 目标后端 id（必须已注册且具备向量存储能力）
+     */
+    @PostMapping(value = "/kb/reindex", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, Object> reindexKnowledge(@RequestBody Map<String, Object> body) {
+        Object idObj = body == null ? null : body.get("targetBackendId");
+        String targetBackendId = idObj == null ? null : String.valueOf(idObj).trim();
+        try {
+            if (targetBackendId == null || targetBackendId.isBlank()) {
+                throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER,
+                        "targetBackendId 不能为空（应为已注册的知识库后端 id）");
+            }
+            log.info("[管控] 收到知识库重灌到后端请求：targetBackendId={}", targetBackendId);
+            Map<String, Integer> reindexed = knowledgeBaseService.reindexToBackend(targetBackendId);
+            // 重灌会改写目标后端上的索引：统计快照作废，别让页面显示重灌前的数
+            knowledgeStatsService.invalidate();
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("code", 0);
+            result.put("success", true);
+            result.put("targetBackendId", targetBackendId);
+            result.put("collections", reindexed.keySet());
+            result.put("reindexed", reindexed);
+            int total = reindexed.values().stream().mapToInt(Integer::intValue).sum();
+            result.put("totalChunks", total);
+            result.put("message", "已重灌到后端 " + targetBackendId + "：" + reindexed.size()
+                    + " 个 collection、共 " + total + " 条切片");
+            return result;
+        } catch (Exception e) {
+            log.error("[管控] 知识库重灌到后端失败（targetBackendId={}）: {}", targetBackendId, e.getMessage(), e);
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("success", false);
+            result.put("error", e.getMessage());
+            return result;
+        }
+    }
+
+    // ===== 存储配置（连接 / 知识体 / Redis） =====
+    //
+    // 三块各管一件事：**连接**管"连哪里"（一台具体 ES 或 Qdrant），**知识体**管
+    // "拿哪台连接干哪种活"（关键字 / 向量 / 原文，一个体只取一种），Redis 是平台
+    // 自己的基础设施。保存后立即生效。
+    //
+    // 域用哪个知识体<b>不在这里</b>：那是域自己的声明，见 AdminDomainController。
+
+    /**
+     * 读取存储配置（口令脱敏）
      */
     @GetMapping("/infra")
     public Map<String, Object> infra() {
         InfraSettings cur = infraHolder.current();
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("es", esBody(cur.getEs()));
         body.put("redis", redisBody(cur.getRedis()));
+
+        List<Map<String, Object>> connections = new ArrayList<>();
+        cur.connectionsOrEmpty().forEach((id, c) -> {
+            if (c != null) {
+                connections.add(connectionBody(c));
+            }
+        });
+        body.put("connections", connections);
+
+        List<Map<String, Object>> bodies = new ArrayList<>();
+        cur.bodiesOrEmpty().forEach((id, b) -> {
+            if (b != null) {
+                bodies.add(bodyBody(b, cur));
+            }
+        });
+        body.put("bodies", bodies);
+        body.put("configured", cur.isConfigured());
+
         body.put("esConfigured", infraHolder.isEsConfigured());
         body.put("redisConfigured", infraHolder.isRedisConfigured());
+        body.put("vectorSlotConfigured", infraHolder.isVectorSlotConfigured());
         body.put("esSource", infraHolder.esSource());
         body.put("redisSource", infraHolder.redisSource());
+        body.put("vectorSlotSource", infraHolder.vectorSlotSource());
         body.put("indexPattern", KbIndexes.WILDCARD);
         body.put("settingsFile", infraSettingsStore.filePath());
+        body.put("supportedTypes", InfraSettings.SUPPORTED_TYPES);
         return body;
+    }
+
+    /** 一个具名连接：类型 + 地址 + 脱敏口令。前端按 type 决定渲染哪张表单 */
+    private static Map<String, Object> connectionBody(InfraSettings.Connection c) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", c.getId());
+        m.put("name", c.effectiveName());
+        m.put("type", c.effectiveType());
+        m.put("usage", c.effectiveUsage());
+        m.put("usable", c.isUsable());
+        m.put("location", c.location());
+        m.put("description", c.describe());
+        if (c.getEs() != null) {
+            m.put("es", esBody(c.getEs()));
+        }
+        if (c.getVector() != null) {
+            m.put("vector", vectorStoreBody(c.getVector()));
+        }
+        return m;
+    }
+
+    /**
+     * 一个知识体：两路各可选，每路一条连接。
+     *
+     * <p>每路单独下发 {@code {slot}Type / {slot}Location / {slot}Missing}，而不是合成一个
+     * "这个体可不可用"：页面要能画出"关键字那台没了、向量还在"这种半残状态，让用户知道
+     * 该修哪一行，而不是整块变红。</p>
+     */
+    private static Map<String, Object> bodyBody(InfraSettings.KnowledgeBody b, InfraSettings all) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", b.getId());
+        m.put("name", b.effectiveName());
+        m.put("keyword", b.keywordId());
+        m.put("vector", b.vectorId());
+        m.put("modes", b.modes());
+        m.put("hybrid", b.hybrid());
+        // 整块可用 = 至少一路连得上；configured=false 表示这个体空着（一路都没配）
+        m.put("configured", b.configured());
+        m.put("usable", b.configured() && all.usableBody(b.getId()) != null);
+        putSlot(m, "keyword", b.keywordId(), all);
+        putSlot(m, "vector", b.vectorId(), all);
+        return m;
+    }
+
+    /** 一路的下发形态：配了谁、连的是哪台、那台还行不行 */
+    private static void putSlot(Map<String, Object> target, String slot, String connectionId,
+                                InfraSettings all) {
+        InfraSettings.Connection c = all.connection(connectionId);
+        String prefix = "keyword".equals(slot) ? "keyword" : "vector";
+        target.put(prefix + "Type", c == null ? null : c.effectiveType());
+        target.put(prefix + "Location", c == null ? null : c.location());
+        // 填了 id 但取不到连接，或者连接没填地址 → 这一路是坏的
+        target.put(prefix + "Missing", connectionId != null && (c == null || !c.isUsable()));
+    }
+
+    private static Map<String, Object> vectorStoreBody(InfraSettings.VectorStore vs) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("uri", vs.getUri());
+        m.put("tokenMasked", vs.getMaskedToken());
+        m.put("tokenSet", hasText(vs.getToken()));
+        m.put("collectionPrefix", vs.getCollectionPrefix());
+        m.put("metric", vs.effectiveMetric());
+        return m;
     }
 
     private static Map<String, Object> esBody(InfraSettings.Elasticsearch es) {
@@ -1015,16 +1501,33 @@ public class AdminController {
     }
 
     /**
-     * 保存存储配置并立即生效（无需重启）
+     * 保存存储配置并立即生效（无需重启）。
+     *
+     * <p>整份覆盖：前端把当前页面上<b>全部</b>连接、知识体、Redis 一起提交。不做增量
+     * 补丁是有意的——"少传一条就当没动过"会让界面上删掉的行在重启后复活。</p>
+     *
+     * <p>请求体里连接与知识体是<b>数组</b>（页面上就是一张表、一组卡片），落盘时才转成
+     * 以 id 为键的对象——人读配置文件时按 id 找比按数组下标找方便。</p>
+     *
+     * <p>删掉某个知识体<b>不会</b>连带清掉域上的绑定：绑定在 {@code DomainStore} 里，
+     * 与存储配置不是一次事务。留着绑定而不是偷改域，好处是"先删体再建同名体"能恢复，
+     * 坏处是中间这段时间那个域没有知识库——域列表会把它标成"知识体已失效"。</p>
      */
     @PostMapping("/infra")
-    public Map<String, Object> saveInfra(@RequestBody InfraSettings incoming) {
-        log.info("[管控] 收到存储配置保存请求: es={}, redis={}",
-                incoming.getEs() == null ? "-" : incoming.getEs().describe(),
+    public Map<String, Object> saveInfra(@RequestBody InfraSaveRequest request) {
+        InfraSettings incoming = new InfraSettings();
+        incoming.setConfigured(true);
+        incoming.setRedis(request.redis());
+        incoming.setConnections(asConnectionMap(request.connections()));
+        incoming.setBodies(asBodyMap(request.bodies()));
+        log.info("[管控] 收到存储配置保存请求：连接 {} 个，知识体 {} 个，Redis={}",
+                incoming.connectionsOrEmpty().size(),
+                incoming.bodiesOrEmpty().size(),
                 incoming.getRedis() == null ? "-" : incoming.getRedis().describe());
         try {
             infraHolder.apply(incoming);
-        } catch (IllegalStateException e) {
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            log.warn("[管控] 存储配置被拒绝: {}", e.getMessage());
             return failBody(e.getMessage());
         }
 
@@ -1032,11 +1535,77 @@ public class AdminController {
         result.put("success", true);
         result.put("esConfigured", infraHolder.isEsConfigured());
         result.put("redisConfigured", infraHolder.isRedisConfigured());
+        result.put("vectorSlotConfigured", infraHolder.isVectorSlotConfigured());
         result.put("esSource", infraHolder.esSource());
         result.put("redisSource", infraHolder.redisSource());
+        result.put("vectorSlotSource", infraHolder.vectorSlotSource());
+        /* 检测移到连接/配置时：启动不再做知识库能力校验，也不做 Redis 自检。保存配置时
+           在这里一次性反馈——不拒绝保存（配置已生效），只把"能力不匹配 / Redis 没持久化"
+           作为 warning 带回去，运维看得见、服务不被拖死。 */
+        List<String> warnings = new ArrayList<>(infraWarnings());
+        warnings.addAll(redisPersistenceAudit.audit());
+        result.put("warnings", warnings);
         result.put("message", "存储配置已保存并立即生效");
         fillSecretState(result);
         return result;
+    }
+
+    /** 保存存储配置后的知识库能力自检：注册表为空（没配知识库）时不唠叨 */
+    private List<String> infraWarnings() {
+        if (knowledgeBackendRegistry.isEmpty()) {
+            return List.of();
+        }
+        try {
+            knowledgeBackendValidator.validate();
+            return List.of();
+        } catch (Exception e) {
+            log.warn("[管控] 存储配置已保存，但知识库能力自检未通过: {}", e.getMessage());
+            return List.of(e.getMessage());
+        }
+    }
+
+    /** 数组 → 以 id 为键的表；id 为空/重复直接抛（保存前就该拦住，不能落成半份配置） */
+    private static Map<String, InfraSettings.Connection> asConnectionMap(
+            List<InfraSettings.Connection> list) {
+        Map<String, InfraSettings.Connection> map = new LinkedHashMap<>();
+        if (list == null) {
+            return map;
+        }
+        for (InfraSettings.Connection c : list) {
+            if (c == null || c.getId() == null || c.getId().isBlank()) {
+                throw new IllegalArgumentException("连接缺少名称（id 不能为空）");
+            }
+            if (map.putIfAbsent(c.getId().trim(), c) != null) {
+                throw new IllegalArgumentException("连接名称重复：「" + c.getId() + "」");
+            }
+        }
+        return map;
+    }
+
+    /** 数组 → 以 id 为键的表；id 为空/重复直接抛（保存前就该拦住，不能落成半份配置） */
+    private static Map<String, InfraSettings.KnowledgeBody> asBodyMap(
+            List<InfraSettings.KnowledgeBody> list) {
+        Map<String, InfraSettings.KnowledgeBody> map = new LinkedHashMap<>();
+        if (list == null) {
+            return map;
+        }
+        for (InfraSettings.KnowledgeBody b : list) {
+            if (b == null || b.getId() == null || b.getId().isBlank()) {
+                throw new IllegalArgumentException("知识体缺少 id（域绑定时要靠它引用）");
+            }
+            if (map.putIfAbsent(b.getId().trim(), b) != null) {
+                throw new IllegalArgumentException("知识体 id 重复：「" + b.getId() + "」");
+            }
+        }
+        return map;
+    }
+
+    /**
+     * 存储配置保存的请求体：连接与知识体按数组传（页面上就是表与卡片）。
+     */
+    public record InfraSaveRequest(InfraSettings.Redis redis,
+                                   List<InfraSettings.Connection> connections,
+                                   List<InfraSettings.KnowledgeBody> bodies) {
     }
 
     /**
@@ -1044,60 +1613,110 @@ public class AdminController {
      */
     private void fillSecretState(Map<String, Object> body) {
         InfraSettings cur = infraHolder.current();
-        body.put("esPasswordMasked", cur.getEs().getMaskedPassword());
-        body.put("esPasswordSet", hasText(cur.getEs().getPassword()));
         body.put("redisPasswordMasked", cur.getRedis().getMaskedPassword());
         body.put("redisPasswordSet", hasText(cur.getRedis().getPassword()));
+        List<Map<String, Object>> secrets = new ArrayList<>();
+        cur.connectionsOrEmpty().forEach((id, c) -> {
+            if (c == null) {
+                return;
+            }
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", c.getId());
+            if (c.getEs() != null) {
+                m.put("passwordMasked", c.getEs().getMaskedPassword());
+                m.put("passwordSet", hasText(c.getEs().getPassword()));
+            }
+            if (c.getVector() != null) {
+                m.put("tokenMasked", c.getVector().getMaskedToken());
+                m.put("tokenSet", hasText(c.getVector().getToken()));
+            }
+            secrets.add(m);
+        });
+        body.put("connectionSecrets", secrets);
     }
 
     /**
-     * 连接测试（保存前先验，避免填错后才发现）
-     * @param type {@code es}（默认）或 {@code redis}
+     * 连接测试（保存前先验，避免填错后才发现）。
+     *
+     * @param type 测哪种：{@code es}（默认）/ {@code qdrant}（旧名 {@code vector} 仍认）/ {@code redis}
      */
     @PostMapping("/infra/test")
-    public Map<String, Object> testInfra(@RequestBody(required = false) InfraSettings settings,
+    public Map<String, Object> testInfra(@RequestBody(required = false) InfraTestRequest request,
                                          @RequestParam(defaultValue = "es") String type) {
-        InfraSettings candidate = settings == null ? new InfraSettings() : settings;
-        infraHolder.fillBlankSecrets(candidate);
+        InfraTestRequest req = request == null ? new InfraTestRequest(null, null) : request;
+        InfraSettings.Connection conn = req.connection();
+        if (conn != null && conn.getId() == null) {
+            conn.setId("");
+        }
+        // 口令留空 = 沿用已存的那份：按连接 id 补齐（编辑时不会把已存的密码冲掉）
+        InfraSettings probe = new InfraSettings();
+        if (conn != null) {
+            Map<String, InfraSettings.Connection> one = new LinkedHashMap<>();
+            one.put(conn.getId(), conn);
+            probe.setConnections(one);
+        }
+        probe.setRedis(req.redis());
+        infraHolder.fillBlankSecrets(probe);
+
+        String kind = type == null ? "es" : type.trim().toLowerCase();
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("type", type.toLowerCase());
+        result.put("type", kind);
         try {
-            if ("redis".equalsIgnoreCase(type)) {
-                InfraSettingsHolder.RedisProbe probe =
-                        infraHolder.testRedis(candidate.getRedis(), redisProperties);
+            if ("redis".equals(kind)) {
+                InfraSettingsHolder.RedisProbe probeResult =
+                        infraHolder.testRedis(probe.getRedis(), redisProperties);
                 result.put("success", true);
-                result.put("version", probe.version());
-                result.put("mode", probe.mode());
-                result.put("database", probe.database());
-                result.put("databases", probe.databases());
-                result.put("dbSize", probe.dbSize());
-                result.put("note", probe.note());
-                result.put("message", "Redis 连接正常：版本 " + text(probe.version())
-                        + "（" + modeLabel(probe.mode()) + "），库 " + probe.database()
-                        + " 当前有 " + text(probe.dbSize()) + " 个 key");
+                result.put("version", probeResult.version());
+                result.put("mode", probeResult.mode());
+                result.put("database", probeResult.database());
+                result.put("databases", probeResult.databases());
+                result.put("dbSize", probeResult.dbSize());
+                result.put("note", probeResult.note());
+                result.put("message", "Redis 连接正常：版本 " + text(probeResult.version())
+                        + "（" + modeLabel(probeResult.mode()) + "），库 " + probeResult.database()
+                        + " 当前有 " + text(probeResult.dbSize()) + " 个 key");
+            } else if ("vector".equals(kind) || "qdrant".equals(kind)) {
+                InfraSettingsHolder.VectorStoreProbe probeResult =
+                        infraHolder.testVectorStore(conn == null ? null : conn.getVector());
+                result.put("success", true);
+                result.put("version", probeResult.version());
+                result.put("metric", probeResult.metric());
+                result.put("collectionCount", probeResult.collectionCount());
+                result.put("note", probeResult.note());
+                result.put("message", probeResult.note() == null
+                        ? "向量库连接正常" : probeResult.note());
             } else {
-                InfraSettingsHolder.EsProbe probe = infraHolder.testEs(candidate.getEs());
+                InfraSettingsHolder.EsProbe probeResult =
+                        infraHolder.testEs(conn == null ? null : conn.getEs());
                 result.put("success", true);
-                result.put("clusterName", probe.clusterName());
-                result.put("version", probe.version());
-                result.put("buildFlavor", probe.buildFlavor());
-                result.put("compatibility", compatBody(probe.compatibility()));
+                result.put("clusterName", probeResult.clusterName());
+                result.put("version", probeResult.version());
+                result.put("buildFlavor", probeResult.buildFlavor());
+                result.put("compatibility", compatBody(probeResult.compatibility()));
                 Map<String, Object> ik = new LinkedHashMap<>();
-                ik.put("available", probe.ikAvailable());
-                ik.put("note", probe.ikNote());
+                ik.put("available", probeResult.ikAvailable());
+                ik.put("note", probeResult.ikNote());
                 result.put("ik", ik);
                 result.put("indexPattern", KbIndexes.WILDCARD);
-                result.put("message", "Elasticsearch 连接正常：集群 " + text(probe.clusterName())
-                        + "（版本 " + text(probe.version()) + "）");
+                result.put("message", "Elasticsearch 连接正常：集群 " + text(probeResult.clusterName())
+                        + "（版本 " + text(probeResult.version()) + "）");
             }
         } catch (Exception e) {
             String reason = e.getMessage() == null ? "未知原因" : e.getMessage();
-            log.warn("[管控] {} 连通性测试失败: {}", type, reason);
+            log.warn("[管控] {} 连通性测试失败: {}", kind, reason);
             result.put("success", false);
             result.put("message", CONNECT_FAILED + "：" + reason);
             result.put("error", reason);
         }
         return result;
+    }
+
+    /**
+     * 连接测试的请求体：一个候选连接，或一份候选 Redis。
+     *
+     * <p>用"候选值"而不是"已存的值"来测，是因为用户会先填再点测试，此时还没保存。</p>
+     */
+    public record InfraTestRequest(InfraSettings.Connection connection, InfraSettings.Redis redis) {
     }
 
     /** 兼容性判读的传输形态（前端只认 tone 上色 + label 展示 + note/hint 展开） */
@@ -1198,9 +1817,10 @@ public class AdminController {
     @PostMapping("/prompts")
     public Map<String, Object> savePrompts(@RequestBody(required = false) DomainSettings incoming) {
         DomainSettings toSave = normalize(incoming);
-        // toolCallEcho 不归提示词页管：那页不发这个字段，而保存是整份覆盖写：
+        // toolCallEcho / planDisplay 不归提示词页管：那页不发这两个字段，而保存是整份覆盖写：
         // 不合并的话，在提示词页点一次保存就会把各域的工具执行信息回写开关冲回默认（关）。
         toSave.setToolCallEcho(domainSettingsStore.load().getToolCallEcho());
+        toSave.setPlanDisplay(domainSettingsStore.load().getPlanDisplay());
         // 域必须已登记：提示词是域的属性，给树里不存在的域存片段只会变成永远不生效的孤儿
         List<String> unknown = toSave.getPrompts().keySet().stream()
                 .filter(domain -> !domainRegistry.contains(domain))

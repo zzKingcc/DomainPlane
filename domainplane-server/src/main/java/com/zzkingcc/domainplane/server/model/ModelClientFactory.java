@@ -1,5 +1,7 @@
 package com.zzkingcc.domainplane.server.model;
 
+import dev.langchain4j.model.anthropic.AnthropicChatModel;
+import dev.langchain4j.model.anthropic.AnthropicStreamingChatModel;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
@@ -22,9 +24,16 @@ import java.util.concurrent.ConcurrentHashMap;
  *   • 每个别名只保留当前指纹那一个实例：旧实例在下次取用时被清掉，
  *     避免反复改配置堆实例。
  *
- * 连接基底只有 OpenAI 兼容一种格式：所有档案都走 OpenAi(Streaming)ChatModel。
- * 服务商差异由对方暴露的 OpenAI 兼容入口吸收，本项目不做协议分派，
- * 后续要接新能力，在这个格式上扩，而不是按服务商开分支。
+ * 连接基底按档案上的 {@code protocol} 分派两种：
+ *
+ *   • {@code openai}（默认）—— OpenAI 兼容端点 {@code /chat/completions}，
+ *     绝大多数服务商与自建端点（vLLM / Ollama / 各类中转）都走这一条；
+ *   • {@code anthropic} —— Anthropic 原生端点 {@code /v1/messages}，
+ *     协议与鉴权头均与 OpenAI 不同，<b>不能用 OpenAI 兼容适配器代劳</b>。
+ *
+ * 分派只在这两个构建方法里发生一次：参数施加（标准参数 / 私有参数 / 思考回写）
+ * 两种 builder 的 setter 同名同义，故完全共用 —— 新增参数只写一遍，不会两侧漂移。
+ * 服务商差异由对方暴露的 OpenAI 兼容入口吸收，不按服务商开分支。
  *
  * 服务商适配（{@link ModelAdapterRegistry}）落在两个地方：
  *
@@ -92,6 +101,21 @@ public class ModelClientFactory {
     // ==================== 构建 ====================
 
     private StreamingChatModel buildStreaming(ModelProfile profile) {
+        /* 按协议分派：Anthropic 的端点（/v1/messages）与鉴权头（x-api-key）都与 OpenAI 不同，
+           不能用 OpenAI 兼容适配器代劳 —— 走兼容层的表现是请求发出去了、对方回 401，
+           而日志上只看到"鉴权失败"，看不出是协议选错。 */
+        if (profile.isAnthropic()) {
+            var b = AnthropicStreamingChatModel.builder()
+                    .baseUrl(profile.baseUrl())
+                    .apiKey(profile.apiKey())
+                    .modelName(profile.modelName());
+            Set<String> stdWires = allowedStdWires(profile);
+            applyTemperature(b::temperature, profile, stdWires);
+            applyMaxTokens(b::maxTokens, profile, stdWires);
+            applyReturnThinking(b::returnThinking, profile);
+            applyCustomParameters(b::customParameters, profile);
+            return b.build();
+        }
         var b = OpenAiStreamingChatModel.builder()
                 .baseUrl(profile.baseUrl())
                 .apiKey(profile.apiKey())
@@ -105,6 +129,18 @@ public class ModelClientFactory {
     }
 
     private ChatModel buildChat(ModelProfile profile) {
+        if (profile.isAnthropic()) {
+            var b = AnthropicChatModel.builder()
+                    .baseUrl(profile.baseUrl())
+                    .apiKey(profile.apiKey())
+                    .modelName(profile.modelName());
+            Set<String> stdWires = allowedStdWires(profile);
+            applyTemperature(b::temperature, profile, stdWires);
+            applyMaxTokens(b::maxTokens, profile, stdWires);
+            applyReturnThinking(b::returnThinking, profile);
+            applyCustomParameters(b::customParameters, profile);
+            return b.build();
+        }
         var b = OpenAiChatModel.builder()
                 .baseUrl(profile.baseUrl())
                 .apiKey(profile.apiKey())
@@ -191,7 +227,8 @@ public class ModelClientFactory {
      *
      * 补缺规则：适配 schema 声明了 {@code default} 而用户没填的键，在此填上，
      * "没填"对用户是不发送，对适配是"按适配登记的默认走"，两者在 default 存在时重合。
-     * 未命中适配的档案原样下发（正常应为空，保存时已被拒绝非空）。
+     * 未命中适配的档案原样下发 —— 那是用户自助填参的主路径，保存时由
+     * {@link CustomParamsGate} 把关，到这里已是"准许下发"的值。
      */
     private void applyCustomParameters(java.util.function.Consumer<Map<String, Object>> setter,
                                        ModelProfile profile) {
@@ -224,9 +261,13 @@ public class ModelClientFactory {
      *
      * 包装规则：{@code wireWrap} 非空的值包一层单键对象（{@code {wireWrap: value}}），
      * 用于厂商把标量塞进子对象的标准写法，如 {@code response_format: {type: "json_object"}}。
-     * 未命中适配的档案原样下发（正常应为空，保存时已被拒绝非空）。
+     * 未命中适配的档案**原样下发** —— 这是"用户声明、我透传"的落点，不是异常分支。
+     *
+     * <p>包级可见是为了让测试直接钉住"原样下发"这四个字：这条分支以前被注释成
+     * "正常应为空"，因为控制器那时拒绝非空；现在 30 个模型里 29 个走它，
+     * 它<b>从"没有测试"变成"必须有测试"</b>。</p>
      */
-    private Map<String, Object> effectiveParams(ModelProfile profile) {
+    Map<String, Object> effectiveParams(ModelProfile profile) {
         ModelAdapterRegistry.MatchResult matched = adapterRegistry.match(profile.baseUrl(), profile.modelName());
         if (!matched.matched()) {
             return profile.params();

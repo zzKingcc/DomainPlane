@@ -236,8 +236,11 @@ public final class AnnotatedToolScanner {
      * 这里不在留空时回填根域：留空本身有语义（挂根域、全树可见），由
      * {@link ToolDescriptor#declaredDomains()} 统一解释，避免两处判断各说各话。
      *
-     * 声明了就必须是合法完整路径：非法直接中断启动。放过它的话，
+     * 声明了就必须是合法完整路径或<b>哨兵</b>：非法直接中断启动。放过它的话，
      * 这个字符串会照样进"已声明域"集合、让入口放行，等于凭空造出一个可用的域。
+     * 哨兵（{@code <unbound>} / {@code <revoked>}）是合法声明值，表示"对任何域都不可见"——
+     * 有的工具生来就没有默认归属（知识检索工具只属于绑了知识体的域），
+     * 要在声明里能把"还没绑"和"挂根域"区分开。
      */
     private static List<String> resolveDomains(Class<?> declaringClass, Tool tool) {
         String[] raw = tool.domains().length > 0 ? tool.domains() : null;
@@ -256,6 +259,9 @@ public final class AnnotatedToolScanner {
                 .distinct()
                 .toList();
         for (String domain : domains) {
+            if (ToolDescriptor.isSentinel(domain)) {
+                continue;
+            }
             String reason = Domains.validatePath(domain);
             if (reason != null) {
                 throw new IllegalStateException("@Tool(domains = {\"" + domain + "\"}) 不合法（" + reason

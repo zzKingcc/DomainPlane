@@ -4,6 +4,8 @@ import com.zzkingcc.domainplane.common.constant.ChunkMetadataKeys;
 import com.zzkingcc.domainplane.infrastructure.ingestion.IngestSource;
 import com.zzkingcc.domainplane.infrastructure.ingestion.processor.SplitResult;
 import com.zzkingcc.domainplane.infrastructure.ingestion.txt.Chunker;
+import com.zzkingcc.domainplane.infrastructure.ingestion.txt.SemanticChunking;
+import com.zzkingcc.domainplane.infrastructure.ingestion.txt.TextChunker;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.segment.TextSegment;
 import lombok.extern.slf4j.Slf4j;
@@ -33,12 +35,14 @@ import java.util.List;
 @Slf4j
 public final class BlockSplitter {
 
-    private final Chunker chunker;
+    private final TextChunker chunker;
     private final int maxChars;
 
     public BlockSplitter(int maxChars, int overlapSentences, int minChars) {
         this.maxChars = Math.max(1, maxChars);
-        this.chunker = new Chunker(maxChars, overlapSentences, minChars);
+        // 语义分块（F05 P2）开启时互补结构感知切片，否则一字不变地沿用 Chunker
+        TextChunker semantic = SemanticChunking.resolve(maxChars);
+        this.chunker = semantic != null ? semantic : new Chunker(maxChars, overlapSentences, minChars);
     }
 
     /** 只出片段，不要诊断计数时用 */

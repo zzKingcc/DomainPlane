@@ -46,6 +46,15 @@
             <groupId>org.bsc.langgraph4j</groupId>
             <artifactId>langgraph4j-core</artifactId>
         </dependency>
+        <!-- LangGraph4j 的 langchain4j 适配：ChatMessage / ToolExecutionRequest 序列化器。
+             测试台要用它搭出与生产同构的图状态序列化器（见 OrchestrationHarness）：
+             langchain4j 的消息类不是 Serializable，缺它时图状态深拷贝会抛 NotSerializableException。 -->
+        <dependency>
+            <groupId>org.bsc.langgraph4j</groupId>
+            <artifactId>langgraph4j-langchain4j</artifactId>
+            <version>${langgraph4j.version}</version>
+            <scope>test</scope>
+        </dependency>
 
         <!-- Reactor 流式输出 -->
         <dependency>

@@ -279,7 +279,11 @@ class AdminModelProfileDetectTest {
         ModelProfile saved = registry.profile("p").orElseThrow();
         assertEquals(List.of(ModelProfile.EP_CHAT), saved.endpoints(),
                 "适配文件登记了 chat 参数 ⇒ 端点族就是 chat，不必问服务商");
-        assertEquals(List.of(ModelProfile.MOD_TEXT), saved.input(), "输入模态取自适配文件");
+        /* 样板适配（DeepSeek Flash）登记的是 text + image：它是多模态档位，
+           这里断言"取自适配文件"而不是断言"是 text"，就是为了让这份声明改了以后测试跟着走 ——
+           归档其余 29 份之后，按模型名命中的只有这一份样板。 */
+        assertEquals(List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE), saved.input(),
+                "输入模态取自适配文件");
         assertEquals(List.of(ModelProfile.MOD_TEXT), saved.output(), "输出模态取自适配文件");
     }
 

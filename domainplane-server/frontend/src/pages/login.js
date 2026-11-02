@@ -84,6 +84,7 @@
         }
 
         submitBtn.disabled = true;
+        submitBtn.classList.add('btn-loading');
         showResult(mode === 'init' ? '正在初始化…' : '正在登录…', true);
 
         var path = mode === 'init' ? '/admin/init' : '/admin/login';
@@ -105,6 +106,7 @@
                         return;
                     }
                     submitBtn.disabled = false;
+                    submitBtn.classList.remove('btn-loading');
                     Console.warnIfCrossOrigin();
                     showResult('账号密码校验通过，但浏览器没有保存登录凭证（Cookie）。'
                         + '管控台必须从服务端自己的地址打开：'
@@ -113,6 +115,7 @@
             })
             .catch(function (e) {
                 submitBtn.disabled = false;
+                submitBtn.classList.remove('btn-loading');
                 showResult(e.message, false);
             });
     });

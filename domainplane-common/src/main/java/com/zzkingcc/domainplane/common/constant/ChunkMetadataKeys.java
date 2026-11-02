@@ -23,6 +23,15 @@ public final class ChunkMetadataKeys {
     /** 归属域 */
     public static final String DOMAIN = "domain";
 
+    /**
+     * 正文 SHA-256（十六进制小写）。
+     *
+     * 与文件名一起构成去重身份（见 {@code domain.rag.store.DedupKey}）。
+     * 此前是 {@code AbstractDocumentProcessStrategy} 与 mapping JSON 里的裸字符串，
+     * 去重查询跨模块用它，补成常量以消掉拼写分叉点。
+     */
+    public static final String CONTENT_HASH = "content_hash";
+
     /** 标题层级路径，如 {@code 会员中心 > 退款} */
     public static final String SECTION_PATH = "section_path";
 

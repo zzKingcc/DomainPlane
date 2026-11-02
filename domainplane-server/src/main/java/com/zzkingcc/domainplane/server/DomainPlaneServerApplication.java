@@ -67,13 +67,15 @@ public class DomainPlaneServerApplication {
                 storageLocations.settingsDir().toAbsolutePath(), storageLocations.settingsSource());
         log.info("  日志目录    : {}（{}）",
                 storageLocations.logDir().toAbsolutePath(), storageLocations.logSource());
+        log.info("  blob 目录   : {}（{}）",
+                storageLocations.blobDir().toAbsolutePath(), storageLocations.blobSource());
         log.info("  账号鉴权    : {}", accountStatus());
         log.info("  管控台      : http://localhost:{}/console/login.html（未登录）/ admin.html", port);
         log.info("  已注册工具  : {} 个（其中 {} 个需人工授权）",
                 toolRouter.toolDescriptors().size(),
                 toolRouter.toolsRequiringApproval().size());
         log.info("  工具域      : {}", toolRouter.knownDomains());
-        log.info("  Elasticsearch: {}   知识库索引 {}{}", infra.getEs().describe(), KbIndexes.WILDCARD,
+        log.info("  Elasticsearch: {}   知识库索引 {}{}", infra.defaultEs().describe(), KbIndexes.WILDCARD,
                 infraHolder.isEsConfigured() ? "（一域一索引，按需创建）" : "   ← 未配置，请到管控台「存储配置」页填写");
         log.info("  Redis        : {}{}", infra.getRedis().describe(),
                 infraHolder.isRedisConfigured() ? "" : "   ← 未配置，请到管控台「存储配置」页填写");

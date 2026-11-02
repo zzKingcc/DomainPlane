@@ -13,7 +13,7 @@ import java.util.List;
  *
  * @author zzkingcc
  */
-public final class Chunker {
+public final class Chunker implements TextChunker {
 
     /** 句子级断点（中文，遇到即断） */
     private static final String CJK_TERMINATORS = "。！？；";

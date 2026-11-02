@@ -8,6 +8,9 @@
  *
  * 信封判定按方法体内是否出现 put("code" / put("success"）分级：
  *   A = 只有 code   B = code + success 都有   C = 只有 success   D = 都没有（裸对象）
+ *
+ * 产物写进 .workbuddy/baseline（已 gitignore）：这三份是某一刻的扫描快照，
+ * 只作核对用，不进 docs（见 docs/README.md 维护约定第 3 条「快照不留」）。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,7 +18,7 @@ import path from 'node:path';
 const ROOT = 'D:/java/zishuati/DomainPlane';
 const CONSOLE = `${ROOT}/domainplane-server/src/main/resources/static/console`;
 const CTRL = `${ROOT}/domainplane-server/src/main/java/com/zzkingcc/domainplane/server/controller`;
-const OUT = `${ROOT}/docs/console-baseline`;
+const OUT = `${ROOT}/.workbuddy/baseline`;
 
 fs.mkdirSync(OUT, { recursive: true });
 

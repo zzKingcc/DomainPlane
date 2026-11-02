@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * 存储目录的单一真相源：统一解析"受保护资源"、"日志"与"切片导出"三个目录的最终路径
+ * 存储目录的单一真相源：统一解析"受保护资源"、"日志"、"切片导出"与"blob 存储"四个目录的最终路径
  */
 @Slf4j
 @Component
@@ -18,26 +18,33 @@ public class StorageLocations {
     private final Path settingsDir;
     private final Path logDir;
     private final Path exportDir;
+    private final Path blobDir;
     private final String settingsSource;
     private final String logSource;
     private final String exportSource;
+    private final String blobSource;
 
     public StorageLocations(Environment env) {
         String settingsRaw = env.getProperty("domainplane.settings.path", RuntimeEnvironment.defaultSettingsPath());
         String logRaw = env.getProperty("domainplane.logging.path", RuntimeEnvironment.defaultLogPath());
         String exportRaw = env.getProperty("domainplane.export.path", RuntimeEnvironment.defaultExportPath());
+        String blobRaw = env.getProperty("domainplane.storage.path", RuntimeEnvironment.defaultStoragePath());
         this.settingsDir = Paths.get(settingsRaw);
         this.logDir = Paths.get(logRaw);
         this.exportDir = Paths.get(exportRaw);
+        this.blobDir = Paths.get(blobRaw);
         this.settingsSource = sourceOf("domainplane.settings.path", "DOMAINPLANE_SETTINGS_PATH",
                 settingsDir, RuntimeEnvironment.defaultSettingsPath());
         this.logSource = sourceOf("domainplane.logging.path", "DOMAINPLANE_LOG_PATH",
                 logDir, RuntimeEnvironment.defaultLogPath());
         this.exportSource = sourceOf("domainplane.export.path", "DOMAINPLANE_EXPORT_PATH",
                 exportDir, RuntimeEnvironment.defaultExportPath());
+        this.blobSource = sourceOf("domainplane.storage.path", "DOMAINPLANE_STORAGE_PATH",
+                blobDir, RuntimeEnvironment.defaultStoragePath());
         ensureDirectory(settingsDir, "配置");
         ensureDirectory(logDir, "日志");
         ensureDirectory(exportDir, "切片导出");
+        ensureDirectory(blobDir, "blob 存储");
     }
 
     /** 受保护资源目录：accounts / llm-settings / infra-settings / prompts 都落在这里 */
@@ -55,6 +62,16 @@ public class StorageLocations {
         return exportDir;
     }
 
+    /**
+     * blob 存储根目录（媒体附件字节；引用名登记表在 Redis）。
+     *
+     * <p>按用途分目录由 {@code LocalBlobStore} 在根下自理（{@code attachments/} 一族），
+     * 这里只定根——与配置/日志/切片同级，一个环境变量管一个根。</p>
+     */
+    public Path blobDir() {
+        return blobDir;
+    }
+
     /** 横幅用：配置目录来自平台默认还是显式覆盖 */
     public String settingsSource() {
         return settingsSource;
@@ -68,6 +85,11 @@ public class StorageLocations {
     /** 横幅用：切片导出目录来自平台默认还是显式覆盖 */
     public String exportSource() {
         return exportSource;
+    }
+
+    /** 横幅用：blob 存储目录来自平台默认还是显式覆盖 */
+    public String blobSource() {
+        return blobSource;
     }
 
     private static void ensureDirectory(Path dir, String what) {

@@ -51,9 +51,14 @@ import java.util.TreeMap;
  * @param returnThinking 是否把思考内容回传给平台（可空 = 不声明，等价于框架默认的"不返回"）
  * @param dimensions   向量维度（仅 embedding 用；可空 = 按模型默认）
  * @param fallbacks    降级链：本档案不可用时依次尝试的别名（M3 生效，先只存）
- * @param params       服务商适配的私有调优参数（如 {@code enable_thinking}）；
- *                     空 = 未适配或无调优值。只有匹配到适配文件（{@link ModelAdapterRegistry}）
- *                     的档案才允许非空；键与取值范围由适配 schema 把关
+ * @param params       自定义参数（如 {@code enable_thinking}）：
+ *                     命中适配时按厂商 schema 复核，未命中时由用户自助填写、原样透传
+ *                     （见 {@code CustomParamsGate}）。换协议会被清空 —— 同一个键在两种
+ *                     协议下语义与必填性都不同，留着旧值就是一个查不出原因的黑盒
+ * @param protocol     上游协议：{@link #PROTOCOL_OPENAI}（默认，OpenAI 兼容端点）或
+ *                     {@link #PROTOCOL_ANTHROPIC}（{@code /v1/messages}，鉴权头与 OpenAI 不同，
+ *                     不能用兼容层代劳）。它决定 {@code ModelClientFactory} 构建哪一种客户端，
+ *                     因此参与指纹 —— 改了协议就必须换实例，而不是继续用缓存里那一个
  * @author zzkingcc
  */
 public record ModelProfile(String alias,
@@ -70,10 +75,16 @@ public record ModelProfile(String alias,
                            Boolean returnThinking,
                            Integer dimensions,
                            List<String> fallbacks,
-                           Map<String, Object> params) {
+                           Map<String, Object> params,
+                           String protocol) {
+
+    /** 协议：OpenAI 兼容（默认）—— 聊天补全端点 {@code /chat/completions} */
+    public static final String PROTOCOL_OPENAI = "openai";
+    /** 协议：Anthropic 原生 —— {@code /v1/messages}，鉴权头与 OpenAI 均不同，不能用兼容层代劳 */
+    public static final String PROTOCOL_ANTHROPIC = "anthropic";
 
     /**
-     * 兼容构造：不声明上下文窗口。
+     * 兼容构造：不声明上下文窗口与协议（取默认协议）。
      *
      * <p>保这条重载是为了不让"加了一个字段"变成"所有人都得改构造调用"，
      * 既有调用方与测试零改动（同 {@code DualConstraintChatMemory} 保留旧重载的口径）。</p>
@@ -97,7 +108,12 @@ public record ModelProfile(String alias,
                         List<String> fallbacks,
                         Map<String, Object> params) {
         this(alias, endpoints, input, output, baseUrl, apiKey, modelName, temperature, maxTokens,
-                null, thinking, returnThinking, dimensions, fallbacks, params);
+                null, thinking, returnThinking, dimensions, fallbacks, params, PROTOCOL_OPENAI);
+    }
+
+    /** 这份档案走的是 Anthropic 原生协议（{@code /v1/messages}）而不是 OpenAI 兼容端点 */
+    public boolean isAnthropic() {
+        return PROTOCOL_ANTHROPIC.equals(protocol);
     }
 
     /** 端点族：对话（/chat/completions） */
@@ -179,6 +195,17 @@ public record ModelProfile(String alias,
         output = output == null ? List.of() : List.copyOf(output);
         fallbacks = fallbacks == null ? List.of() : List.copyOf(fallbacks);
         params = normalizeParams(params);
+        /* 协议归一：空白一律落回 OpenAI 兼容。
+           归一而不是"留空表示默认"：协议要进指纹（换协议必须换客户端实例），
+           而 null 与 "openai" 会算出两个指纹 —— 同一份配置在进程里缓存出两份等价客户端。
+           未知协议一律拒绝，不静默回落：回落会让用户以为选了 Anthropic 而实际在按 OpenAI
+           发请求，那种错在日志里也看不出来。 */
+        protocol = protocol == null || protocol.isBlank()
+                ? PROTOCOL_OPENAI : protocol.trim().toLowerCase(Locale.ROOT);
+        if (!PROTOCOL_OPENAI.equals(protocol) && !PROTOCOL_ANTHROPIC.equals(protocol)) {
+            throw new IllegalArgumentException("不支持的模型协议：" + protocol
+                    + "（可选：" + PROTOCOL_OPENAI + " / " + PROTOCOL_ANTHROPIC + "）");
+        }
     }
 
     /**
@@ -224,7 +251,8 @@ public record ModelProfile(String alias,
                 mergeModalities(input, detectedInput, modalitiesAuthoritative),
                 mergeModalities(output, detectedOutput, modalitiesAuthoritative),
                 baseUrl, apiKey, modelName,
-                temperature, maxTokens, contextWindow, thinking, returnThinking, dimensions, fallbacks, params);
+                temperature, maxTokens, contextWindow, thinking, returnThinking, dimensions, fallbacks,
+                params, protocol);
     }
 
     /** 模态合并：权威（完整枚举）覆盖，基线值并集。读不到一律保留原值。 */
@@ -260,7 +288,8 @@ public record ModelProfile(String alias,
                 union(input, confirmedInput),
                 union(output, confirmedOutput),
                 baseUrl, apiKey, modelName,
-                temperature, maxTokens, contextWindow, thinking, returnThinking, dimensions, fallbacks, params);
+                temperature, maxTokens, contextWindow, thinking, returnThinking, dimensions, fallbacks,
+                params, protocol);
     }
 
     /** 有序并集：{@code base} 原样在前，{@code extra} 里没有的新值追加在后 */
@@ -297,7 +326,41 @@ public record ModelProfile(String alias,
     public ModelProfile withTuning(Double newTemperature, Integer newMaxTokens,
                                    Integer newDimensions, Map<String, Object> newParams) {
         return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey, modelName,
-                newTemperature, newMaxTokens, contextWindow, thinking, returnThinking, newDimensions, fallbacks, newParams);
+                newTemperature, newMaxTokens, contextWindow, thinking, returnThinking, newDimensions, fallbacks,
+                newParams, protocol);
+    }
+
+    /**
+     * 复制一份、只换自定义参数（卡片上那个 JSON 文本框的保存口）。
+     *
+     * <p>刻意与 {@link #withTuning} 分开：调优框是**按适配 schema 渲染控件**的，只出现在
+     * 按模型名命中适配的档案上；自定义参数文本框走的是"用户声明、我透传"，
+     * 未命中适配的档案**恰恰最需要它** —— 两条路的适用面正好互补，放在一起就得在
+     * 接口里再判一次"这份档案走哪条路"，而这个判据前后端各存一份就会漂移。</p>
+     *
+     * <p>与其余复制方法同口径：只提供 params 一个入口，连接信息 / 标准字段 / 端点族
+     * 一律原样带走（{@code null} / 空 map = 清除）。</p>
+     */
+    public ModelProfile withParams(Map<String, Object> newParams) {
+        return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey, modelName,
+                temperature, maxTokens, contextWindow, thinking, returnThinking, dimensions, fallbacks,
+                newParams, protocol);
+    }
+
+    /**
+     * 复制一份、只换协议（卡片上那个下拉的保存口）。
+     *
+     * <p><b>换协议必然清空自定义参数</b>，这不是顺手而是必须：同一个 {@code max_tokens}
+     * 在两种协议下语义与必填性都不同（OpenAI 可选、Anthropic 必填），
+     * 留着旧值的后果是"我明明填了却不生效 / 直接报错"，而用户看不到中间那条断层。
+     * 清空的代价只是一次重填，不清理的代价是一个查不出原因的黑盒。</p>
+     *
+     * <p>标准字段（温度 / 单次最大输出）不动：两侧 builder 都有同名 setter，语义一致。</p>
+     */
+    public ModelProfile withProtocol(String newProtocol) {
+        return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey, modelName,
+                temperature, maxTokens, contextWindow, thinking, returnThinking, dimensions, fallbacks,
+                Map.of(), newProtocol == null ? PROTOCOL_OPENAI : newProtocol);
     }
 
     /**
@@ -308,7 +371,8 @@ public record ModelProfile(String alias,
      */
     public ModelProfile withDimensions(Integer newDimensions) {
         return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey, modelName,
-                temperature, maxTokens, contextWindow, thinking, returnThinking, newDimensions, fallbacks, params);
+                temperature, maxTokens, contextWindow, thinking, returnThinking, newDimensions, fallbacks,
+                params, protocol);
     }
 
     /**
@@ -323,7 +387,8 @@ public record ModelProfile(String alias,
      */
     public ModelProfile withReturnThinking(Boolean newReturnThinking) {
         return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey, modelName,
-                temperature, maxTokens, contextWindow, thinking, newReturnThinking, dimensions, fallbacks, params);
+                temperature, maxTokens, contextWindow, thinking, newReturnThinking, dimensions, fallbacks,
+                params, protocol);
     }
 
     /**
@@ -339,7 +404,8 @@ public record ModelProfile(String alias,
      */
     public ModelProfile withContextWindow(Integer newContextWindow) {
         return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey, modelName,
-                temperature, maxTokens, newContextWindow, thinking, returnThinking, dimensions, fallbacks, params);
+                temperature, maxTokens, newContextWindow, thinking, returnThinking, dimensions, fallbacks,
+                params, protocol);
     }
 
     /**
@@ -451,6 +517,9 @@ public record ModelProfile(String alias,
                 String.valueOf(temperature), String.valueOf(maxTokens),
                 String.valueOf(thinking), String.valueOf(returnThinking),
                 stableParams(),
+                /* 协议进指纹：它决定构建的是哪一种客户端。不进指纹的话，改协议后
+                   拿到的还是缓存里的旧客户端，表现是"改了没生效"且重启才恢复 */
+                protocol,
                 sha256(nz(apiKey)));
         return sha256(raw).substring(0, 16);
     }

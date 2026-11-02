@@ -2,6 +2,7 @@ package com.zzkingcc.domainplane.server.capability;
 
 import com.zzkingcc.domainplane.api.annotation.Tool;
 import com.zzkingcc.domainplane.api.annotation.ToolParam;
+import com.zzkingcc.domainplane.api.tool.ToolDescriptor;
 import com.zzkingcc.domainplane.runtime.vision.MediaAttachmentStore.Kind;
 import com.zzkingcc.domainplane.server.model.DefaultModelResolver;
 import com.zzkingcc.domainplane.server.model.ModelEndpointClient;
@@ -26,16 +27,19 @@ import java.util.List;
  * <p><b>绝不把 base64 拼进返回值</b>：返回值会进工具调用事件与会话记忆，两者都会落库：
  * 一张 1024×1024 的图 base64 上兆，塞进去等于把整段图像数据写进对话历史。</p>
  *
- * <p><b>可见性</b>：挂根域（全树可见），执行时按本轮域校验有没有可用的生图模型。
- * 与 {@code seeImage} 同一口径：让所有域都看见这个工具，比"只有配了生图模型的域才看见"
- * 更好排障：后者在没配的域上表现为"模型根本不知道有这条路"，用户看到的是答非所问。</p>
+ * <p><b>可见性</b>：由「该域（链上）绑没绑可用的生图模型」决定，不写死在注解里。
+ * 初始声明哨兵 {@link ToolDescriptor#UNBOUND_DOMAIN}（对任何域都不可见），由
+ * {@code ModelCapabilityToolBinder} 在启动与模型配置变更时重算：绑了生图模型的域才拿到它，
+ * 解绑或档案失效就收回。理由与知识检索工具同类——一个没有生图模型的域，模型却能调用
+ * "生成图片"，结果是白调一次再把"未配置"转述给用户，还平白占掉一份工具 schema。</p>
  *
  * @author zzkingcc
  */
 @Component
 public class ImageGenTool extends CapabilityToolSupport {
 
-    private static final String TOOL_NAME = "generateImage";
+    /** 工具名（模型看到的函数名）。{@code ModelCapabilityToolBinder} 按它改可用域 */
+    public static final String TOOL_NAME = "generateImage";
 
     /** 服务商没给内容类型时的兜底 —— 绝大多数 OpenAI 兼容生图端点的 b64 就是 PNG */
     private static final String DEFAULT_MIME = "image/png";
@@ -53,7 +57,8 @@ public class ImageGenTool extends CapabilityToolSupport {
                     + "参数 prompt 填图片内容描述（越具体越好：主体、风格、构图、色调）。"
                     + "生成结果会以图片编号返回，你可以在回答里直接提到这张图，或用 seeImage 复核。"
                     + "本工具依赖当前域已绑定的生图模型；没有时会明确告知，此时不要凭空描述图片内容。",
-            effect = Tool.Effect.WRITE)
+            effect = Tool.Effect.WRITE,
+            domains = ToolDescriptor.UNBOUND_DOMAIN)
     public String generate(@ToolParam("图片内容描述：想画什么、什么风格、什么构图。"
             + "例如'一只戴墨镜的柴犬，扁平插画风格，暖色调背景'") String prompt,
                            @ToolParam(value = "图片尺寸，形如 1024x1024 / 1792x1024；"

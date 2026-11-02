@@ -58,6 +58,15 @@ public final class RuntimeEnvironment {
         };
     }
 
+    /** blob 存储（媒体附件字节）的默认目录，随运行系统变化 */
+    public static String defaultStoragePath() {
+        return switch (osFamily()) {
+            case WINDOWS -> programData() + "\\DomainPlane\\blobs";
+            case MACOS -> "/Library/Application Support/DomainPlane/blobs";
+            case LINUX, OTHER -> "/var/lib/domainplane/blobs";
+        };
+    }
+
     /** 横幅用的一行环境摘要：操作系统 / 架构 / JDK 版本与厂商 */
     public static String describe() {
         return safeProperty("os.name", "unknown") + " / " + safeProperty("os.arch", "unknown")

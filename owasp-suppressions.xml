@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OWASP dependency-check 的误报抑制清单。
+
+  纪律：每一条抑制必须有 notes 写明「为什么它是误报」。留空的抑制等于把扫描关掉，
+  那还不如不跑。抑制的是**结论**，不是依赖本身 —— 依赖该升级还是要升级。
+-->
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+  <!-- 示例（勿删注释，照这个格式加）：
+  <suppress>
+    <notes><![CDATA[
+      理由：CPE 匹配到了同名不同厂商的组件，本项目的 xxx 与 CVE-20xx-xxxx 无关。
+      复核人 / 日期：
+    ]]></notes>
+    <packageUrl regex="true">^pkg:maven/com\.example/.*@.*$</packageUrl>
+    <cve>CVE-20xx-xxxx</cve>
+  </suppress>
+  -->
+</suppressions>

@@ -93,6 +93,17 @@ public final class AgentEvent implements Serializable {
         return new AgentEvent(AgentEventType.THINKING, sessionId, content, null);
     }
 
+    /**
+     * 本轮执行计划（规划前置能力产出）。
+     *
+     * <p>{@code content} 为空，结构化内容全部在 {@code payload}（planner 输出的原样 JSON，
+     * 形如 {@code {"mode":"plan","goal":...,"steps":[...],"risks":...}}）。
+     * 是否下发由域级展示开关决定；该事件恒先于本轮第一个 {@code TOKEN}。</p>
+     */
+    public static AgentEvent plan(String sessionId, String planJson) {
+        return new AgentEvent(AgentEventType.PLAN, sessionId, null, planJson);
+    }
+
     /** 工具调用请求 */
     public static AgentEvent toolCall(String sessionId, String toolName, String argumentsJson) {
         return new AgentEvent(AgentEventType.TOOL_CALL, sessionId, toolName, argumentsJson);

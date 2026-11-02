@@ -2,10 +2,12 @@ package com.zzkingcc.domainplane.server.config;
 
 import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
 import com.zzkingcc.domainplane.server.settings.DomainStore;
+import com.zzkingcc.domainplane.server.settings.DomainVersionSignal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -18,6 +20,7 @@ import java.util.List;
  * @author zzkingcc
  */
 @Configuration
+@EnableConfigurationProperties(DomainProperties.class)
 public class DomainConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(DomainConfiguration.class);
@@ -33,7 +36,14 @@ public class DomainConfiguration {
         DomainRegistry registry = new DomainRegistry();
         DomainStore.StoredDomains stored = domainStore.load();
         registry.loadManual(stored.callables());
-        if (stored.status() == DomainStore.StoredDomains.Status.CORRUPT) {
+        // 软删标记与声明同源恢复：域在注册表里原样建出，标记叠加其上
+        registry.loadPendingDeletes(stored.pendingDeletes());
+        if (stored.status() == DomainStore.StoredDomains.Status.RECOVERED) {
+            log.warn("[域注册表] 权威文件损坏，本次启动从历史快照 v{} 恢复（{} 个域声明，"
+                            + "软删标记 {} 个）。下次变更落盘将自动修复权威文件；"
+                            + "若反复出现，请检查磁盘",
+                    stored.version(), stored.callables().size(), stored.pendingDeletes().size());
+        } else if (stored.status() == DomainStore.StoredDomains.Status.CORRUPT) {
             log.error("[域注册表] 配置文件损坏且无法解析（{}），已用空声明初始化注册表："
                             + "人工创建的域本轮不可用，但服务照常启动，且不会把这份空配置写回磁盘",
                     domainStore.filePath());
@@ -43,6 +53,19 @@ public class DomainConfiguration {
                 registry.ids().size(), registry.ids(),
                 registry.callableIds().size(), registry.callableIds());
         return registry;
+    }
+
+    /**
+     * 版本信号接线：DomainStore 每次落盘后把新版本号广播出去（多实例传播）。
+     *
+     * 方向是存储 → 信号，用启动后回调接线而不是让存储依赖信号组件：
+     * 本地文件是唯一权威存储，Redis 只传版本信号，存储的正确性不能依赖 Redis 可用。
+     * 信号组件缺席（测试装配、裁剪部署）时存储照常工作，只是不广播。
+     */
+    @Bean
+    public SmartInitializingSingleton domainVersionSignalWiring(DomainStore domainStore,
+                                                                DomainVersionSignal signal) {
+        return () -> domainStore.setVersionListener(signal::publish);
     }
 
     /**

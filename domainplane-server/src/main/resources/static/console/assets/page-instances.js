@@ -1,5 +1,26 @@
 (() => {
-  // domainplane-server/frontend/src/pages/instances.js
+  var __async = (__this, __arguments, generator) => {
+    return new Promise((resolve, reject) => {
+      var fulfilled = (value) => {
+        try {
+          step(generator.next(value));
+        } catch (e) {
+          reject(e);
+        }
+      };
+      var rejected = (value) => {
+        try {
+          step(generator.throw(value));
+        } catch (e) {
+          reject(e);
+        }
+      };
+      var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
+      step((generator = generator.apply(__this, __arguments)).next());
+    });
+  };
+
+  // src/pages/instances.js
   (function() {
     var AUTO_INTERVAL = 1e4;
     var timer = null;
@@ -46,7 +67,7 @@
       var list = data.instances || [];
       var online = document.getElementById("statOnline");
       online.textContent = stats.onlineCount || 0;
-      online.className = "v" + (stats.onlineCount || 0 ? " ok" : " warn");
+      online.className = "dp-stat-value" + (stats.onlineCount || 0 ? "" : " warn");
       var note = [];
       if (stats.mutedCount) {
         note.push(stats.mutedCount + " \u4E2A\u5DF2\u7194\u65AD");
@@ -62,13 +83,13 @@
       }
       document.getElementById("statOnlineNote").textContent = note.join("\uFF0C");
       document.getElementById("statReplica").textContent = stats.remoteReplicaCount || 0;
-      document.getElementById("statReplica").className = "v" + (stats.remoteReplicaCount || 0 ? " ok" : " warn");
+      document.getElementById("statReplica").className = "dp-stat-value" + (stats.remoteReplicaCount || 0 ? "" : " warn");
       document.getElementById("statReplicaNote").textContent = "\u540C\u540D\u591A\u5B9E\u4F8B = \u591A\u526F\u672C\uFF0C\u8C03\u7528\u65F6\u968F\u673A\u9009\u4E00\u4E2A";
       document.getElementById("statTools").textContent = stats.registeredToolCount || 0;
-      document.getElementById("statTools").className = "v";
+      document.getElementById("statTools").className = "dp-stat-value";
       document.getElementById("statToolsNote").textContent = "\u903B\u8F91\u5DE5\u5177\u6761\u76EE\u6570\uFF08\u542B\u672C\u5730 Bean \u5DE5\u5177\uFF09";
       document.getElementById("statTimeout").textContent = (stats.timeoutSeconds || 0) + " \u79D2";
-      document.getElementById("statTimeout").className = "v";
+      document.getElementById("statTimeout").className = "dp-stat-value";
       var body = document.getElementById("instanceBody");
       var wrap = document.getElementById("tableWrap");
       var empty = document.getElementById("emptyHint");
@@ -88,7 +109,7 @@
       }).join("");
       body.querySelectorAll("button[data-act]").forEach(function(btn) {
         btn.addEventListener("click", function() {
-          act(btn.getAttribute("data-act"), btn.getAttribute("data-id"));
+          act(btn.getAttribute("data-act"), btn.getAttribute("data-id"), btn);
         });
       });
     }
@@ -98,18 +119,33 @@
         return '<span class="muted">\u5DF2\u540A\u9500\uFF08\u53EA\u80FD\u7531\u63A5\u53E3\u6062\u590D\uFF09</span>';
       }
       if (it.muted) {
-        return '<button class="primary btn btn-primary" data-act="restore" data-id="' + id + '" title="\u5B9E\u4F8B\u4ECD\u5728\u5FC3\u8DF3\uFF0C\u6062\u590D\u5373\u7B49\u5F85\u4E0B\u6B21\u5FC3\u8DF3\u91CD\u5EFA\u526F\u672C">\u6062\u590D\u5DE5\u5177\u8C03\u7528</button>';
+        return '<button class="btn btn-sm btn-outline-secondary" data-act="restore" data-id="' + id + '" title="\u5B9E\u4F8B\u4ECD\u5728\u5FC3\u8DF3\uFF0C\u6062\u590D\u5373\u7B49\u5F85\u4E0B\u6B21\u5FC3\u8DF3\u91CD\u5EFA\u526F\u672C">\u6062\u590D\u5DE5\u5177\u8C03\u7528</button>';
       }
-      return '<button class="write btn btn-primary" data-act="mute" data-id="' + id + '" title="\u6458\u9664\u5DE5\u5177\u526F\u672C\uFF0C\u5FC3\u8DF3\u7167\u5E38\u53D7\u7406">\u65AD\u5F00\u5DE5\u5177\u8C03\u7528</button>';
+      return '<button class="btn btn-sm btn-outline-secondary" data-act="mute" data-id="' + id + '" title="\u6458\u9664\u5DE5\u5177\u526F\u672C\uFF0C\u5FC3\u8DF3\u7167\u5E38\u53D7\u7406">\u65AD\u5F00\u5DE5\u5177\u8C03\u7528</button>';
     }
     var loadSeq = 0;
+    var LOADED = false;
     function load() {
       var state = document.getElementById("loadState");
       var seq = ++loadSeq;
+      if (!LOADED) {
+        var wrap0 = document.getElementById("tableWrap");
+        if (wrap0) {
+          wrap0.style.display = "block";
+        }
+        var body0 = document.getElementById("instanceBody");
+        if (body0) {
+          body0.innerHTML = Console.loadingRowHtml(7, "\u6B63\u5728\u8BFB\u53D6\u5B9E\u4F8B\u2026");
+        }
+        if (state) {
+          state.textContent = "\u6B63\u5728\u8BFB\u53D6\u2026";
+        }
+      }
       return Console.api.get("/admin/instances").then(function(data) {
         if (seq !== loadSeq) {
           return;
         }
+        LOADED = true;
         render(data);
         state.textContent = "\u66F4\u65B0\u4E8E " + fmtTime(Date.now());
       }).catch(function(e) {
@@ -127,16 +163,28 @@
         text: "\u6062\u590D\u5B9E\u4F8B\u300C%s\u300D\u7684\u5DE5\u5177\u8C03\u7528\uFF1F\n\n\xB7 \u526F\u672C\u5728\u5B83\u7684\u4E0B\u4E00\u6B21\u5FC3\u8DF3\u65F6\u91CD\u5EFA\uFF08\u9ED8\u8BA4 10 \u79D2\u5185\uFF09\n\xB7 \u5FC3\u8DF3\u5DF2\u505C\u7684\u5B9E\u4F8B\u6062\u590D\u4E0D\u4E86\uFF0C\u90A3\u79CD\u60C5\u51B5\u5B83\u6CA1\u6709\u5DE5\u5177\u53EF\u8C03\uFF0C\u7B49\u8D85\u65F6\u6E05\u8868\u5373\u53EF"
       }
     };
-    function act(action, instanceId) {
-      var spec = ACTIONS[action];
-      if (!spec || !confirm(spec.text.replace("%s", instanceId))) {
-        return;
-      }
-      Console.api.post("/admin/instances/" + encodeURIComponent(instanceId) + "/" + action).then(function(r) {
-        alert(r.message || "\u5DF2\u63D0\u4EA4");
-        load();
-      }).catch(function(e) {
-        alert("\u64CD\u4F5C\u5931\u8D25\uFF1A" + e.message);
+    function act(action, instanceId, btn) {
+      return __async(this, null, function* () {
+        var spec = ACTIONS[action];
+        if (!spec) {
+          return;
+        }
+        var ok = yield Console.confirm(spec.text.replace("%s", instanceId), {
+          title: action === "mute" ? "\u65AD\u5F00\u5DE5\u5177\u8C03\u7528" : "\u6062\u590D\u5DE5\u5177\u8C03\u7528",
+          okText: "\u786E\u8BA4",
+          danger: action === "mute"
+        });
+        if (!ok) {
+          return;
+        }
+        Console.busy(btn, function() {
+          return Console.api.post("/admin/instances/" + encodeURIComponent(instanceId) + "/" + action).then(function(r) {
+            Console.toast(r.message || "\u5DF2\u63D0\u4EA4", { type: "success" });
+            load();
+          }).catch(function(e) {
+            Console.toast("\u64CD\u4F5C\u5931\u8D25\uFF1A" + e.message, { type: "error" });
+          });
+        }, action === "mute" ? "\u65AD\u5F00\u4E2D\u2026" : "\u6062\u590D\u4E2D\u2026");
       });
     }
     function setupAutoRefresh() {

@@ -88,5 +88,26 @@ public class RagProperties {
 
         /** 尾片短于该值就并进前一片 */
         private int minChars = 60;
+
+        /**
+         * 语义分块开关（F05 P2，结构感知切片的互补模式，默认关闭）。
+         *
+         * 开启后在标题已切好的小节内部，再按句子嵌入向量的相邻余弦相似度切分：
+         * 主题相近的句子留在同一片、主题转折处断开，同时仍受 {@code maxChars} 硬上限约束。
+         * 需要 {@link dev.langchain4j.model.embedding.EmbeddingModel} 可用；模型不可用或嵌入
+         * 失败时自动退回结构感知切片，导入不中断。
+         */
+        private boolean semanticEnabled = false;
+
+        /**
+         * 相邻句子余弦相似度低于该阈值时断开一片（0~1，越大切得越细）。0.6 大致对应
+         * 多语言向量模型中"明显不同主题"的分界，按实际语料调优。
+         */
+        private double semanticSimilarityThreshold = 0.6;
+
+        /**
+         * 语义分块最小每片句子数：不足该句数的片段不单独切出，避免过碎。
+         */
+        private int semanticMinSentences = 2;
     }
 }

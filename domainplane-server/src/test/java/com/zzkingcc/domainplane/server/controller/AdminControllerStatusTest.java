@@ -69,7 +69,7 @@ class AdminControllerStatusTest {
         Integer dims = 768;
 
         StubKnowledgeBase() {
-            super(null, null, new RagProperties(), null, null, null);
+            super(null, new RagProperties(), null, null, null, null, null, null);
         }
 
         @Override
@@ -135,9 +135,12 @@ class AdminControllerStatusTest {
 
     private AdminController controller(LlmModelHolder holder, KnowledgeBaseService kb,
                                        ModelProfileRegistry registry) {
+        // saveSettings 只碰 modelHolder（第 4 参）、settingsStore（第 5 参）、
+        // knowledgeBaseService（第 15 参）与 modelProfileRegistry（第 22 参）
         return new AdminController(
-                null, null, null, holder, new StubSettingsStore(), null, null, null, null,
-                null, null, null, null, null, kb, null, null, registry);
+                null, null, null, holder, new StubSettingsStore(), null, null, null,
+                null, null, null, null, null, null, kb, null, null, null, null, null,
+                null, registry, null, null, null);
     }
 
     /** 改动了向量配置的入参：只有"向量侧变了"才会走维度预检 */

@@ -1,5 +1,5 @@
 (() => {
-  // domainplane-server/frontend/src/pages/login.js
+  // src/pages/login.js
   (function() {
     var mode = "login";
     var resultEl = document.getElementById("result");
@@ -73,6 +73,7 @@
         return;
       }
       submitBtn.disabled = true;
+      submitBtn.classList.add("btn-loading");
       showResult(mode === "init" ? "\u6B63\u5728\u521D\u59CB\u5316\u2026" : "\u6B63\u5728\u767B\u5F55\u2026", true);
       var path = mode === "init" ? "/admin/init" : "/admin/login";
       Console.api.post(path, { username, password }).then(function(r) {
@@ -89,11 +90,13 @@
             return;
           }
           submitBtn.disabled = false;
+          submitBtn.classList.remove("btn-loading");
           Console.warnIfCrossOrigin();
           showResult("\u8D26\u53F7\u5BC6\u7801\u6821\u9A8C\u901A\u8FC7\uFF0C\u4F46\u6D4F\u89C8\u5668\u6CA1\u6709\u4FDD\u5B58\u767B\u5F55\u51ED\u8BC1\uFF08Cookie\uFF09\u3002\u7BA1\u63A7\u53F0\u5FC5\u987B\u4ECE\u670D\u52A1\u7AEF\u81EA\u5DF1\u7684\u5730\u5740\u6253\u5F00\uFF1A" + Console.baseUrl() + "/admin.html", false);
         });
       }).catch(function(e) {
         submitBtn.disabled = false;
+        submitBtn.classList.remove("btn-loading");
         showResult(e.message, false);
       });
     });

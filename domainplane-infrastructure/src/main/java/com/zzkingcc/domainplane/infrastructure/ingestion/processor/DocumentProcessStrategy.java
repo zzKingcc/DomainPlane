@@ -1,9 +1,8 @@
 package com.zzkingcc.domainplane.infrastructure.ingestion.processor;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import com.zzkingcc.domainplane.domain.rag.store.IngestTarget;
 import com.zzkingcc.domainplane.infrastructure.ingestion.IngestSource;
 import dev.langchain4j.model.embedding.EmbeddingModel;
-import dev.langchain4j.store.embedding.EmbeddingStore;
 
 import java.util.List;
 
@@ -17,17 +16,13 @@ public interface DocumentProcessStrategy {
      * 流程：解析 → 分片 → 去重 → 向量化写入。
      *
      * @param documents      待处理的文档列表（已按文件类型分组，全部匹配本策略）
-     * @param esClient
-     * @param indexName
-     * @param embeddingStore
-     * @param embeddingModel
+     * @param target         写入目标（collection + store + 去重查询；SPI，不认识 ES）
+     * @param embeddingModel 向量模型（向量化留在调用侧：后端只管存已带向量的切片）
      * @param sourceTag      来源标签（"本地"/"外部"）
      * @return 处理报告（文档数 + 切片诊断计数）
      */
     IngestReport process(List<IngestSource> documents,
-                         ElasticsearchClient esClient,
-                         String indexName,
-                         EmbeddingStore embeddingStore,
+                         IngestTarget target,
                          EmbeddingModel embeddingModel,
                          String sourceTag);
 

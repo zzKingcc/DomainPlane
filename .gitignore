@@ -43,6 +43,15 @@ ddoc/
 ### 本地工作区数据（构建日志 / 记忆 / 脚本），不进版本库 ###
 .workbuddy/
 
+### 本地构建日志（一次性产物，勿入库） ###
+/mvn-*.log
+/mvn-*.txt
+/tools/*
+!/tools/*.mjs
+!/tools/*.js
+!/tools/.gitignore
+!/tools/shots/.keep.txt
+
 
 
 

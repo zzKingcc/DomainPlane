@@ -30,7 +30,7 @@ public class TxtSplitter implements DocumentSplitter {
     public static final int DEFAULT_OVERLAP_SENTENCES = 1;
     public static final int DEFAULT_MIN_CHARS = 60;
 
-    private final Chunker chunker;
+    private final TextChunker chunker;
     private final int maxChars;
 
     public TxtSplitter() {
@@ -39,7 +39,9 @@ public class TxtSplitter implements DocumentSplitter {
 
     public TxtSplitter(int maxChars, int overlapSentences, int minChars) {
         this.maxChars = maxChars;
-        this.chunker = new Chunker(maxChars, overlapSentences, minChars);
+        // 语义分块（F05 P2）开启时互补结构感知切片，否则一字不变地沿用 Chunker
+        TextChunker semantic = SemanticChunking.resolve(maxChars);
+        this.chunker = semantic != null ? semantic : new Chunker(maxChars, overlapSentences, minChars);
     }
 
     @Override

@@ -43,8 +43,94 @@ body {
 .main {
     flex: 1 1 auto;
     min-width: 0;
-    padding: 26px 30px 48px;
-    max-width: 1180px;
+    /* 规范值「内容区内边距 20px 24px」：原来 26px 30px 48px 是试出来的数，
+       比规范宽一截，与卡片内部 20px 形成两套间距语言，页面显松。 */
+    padding: 20px 24px 24px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ===== 页面骨架：纵向页布局（Tabler .page-header / .page-body）+ 流体宽度 =====
+   页面上半是页头（标题 / 说明 / 操作），下半是页身（内容自上而下排开），
+   两块纵向堆叠；内容区不设宽度上限 —— 窗口多宽就铺多宽（fluid），
+   卡片列表按可用宽度自动分列（见下面 .dp-list）。
+
+   用的是 Tabler 自带的 .page-header / .page-body：.page-body 本身就是
+   flex 列 + flex:1，页身内容少时会把剩余高度撑满，于是「保存并生效」那类
+   贴在页面底部的操作条能停在视口底部。
+
+   ⚠️ 两处要覆盖厂商默认值：
+   · 厂商 .page-header / .page-body 自带 margin（--tblr-page-padding-y），
+     这里统一清零 —— 间距由 .main 的 padding 和 .page-head 自己管，
+     不叠两层，否则页头下面会多出一截空白；
+   · .page-body 是 flex 列，flex 子项默认 min-width:auto，
+     宽表格（.table-wrap）会因此把整页撑出横向滚动条，
+     所以给子项补 min-width:0，让表格在自己的容器里滚。 */
+.page-header { margin: 0 0 20px; }
+.page-header .page-head { margin-bottom: 0; }
+.page-body { flex: 1 1 auto; min-width: 0; margin: 0; }
+.page-body > * { min-width: 0; }
+
+/* ===== 概览 · 行距（补厂商 gutter 的锅） =====
+   tabler 的 gutter-y 实现是「row 自身 margin-top:-g + 子 col margin-top:+g」，
+   抵消后单 row 首行与上方间距为 0 —— 单 row 页面没问题，但概览纵向叠了
+   4 个 row + 2 张裸卡，相邻两组卡片上下直接贴住，页面糊成一片。
+   这里按规范「图表卡片之间 16px」显式补行距。
+   只作用于 .dp-overview：其他页面靠 .dp-card 自己的 margin-bottom 管堆叠，
+   全局规则会叠出双份间距。 */
+.dp-overview > * + * { margin-top: 16px; }
+/* 熔断页同病：统计行（row-cards）+ 实例清单卡两段纵向堆叠。
+   dp-card 只管自己 margin-bottom、没有 margin-top，不补就贴。 */
+.dp-instances > * + * { margin-top: 16px; }
+/* 知识库页三组堆叠：统计行 + 上传/重建两列 + 文档清单，同一个 gutter 抵消坑 */
+.dp-knowledge > * + * { margin-top: 16px; }
+/* 提示词页同款：统计行 + 域清单卡。其余间距沿用原有管理（dp-card mb 20 / sticky mt 16），
+   这里只补统计行后第一个元素——给全部后继元素加 mt 会和 dp-card 自己的 mb 叠成双份。 */
+.dp-prompts > .row-cards + * { margin-top: 16px; }
+/* MCP 连接页同款：统计行 + 连接卡片列表（dp-list）两段纵向堆叠 */
+.dp-mcp > * + * { margin-top: 16px; }
+
+/* 提示词页原先贴在底部的 sticky-actions（保存 / 清空）已撤：按钮移入右侧编辑器卡片
+   标题行，保存仅在检测到改动后可点（disabled），不再需要常驻底部操作条。 */
+
+/* 卡片列表：宽度够就分列，窄了就回到一列。
+   这是按需开启的（容器上加 .dp-list），目前只有 MCP 连接列表用 ——
+   那页的卡片短（名字 + 一排小按钮 + 几行键值），并排看更省事。
+   模型 / 域空间**保持整行长条**：卡片内容本身就宽（表单、调优框、绑定信息），
+   压到半栏宽度反而挤，改成一行铺满更好读。
+   卡片自身的 margin-bottom 在网格里会跟 gap 叠出双份间距，这里归零。 */
+.dp-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+    gap: 20px;
+    align-items: start;
+}
+.dp-list > .dp-card { margin-bottom: 0; }
+@media (max-width: 900px) {
+    .dp-list { grid-template-columns: 1fr; }
+}
+
+/* ===== 链接：一律不加 hover 下划线 =====
+   Tabler reboot 里有 a:hover { text-decoration: underline }（权重 0,1,1）。
+   它比任何只写在类上的 text-decoration: none（0,1,0）都高，
+   所以侧栏导航项、侧栏底部的「账号与密码」、正文里的裸 <a>（如「见 域空间」）
+   一 hover 就冒出一条下划线。
+   这里统一压掉：本管控台的链接全靠颜色 / 背景区分，不靠下划线。
+
+   权重说明（别随手改）：
+   · 本文件在 @import tabler.min.css 之后，所以同权重的 a:hover 由本条胜出；
+   · Tabler 里还有几条权重更高或同类别的 hover 下划线规则
+     （a:hover:has(.icon)、a.mention:hover、.btn-link:hover、.breadcrumb a:hover），
+     一并点名压掉，免得以后加标记时又冒出来。
+   · 刻意不用 !important：Tabler 的 .link-underline-* 只改 text-decoration-color，
+     将来真要显式下划线时把这里的选择器改窄即可，不必和 !important 打架。 */
+a:hover,
+a:hover:has(.icon),
+a.mention:hover,
+.btn-link:hover,
+.btn-link:focus-visible,
+.breadcrumb a:hover {
+    text-decoration: none;
 }
 
 /* ===== 侧栏 ===== */
@@ -99,17 +185,19 @@ body {
 .sidebar-foot .foot-link {
     font-size: 12px; color: var(--primary); text-decoration: none; padding-left: 15px;
 }
-.sidebar-foot .foot-link:hover { text-decoration: underline; }
-.sidebar-foot .foot-out {
-    margin-top: 2px; padding: 6px 10px; font-size: 12.5px;
-    background: #fff; color: var(--slate); border: 1px solid var(--border);
-    border-radius: 6px; cursor: pointer;
-}
-.sidebar-foot .foot-out:hover { background: #f8fafc; color: var(--text); }
+/* hover 不给下划线：链接本身已用主色标出，再加下划线在侧栏这种密集区显得噪 */
+.sidebar-foot .foot-link:hover { color: var(--primary); }
+/* 退出按钮：跟着全局按钮规格走（btn btn-sm btn-outline-secondary），
+   这里只补位置与左右间距，不再自己定字号/底色 —— 侧栏这个按钮和页面上其它小按钮
+   是同一类，高度差 2px 看着就别扭。 */
+.sidebar-foot .foot-out { margin-top: 2px; width: 100%; }
 
 /* ===== 页头 ===== */
 .page-head { margin-bottom: 20px; }
-.page-head h2 { font-size: 18px; font-weight: 600; }
+/* 页面标题字号按后台规范定为 16px / 600（与卡片标题 15px 拉开半级，
+   不再跟着 tabler h2 的 20px 走——那会和一屏之内的卡片标题糊成一片）。
+   字重 600（semibold）而非 700：这是标题不是数字，重字留给统计大数。 */
+.page-head h2 { font-size: 16px; font-weight: 600; line-height: 1.5; color: var(--tblr-heading-color); }
 .page-head p { font-size: 13px; color: var(--muted); margin-top: 5px; }
 .page-head .actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
 
@@ -153,8 +241,24 @@ body {
    （.page-head .actions / .btn-row / .card-foot 都已 flex-wrap: wrap）。
    这与 .tag / .count-badge / .mbadge / .dirty 已有的 nowrap 是同一条规矩。 */
 /* V2：带 .btn 的按钮交给 Tabler 接管，下面这组只兜住尚未改造的元素型按钮
-   （modal-close / combo-btn / tune-bar-seg 这类结构型按钮仍走这套）。 */
-button:not(.btn) {
+   （modal-close / combo-btn / tune-bar-seg 这类结构型按钮仍走这套）。
+
+   业务按钮现在**一律走 Tabler 的 outline 变体**：
+   btn-outline-primary（主操作）/ btn-outline-secondary（次要、取消、关闭）/
+   btn-outline-danger（删除等破坏性操作），尺寸只有两档 ——
+   弹层/表单里的按钮用默认档（与输入框齐平），页面上的动作按钮用 btn-sm。
+   旧的 .ghost / .sec / .danger 三套自制样式全部作废（它们当年都被 :not(.btn)
+   挡着没生效过，元素一律带 .btn），随这次统一一起删掉。
+
+   ⚠️ 这里必须写 :where(button)，不能写 button。
+   button:not(.btn) 的权重是 (0,1,1)（元素 1 个 + :not() 里的 .btn 一个类），
+   比任何单类选择器（如 .combo-btn / .modal-close 的 (0,1,0)）都高，
+   于是结构型按钮自己的样式会被这条底座压掉 —— 实测后果：
+   「×」关闭键和下拉箭头都被染成主色蓝块、箭头的 svg 被 8px 16px 的 padding 挤成 0 宽、
+   .tune-bar-seg 分段控件和 .chip 也全成了蓝按钮。
+   :where(button) 把元素本身那一点权重抹掉（整条只剩 :not(.btn) 的类权重 (0,1,0)），
+   结构型按钮的类规则就能按「谁写在后面谁生效」正常覆盖底座。 */
+:where(button):not(.btn) {
     background: var(--primary);
     color: #fff;
     border: none;
@@ -165,19 +269,11 @@ button:not(.btn) {
     cursor: pointer;
     white-space: nowrap;
 }
-button:not(.btn):hover { opacity: .9; }
-button:not(.btn):disabled { opacity: .5; cursor: not-allowed; }
-button:not(.btn).ghost {
-    background: #fff; color: var(--primary);
-    border: 1px solid var(--border); font-size: 12px; padding: 4px 10px;
-}
-button:not(.btn).ghost:hover { background: var(--primary-dim); }
-button:not(.btn).sec {
-    background: #fff; color: var(--text);
-    border: 1px solid var(--border); font-size: 13px; padding: 8px 14px;
-}
-button:not(.btn).sec:hover { background: #f8fafc; }
-button:not(.btn).danger { background: var(--red); }
+/* 只有「没类的朴素按钮」才用整体变淡来表达 hover；
+   带类的结构型按钮（chip / tune-bar-seg / combo-btn / modal-close）自己管 hover 反馈，
+   再叠一层 opacity 只会让它们变脏。 */
+:where(button):not(.btn):not([class]):hover { opacity: .9; }
+:where(button):not(.btn):disabled { opacity: .5; cursor: not-allowed; }
 
 .btn-row { display: flex; gap: 10px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
 
@@ -197,6 +293,18 @@ input:not([type="checkbox"]):not([type="radio"]), select {
     color: var(--text);
     background: var(--tblr-bg-forms);
     box-shadow: var(--shadow-input);
+}
+/* 下拉框跟输入框统一尺寸。
+   上面那条里的 select 只有元素权重 (0,0,1)，压不过 Tabler 的 .form-select (0,1,0)，
+   于是下拉框会退回 Tabler 默认的 14px / 40px / 浅灰边框，
+   跟同一行输入框（13px / 38px / 半透明边框）大小深浅都不一致。
+   这里只改尺寸与边框，保留 Tabler 自带的下拉箭头（background-image），
+   右边留 34px 给箭头，文字不会被压住。 */
+select.form-select {
+    padding: 8px 34px 8px 12px;
+    font-size: 13px;
+    border-color: var(--tblr-border-color-translucent);
+    background-color: var(--tblr-bg-forms);
 }
 /* 勾选类控件恢复原生尺寸，不再被当成文本框 */
 input[type="checkbox"], input[type="radio"] {
@@ -300,6 +408,7 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 .model-card.emb { border-left-color: #7c3aed; }
 .model-card.infra-es { border-left-color: #0d9488; }
 .model-card.infra-redis { border-left-color: #ea580c; }
+.model-card.infra-vector { border-left-color: #6366f1; }
 .model-card .card-head {
     margin-bottom: 16px; padding-bottom: 12px;
     border-bottom: 1px solid var(--border); flex-wrap: wrap;
@@ -311,6 +420,19 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 .model-card.emb .model-dot { background: #7c3aed; }
 .model-card.infra-es .model-dot { background: #0d9488; }
 .model-card.infra-redis .model-dot { background: #ea580c; }
+.model-card.infra-vector .model-dot { background: #6366f1; }
+
+/* 存储配置页的 Redis 卡单独收一档。
+   它只有 4 个字段，却与字段数加倍的 ES 卡共用同一套间距（20px 卡内边距 + 16px 字段距
+   + 说明框独占一行），整卡因此显得空。只作用于 .infra-redis，不牵动同页另两张卡。 */
+.infra-redis { padding: 16px; }
+.infra-redis .card-head { margin-bottom: 10px; }
+.infra-redis .compat-box { padding: 8px 12px; margin-bottom: 12px; }
+/* 说明框里的 details 提到 cb-head 内，与 chips 同一行；展开时才独占一行 */
+.infra-redis .compat-box details { margin-top: 0; }
+.infra-redis .compat-box details[open] { flex-basis: 100%; }
+.infra-redis .field { margin-bottom: .6rem; }
+.infra-redis .card-foot { padding-top: 10px; }
 .card-head .spacer { flex: 1 1 auto; }
 .card-note { font-size: 12px; color: #94a3b8; }
 
@@ -333,15 +455,36 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 }
 .empty-box .empty-title { font-size: 1.25rem; font-weight: 600; line-height: 1.75rem; margin: 0 0 .5rem; }
 .empty-box .empty-sub { font-size: .875rem; color: var(--muted); line-height: 1.7; }
-.empty-box .btn-primary { margin-top: 1.5rem; }
 
 /* 模型卡片内的信息行（键值对） */
 .model-meta { display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.6; }
 .model-meta .k { display: inline-block; min-width: 92px; color: var(--muted); }
-/* 「上下文长度」输入框：宽度必须收窄，输入框默认 width:100%，不收的话单位会飘到行尾，
-   这一行也会比别的信息行抢眼得多。改动即存，见 models.html 的 saveContextWindow。 */
-.model-meta .model-ctx { width: 120px; }
-.model-meta .ctx-unit { margin-left: 6px; color: var(--muted); font-size: 12.5px; }
+/* 「上下文长度」这一行：标签、输入框、单位并到一行，整体收小。
+   原来标签占 92px、输入框 120px，信息列只有 220px 宽 —— 放不下就折行，
+   标签在上一行、输入框掉到下一行，看着像两张不相干的东西。
+
+   ⚠️ 选择器要写三层（.model-meta .ctx-row .model-ctx = 0,3,0）：
+   全局那条 `input:not([type=checkbox]):not([type=radio])` 是 (0,2,1)，
+   它的 width:100% / font-size:13px / padding 会压过两层的写法，
+   输入框就又撑满整行（这正是它折行的原因）。 */
+.model-meta .ctx-row { display: flex; align-items: center; gap: 6px; }
+.model-meta .ctx-row .k { flex: 0 0 auto; }
+.model-meta .ctx-row .model-ctx {
+    flex: 0 0 80px;
+    width: 80px; height: 26px; padding: 2px 8px;
+    font-size: 12px; line-height: 20px; text-align: right;
+    border-radius: 4px;
+}
+/* 这个尺寸下数字框的上下微调箭头太挤，藏掉（值仍然可以直接改） */
+.model-meta .ctx-row .model-ctx::-webkit-outer-spin-button,
+.model-meta .ctx-row .model-ctx::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.model-meta .ctx-row .model-ctx { -moz-appearance: textfield; appearance: textfield; }
+.model-meta .ctx-row .ctx-unit { margin-left: 0; color: var(--muted); font-size: 12px; }
+/* 连接协议下拉：与上下文长度输入框同一套紧凑尺寸，两个就地项摆在一起才不打架 */
+.model-meta .proto-select {
+    width: auto; min-width: 116px; height: 26px; padding: 2px 6px;
+    font-size: 12px; line-height: 20px; border-radius: 4px;
+}
 
 .mbadge {
     display: inline-flex; align-items: center;
@@ -362,9 +505,15 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 .head-line { display: flex; align-items: flex-start; gap: 12px; }
 .head-line > div:first-child { flex: 1 1 auto; }
 
-/* ===== 模型名控件：下拉选择 + 手动输入（输入框内容为准） ===== */
+/* ===== 模型名控件：下拉选择 + 手动输入（输入框内容为准） =====
+   形态 = 一个输入框 + 右侧一枚箭头按钮（像原生 select 的样子），
+   箭头按钮是「输入框的一部分」而不是独立按钮，所以：
+   · 底色透明、只在左边留一条分隔线，与输入框合成一个整体；
+   · 颜色走弱（muted），hover 才上主色 —— 它是输入框的附属件，不该抢主按钮的戏。 */
 .combo { position: relative; }
 .combo input { padding-right: 34px; }
+/* 下拉开着的时候输入框保持「被选中」的边框色，别让焦点环一闪就没 */
+.combo:focus-within .form-control { border-color: var(--primary); }
 .combo-btn {
     position: absolute; top: 0; right: 0; height: 100%; width: 32px; padding: 0;
     display: flex; align-items: center; justify-content: center;
@@ -372,10 +521,13 @@ input:disabled { background: #f8fafc; color: var(--muted); }
     border-radius: 0 6px 6px 0; color: var(--muted); cursor: pointer;
 }
 .combo-btn:hover { background: #f8fafc; color: var(--primary); opacity: 1; }
+.combo-btn:focus-visible { outline: 2px solid var(--primary-dim); outline-offset: -2px; }
 .combo-btn svg { width: 14px; height: 14px; }
+/* 浮层要给一点抬升感，否则压在白色卡片上看不出这是一层浮层 */
 .combo-menu {
     position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
-    background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card); border: 1px solid var(--tblr-border-color-translucent);
+    border-radius: 6px; box-shadow: 0 8px 24px rgba(15, 23, 42, .12);
     max-height: 240px; overflow-y: auto; padding: 4px;
 }
 .combo-state { font-size: 12px; color: var(--muted); padding: 8px 10px; }
@@ -390,7 +542,11 @@ input:disabled { background: #f8fafc; color: var(--muted); }
     font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
     color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.combo-item:hover, .combo-item.active { background: var(--primary-dim); color: var(--primary); }
+/* 选中/悬停用比 --primary-dim 更实一点的蓝，否则浮层里几乎看不出指到哪一行 */
+.combo-item:hover, .combo-item.active {
+    background: color-mix(in oklab, var(--tblr-primary) 12%, var(--tblr-white));
+    color: var(--primary);
+}
 
 .hint { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 8px; }
 .hint code {
@@ -426,7 +582,8 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 .disclose > summary::-webkit-details-marker { display: none; }
 .disclose > summary::before { content: '▸'; font-size: 10px; line-height: 1; }
 .disclose[open] > summary::before { content: '▾'; }
-.disclose > summary:hover { text-decoration: underline; }
+/* hover 用颜色加深代替下划线：summary 是折叠开关，下划线在这里更像正文链接 */
+.disclose > summary:hover { color: var(--text); }
 .disclose > .disclose-body {
     font-size: 12px; color: var(--muted); line-height: 1.7; margin-top: 8px;
 }
@@ -500,20 +657,77 @@ tbody tr:hover { background: #fcfcfd; }
 .origin-warn a { color: #991b1b; font-weight: 600; }
 .origin-warn b { color: #991b1b; }
 
-/* ===== 统计块 =====
-   auto-fit 而非固定列数：概览 4 块、域空间 5 块，同一套样式都要能撑满一行；
-   固定列数会在卡片增减时留下空列，窄屏也靠它自动塌列（下方媒体查询兜底）。 */
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 14px; margin-bottom: 20px; }
-.stat {
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: 8px; padding: 16px;
+/* ===== 提示气泡（toast）与二次确认（modal）=====
+   两者都用 Tabler 的组件外观（vendor/tabler.min.css 里已有 .toast / .modal 全套），
+   行为由 core/feedback.js 自己实现 —— 不引 tabler.min.js（Bootstrap JS + Popper 整包，
+   与本项目「纯 CSS 套件、功能逻辑自己写」的路线冲突），也不引 CDN（要能离线部署）。
+   原来用的是浏览器原生 alert() / confirm()，样式与页面完全不在一套。 */
+
+/* Tabler 的 .modal 默认 display:none，.show 只负责位移/动画，
+   真正把 display 打开的是 Bootstrap JS（它直接写 style.display）。
+   我们没有那份 JS，所以自己补这一条 —— 少了它，.show 加了也不显示。 */
+.modal.show { display: block; }
+
+/* ---------- 提示气泡：右下角堆叠 ---------- */
+.dp-toast-stack {
+    position: fixed; right: 16px; bottom: 16px; z-index: 1090;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+    width: max-content; max-width: calc(100vw - 32px);
+    pointer-events: none;
 }
-.stat .k { font-size: 12px; color: var(--muted); }
-.stat .v { font-size: 16px; font-weight: 600; margin-top: 6px; }
-.stat .v.ok { color: var(--green); }
-.stat .v.warn { color: var(--amber); }
-.stat .v.err { color: var(--red); }
-.stat .note { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+.dp-toast-stack .toast {
+    pointer-events: auto;
+    transition: opacity .18s ease, transform .18s ease;
+}
+.dp-toast-stack .toast.dp-toast-hide { opacity: 0; transform: translateY(6px); }
+/* 宽版气泡：Tabler 的 --tblr-toast-max-width 是 350px，几行清单放不下会折得很碎。
+   直接改这个变量即可（厂商规则读的就是它），不必去覆盖厂商的 max-width 声明。 */
+.dp-toast-stack .toast.dp-toast-wide { --tblr-toast-max-width: 460px; }
+
+.dp-toast-head { gap: 8px; }
+.dp-toast-icon { display: inline-flex; }
+.dp-toast-icon svg { width: 16px; height: 16px; }
+.dp-toast-title { font-weight: 600; }
+/* 把关闭键顶到最右（Tabler 的 .btn-close 默认紧跟在文字后面） */
+.dp-toast-spacer { flex: 1 1 auto; }
+/* 错误详情常是多行，正文里的换行要留住 */
+.dp-toast-body { white-space: pre-wrap; line-height: 1.6; }
+
+/* 关闭键：Tabler 1.6 用 mask 画「×」，颜色走 currentColor。
+   管控台底座那条 :where(button):not(.btn) 会把它染成主色蓝块，
+   这里按 Tabler 的原意改回「文字色的 ×」，尺寸也收小。 */
+.dp-toast .btn-close,
+.dp-confirm .btn-close {
+    width: 24px; height: 24px; padding: 0; border-radius: 4px;
+    background-color: currentColor; color: var(--muted); opacity: .6;
+    transition: opacity .15s ease;
+}
+.dp-toast .btn-close:hover,
+.dp-confirm .btn-close:hover { opacity: 1; }
+
+/* 四种语义色：Tabler 的 toast 本身不带配色，这里用本项目的语义变量区分 */
+.dp-toast-success { border-left: 3px solid var(--green); }
+.dp-toast-success .dp-toast-icon,
+.dp-toast-success .dp-toast-title { color: var(--green); }
+.dp-toast-error { border-left: 3px solid var(--red); }
+.dp-toast-error .dp-toast-icon,
+.dp-toast-error .dp-toast-title { color: var(--red); }
+.dp-toast-warning { border-left: 3px solid var(--amber); }
+.dp-toast-warning .dp-toast-icon,
+.dp-toast-warning .dp-toast-title { color: var(--amber); }
+.dp-toast-info { border-left: 3px solid var(--primary); }
+.dp-toast-info .dp-toast-icon,
+.dp-toast-info .dp-toast-title { color: var(--primary); }
+
+/* ---------- 二次确认：顶部居中弹窗 ---------- */
+/* Tabler 1.6 的 .modal-dialog 没有 max-width（--tblr-modal-width 没人用），
+   不给宽度的话框会跟着正文长度飘。确认类文案不长，460px 够用。
+   位置：顶部居中（不再用 .modal-dialog-centered 的垂直居中），
+   跟管理台自己的弹层（.modal-panel）一个落点，两种弹窗看起来是一套。 */
+.dp-confirm .modal-dialog { max-width: 460px; margin: 40px auto; }
+.dp-confirm .modal-content { animation: dp-modal-drop .18s ease-out; }
+.dp-confirm .modal-body { white-space: pre-wrap; line-height: 1.7; color: var(--text); }
+.dp-confirm .modal-footer { gap: 8px; }
 
 /* ===== 模态框 / 遮罩层 =====
    点「添加 / 编辑」时弹出的表单层：全屏半透明遮罩 + 居中面板。
@@ -523,7 +737,7 @@ tbody tr:hover { background: #fcfcfd; }
     position: fixed; inset: 0; z-index: 60;
     background: rgba(17, 24, 39, .45);
     display: flex; align-items: flex-start; justify-content: center;
-    padding: 56px 16px; overflow-y: auto;
+    padding: 40px 16px 24px; overflow-y: auto;
 }
 .modal-mask[hidden] { display: none; }
 .modal-panel {
@@ -531,6 +745,16 @@ tbody tr:hover { background: #fcfcfd; }
     border-radius: 10px; width: 100%; max-width: 640px;
     box-shadow: 0 16px 44px rgba(15, 23, 42, .24);
     padding: 20px 22px 18px;
+    animation: dp-modal-drop .18s ease-out;
+}
+/* 弹窗从顶部落下：点「添加模型 / 保存」时，框应当是从上边滑到视口中间偏上，
+   而不是从画面正中淡入 —— 视线不用先扫到屏幕中央去找它。 */
+@keyframes dp-modal-drop {
+    from { opacity: 0; transform: translateY(-14px); }
+    to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .modal-panel, .dp-confirm .modal-content { animation: none; }
 }
 .modal-head {
     display: flex; align-items: center; gap: 10px;
@@ -539,12 +763,15 @@ tbody tr:hover { background: #fcfcfd; }
 }
 .modal-head h3 { font-size: 15px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .modal-head .spacer { flex: 1 1 auto; }
+/* 关闭键做成「图标按钮」：去掉边框和常驻底色，只在 hover 时给一块浅底。
+   原来是个带边框的白底方块，夹在标题旁边显得笨重，也容易被误认成主按钮。 */
 .modal-close {
-    background: #fff; color: var(--muted); border: 1px solid var(--border);
-    border-radius: 6px; padding: 1px 9px 3px; font-size: 17px; line-height: 1.15;
-    cursor: pointer;
+    background: transparent; color: var(--muted); border: none;
+    border-radius: 6px; width: 28px; height: 28px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 18px; line-height: 1; cursor: pointer;
 }
-.modal-close:hover { background: #f8fafc; color: var(--text); opacity: 1; }
+.modal-close:hover { background: #f1f5f9; color: var(--text); opacity: 1; }
 
 /* ===== 响应式：窄屏时侧栏转顶部横向 ===== */
 @media (max-width: 860px) {
@@ -556,7 +783,6 @@ tbody tr:hover { background: #fcfcfd; }
     .dp-nav { flex-direction: row; overflow-x: auto; }
     .dp-nav-item .dot-warn { margin-left: 6px; }
     .main { padding: 20px 16px 40px; }
-    .stats { grid-template-columns: 1fr; }
     .dp-row { grid-template-columns: 1fr; }
     .modal-mask { padding: 24px 12px; }
     .modal-panel { padding: 16px 16px 14px; }
@@ -584,8 +810,8 @@ tbody tr:hover { background: #fcfcfd; }
 .tune-status.ok { color: var(--green); }
 .tune-status.err { color: var(--red); }
 /* 「更新」按钮：无改动 → disabled（全局 button:disabled 就是灰的），有改动才亮起来。
-   它挂在卡片头部（删除左侧），不再是绿框里单独的一行。 */
-.tune-save { font-size: 12px; padding: 4px 12px; }
+   它挂在卡片头部（删除左侧），不再是绿框里单独的一行。
+   尺寸不再单独定 —— 跟页面上其它小动作一样是 btn-sm btn-outline-primary。 */
 /* 参数行：网格里的一格，比通用 .field 更紧凑，框内是密集参数区，不是主表单。
    label 只指「参数名」那一层，故用 > 限定直接子元素：bool 的开关本身也是 label，
    不限定的话会被这条规则染上参数名的字号与下距，开关就浮起来了。 */
@@ -703,3 +929,769 @@ tbody tr:hover { background: #fcfcfd; }
 .tune-bar-cap[hidden] { display: none; }
 /* 卡片右侧的绿框：占住 meta 右侧的空白区，就地改值，不必重开弹窗 */
 .card-tune { flex: 1 1 340px; min-width: 0; margin-bottom: 0; }
+/* ---------- 「自定义参数（JSON）」文本框 ----------
+   与绿框（.tune-box）是两条不同的路：绿框由适配 schema 驱动，只在按模型名命中适配的
+   档案上出现；这个框走"用户声明、我透传"，只在**未命中**的档案上出现。
+   两者互斥（服务端同一份判据下发 customParams.schemaDriven），所以视觉上刻意不同：
+   绿框 = 平台替你登记过，虚线框 = 参数由你自己声明，平台不管它是什么意思。
+   用虚线而不是另一套彩色边框：颜色已经分工了（绿=适配、红=危险），
+   再引一种颜色只会让"这个框是什么"更难懂。 */
+.cp-box {
+    flex: 1 1 340px;
+    min-width: 0;
+    margin-bottom: 0;
+    border: 1px dashed var(--slate);
+    border-radius: 8px;
+    background: rgba(148, 163, 184, .06);
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.cp-box > label { font-size: 12px; color: var(--muted); }
+.cp-box textarea {
+    width: 100%;
+    min-height: 92px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    resize: vertical;
+    color: var(--text);
+    background: #fff;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+}
+.cp-box textarea:focus { outline: 2px solid var(--primary-dim); border-color: var(--primary); }
+.cp-box textarea:disabled { background: #f8fafc; color: var(--muted); }
+/* 上限与提示：只写"能填什么、上限多少"，不解释 JSON 是什么 —— 会填这个框的人不需要，
+   不会填的人看了也学不会。上限数字由服务端下发，前端不另存一份常量。 */
+.cp-hint { font-size: 11px; color: var(--muted); line-height: 1.6; }
+.cp-foot { display: flex; align-items: center; gap: 8px; }
+.cp-foot .spacer { flex: 1 1 auto; }
+
+/* ===== 概览统计卡（overview）=====
+   四张关键指标一行排开，规格来自后台设计规范：横向「图标容器 + 数字 + 标签」。
+   图标底色吃各指标语义色（primary / purple / success / pink）的 10% 混合底，
+   图标本身用实色：颜色只用来"辨认是哪一类指标"，不当状态指示灯——状态统一由
+   数字颜色表达，且只有 warn / danger 才染色，正常态一律 heading 深色。
+   全卡默认无彩色是"专业克制"，异常时让颜色说话，两件事不混在一张卡上。
+   悬停 translateY(-2px)：四张卡是页面上唯一可点的视觉锚点，给一点活着 feedback。 */
+.dp-stat { transition: transform .2s ease, box-shadow .2s ease; }
+.dp-stat:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(15, 23, 42, .08);
+}
+/* 统计卡内边距按规范「20px 16px」：card-sm 默认 16px 全向，上下压得太瘪，
+   与面板卡的 20px 上下边距不在一个密度上。 */
+.dp-stat .card-body { padding: 20px 16px; }
+.dp-stat-body { display: flex; align-items: center; gap: 14px; }
+.dp-stat-icon {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.dp-stat-icon svg { width: 22px; height: 22px; display: block; }
+.dp-stat-info { min-width: 0; }
+.dp-stat-label { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+/* 数字 22px / 700 是规范值；nowrap + ellipsis：模型名做数字时（向量模型卡）不换行撑卡 */
+.dp-stat-value {
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.dp-stat-value.warn { color: var(--amber); }
+.dp-stat-value.err { color: var(--red); }
+/* 占位值（"—"）降权：22px 的粗体破折号看着像一条横线，会读成"有内容但被划掉" */
+.dp-stat-value.mute { color: var(--muted); font-weight: 500; }
+/* 统计卡补充小字（如「2 个已熔断」）：运营关键信息才配拥有，
+   装饰性解释不配进卡——卡片越干净，出状况时那行小字越显眼。 */
+.dp-stat-note { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+.dp-stat-icon-blue { background: color-mix(in oklab, var(--tblr-primary) 10%, transparent); color: var(--tblr-primary); }
+.dp-stat-icon-purple { background: color-mix(in oklab, var(--tblr-purple) 10%, transparent); color: var(--tblr-purple); }
+.dp-stat-icon-green { background: color-mix(in oklab, var(--tblr-success) 10%, transparent); color: var(--tblr-success); }
+.dp-stat-icon-pink { background: color-mix(in oklab, var(--tblr-pink) 10%, transparent); color: var(--tblr-pink); }
+
+/* ===== 概览 · 运行质量（三条占比条）=====
+   正向指标（命中率，越高越好）与反向指标（失败率，越低越好）共用一条轨道，
+   颜色由 JS 按阈值落 ok / warn / err 类——轨道本身不表态，只报数。 */
+.dp-bar { margin-bottom: 12px; }
+.dp-bar:last-child { margin-bottom: 0; }
+.dp-bar-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 12px; color: var(--muted); margin-bottom: 5px;
+}
+.dp-bar-head b { font-size: 13px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.dp-bar-track { height: 6px; border-radius: 3px; background: var(--tblr-bg-surface-tertiary); overflow: hidden; }
+.dp-bar-fill { height: 100%; width: 0; border-radius: 3px; background: var(--slate); transition: width .3s ease; }
+.dp-bar-fill.ok { background: var(--green); }
+.dp-bar-fill.warn { background: var(--amber); }
+.dp-bar-fill.err { background: var(--red); }
+
+/* ===== 概览 · 工具风险构成（SVG 环形图，零依赖）=====
+   不引 Chart.js：console 是私有化 / 离线部署，禁外部 CDN；三条弧的
+   stroke-dasharray 由 JS 按占比算，周长 C = 2πr（r=45）。rotate(-90)
+   让起点落在 12 点；dashoffset 负向累加=下一段接着上一段画。
+   只animate width/opacity 的通用纪律这里天然满足——弧长是一次性落值。 */
+.dp-donut-wrap { display: flex; align-items: center; gap: 20px; }
+.dp-donut { position: relative; flex: 0 0 140px; width: 140px; height: 140px; }
+.dp-donut svg { width: 140px; height: 140px; transform: rotate(-90deg); }
+.dp-donut circle { fill: none; stroke-width: 14; stroke-dasharray: 0 283; stroke-dashoffset: 0; }
+.dp-donut #donutRead { stroke: var(--green); }
+.dp-donut #donutWrite { stroke: var(--tblr-primary); }
+.dp-donut #donutDestructive { stroke: var(--red); }
+/* 环形中央的总数：绝对定价于 .dp-donut（position:relative）正中 */
+.dp-donut-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    line-height: 1.2;
+}
+.dp-donut-center b { font-size: 22px; font-weight: 700; color: var(--text); }
+.dp-donut-center span { font-size: 11px; color: var(--muted); }
+.dp-legend { flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dp-legend-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+.dp-legend-row b { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dp-legend-row .p { width: 44px; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dp-legend-dot { width: 9px; height: 9px; border-radius: 3px; flex: 0 0 9px; }
+.dp-legend-dot.dot-read { background: var(--green); }
+.dp-legend-dot.dot-write { background: var(--tblr-primary); }
+.dp-legend-dot.dot-destructive { background: var(--red); }
+
+/* ===== 概览 · 待配置项 =====
+   一行一个待办：状态点 + 一句话 + 直达链接。全部就绪时 JS 给整卡 hidden，
+   不留空态文案——空列表还要写句"暂无待办"是给已完工的人看废话。 */
+.dp-todo-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0; border-bottom: 1px solid var(--tblr-border-color-translucent);
+    font-size: 13px; color: var(--text);
+}
+.dp-todo-item:first-child { padding-top: 0; }
+.dp-todo-item:last-child { border-bottom: 0; padding-bottom: 0; }
+.dp-todo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); flex: 0 0 8px; }
+.dp-todo-item .txt { flex: 1 1 auto; min-width: 0; }
+.dp-todo-item .btn { flex: 0 0 auto; }
+
+/* 面板卡（图表 / 列表）标题按后台规范 15px / 600：
+   tabler card-title 默认 16px，压半级，与页面标题 16px 拉开层次。
+   标题与内容的间距从 tabler 默认 20px 收到 14px：概览面板一屏并列多张，
+   20px 的空隙在短内容面板里显空；规范「紧凑但不拥挤」取中间值。 */
+.dp-panel .card-title { font-size: 15px; font-weight: 600; color: var(--tblr-heading-color); margin-bottom: 14px; }
+/* 面板内说明段：全局 reset 把 p 的间距清了，不补一条会和下面的操作行贴脸 */
+.dp-kb-note { font-size: 13px; color: var(--muted); line-height: 1.7; margin-bottom: 14px; }
+.dp-kb-note b { color: var(--text); font-weight: 600; }
+
+/* ===== L2 · 请求趋势（SVG 折线，无 Chart.js） =====
+   窗口数据来自后端 MetricsRegistry 采样（累计值差分前已算成速率）。
+   svg 用 preserveAspectRatio="none" 做宽度自适应，描边必须 non-scaling-stroke，
+   否则横向拉伸时线会被拉粗——这是等比 viewBox 换响应式宽度的固定代价。 */
+.dp-trend svg { display: block; width: 100%; height: 160px; }
+.dp-trend-line { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.dp-trend-line.line-chat { stroke: var(--tblr-primary); }
+.dp-trend-line.line-tool { stroke: var(--green); }
+.dp-trend-area { stroke: none; opacity: 0.12; }
+.dp-trend-area.area-chat { fill: var(--tblr-primary); }
+.dp-trend-area.area-tool { fill: var(--green); }
+.dp-trend-grid line { stroke: var(--tblr-border-color-translucent); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.dp-trend-legend { display: flex; align-items: center; gap: 14px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.dp-trend-legend i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; margin-right: 5px; vertical-align: -1px; }
+.dp-trend-legend i.chat { background: var(--tblr-primary); }
+.dp-trend-legend i.tool { background: var(--green); }
+.dp-trend-legend b { margin-left: auto; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.dp-trend-window { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 6px; }
+
+/* ===== 提示词页 · 左右分栏（左域列表 / 右编辑器） =====
+   早年是整页表格：域一多，选完域要滚到页面底部才见编辑框，且编辑时看不到「编辑到第几个域」。
+   分栏后左列表自己滚、右编辑器常驻视野，两边的滚动互不干扰。
+   窄屏（<1100px）退回上下堆叠，左列表取消限高——此时页面整体滚，限高反而要多滚一次。 */
+.dp-prompts-split {
+    display: grid;
+    grid-template-columns: minmax(240px, 320px) 1fr;
+    gap: 16px;
+    align-items: start;
+}
+@media (max-width: 1100px) {
+    .dp-prompts-split { grid-template-columns: 1fr; }
+}
+/* 左列表滚动区：高度锚视口扣掉页头 + 统计行 + 底部 sticky 操作区的粗略占比。
+   min-height 兜底：视口极矮时也不塌成一条。 */
+.dp-domain-scroll {
+    max-height: calc(100vh - 380px);
+    min-height: 220px;
+    overflow-y: auto;
+    margin: 0 -4px;
+}
+.dp-domain-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 12px; margin: 0 4px 4px;
+    border-radius: 6px; cursor: pointer;
+    border-left: 3px solid transparent;
+    font-size: 13px; color: var(--text);
+}
+.dp-domain-item:hover { background: #f8fafc; }
+/* 选中态：左侧竖条 + 淡蓝底。这一列列表时「当前在编辑哪个域」必须一眼可辨——
+   否则改半天不知道存的哪个域，是这类分栏最容易出的误操作。 */
+.dp-domain-item.on { background: #eff6ff; border-left-color: var(--tblr-primary); }
+.dp-domain-name {
+    flex: 1 1 auto; min-width: 0;
+    font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dp-domain-tag { flex: 0 0 auto; font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 4px; }
+.dp-domain-tag.ok { background: #ecfdf5; color: #047857; }
+.dp-domain-tag.miss { background: #fffbeb; color: #b45309; }
+.dp-domain-empty { padding: 28px 12px; text-align: center; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
+.dp-editor-empty { padding: 60px 16px; text-align: center; font-size: 13px; color: var(--muted); }
+
+/* ===== 域空间 · 左域结构树 / 右域详情 =====
+   早年整页平铺卡片：域一多既看不出谁继承谁，配一个域要翻很久。
+   分栏后左树自己滚、右详情常驻视野；树按 /admin/domains 的 parentId 嵌套，
+   纯前端渲染、零后端依赖。窄屏（<1100px）退回上下堆叠。 */
+.dp-domains-split {
+    display: grid;
+    grid-template-columns: minmax(260px, 340px) 1fr;
+    gap: 16px;
+    align-items: start;
+}
+@media (max-width: 1100px) {
+    .dp-domains-split { grid-template-columns: 1fr; }
+}
+/* 子级容器：左侧竖线即「继承」的视觉表达，与文件树同构 */
+.dp-tree-kids { margin-left: 14px; border-left: 1px solid var(--border); }
+.dp-tree-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 10px; margin: 0 4px 2px;
+    border-radius: 6px; cursor: pointer;
+    border-left: 3px solid transparent;
+    font-size: 13px; color: var(--text);
+}
+.dp-tree-row:hover { background: #f8fafc; }
+/* 选中态与提示词页左列表同一套语言：淡蓝底 + 左侧竖条。
+   分栏页「当前在看哪个域」必须一眼可辨，否则改半天不知道存的哪个域。 */
+.dp-tree-row.on { background: #eff6ff; border-left-color: var(--tblr-primary); }
+.dp-tree-chev {
+    flex: 0 0 16px; width: 16px; height: 16px; padding: 0;
+    border: 0; background: none; cursor: pointer;
+    color: #94a3b8; font-size: 10px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 4px;
+}
+.dp-tree-chev:hover { background: #eef2f7; color: var(--text); }
+/* 叶子节点占位：不显示箭头，但要把位置留出来，各行才对得齐 */
+.dp-tree-chev.leaf { visibility: hidden; cursor: default; }
+.dp-tree-dot { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; }
+.dp-tree-dot.on { background: #10b981; }
+.dp-tree-dot.off { background: #f59e0b; }
+.dp-tree-name {
+    flex: 0 1 auto; min-width: 0;
+    font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dp-tree-tag { flex: 0 0 auto; font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 4px; }
+.dp-tree-tag.src-builtin { background: #f1f5f9; color: #64748b; }
+.dp-tree-tag.src-manual { background: #eff6ff; color: #2563eb; }
+.dp-tree-tag.src-derived { background: #f5f3ff; color: #7c3aed; }
+.dp-tree-count { margin-left: auto; font-size: 11.5px; color: #94a3b8; font-variant-numeric: tabular-nums; }
+.dp-tree-row.on .dp-tree-count { color: #2563eb; }
+/* 图例：三个视觉编码（点色 / 来源签 / 数字）各一行说不清，收成一行小字 */
+.dp-tree-legend {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--muted);
+}
+.dp-tree-legend i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: -1px; }
+.dp-tree-legend i.on { background: #10b981; }
+.dp-tree-legend i.off { background: #f59e0b; }
+/* 右详情卡：回写开关 / 计数 / 四五个按钮全在标题行，必须允许换行 */
+.dp-detail-card .card-head { flex-wrap: wrap; row-gap: 8px; }
+/* 父域 / 子域跳转：内联小链接，不抢按钮的视觉权重 */
+.dp-jump {
+    border: 0; background: none; padding: 0; cursor: pointer;
+    font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
+    color: var(--primary);
+}
+.dp-jump:hover { text-decoration: underline; }
+
+/* ===== 账号页（console/account.html）=====
+   三段纵向堆叠：总览四卡（密码状态 / 最近登录 / 来源 / 记录数）→ 账号卡（头像 + 名 + chip + 账号文件）
+   → 登录记录定高表。四张卡与账号卡吃的是同一份 /admin/session，但刻意不摆同一项：
+   账号名只在账号卡出现一次，统计行只放"随时间变化"的四件事。
+   改密码是这一页唯一的写操作，收进遮罩层（#pwdModal），不占常驻卡位。
+   卡片间距按规范「图表卡片之间 16px」显式补：Tabler 的 .card 不带 margin-bottom，
+   不补两张卡会直接贴住。 */
+.dp-account > * + * { margin-top: 16px; }
+.dp-account .card-body { padding: 20px; }
+/* 账号卡主体：48px 头像 + 右侧身份块。头像取账号首字母（离线部署没有头像资源） */
+.dp-ac-profile { display: flex; align-items: center; gap: 14px; margin-top: 4px; }
+.dp-ac-avatar {
+    flex: 0 0 48px; width: 48px; height: 48px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 700; text-transform: uppercase;
+    background: color-mix(in oklab, var(--tblr-primary) 12%, transparent);
+    color: var(--tblr-primary);
+}
+.dp-ac-id { min-width: 0; }
+.dp-ac-name {
+    font-size: 15px; font-weight: 600; color: var(--tblr-heading-color);
+    overflow-wrap: anywhere;
+}
+.dp-ac-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+/* 账号文件：事实项（运维要找它），但权重低于账号名 —— 12px 等宽灰字 + 可断行 */
+.dp-ac-file {
+    margin-top: 6px; font-size: 12px; color: var(--muted);
+    font-family: ui-monospace, Consolas, monospace; word-break: break-all;
+}
+/* 登录记录表比知识库两张表矮一档：它最多 20 行，撑满 420px 会留半屏空白 */
+.dp-ac-log-scroll { height: 320px; }
+.dp-ac-log-scroll .dp-doc-empty td > div { height: 274px; }
+/* 改密码弹层的代价条：黄底，与"错误红"区分开 —— 它是后果预告不是报错 */
+.dp-ac-warn {
+    padding: 10px 12px; margin-bottom: 14px; border-radius: 6px;
+    background: #fffbeb; border: 1px solid #fde68a; color: #b45309;
+    font-size: 12.5px; line-height: 1.7;
+}
+/* 统计卡缺一个琥珀色图标位：密码仍是初始值时与"警告"同色，其余四色已够用 */
+.dp-stat-icon-amber { background: color-mix(in oklab, #f59e0b 12%, transparent); color: #d97706; }
+/* 改密码弹层的按钮行：用 spacer 把「清空 / 保存」推到右侧，与页面上的 .card-foot 同一套分隔线 */
+#pwdModal .card-foot .spacer { flex: 1 1 auto; }
+
+/* ===== 登录页（console/login.html）=====
+   骨架走 Tabler 官方 sign-in：.page.page-center（纵向居中）+ .container-tight（窄栏）
+   + 表单本身就是 .card.card-md（按钮在 .form-footer 里 w-100 撑满）。
+   两处必须自己补，否则这套骨架在本地这份 Tabler 上不成立：
+   ① .page 的 min-height 是 100%（依赖 html/body 的高度链），登录页是独立入口、
+      没有 .layout 撑高，不压成 100vh 卡片会贴在视口顶部而不是居中；
+   ② .container-tight 自带 max-width:32rem（512px），三行表单撑到 512 会显空，收到 420px。
+      （另外这份 tabler 没有 .container 规则 —— 只有 .toast-container —— 挂上去是死类。） */
+.dp-login > .page { min-height: 100vh; }
+.dp-login .container-tight { max-width: 420px; }
+/* 品牌名：离线部署不引外部图，没有 logo 资源，用文字顶替 Tabler 示例里 navbar-brand 的位置 */
+.dp-login-brand { font-size: 24px; font-weight: 700; letter-spacing: -.2px; }
+/* 状态条：卡片之上的一行提示（仍在用初始密码 / 账号文件损坏）。
+   原来写在 login.html 的内联 <style> 里，随骨架改造一起收进共享样式 */
+.dp-login .banner {
+    font-size: 12.5px; line-height: 1.7;
+    padding: 10px 12px; border-radius: 6px; margin-bottom: 14px;
+}
+.dp-login .banner.warn { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.dp-login .banner.info { background: var(--primary-dim); color: var(--primary); border: 1px solid #bfdbfe; }
+
+/* ===== 全局加载指示（配套 console.js 的 progress / busy / loadingHtml）===== */
+/* 顶部进度条：挂在统一请求层，任何请求超过 120ms 未返回就浮现；
+   细条不占布局，indeterminate 来回扫，全部请求结束后淡出 */
+#dpProgress {
+    position: fixed; top: 0; left: 0; right: 0; height: 3px;
+    z-index: 3000; pointer-events: none; overflow: hidden;
+    background: rgba(66, 153, 225, .15);
+    opacity: 0; transition: opacity .25s ease;
+}
+#dpProgress.on { opacity: 1; }
+#dpProgress::after {
+    content: ''; position: absolute; top: 0; bottom: 0; width: 38%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(32,107,196,0), var(--primary, #206bc4) 45%, #63b3ed);
+    transform: translateX(-110%);
+}
+#dpProgress.on::after { animation: dp-progress-scan 1.1s ease-in-out infinite; }
+@keyframes dp-progress-scan {
+    from { transform: translateX(-110%); }
+    to { transform: translateX(290%); }
+}
+
+/* 软删宽限期说明条：黄底，与"删除"红、"已就绪"绿区分开——
+   它是"还没删完、可反悔"的中间态，用错颜色会被当成已删除或报错 */
+.dp-pending-box {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 10px 12px; margin-bottom: 12px;
+    border-radius: 6px; background: #fffbeb; border: 1px solid #fde68a;
+    color: #b45309; font-size: 12.5px; line-height: 1.7;
+}
+.dp-pending-box b { color: #92400e; font-weight: 600; }
+.dp-pending-box .spacer { flex: 1 1 auto; }
+
+/* 转圈圈：列表占位与按钮共用一个动画 */
+.dp-spin {
+    width: 14px; height: 14px; flex: none; display: inline-block;
+    border: 2px solid rgba(32, 107, 196, .25); border-top-color: var(--primary, #206bc4);
+    border-radius: 50%;
+    animation: dp-spin-rotate .7s linear infinite;
+}
+@keyframes dp-spin-rotate { to { transform: rotate(360deg); } }
+
+/* 列表区占位：首次加载塞进容器，数据到了随 innerHTML 一起被替换 */
+.dp-loading {
+    display: flex; gap: 8px; align-items: center; justify-content: center;
+    padding: 28px 12px; font-size: 13px; color: var(--muted);
+}
+.dp-loading-inline { padding: 4px 0; justify-content: flex-start; }
+
+/* 按钮级 loading：Console.busy / 手动加 .btn-loading 均可；
+   圈圈用 currentColor，primary / outline / danger 变体下都随按钮本色 */
+.btn-loading::before {
+    content: ''; width: .85em; height: .85em; flex: none;
+    display: inline-block; vertical-align: -.12em; margin-right: .4em;
+    border: 2px solid currentColor; border-right-color: transparent;
+    border-radius: 50%;
+    animation: dp-spin-rotate .7s linear infinite;
+}
+
+/* ==========================================================================
+   存储配置页：三段式面板（01 运行状态 / 02 连接 / 03 知识体）
+   容器统一，内部形态刻意做成三种：单张表单 / 表格 / 卡片矩阵。
+   形态不同才扫一眼就知道是三件事，堆一样的卡只会读成一张长列表。
+   ========================================================================== */
+
+.panel {
+    background: var(--card);
+    border: 1px solid var(--tblr-border-color-translucent);
+    border-radius: 10px;
+    box-shadow: var(--shadow-card);
+    margin-bottom: 18px;
+    overflow: hidden;
+}
+
+/* 面板头：编号 + 标题 + 说明 + 右侧动作 */
+.panel-head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--border);
+    background: var(--tblr-bg-surface-secondary, #f7f8fa);
+    flex-wrap: wrap;
+}
+.panel-no {
+    flex: 0 0 auto;
+    width: 26px; height: 26px; border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; color: #fff;
+    background: var(--slate, #64748b);
+}
+.panel-redis .panel-no { background: #ea580c; }
+.panel-conn .panel-no { background: #0d9488; }
+.panel-prof .panel-no { background: #6366f1; }
+
+.panel-title { min-width: 0; }
+.panel-title h3 { font-size: 15px; font-weight: 600; margin: 0; line-height: 1.35; }
+.panel-title p { font-size: 12px; color: var(--muted); margin: 2px 0 0; }
+
+.panel-flag {
+    font-size: 12px; color: var(--muted);
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 3px 10px; white-space: nowrap;
+}
+.panel-flag.flag-required { color: #b45309; border-color: #fcd9a4; background: #fffbeb; }
+
+.panel-body { padding: 16px 18px 18px; }
+
+/* 面板里的旧卡片壳（Redis）溶进面板，不留第二层投影 */
+.panel-body > .dp-card {
+    margin: 0; padding: 0; border: 0; box-shadow: none; background: transparent;
+}
+.panel-body > .model-card { border-left: 0; }
+.panel-body > .infra-redis { padding: 0; }
+
+/* ---------- 02 连接：三段各一张表（2-1 关键字 / 2-2 向量 / 2-3 原文） ----------
+   刻意不做"一张表加类型列"：三种连接的字段、地址形态、失败后果全不一样，
+   混在一张表里只能靠类型列区分，扫表时反而要多读一列才能判断自己该看哪行。 */
+.sub-seg {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding-bottom: 8px;
+}
+.sub-seg:not(:first-child) {
+    margin-top: 26px; padding-top: 18px;
+    border-top: 1px solid var(--border);
+}
+.sub-seg h4 {
+    display: inline-flex; align-items: baseline; gap: 8px;
+    margin: 0; font-size: 14px; font-weight: 600;
+}
+.sub-no {
+    font-size: 11px; font-weight: 700; letter-spacing: .02em;
+    padding: 2px 7px; border-radius: 6px; line-height: 1.5;
+}
+.sub-es .sub-no { background: rgba(13, 148, 136, .12); color: #0f766e; }
+.sub-vec .sub-no { background: rgba(99, 102, 241, .12); color: #4f46e5; }
+.sub-txt .sub-no { background: rgba(100, 116, 139, .14); color: #475569; }
+.sub-type { font-size: 12px; font-weight: 400; color: var(--muted); }
+.sub-seg .spacer { flex: 1 1 auto; }
+.sub-meta {
+    font-size: 12px; color: var(--muted);
+    font-family: var(--tblr-font-monospace), ui-monospace, monospace;
+    overflow-wrap: anywhere;
+}
+/* 分段色渗透到紧随其后的那张表头，三段并排时不用回头读编号也能分清 */
+.sub-es + .conn-table th { background: rgba(13, 148, 136, .07); color: #0f766e; }
+.sub-vec + .conn-table th { background: rgba(99, 102, 241, .07); color: #4f46e5; }
+.sub-txt + .conn-table th { background: rgba(100, 116, 139, .09); color: #475569; }
+
+/* ---------- 02 连接：表格 ----------
+   table-layout 必须是 fixed：地址列是长 mono 串，auto 布局会让它把别的列挤扁，
+   表头上写的百分比宽度直接失效，单元格和表头对不上。 */
+.conn-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.conn-table th {
+    text-align: left; font-size: 12px; font-weight: 600; color: var(--muted);
+    padding: 8px 10px; background: var(--tblr-bg-surface-secondary, #f7f8fa);
+    border-bottom: 1px solid var(--border);
+}
+.conn-table td {
+    padding: 11px 10px; font-size: 13px;
+    border-bottom: 1px solid var(--border); vertical-align: middle;
+}
+.conn-table tbody tr:last-child td { border-bottom: 0; }
+.conn-table .ta-r { text-align: right; }
+.conn-row:hover td { background: #fafbff; }
+
+.conn-name { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
+.conn-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; display: inline-block; }
+.dot-es { background: #0d9488; }
+.dot-vec { background: #6366f1; }
+.dot-blob { background: #94a3b8; }
+
+.conn-table td.mono {
+    font-family: var(--tblr-font-monospace), ui-monospace, monospace;
+    font-size: 12px; color: var(--muted); overflow-wrap: anywhere;
+}
+
+.refs { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.ref-chip {
+    font-size: 11px; padding: 1px 7px; border-radius: 10px;
+    background: var(--tblr-secondary-lt, #eef1f5); color: var(--muted);
+    font-family: var(--tblr-font-monospace), ui-monospace, monospace;
+}
+.refs .none { font-size: 12px; color: var(--muted); }
+.muted-sm { font-size: 12px; color: var(--muted); }
+
+/* 端口 / 协议这类一格两控的并排（弹窗里的 ES 表单用） */
+.inline-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* ---------- 03 知识体：卡片矩阵 ---------- */
+.profile { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
+.profile:last-child { margin-bottom: 0; }
+.profile-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    background: var(--tblr-bg-surface-secondary, #f7f8fa);
+    border-bottom: 1px solid var(--border);
+}
+.profile-head h4 { font-size: 14px; font-weight: 600; margin: 0; }
+.profile-head .spacer { flex: 1 1 auto; }
+.p-meta { font-size: 12px; color: var(--muted); }
+.p-dot { width: 8px; height: 8px; border-radius: 50%; background: #6366f1; flex: 0 0 8px; }
+
+.p-ns, .slot {
+    display: grid; grid-template-columns: 76px minmax(160px, 240px) 1fr;
+    align-items: center; gap: 14px; padding: 10px 14px;
+}
+.p-ns { border-bottom: 1px dashed var(--border); }
+.p-ns label, .slot-k { font-size: 13px; font-weight: 500; }
+.slot + .slot { border-top: 1px dashed var(--border); }
+.slot-v { width: 100%; }
+.slot-h, .p-ns-hint {
+    font-size: 12px; color: var(--muted);
+    font-family: var(--tblr-font-monospace), ui-monospace, monospace;
+    overflow-wrap: anywhere;
+}
+.slot.empty .slot-h { font-family: inherit; font-style: italic; }
+
+@media (max-width: 900px) {
+    .p-ns, .slot { grid-template-columns: 76px 1fr; }
+    .p-ns-hint, .slot-h { grid-column: 1 / -1; }
+    /* 窄屏先牺牲「被引用」列，操作列必须留（编辑入口） */
+    .conn-table th:nth-child(4), .conn-table td:nth-child(4) { display: none; }
+}
+
+/* 面板化的补偿：旧 .infra-redis 的整卡内边距套到面板上会多出一圈外框留白 */
+.panel.infra-redis { padding: 0; }
+.panel-head .spacer { flex: 1 1 auto; }
+/* Redis 段现在是面板，不再有 .model-card，头部横线要自己补 */
+.panel-body > .card-head {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 12px; padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+/* 表格里的文字按钮：不带边框不填充，只在悬停时给下划线 */
+.linkbtn {
+    background: none; border: 0; padding: 0; margin: 0;
+    font-family: inherit; font-size: 12px; line-height: 1.4;
+    color: var(--primary); cursor: pointer;
+}
+.linkbtn:hover { text-decoration: underline; }
+.linkbtn.danger { color: #dc2626; }
+.linkbtn.quiet { color: var(--muted); }
+/* 操作列只有 8%，两个按钮必须同排；换行会把下一行的取消按钮挤到行外 */
+.conn-table td.nowrap { white-space: nowrap; }
+.conn-table td.nowrap .linkbtn + .linkbtn { margin-left: 10px; }
+
+/* 命名空间输入与槽位下拉对齐：.form-control 不占满栅格列，这里显式拉满 */
+.p-ns input.form-control { width: 100%; }
+
+/* ==========================================================================
+   连接弹窗：新增 / 编辑共用
+   遮罩与面板复用 .modal-mask / .modal-panel（models 页同款），只加宽版与类型选项。
+   ========================================================================== */
+.modal-panel-wide { max-width: 720px; }
+/* 底部动作条右对齐「取消 / 保存」，左侧留测试与清空 —— .card-foot 本身没有 .spacer 规则 */
+.card-foot .spacer { flex: 1 1 auto; }
+
+/* 预设选择：2-1 新增的第一步。卡片 = 一种可用的关键字存储实现（当前只有 ES）；
+   选中才铺下面的配置表单。以后加第二种实现就是多一张卡，结构不动。 */
+.preset-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
+.preset-card {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+    padding: 10px 12px; text-align: left; font-family: inherit; font-size: 13px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); cursor: pointer;
+}
+.preset-card b { font-weight: 600; }
+.preset-card .pc-sub, .preset-card .pc-note { font-size: 11px; color: var(--muted); }
+.preset-card .pc-note.ok { color: var(--primary); font-weight: 500; }
+.preset-card.is-on {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, .12);
+    background: rgba(59, 130, 246, .03);
+}
+
+/* 弹窗里的空态/说明块（2-2 新增占位、2-3 内置说明） */
+.empty-box {
+    border: 1px dashed var(--border); border-radius: 8px;
+    padding: 18px 16px; margin-bottom: 14px;
+}
+.empty-box b { display: block; font-size: 13px; margin-bottom: 4px; }
+.empty-box p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.7; }
+
+/* 名称重复 / 未填这类内联错误：只染红字，不弹 toast（弹窗里已经有位置） */
+.field .help.err { color: #dc2626; }
+@media (max-width: 640px) { .preset-pick { grid-template-columns: 1fr; } }
+
+/* ===== 知识库 · 操作卡（上传 / 重建 / 重灌） =====
+   三张等宽并排：图标 + 标题的头、内容区、按钮沉底（margin-top:auto），
+   三张卡的动作按钮横向对齐，不会因为内容多少不同而参差。 */
+.dp-op-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+}
+@media (max-width: 1100px) { .dp-op-grid { grid-template-columns: 1fr; } }
+.dp-op-card > .card-body {
+    display: flex; flex-direction: column; gap: 12px; padding: 20px;
+}
+.dp-op-head { display: flex; align-items: center; gap: 10px; }
+.dp-op-head h3 { font-size: 15px; font-weight: 600; margin: 0; }
+.dp-op-head .spacer { flex: 1 1 auto; }
+.dp-op-icon {
+    width: 36px; height: 36px; border-radius: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: 0 0 auto;
+}
+.dp-op-icon svg { width: 20px; height: 20px; display: block; }
+.dp-op-icon-blue   { background: color-mix(in oklab, var(--tblr-primary) 10%, transparent); color: var(--tblr-primary); }
+.dp-op-icon-amber  { background: color-mix(in oklab, #f59e0b 12%, transparent); color: #d97706; }
+.dp-op-icon-purple { background: color-mix(in oklab, var(--tblr-purple) 10%, transparent); color: var(--tblr-purple); }
+.dp-op-icon-green  { background: color-mix(in oklab, var(--tblr-success) 10%, transparent); color: #059669; }
+.dp-op-body { display: flex; flex-direction: column; gap: 10px; }
+.dp-op-foot { margin-top: auto; display: flex; gap: 8px; }
+.dp-op-foot .btn + .btn { margin-left: 0; }
+.dp-op-opts {
+    display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center;
+    font-size: 12px; color: var(--muted);
+}
+.dp-op-check { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
+.dp-op-field { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
+.dp-op-field .form-select { width: auto; min-width: 12rem; }
+.dp-op-card .result { margin-top: 0; }
+.dp-op-card input[type="file"] { font-size: 12.5px; }
+
+/* ===== 知识库 · 已入库文档（固定高度无限滚动表） =====
+   高度恒定：空态 / 加载态 / 有数据都占同一块 420px 滚动区，卡片不再随数据量跳尺寸；
+   表头 sticky 吸顶，数据行悬停高亮。 */
+.dp-doc-scroll {
+    height: 420px; overflow-y: auto; overflow-x: auto;
+    border: 1px solid var(--tblr-border-color-translucent); border-radius: 8px;
+    background: #fff;
+}
+.dp-doc-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.dp-doc-scroll::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+.dp-doc-scroll::-webkit-scrollbar-track { background: transparent; }
+.dp-doc-table { margin: 0; border-bottom: 0; }
+.dp-doc-table thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: #fafafa; color: #666; font-weight: 600; font-size: 13px;
+    padding: 11px 14px; border-bottom: 1px solid #f0f0f0;
+    box-shadow: 0 1px 0 #f0f0f0;
+}
+.dp-doc-table tbody td { padding: 11px 14px; font-size: 13px; color: #333; }
+.dp-doc-table tbody tr { border-bottom: 1px solid #f5f5f5; }
+.dp-doc-table tbody tr:hover { background: #fafbff; }
+.dp-doc-table td.ta-r { text-align: right; }
+.dp-doc-table .dp-doc-empty td { border-bottom: 0; box-shadow: none; }
+/* 空态/加载/错误块撑满滚动区剩余高度（420 − 吸顶表头），垂直居中；
+   表格底缘因此贴住容器底缘，不会在半空露出一条表格结束的边 */
+.dp-doc-empty td > div {
+    height: 374px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+    padding: 0 16px; font-size: 13px; color: var(--muted);
+}
+.dp-doc-empty .dp-doc-empty-icon { margin-bottom: 10px; opacity: .45; }
+.dp-doc-empty .dp-doc-empty-icon svg { width: 34px; height: 34px; }
+
+/* ===== 知识库 · 知识体视图 / 上传落点 / 文档筛选 ===== */
+
+/* 体的图标色：与操作卡同一套（teal 只给"知识体"这一块，避免和上传/重建撞色） */
+.dp-op-icon-teal { background: color-mix(in oklab, #0d9488 10%, transparent); color: #0d9488; }
+
+/* 体表比文档表矮一档：它一屏最多几行，撑 420px 只会留下大片空白 */
+.dp-body-scroll { height: 320px; }
+.dp-body-scroll .dp-doc-empty td > div { height: 274px; }
+.dp-body-table tbody td { vertical-align: middle; }
+/* 域路径 pill 在 11% 的窄列里会断成两行（"default（全域）"），统一不换行 */
+.dp-doc-table .pill { white-space: nowrap; }
+.dp-body-table .dp-body-domain {
+    display: block; font-size: 11.5px; color: var(--muted);
+    max-width: 15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 通用小 chip：落点、召回模式、状态共用一套规格，颜色只表达"好 / 待看 / 坏" */
+.dp-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 8px; border-radius: 999px;
+    font-size: 11.5px; line-height: 18px; white-space: nowrap;
+    background: #f3f4f6; color: #4b5563;
+}
+.dp-chip.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.dp-chip.ok { background: var(--tblr-success-lt); color: #047857; }
+.dp-chip.warn { background: var(--tblr-warning-lt); color: #b45309; }
+.dp-chip.err { background: var(--tblr-danger-lt, #fef2f2); color: #b91c1c; }
+.dp-chip.mute { background: #f3f4f6; color: #9ca3af; }
+.dp-chip + .dp-chip { margin-left: 4px; }
+
+/* 上传落点行：一行说清"这次写哪几台"，不可写时给原因 + 跳转 */
+.dp-target {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    min-height: 22px; font-size: 12px; color: var(--muted);
+}
+.dp-target .dp-target-link {
+    color: var(--tblr-primary); text-decoration: none; font-size: 12px;
+}
+.dp-target .dp-target-link:hover { text-decoration: underline; }
+
+/* 文档表筛选行：三个下拉 + 清除，压低高度不抢表头的视觉重量 */
+.dp-filters {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+    margin: 12px 0 10px;
+}
+.dp-filter {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--muted); white-space: nowrap;
+}
+.dp-filter .form-select {
+    width: auto; min-width: 9rem; height: 30px; padding: 2px 28px 2px 10px;
+    font-size: 12.5px; border-radius: 6px;
+}
+.dp-filter-clear { margin-left: auto; }
+

@@ -1,0 +1,80 @@
+# 依赖安全扫描 + SBOM
+#
+# 为什么必须跑：LangChain4j 出过 CVE，而我们引的依赖里有一半是 AI 生态的新库，
+# 版本迭代快、公告散。没有扫描的话，"我引的那个版本有没有洞"这个问题根本没有答案。
+#
+# 两条刻意的设计：
+#   1. 扫描插件写在 root pom 的 `security` profile 里（默认不激活）——
+#      本地 `mvn -o` 离线构建不受影响，只有这里显式 -Psecurity 才解析。
+#   2. NVD API Key 走 secret，缺省也能跑（只是慢，走 NVD 限速）。
+#      没有 key 时不跳过扫描：慢一天也比不扫强。
+name: Security
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  schedule:
+    # 每周一 03:17 UTC：CVE 库是活的，依赖树不动也要重扫
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  dependency-check:
+    name: OWASP 依赖漏洞扫描
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # failOnError=false：扫描本身失败（NVD 抽风、网络抖动）不该把 CI 判红，
+      # 报告照传，结论由人看。要卡漏洞级别的是下面的 failBuildOnCVSS。
+      - name: 运行 dependency-check
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: >
+          mvn -B -ntp -Psecurity
+          org.owasp:dependency-check-maven:check
+          -DfailOnError=false
+          -DfailBuildOnCVSS=9
+          -DnvdApiKey="${NVD_API_KEY}"
+          -DnvdApiDelay=2000
+          -DsuppressionFiles=owasp-suppressions.xml
+
+      - name: 归档漏洞报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: "**/target/dependency-check-report.*"
+          retention-days: 30
+          if-no-files-found: ignore
+
+  sbom:
+    name: CycloneDX SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: 生成 SBOM
+        run: mvn -B -ntp -Psecurity org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom
+
+      - name: 归档 SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: target/bom.*
+          retention-days: 90
+          if-no-files-found: error

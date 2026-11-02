@@ -1,5 +1,6 @@
 package com.zzkingcc.domainplane.runtime.conversation;
 
+import com.zzkingcc.domainplane.api.conversation.ContextAssemblyReport;
 import com.zzkingcc.domainplane.api.conversation.HistoryCard;
 import com.zzkingcc.domainplane.api.conversation.TurnRecord;
 import com.zzkingcc.domainplane.api.conversation.TurnFlags;
@@ -96,46 +97,129 @@ public final class ContextAssembler {
                                       String summary,
                                       List<HistoryCard> cards,
                                       UserMessage current) {
+        return assembleWithReport(null, 0L, system, window, summary, cards, current).messages();
+    }
+
+    /**
+     * 装配 + 出清单（F04-a）。
+     *
+     * <p>与 {@link #assemble} 同一套取舍，只是把"每段给了多少、砍了多少"逐段落账。
+     * 清单是派生账本，不进请求体、不影响装配结果：本方法对
+     * {@code assemble} 而言是纯增量，两条路径的 {@code messages} 必须逐条一致
+     * （测试 {@code ContextAssemblyReportTest} 盯着这条）。</p>
+     *
+     * @param sessionKey 会话键（写清单用；{@code null} 表示本轮不落账）
+     * @param turnId     本轮轮号（开轮失败时为 0）
+     */
+    public Assembled assembleWithReport(String sessionKey,
+                                        long turnId,
+                                        SystemMessage system,
+                                        List<ChatMessage> window,
+                                        String summary,
+                                        List<HistoryCard> cards,
+                                        UserMessage current) {
         List<ChatMessage> out = new ArrayList<>();
+        int systemTokens = 0;
         if (system != null && system.text() != null && !system.text().isBlank()) {
             out.add(system);
+            systemTokens = tokensOf(system);
         }
 
         // 顺序即优先级：先放最可能被砍的两段，再放窗口与提问。
         // 预算分配是"各自管各自的上限"，不是三者抢一个池子，这样任一段超限都只波及自己，
         // 不会把窗口挤到只剩两条（那才是真的把历史扔了）。
-        int remaining = totalBudget - tokensOf(current);
+        int currentTokens = tokensOf(current);
+        int remaining = totalBudget - currentTokens;
         if (remaining <= 0) {
             // 单条提问就顶满预算：只留系统提示与提问，其余全部让位
             out.add(current);
-            return out;
+            return new Assembled(out, new ContextAssemblyReport(sessionKey, turnId, Instant.now(),
+                    totalBudget, systemTokens, 0, 0, lineCount(summary), 0, 0,
+                    turnIdsFrom(cards, 0), 0, 0, countOf(window), currentTokens,
+                    tokensOf(out), true));
         }
 
+        int summaryTokens = 0;
+        int summaryLines = 0;
+        int summaryDropped = 0;
         if (summary != null && !summary.isBlank()) {
             int budget = Math.min(summaryBudget, remaining);
             String clipped = clipLines(summary, budget);
+            /* 截掉的行数在"整段被截光"时也要记：那时账本上写"本轮没有摘要段"是错的，
+               真相是"有摘要，但预算把它全砍了"——排障时这两者是两回事，
+               前者要去查摘要为什么没生成，后者要去查预算为什么这么小。 */
+            summaryDropped = Math.max(0, lineCount(summary) - lineCount(clipped));
             if (!clipped.isBlank()) {
                 out.add(UserMessage.from(TurnView.renderSummary(clipped)));
-                remaining -= tokensOf(out.get(out.size() - 1));
+                int spent = tokensOf(out.get(out.size() - 1));
+                remaining -= spent;
+                summaryTokens = spent;
+                summaryLines = lineCount(clipped);
             }
         }
 
-        if (cards != null && !cards.isEmpty() && remaining > 0) {
-            int budget = Math.min(remaining, maxCards * CARD_ESTIMATE_TOKENS);
-            List<HistoryCard> kept = takeCards(cards, budget);
+        int cardTokens = 0;
+        int cardCount = 0;
+        List<Long> droppedCardTurnIds = new ArrayList<>();
+        if (cards != null && !cards.isEmpty()) {
+            // 卡片段整体让位（预算被前面吃光）同样要记账：那是"召回被挤掉"最彻底的一种
+            List<HistoryCard> kept = remaining > 0
+                    ? takeCards(cards, Math.min(remaining, maxCards * CARD_ESTIMATE_TOKENS))
+                    : List.of();
             if (!kept.isEmpty()) {
                 out.add(UserMessage.from(TurnView.renderCards(kept)));
-                remaining -= tokensOf(out.get(out.size() - 1));
+                int spent = tokensOf(out.get(out.size() - 1));
+                remaining -= spent;
+                cardTokens = spent;
+                cardCount = kept.size();
             }
+            droppedCardTurnIds.addAll(turnIdsFrom(cards, kept.size()));
         }
 
+        int windowMessages = 0;
+        int windowTokens = 0;
+        int windowDropped = 0;
         if (window != null && !window.isEmpty()) {
             int budget = Math.min(windowBudget, Math.max(remaining, MIN_WINDOW_TOKENS));
             List<ChatMessage> kept = takeWindow(window, budget);
             out.addAll(kept);
+            windowMessages = kept.size();
+            windowTokens = tokensOf(kept);
+            windowDropped = window.size() - kept.size();
         }
 
         out.add(current);
+        boolean degraded = summaryDropped > 0 || !droppedCardTurnIds.isEmpty() || windowDropped > 0;
+        return new Assembled(out, new ContextAssemblyReport(sessionKey, turnId, Instant.now(),
+                totalBudget, systemTokens, summaryTokens, summaryLines, summaryDropped,
+                cardCount, cardTokens, droppedCardTurnIds, windowMessages, windowTokens,
+                windowDropped, currentTokens, tokensOf(out), degraded));
+    }
+
+    /** 装配结果：消息序列 + 本轮装配清单 */
+    public record Assembled(List<ChatMessage> messages, ContextAssemblyReport report) {
+    }
+
+    private static int lineCount(String text) {
+        return text == null || text.isBlank() ? 0 : text.split("\n").length;
+    }
+
+    private static int countOf(List<?> list) {
+        return list == null ? 0 : list.size();
+    }
+
+    /** 卡片里从 {@code from} 起的那些轮号（被预算砍掉的部分） */
+    private static List<Long> turnIdsFrom(List<HistoryCard> cards, int from) {
+        if (cards == null || from >= cards.size()) {
+            return List.of();
+        }
+        List<Long> out = new ArrayList<>();
+        for (int i = Math.max(0, from); i < cards.size(); i++) {
+            HistoryCard c = cards.get(i);
+            if (c != null) {
+                out.add(c.turnId());
+            }
+        }
         return out;
     }
 

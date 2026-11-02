@@ -1,11 +1,40 @@
 (() => {
-  // domainplane-server/frontend/src/pages/mcp.js
+  var __async = (__this, __arguments, generator) => {
+    return new Promise((resolve, reject) => {
+      var fulfilled = (value) => {
+        try {
+          step(generator.next(value));
+        } catch (e) {
+          reject(e);
+        }
+      };
+      var rejected = (value) => {
+        try {
+          step(generator.throw(value));
+        } catch (e) {
+          reject(e);
+        }
+      };
+      var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
+      step((generator = generator.apply(__this, __arguments)).next());
+    });
+  };
+
+  // src/pages/mcp.js
   (function() {
     var esc = Console.escapeHtml;
     var CONNS = [];
     var BINDINGS = { domainBindings: {}, connectionBindings: {} };
     var DOMAINS = [];
     var EP = { STREAMABLE_HTTP: "Streamable HTTP", LEGACY_SSE: "Legacy SSE" };
+    var MCP_ICON = '<svg class="mcp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>';
+    function setValue(id, v, tone) {
+      var el = document.getElementById(id);
+      if (el) {
+        el.textContent = v;
+        el.className = "dp-stat-value" + (tone ? " " + tone : "");
+      }
+    }
     function statusTag(c) {
       if (!c.enabled) {
         return '<span class="tag off">\u5DF2\u7981\u7528</span>';
@@ -32,9 +61,25 @@
       }
       return '<span class="tag ' + cls + '">' + esc(se) + "</span>";
     }
+    function renderStats() {
+      var ready = 0, needsAuth = 0, failed = 0;
+      CONNS.forEach(function(c) {
+        if (c.enabled && c.ready) {
+          ready++;
+        } else if (c.enabled && c.needsAuth) {
+          needsAuth++;
+        } else if (c.enabled && c.status === "FAILED") {
+          failed++;
+        }
+      });
+      setValue("statConns", String(CONNS.length));
+      setValue("statReady", String(ready));
+      setValue("statNeedsAuth", String(needsAuth), needsAuth ? "warn" : "");
+      setValue("statFailed", String(failed), failed ? "err" : "");
+    }
     function render() {
       var box = document.getElementById("connList");
-      document.getElementById("connCount").textContent = CONNS.length + " \u4E2A\u8FDE\u63A5";
+      renderStats();
       if (!CONNS.length) {
         box.innerHTML = '<div class="dp-card"><span class="perm-none">\u8FD8\u6CA1\u6709\u4EFB\u4F55 MCP \u8FDE\u63A5\u3002\u70B9\u300C\u65B0\u589E\u8FDE\u63A5\u300D\u63A5\u5165\u4E00\u4E2A\u5916\u90E8 MCP server\u3002</span></div>';
         return;
@@ -44,16 +89,17 @@
         var boundTags = bound.length ? bound.map(function(d) {
           return '<span class="tag public mono">' + esc(d) + "</span>";
         }).join(" ") : '<span class="perm-none">\u672A\u7ED1\u5B9A\u4EFB\u4F55\u57DF\uFF08\u5DE5\u5177\u5BF9\u8C01\u90FD\u4E0D\u53EF\u89C1\uFF09</span>';
-        return '<section class="dp-card model-card"><header class="card-head"><svg class="mcp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg><h2 class="mono">' + esc(c.name) + "</h2>" + statusTag(c) + '<span class="spacer"></span><span class="card-note">\u5DE5\u5177 ' + (c.ready ? c.toolCount : 0) + " \xB7 \u7B56\u7565 " + esc(c.approvalPolicy) + "</span>" + (c.enabled ? '<button class="ghost btn btn-sm btn-outline-primary" data-toggle="' + esc(c.name) + '" data-to="false">\u505C\u7528</button>' : '<button class="ghost btn btn-sm btn-outline-primary" data-toggle="' + esc(c.name) + '" data-to="true">\u542F\u7528</button>') + '<button class="ghost btn btn-sm btn-outline-primary" data-test="' + esc(c.name) + '">\u6D4B\u8BD5</button><button class="ghost btn btn-sm btn-outline-primary" data-tools="' + esc(c.name) + '">\u5DE5\u5177</button>' + (c.needsAuth ? '<button class="ghost btn btn-sm btn-outline-primary" data-oauth="' + esc(c.name) + '">\u6388\u6743</button>' : "") + '<button class="ghost btn btn-sm btn-outline-primary" data-bind="' + esc(c.name) + '">\u7ED1\u5B9A\u57DF</button><button class="ghost btn btn-sm btn-outline-primary" data-edit="' + esc(c.name) + '">\u7F16\u8F91</button><button class="ghost btn btn-sm btn-outline-primary" data-del="' + esc(c.name) + '">\u5220\u9664</button></header><div class="kv"><span class="k">\u5730\u5740</span><span class="v">' + esc(c.url) + '</span><span class="k">\u4F20\u8F93</span><span class="v">' + esc(EP[c.transport] || c.transport) + "</span>" + (c.hasHeaders ? '<span class="k">\u9274\u6743</span><span class="v">\u5DF2\u914D\u7F6E\uFF08\u660E\u6587\u4E0D\u56DE\u663E\uFF09</span>' : "") + (c.oauthClientId ? '<span class="k">OAuth</span><span class="v">client_id ' + esc(c.oauthClientId) + (c.hasOauthClientSecret ? " + secret" : "") + "\uFF08\u624B\u5DE5\u767B\u8BB0\uFF09</span>" : "") + (c.lastError ? '<span class="k">\u9519\u8BEF</span><span class="v" style="color:var(--red);">' + esc(c.lastError) + "</span>" : "") + '</div><div style="margin-top:8px;"><span class="k" style="color:var(--muted);font-size:12px;">\u7ED1\u5B9A\u57DF\uFF1A</span> ' + boundTags + "</div></section>";
+        var actions = (c.enabled ? '<button class="btn btn-sm btn-outline-secondary" data-toggle="' + esc(c.name) + '" data-to="false">\u505C\u7528</button>' : '<button class="btn btn-sm btn-outline-primary" data-toggle="' + esc(c.name) + '" data-to="true">\u542F\u7528</button>') + '<button class="btn btn-sm btn-outline-secondary" data-test="' + esc(c.name) + '">\u6D4B\u8BD5</button><button class="btn btn-sm btn-outline-secondary" data-tools="' + esc(c.name) + '">\u5DE5\u5177</button>' + (c.needsAuth ? '<button class="btn btn-sm btn-outline-secondary" data-oauth="' + esc(c.name) + '">\u6388\u6743</button>' : "") + '<button class="btn btn-sm btn-outline-secondary" data-bind="' + esc(c.name) + '">\u7ED1\u5B9A\u57DF</button><button class="btn btn-sm btn-outline-secondary" data-edit="' + esc(c.name) + '">\u7F16\u8F91</button><button class="btn btn-sm btn-outline-danger" data-del="' + esc(c.name) + '">\u5220\u9664</button>';
+        return '<section class="dp-card model-card"><header class="card-head">' + MCP_ICON + '<h2 class="mono">' + esc(c.name) + "</h2>" + statusTag(c) + '<span class="spacer"></span><span class="card-note">\u5DE5\u5177 ' + (c.ready ? c.toolCount : 0) + " \xB7 \u7B56\u7565 " + esc(c.approvalPolicy) + '</span></header><div class="kv"><span class="k">\u5730\u5740</span><span class="v">' + esc(c.url) + '</span><span class="k">\u4F20\u8F93</span><span class="v">' + esc(EP[c.transport] || c.transport) + "</span>" + (c.hasHeaders ? '<span class="k">\u9274\u6743</span><span class="v">\u5DF2\u914D\u7F6E\uFF08\u660E\u6587\u4E0D\u56DE\u663E\uFF09</span>' : "") + (c.oauthClientId ? '<span class="k">OAuth</span><span class="v">client_id ' + esc(c.oauthClientId) + (c.hasOauthClientSecret ? " + secret" : "") + "\uFF08\u624B\u5DE5\u767B\u8BB0\uFF09</span>" : '<span class="k">OAuth</span><span class="v">\u672A\u767B\u8BB0\uFF08\u9700\u8981\u65F6\u8D70\u52A8\u6001\u6CE8\u518C\uFF09</span>') + (c.callTimeoutMs ? '<span class="k">\u8D85\u65F6</span><span class="v">' + esc(c.callTimeoutMs) + " ms</span>" : "") + ((c.toolAllowlist || []).length ? '<span class="k">\u767D\u540D\u5355</span><span class="v">' + esc(c.toolAllowlist.join(", ")) + "</span>" : "") + (c.remark ? '<span class="k">\u5907\u6CE8</span><span class="v">' + esc(c.remark) + "</span>" : "") + '</div><div class="mcp-bound"><span class="k">\u7ED1\u5B9A\u57DF</span>' + boundTags + '</div><div class="mcp-actions">' + actions + "</div></section>";
       }).join("");
       box.querySelectorAll("button[data-toggle]").forEach(function(b) {
         b.addEventListener("click", function() {
-          toggle(b.getAttribute("data-toggle"), b.getAttribute("data-to") === "true");
+          toggle(b.getAttribute("data-toggle"), b.getAttribute("data-to") === "true", b);
         });
       });
       box.querySelectorAll("button[data-test]").forEach(function(b) {
         b.addEventListener("click", function() {
-          testConn(b.getAttribute("data-test"));
+          testConn(b.getAttribute("data-test"), b);
         });
       });
       box.querySelectorAll("button[data-oauth]").forEach(function(b) {
@@ -95,7 +141,7 @@
       });
     }
     function load() {
-      document.getElementById("connList").innerHTML = '<div class="dp-card"><span class="perm-none">\u52A0\u8F7D\u4E2D\u2026</span></div>';
+      document.getElementById("connList").innerHTML = Console.loadingHtml("\u6B63\u5728\u52A0\u8F7D MCP \u8FDE\u63A5\u2026");
       Console.api.get("/admin/mcp-connections").then(function(r) {
         CONNS = r && r.connections || [];
         return loadBindings();
@@ -103,9 +149,7 @@
         document.getElementById("connList").innerHTML = '<div class="dp-card" style="color:var(--red);">\u8BFB\u53D6\u5931\u8D25\uFF1A' + esc(e.message) + "</div>";
       });
     }
-    var EDIT_NAME = "";
     function openCreate() {
-      EDIT_NAME = "";
       document.getElementById("editTitle").textContent = "\u65B0\u589E MCP \u8FDE\u63A5";
       document.getElementById("f_name").value = "";
       document.getElementById("f_name").disabled = false;
@@ -132,7 +176,6 @@
       if (!c) {
         return;
       }
-      EDIT_NAME = name;
       document.getElementById("editTitle").textContent = "\u7F16\u8F91 MCP \u8FDE\u63A5";
       document.getElementById("f_name").value = c.name;
       document.getElementById("f_name").disabled = true;
@@ -165,7 +208,7 @@
         try {
           headers = JSON.parse(headersRaw);
         } catch (e) {
-          alert("\u81EA\u5B9A\u4E49\u8BF7\u6C42\u5934\u4E0D\u662F\u5408\u6CD5 JSON\uFF1A" + e.message);
+          Console.toast("\u81EA\u5B9A\u4E49\u8BF7\u6C42\u5934\u4E0D\u662F\u5408\u6CD5 JSON\uFF1A" + e.message, { type: "error" });
           return;
         }
       }
@@ -188,40 +231,59 @@
         oauthScope: document.getElementById("f_oauth_scope").value.trim(),
         oauthRedirectUri: document.getElementById("f_oauth_redirect").value.trim()
       };
-      Console.api.post("/admin/mcp-connections", body).then(function(r) {
-        alert(r && r.message ? r.message : "\u5DF2\u4FDD\u5B58");
+      return Console.api.post("/admin/mcp-connections", body).then(function(r) {
+        Console.toast(r && r.message ? r.message : "\u5DF2\u4FDD\u5B58", { type: "success" });
         closeEdit();
         load();
       }).catch(function(e) {
-        alert("\u4FDD\u5B58\u5931\u8D25\uFF1A" + e.message);
+        Console.toast("\u4FDD\u5B58\u5931\u8D25\uFF1A" + e.message, { type: "error" });
       });
     }
-    function toggle(name, enabled) {
-      Console.api.post("/admin/mcp-connections/" + encodeURIComponent(name) + "/toggle", null).then(function() {
-        load();
-      }).catch(function(e) {
-        alert("\u64CD\u4F5C\u5931\u8D25\uFF1A" + e.message);
-      });
+    function toggle(name, enabled, btn) {
+      Console.busy(btn, function() {
+        return Console.api.post("/admin/mcp-connections/" + encodeURIComponent(name) + "/toggle", { enabled }).then(function() {
+          load();
+        }).catch(function(e) {
+          Console.toast("\u64CD\u4F5C\u5931\u8D25\uFF1A" + e.message, { type: "error" });
+        });
+      }, enabled ? "\u542F\u7528\u4E2D\u2026" : "\u505C\u7528\u4E2D\u2026");
     }
     function delConn(name) {
-      if (!confirm("\u786E\u8BA4\u5220\u9664 MCP \u8FDE\u63A5 " + name + "\uFF1F\n\n\u5176\u5DE5\u5177\u4F1A\u88AB\u6458\u9664\u3001\u7ED1\u5B9A\u4F1A\u89E3\u7ED1\uFF08\u4E0D\u5220\u57DF\uFF09\u3002")) {
-        return;
-      }
-      Console.api.del("/admin/mcp-connections?name=" + encodeURIComponent(name)).then(function() {
-        load();
-      }).catch(function(e) {
-        alert("\u5220\u9664\u5931\u8D25\uFF1A" + e.message);
+      return __async(this, null, function* () {
+        var ok = yield Console.confirm(
+          "\u786E\u8BA4\u5220\u9664 MCP \u8FDE\u63A5 " + name + "\uFF1F\n\n\u5176\u5DE5\u5177\u4F1A\u88AB\u6458\u9664\u3001\u7ED1\u5B9A\u4F1A\u89E3\u7ED1\uFF08\u4E0D\u5220\u57DF\uFF09\u3002",
+          { title: "\u5220\u9664 MCP \u8FDE\u63A5", okText: "\u5220\u9664", danger: true }
+        );
+        if (!ok) {
+          return;
+        }
+        Console.api.del("/admin/mcp-connections?name=" + encodeURIComponent(name)).then(function() {
+          load();
+        }).catch(function(e) {
+          Console.toast("\u5220\u9664\u5931\u8D25\uFF1A" + e.message, { type: "error" });
+        });
       });
     }
-    function testConn(name) {
-      if (!confirm("\u5BF9 " + name + " \u53D1\u8D77\u8FDE\u901A\u6027\u6D4B\u8BD5\uFF08initialize + tools/list\uFF09\uFF1F")) {
-        return;
-      }
-      Console.api.post("/admin/mcp-connections/" + encodeURIComponent(name) + "/test", null).then(function(r) {
-        alert((r && r.message) + (r && r.tools ? "\n\u5DE5\u5177\uFF1A" + r.tools.join(", ") : ""));
-        load();
-      }).catch(function(e) {
-        alert("\u6D4B\u8BD5\u5931\u8D25\uFF1A" + e.message);
+    function testConn(name, btn) {
+      return __async(this, null, function* () {
+        var ok = yield Console.confirm(
+          "\u5BF9 " + name + " \u53D1\u8D77\u8FDE\u901A\u6027\u6D4B\u8BD5\uFF08initialize + tools/list\uFF09\uFF1F",
+          { title: "\u8FDE\u901A\u6027\u6D4B\u8BD5", okText: "\u5F00\u59CB\u6D4B\u8BD5", danger: false }
+        );
+        if (!ok) {
+          return;
+        }
+        Console.busy(btn, function() {
+          return Console.api.post("/admin/mcp-connections/" + encodeURIComponent(name) + "/test", null).then(function(r) {
+            Console.toast(
+              (r && r.message) + (r && r.tools ? "\n\u5DE5\u5177\uFF1A" + r.tools.join(", ") : ""),
+              { type: "success", wide: true }
+            );
+            load();
+          }).catch(function(e) {
+            Console.toast("\u6D4B\u8BD5\u5931\u8D25\uFF1A" + e.message, { type: "error", wide: true });
+          });
+        }, "\u6D4B\u8BD5\u4E2D\u2026");
       });
     }
     function startOAuth(name) {
@@ -232,12 +294,12 @@
         }
         throw new Error("\u6388\u6743\u7AEF\u70B9\u672A\u8FD4\u56DE\u6388\u6743\u94FE\u63A5");
       }).catch(function(e) {
-        alert("\u53D1\u8D77\u6388\u6743\u5931\u8D25\uFF1A" + e.message);
+        Console.toast("\u53D1\u8D77\u6388\u6743\u5931\u8D25\uFF1A" + e.message, { type: "error" });
       });
     }
     function showTools(name) {
       document.getElementById("toolsConnName").textContent = name;
-      document.getElementById("toolsBody").innerHTML = "\u52A0\u8F7D\u4E2D\u2026";
+      document.getElementById("toolsBody").innerHTML = Console.loadingHtml("\u6B63\u5728\u8BFB\u53D6\u5DE5\u5177\u76EE\u5F55\u2026");
       document.getElementById("toolsModal").hidden = false;
       document.body.style.overflow = "hidden";
       Console.api.get("/admin/mcp-connections/" + encodeURIComponent(name) + "/tools").then(function(r) {
@@ -318,9 +380,9 @@
           return r && r.__error;
         })[0];
         if (err) {
-          alert("\u90E8\u5206\u7ED1\u5B9A\u4FDD\u5B58\u5931\u8D25\uFF1A" + err.__error);
+          Console.toast("\u90E8\u5206\u7ED1\u5B9A\u4FDD\u5B58\u5931\u8D25\uFF1A" + err.__error, { type: "error" });
         } else {
-          alert("\u7ED1\u5B9A\u5DF2\u4FDD\u5B58");
+          Console.toast("\u7ED1\u5B9A\u5DF2\u4FDD\u5B58", { type: "success" });
         }
         closeBind();
         load();
@@ -329,7 +391,9 @@
     document.getElementById("createBtn").addEventListener("click", openCreate);
     document.getElementById("refreshBtn").addEventListener("click", load);
     document.getElementById("editClose").addEventListener("click", closeEdit);
-    document.getElementById("editSaveBtn").addEventListener("click", saveEdit);
+    document.getElementById("editSaveBtn").addEventListener("click", function() {
+      Console.busy(this, saveEdit, "\u4FDD\u5B58\u4E2D\u2026");
+    });
     document.getElementById("editClearBtn").addEventListener("click", openCreate);
     document.getElementById("bindClose").addEventListener("click", closeBind);
     document.getElementById("bindSaveBtn").addEventListener("click", saveBind);
@@ -356,9 +420,9 @@
       var q = new URLSearchParams(location.search);
       var auth = q.get("auth");
       if (auth === "ok") {
-        alert("\u6388\u6743\u6210\u529F\uFF1A\u8FDE\u63A5 " + (q.get("name") || "") + " \u5DF2\u5C31\u7EEA\uFF0C\u5DE5\u5177\u5BF9\u7ED1\u5B9A\u57DF\u53EF\u89C1");
+        Console.toast("\u6388\u6743\u6210\u529F\uFF1A\u8FDE\u63A5 " + (q.get("name") || "") + " \u5DF2\u5C31\u7EEA\uFF0C\u5DE5\u5177\u5BF9\u7ED1\u5B9A\u57DF\u53EF\u89C1", { type: "success" });
       } else if (auth === "fail") {
-        alert("\u6388\u6743\u5931\u8D25\uFF1A" + (q.get("reason") || "\u672A\u77E5\u539F\u56E0"));
+        Console.toast("\u6388\u6743\u5931\u8D25\uFF1A" + (q.get("reason") || "\u672A\u77E5\u539F\u56E0"), { type: "error" });
       }
       if (auth) {
         history.replaceState(null, "", location.pathname);

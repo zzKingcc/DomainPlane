@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>会话档案 · DomainPlane 管控台</title>
+    <link rel="stylesheet" href="assets/console.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <main class="main">
+        <div class="page-header">
+            <div class="page-head">
+                <h2>会话档案</h2>
+            </div>
+        </div>
+        <div class="page-body dp-sessions">
+
+            <!-- 体量：哪个会话长到该注意了。记忆条数 / 归档轮数 / 向量轮数 / 清单条数 -->
+            <div class="card dp-panel">
+                <div class="card-body">
+                    <h3 class="card-title">会话体量（按归档轮数降序）</h3>
+                    <div class="table-wrap">
+                        <table class="table">
+                            <thead>
+                            <tr>
+                                <th>会话</th>
+                                <th>域</th>
+                                <th>记忆条数</th>
+                                <th>归档轮数</th>
+                                <th>向量轮数</th>
+                                <th>装配清单</th>
+                                <th>操作</th>
+                            </tr>
+                            </thead>
+                            <tbody id="sessionList"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 装配清单：每段给了多少、砍了多少 ——「它为什么忘了」的唯一入口 -->
+            <div class="card dp-panel" id="assemblyBox">
+                <div class="card-body"></div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script src="assets/console.js"></script>
+<script src="assets/page-sessions.js"></script>
+</body>
+</html>

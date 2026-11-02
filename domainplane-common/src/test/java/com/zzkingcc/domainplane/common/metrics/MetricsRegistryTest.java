@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 指标契约：{@code snapshot()} 的键名是对外承诺（{@code docs/接口文档.md} 的 {@code /admin/metrics}），
+ * 指标契约：{@code snapshot()} 的键名是对外承诺（{@code docs/设计文档.md} F02 §2.7 的指标表 / {@code GET /admin/metrics}），
  * 改名等于破坏接入方已经接好的看板。
  *
  * <p>断言一律用<b>增量</b>而不是绝对值：计数器是进程内静态状态，多个测试共享同一个 JVM。</p>

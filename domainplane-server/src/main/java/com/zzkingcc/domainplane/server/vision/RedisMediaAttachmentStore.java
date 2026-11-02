@@ -6,17 +6,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
 /**
- * 媒体暂存区的 Redis 实现 —— 主模型用不到的那些字节，在这里等 {@code seeImage} 或归档来取。
+ * 媒体暂存区的 Redis 实现（存量兼容路径）—— 主模型用不到的那些字节，在这里等 {@code seeImage} 或归档来取。
+ *
+ * <p><b>新写入已不走这里</b>：{@link BlobMediaAttachmentStore} 把字节搬进 blob 存储、
+ * 只留登记表在 Redis，本类退位为"升级前存量"的只读兼容路径（键空间与派生规则不变，
+ * 见 {@link MediaIds}）。保留而不是删除：旧数据按既定约束留原处，而会话可能还在引用
+ * 30 分钟 TTL 内的老附件。</p>
  *
  * <p>落 Redis 而不是本地文件或进程内 Map：多实例部署下"编排层存、工具线程取"
  * 不落在同一个进程里，存本地就是取不到；而项目本身是 Redis 强依赖，
@@ -42,15 +44,6 @@ public class RedisMediaAttachmentStore implements MediaAttachmentStore {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /**
-     * 键前缀：与记忆、检查点同在 {@code domainplane:} 命名空间下，便于按命名空间排查与清理。
-     *
-     * <p>从 {@code domainplane:image:attachment:} 改名而来：这个键空间现在装的是三种媒体，
-     * 继续叫 image 会让排障的人以为音视频在别处。改名的影响面只有"重启那一刻仍在暂存期
-     * 内的图片会取不到"（TTL 30 分钟，且取不到时的文案本就是"可能已过期"），故不留兼容键。</p>
-     */
-    private static final String KEY_PREFIX = "domainplane:media:attachment:";
-
     private final StringRedisTemplate redis;
     private final Duration ttl;
 
@@ -70,8 +63,8 @@ public class RedisMediaAttachmentStore implements MediaAttachmentStore {
             // 二选一是入参约定；两者都空说明上游在构造内容块时就漏填了，这里是最后一道
             throw new IllegalArgumentException(kind.label() + "既没有 base64 也没有 url，无法暂存");
         }
-        String id = kind.idPrefix() + sha256(hasBase64 ? base64 : url).substring(0, 16);
-        String key = KEY_PREFIX + id;
+        String id = MediaIds.derive(kind, hasBase64 ? base64 : url);
+        String key = MediaIds.KEY_PREFIX + id;
 
         Map<String, String> payload = new LinkedHashMap<>();
         payload.put("kind", kind.wire());
@@ -102,7 +95,7 @@ public class RedisMediaAttachmentStore implements MediaAttachmentStore {
             return Optional.empty();
         }
         String id = attachmentId.trim();
-        String raw = redis.opsForValue().get(KEY_PREFIX + id);
+        String raw = redis.opsForValue().get(MediaIds.KEY_PREFIX + id);
         if (raw == null) {
             // 取不到 = 从没存过 / 已过期。两种情况对调用方是同一处置（让用户重发），
             // 所以这里不细分，由 seeImage 统一回喂"附件不存在或已过期"
@@ -162,7 +155,7 @@ public class RedisMediaAttachmentStore implements MediaAttachmentStore {
                 continue;
             }
             try {
-                if (Boolean.TRUE.equals(redis.expire(KEY_PREFIX + id.trim(), ttl))) {
+                if (Boolean.TRUE.equals(redis.expire(MediaIds.KEY_PREFIX + id.trim(), ttl))) {
                     renewed++;
                 } else {
                     missing++;
@@ -175,21 +168,6 @@ public class RedisMediaAttachmentStore implements MediaAttachmentStore {
         }
         if (renewed > 0 || missing > 0) {
             log.debug("[附件暂存] 附件续期：{} 个重置为 {}，{} 个已不存在", renewed, ttl, missing);
-        }
-    }
-
-    private static String sha256(String raw) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(raw.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(bytes.length * 2);
-            for (byte b : bytes) {
-                sb.append(String.format(Locale.ROOT, "%02x", b));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            // 极不可能（JDK 必带 SHA-256）；退化为内容自身，宁可引用名变长也不能抛
-            return raw;
         }
     }
 }

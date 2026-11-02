@@ -29,31 +29,55 @@
     <aside class="sidebar" id="sidebar"></aside>
 
     <main class="main">
-        <div class="page-head">
-            <div class="head-line">
-                <div>
-                    <h2>域空间</h2>
-                    <p>一个域一张卡片：配置可调用模型与可见工具。域分两种角色：<b>可调用单元</b>（能作为入口）与<b>装配节点</b>（只把工具 / 提示词 / 模型 / 知识传给后代）。新建域默认无可调用模型。</p>
+        <div class="page-header">
+            <div class="page-head">
+                <div class="head-line">
+                    <div>
+                        <h2>域空间</h2>
+                    </div>
+                    <span class="count-badge" id="domainCount">—</span>
                 </div>
-                <span class="count-badge" id="domainCount">—</span>
-            </div>
-            <div class="actions">
-                <input class="form-control" type="text" id="newDomain" placeholder="完整路径域，如 default.customer-service"
-                       style="width:240px; font-family:ui-monospace,Consolas,monospace;">
-                <!-- nowrap 必须写在这里：label 是 inline-flex，里面的「可调用」是匿名 flex 项，
-                     中文可在任意两字间断行，行内空间一紧就会被挤成竖排三个字；
-                     flex:0 0 auto 同时禁止这一行把 label 压扁 -->
-                <label class="card-note"
-                       style="display:inline-flex; align-items:center; gap:4px; white-space:nowrap; flex:0 0 auto;"
-                       title="勾选=可调用单元（能作为入口）；不勾选=只做装配，供后代继承工具 / 提示词 / 模型 / 知识">
-                    <input type="checkbox" id="newDomainCallable" checked> 可调用
-                </label>
-                <button class="btn btn-primary" id="createDomainBtn">新建域</button>
-                <button class="ghost btn btn-sm btn-outline-primary" id="refreshBtn">重新读取</button>
+                <div class="actions">
+                    <input class="form-control" type="text" id="newDomain" placeholder="完整路径域，如 default.customer-service"
+                           style="width:240px; font-family:ui-monospace,Consolas,monospace;">
+                    <!-- nowrap 必须写在这里：label 是 inline-flex，里面的「可调用」是匿名 flex 项，
+                         中文可在任意两字间断行，行内空间一紧就会被挤成竖排三个字；
+                         flex:0 0 auto 同时禁止这一行把 label 压扁 -->
+                    <label class="card-note"
+                           style="display:inline-flex; align-items:center; gap:4px; white-space:nowrap; flex:0 0 auto;"
+                           title="勾选=可调用单元（能作为入口）；不勾选=只做装配，供后代继承工具 / 提示词 / 模型 / 知识">
+                        <input type="checkbox" id="newDomainCallable" checked> 可调用
+                    </label>
+                    <button class="btn btn-sm btn-outline-primary" id="createDomainBtn">新建域</button>
+                    <button class="btn btn-sm btn-outline-secondary" id="refreshBtn">重新读取</button>
+                </div>
             </div>
         </div>
+        <div class="page-body dp-domains">
 
-        <div id="domainList"></div>
+            <!-- 左：域结构树（按 parentId 嵌套，点节点选中）。
+                 早年是整页平铺卡片：域一多既看不出层级，配一个域要翻很久。
+                 树把「谁继承谁」直接画出来，右侧只放当前选中域的配置。 -->
+            <div class="dp-domains-split">
+                <div class="card dp-panel">
+                    <div class="card-body">
+                        <div class="card-head">
+                            <h2>域结构</h2>
+                            <span class="spacer"></span>
+                            <button class="btn btn-sm btn-outline-secondary" id="treeExpandBtn">展开</button>
+                            <button class="btn btn-sm btn-outline-secondary" id="treeCollapseBtn">折叠</button>
+                        </div>
+                        <div class="dp-domain-scroll" id="treeList"></div>
+                        <div class="dp-tree-legend">
+                            <span><i class="on"></i>可调用单元</span>
+                            <span><i class="off"></i>装配节点</span>
+                            <span>数字 = 可见工具数</span>
+                        </div>
+                    </div>
+                </div>
+                <div id="detailBody"></div>
+            </div>
+        </div>
     </main>
 </div>
 
@@ -64,13 +88,13 @@
         <div class="modal-head">
             <h3>配置 <span class="mono" id="bindDomainName"></span> 的模型</h3>
             <span class="spacer"></span>
-            <button class="ghost btn btn-sm btn-outline-primary" id="bindModalClose">关闭</button>
+            <button class="btn btn-outline-secondary" id="bindModalClose">关闭</button>
         </div>
         <div id="bindCardList" class="pick-grid"></div>
         <div id="bindEmpty" class="perm-none" style="margin-top:10px; display:none;"></div>
         <footer class="card-foot">
-            <button class="btn btn-primary" id="bindSaveBtn">保存</button>
-            <button class="ghost btn btn-sm btn-outline-primary" id="bindClearBtn">清空（置为无可调用）</button>
+            <button class="btn btn-outline-primary" id="bindSaveBtn">保存</button>
+            <button class="btn btn-outline-secondary" id="bindClearBtn">清空（置为无可调用）</button>
         </footer>
     </div>
 </div>
@@ -82,13 +106,13 @@
         <div class="modal-head">
             <h3>配置 <span class="mono" id="mcpBindDomainName"></span> 的 MCP 连接</h3>
             <span class="spacer"></span>
-            <button class="ghost btn btn-sm btn-outline-primary" id="mcpBindModalClose">关闭</button>
+            <button class="btn btn-outline-secondary" id="mcpBindModalClose">关闭</button>
         </div>
         <div id="mcpBindCardList" class="pick-grid"></div>
         <div id="mcpBindEmpty" class="perm-none" style="margin-top:10px; display:none;"></div>
         <footer class="card-foot">
-            <button class="btn btn-primary" id="mcpBindSaveBtn">保存</button>
-            <button class="ghost btn btn-sm btn-outline-primary" id="mcpBindClearBtn">全部解绑</button>
+            <button class="btn btn-outline-primary" id="mcpBindSaveBtn">保存</button>
+            <button class="btn btn-outline-secondary" id="mcpBindClearBtn">全部解绑</button>
         </footer>
     </div>
 </div>

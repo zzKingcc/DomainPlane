@@ -116,4 +116,30 @@ class DomainSettingsStoreTest {
                 .noneMatch(k -> k.startsWith("default.sales")), "整棵子树都要清掉");
         assertEquals(Boolean.TRUE, reloaded.getToolCallEcho().get("default.hr"));
     }
+
+    /**
+     * 删域的实际入口是 {@code removeDomains}（DomainPurgeService 调它）。
+     *
+     * <p>三类键都要清：提示词、工具回写开关、执行计划展示开关。漏掉第三类的表现是
+     * "孤儿键"——同路径域将来重建时，上一世调好的计划展示开关会静默复活。</p>
+     */
+    @Test
+    void removeDomainsClearsPromptsEchoAndPlanDisplay() throws IOException {
+        writePrompts("""
+                {"prompts":{"default.sales":"销售","default.hr":"人事"},
+                 "toolCallEcho":{"default.sales":true,"default.hr":true},
+                 "planDisplay":{"default.sales":true,"default.hr":false}}
+                """);
+
+        store().removeDomains(List.of("default.sales"));
+
+        DomainSettings reloaded = store().load();
+        assertFalse(reloaded.getPrompts().containsKey("default.sales"), "被删域的提示词必须清掉");
+        assertFalse(reloaded.getToolCallEcho().containsKey("default.sales"), "被删域的回写开关必须清掉");
+        assertFalse(reloaded.getPlanDisplay().containsKey("default.sales"),
+                "被删域的计划展示开关同样必须清掉（否则同路径域重建时静默复活）");
+        assertEquals("人事", reloaded.getPrompts().get("default.hr"));
+        assertEquals(Boolean.TRUE, reloaded.getToolCallEcho().get("default.hr"));
+        assertEquals(Boolean.FALSE, reloaded.getPlanDisplay().get("default.hr"), "没被删的域原样保留");
+    }
 }

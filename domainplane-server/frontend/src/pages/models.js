@@ -183,7 +183,6 @@ Console.renderSidebar('models');
             + ' value="' + Console.escapeHtml(v) + '" placeholder="未声明">'
             + '<span class="ctx-unit">token</span>';
     }
-
     /* 真正的空状态：一份向量档案都没有。
        注意「没有档案」与「有档案但没启用」是两件事，后者会把卡片逐张列出来让你点「启用」，
        前者才走这里。 */
@@ -204,17 +203,17 @@ Console.renderSidebar('models');
            向量档案同样会停在"未识别"而进不了向量槽位，得靠探测把 embedding 端点与模态实测出来。
            按钮排在「删除」之前，与对话卡片一致。 */
         var actions = (active ? ''
-                : '<button class="ghost btn btn-sm btn-outline-primary" data-enable="' + Console.escapeHtml(p.alias) + '"'
+                : '<button class="btn btn-sm btn-outline-primary" data-enable="' + Console.escapeHtml(p.alias) + '"'
                     + (p.usable ? '' : ' disabled') + '>启用</button>')
-            + '<button class="ghost btn btn-sm btn-outline-primary" data-probe="' + Console.escapeHtml(p.alias) + '">探测</button>'
-            + '<button class="ghost btn btn-sm btn-outline-primary" data-del="' + Console.escapeHtml(p.alias) + '">删除</button>';
+            + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">探测</button>'
+            + '<button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">删除</button>';
         /* 「已适配」徽标 + 绿框 + 更新按钮，与对话卡片同一套件（见 renderProfiles） */
         var adapterBadge = p.adapter ? '<span class="mbadge">已适配</span>' : '';
         var hasTune = !!(p.adapter && (p.adapter.params || []).length);
         var tuneBox = hasTune ? adapterTuneBox(p, prefix) : '';
         var tuneCtl = hasTune
             ? '<span class="tune-status"></span>'
-              + '<button type="button" class="tune-save btn btn-sm btn-primary" disabled>更新</button>'
+              + '<button type="button" class="btn btn-sm btn-outline-primary tune-save" disabled>更新</button>'
             : '';
 
         /* 端点族小签与「模型」段同款，向量段的卡片头部原来是两张卡片里唯一没有类型标识的
@@ -276,14 +275,17 @@ Console.renderSidebar('models');
     }
 
     /* 换向量模型共用的二次确认。
-       返回 'rebuild'（保留原文重灌）、'purge'（丢弃旧内容）或 null（本次不做任何改动）。 */
-    function askRebuildOrPurge(message) {
-        var rebuild = window.confirm(message
-            + '\n\n现在用新的向量把知识库重新算一遍吗？文档都还在，不用重新上传。');
+       返回 'rebuild'（保留原文重灌）、'purge'（丢弃旧内容）或 null（本次不做任何改动）。
+       确认框改成 Tabler 模态后是异步的（要等用户点），所以这个函数返回 Promise。 */
+    async function askRebuildOrPurge(message) {
+        var rebuild = await Console.confirm(message
+            + '\n\n现在用新的向量把知识库重新算一遍吗？文档都还在，不用重新上传。',
+            { title: '换向量模型：重灌知识库', okText: '重新算一遍', cancelText: '不重灌', danger: false });
         if (rebuild) { return 'rebuild'; }
-        var purge = window.confirm(
+        var purge = await Console.confirm(
             '清空知识库？\n\n'
-            + '里面的文档和向量会被全部删除，以后要重新上传。');
+            + '里面的文档和向量会被全部删除，以后要重新上传。',
+            { title: '换向量模型：清空知识库', okText: '清空', danger: true });
         return purge ? 'purge' : null;
     }
 
@@ -297,24 +299,27 @@ Console.renderSidebar('models');
         Console.api.put('/admin/embedding-model', { alias: alias })
             .then(function (r) {
                 if (r && r.requiresConfirmation) {
-                    var choice = askRebuildOrPurge(r.message
-                        || '知识库已有内容。');
-                    if (!choice) {
-                        loadProfiles();
-                        return;
-                    }
-                    return Console.api.put('/admin/embedding-model',
-                        { alias: alias, mode: choice });
+                    /* askRebuildOrPurge 现在是异步的（要等用户在模态里点确认），
+                       必须把它的 Promise return 出去，后面的 .then 才会等它 ——
+                       忘了 return 就会直接走「已切换」，把用户的确认绕过去。 */
+                    return askRebuildOrPurge(r.message || '知识库已有内容。').then(function (choice) {
+                        if (!choice) {
+                            loadProfiles();
+                            return null;
+                        }
+                        return Console.api.put('/admin/embedding-model',
+                            { alias: alias, mode: choice });
+                    });
                 }
                 return r;
             })
             .then(function (r) {
                 if (!r) { return; }
-                alert(r.message || '已切换');
+                Console.toast(r.message || '已切换', { type: 'success' });
                 loadProfiles();
                 loadSettings();
             })
-            .catch(function (e) { alert('切换失败：' + e.message); });
+            .catch(function (e) { Console.toast('切换失败：' + e.message, { type: 'error' }); });
     }
 
     function renderProfiles() {
@@ -364,7 +369,7 @@ Console.renderSidebar('models');
                    头部已有「删除」，「更新」放它左边（先改后删，误点代价小）。没调优框则两者都不出现。 */
                 var tuneCtl = hasTune
                     ? '<span class="tune-status"></span>'
-                      + '<button type="button" class="tune-save btn btn-sm btn-primary" disabled>更新</button>'
+                      + '<button type="button" class="btn btn-sm btn-outline-primary tune-save" disabled>更新</button>'
                     : '';
                 /* 「是否回写思考内容」开关：只出现在对话档案上（思考是对话流的概念），
                    放在「更新」左边。拨动即存，不与调优参数共用同一个保存动作，见 saveReturnThinking。 */
@@ -381,8 +386,8 @@ Console.renderSidebar('models');
                     +   '<span class="spacer"></span>'
                     +   thinkCtl
                     +   tuneCtl
-                    +   '<button class="ghost btn btn-sm btn-outline-primary" data-probe="' + Console.escapeHtml(p.alias) + '">探测</button>'
-                    +   '<button class="ghost btn btn-sm btn-outline-primary" data-del="' + Console.escapeHtml(p.alias) + '">删除</button>'
+                    +   '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">探测</button>'
+                    +   '<button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">删除</button>'
                     + '</header>'
                     + '<div class="dp-card-body">'
                     + '<div class="model-meta">'
@@ -393,7 +398,7 @@ Console.renderSidebar('models');
                     +   '<div><span class="k">服务商地址</span><span class="mono">'
                     +      Console.escapeHtml(p.baseUrl || '-') + '</span></div>'
                     +   '<div><span class="k">被哪些域使用</span>' + used + '</div>'
-                    +   (chat ? '<div><span class="k">上下文长度</span>' + ctxCell(p) + '</div>' : '')
+                    +   (chat ? '<div class="ctx-row"><span class="k">上下文长度</span>' + ctxCell(p) + '</div>' : '')
                     + '</div>'
                     +   tuneBox
                     + '</div>'
@@ -899,7 +904,7 @@ Console.renderSidebar('models');
             var cls = 'tune-bar-seg';
             if (on && i <= active) { cls += ' on'; }
             if (on && i === active) { cls += ' active'; }
-            return '<button type="button" class="' + cls + ' btn btn-primary"' + (on ? '' : ' disabled')
+            return '<button type="button" class="' + cls + ' btn btn-outline-primary"' + (on ? '' : ' disabled')
                 + ' data-bar-val="' + Console.escapeHtml(o.value) + '"'
                 + ' title="' + Console.escapeHtml(o.label || o.value) + '">'
                 + Console.escapeHtml(o.value) + '</button>';
@@ -1159,6 +1164,7 @@ Console.renderSidebar('models');
         if (btn) {
             btn.addEventListener('click', function () {
                 btn.disabled = true;
+                btn.classList.add('btn-loading');
                 if (status) { status.textContent = ''; status.className = 'tune-status'; }
                 saveTuning(alias, prefix, specs, function (ok, msg) {
                     if (status) {
@@ -1168,6 +1174,7 @@ Console.renderSidebar('models');
                     if (ok) { base = current(); }
                     /* 失败保持可点，让用户改完再试；成功则回到"无改动"的灰态 */
                     btn.disabled = ok;
+                    btn.classList.remove('btn-loading');
                 });
             });
         }
@@ -1216,7 +1223,7 @@ Console.renderSidebar('models');
             })
             .catch(function (e) {
                 input.checked = !on;
-                alert('保存失败：' + Console.sanitizeError(e.message));
+                Console.toast('保存失败：' + Console.sanitizeError(e.message), { type: 'error' });
             })
             .then(function () { input.disabled = false; });
     }
@@ -1234,7 +1241,7 @@ Console.renderSidebar('models');
         if (raw !== '') {
             value = Number(raw);
             if (!isFinite(value) || value <= 0 || Math.floor(value) !== value) {
-                alert('上下文长度必须是正整数（单位 token）；留空表示未声明');
+                Console.toast('上下文长度必须是正整数（单位 token）；留空表示未声明', { type: 'warning' });
                 input.value = prev;
                 return;
             }
@@ -1250,7 +1257,7 @@ Console.renderSidebar('models');
             })
             .catch(function (e) {
                 input.value = prev;
-                alert('保存失败：' + Console.sanitizeError(e.message));
+                Console.toast('保存失败：' + Console.sanitizeError(e.message), { type: 'error' });
             })
             .then(function () { input.disabled = false; });
     }
@@ -1289,17 +1296,24 @@ Console.renderSidebar('models');
         if (tuning.maxTokens != null) { body.maxTokens = tuning.maxTokens; }
         /* 向量维度：适配了 embedding 族的模型才会填出来；留空则由服务端按模型原生维度回填 */
         if (tuning.dimensions != null) { body.dimensions = tuning.dimensions; }
+        var btn = pfEl('saveProfileBtn');
+        btn.disabled = true;
+        btn.classList.add('btn-loading');
         Console.api.post('/admin/model-profiles', body)
             .then(function () {
                 closeModal();
                 return loadProfiles();
             })
-            .catch(function (e) { showResult(false, '保存失败：' + e.message); });
+            .catch(function (e) { showResult(false, '保存失败：' + e.message); })
+            .then(function () {
+                btn.disabled = false;
+                btn.classList.remove('btn-loading');
+            });
     }
 
     /* 删除向量档案就是删档案本身（与对话档案同一条路径）；
        唯一差别是要提示「当前向量模型会被取消」，那段在 deleteProfile 里。 */
-    function deleteProfile(alias) {
+    async function deleteProfile(alias) {
         /* 必须跨两处找：纯向量档案不在 PROFILES 里，只查 PROFILES 会让"它正是当前向量模型"
            的警告消失，用户删掉正在用的向量模型却只看到一句普通的删除确认。 */
         var target = findProfile(alias);
@@ -1316,14 +1330,16 @@ Console.renderSidebar('models');
             text += '该模型会从所有域的绑定里一并移除（级联清理），'
                 + '这些域将立即变为「无可调用模型」。\n\n';
         }
-        if (!confirm(text)) { return; }
+        var ok = await Console.confirm(text,
+            { title: '删除模型', okText: '删除', danger: true });
+        if (!ok) { return; }
         /* P2：B 类。信封判断已由 api.del 承担 */
         Console.api.del('/admin/model-profiles?alias=' + encodeURIComponent(alias))
             .then(function (r) {
-                if (r && r.message) { alert(r.message); }
+                if (r && r.message) { Console.toast(r.message, { type: 'success' }); }
                 loadProfiles();
             })
-            .catch(function (e) { alert('删除失败：' + e.message); });
+            .catch(function (e) { Console.toast('删除失败：' + e.message, { type: 'error' }); });
     }
 
     /* 探测一个档案：POST /admin/model-profiles/detect，服务端用一组最小请求实测端点族与模态，
@@ -1331,31 +1347,50 @@ Console.renderSidebar('models');
 
        先二次确认：这是本页唯一会真花钱的按钮（保存只发 GET，零 token）。开销按探针逐条说清，
        免得用户以为"探测"是个纯本地动作。 */
-    function probeProfile(alias, btn) {
-        var ok = confirm('探测「' + alias + '」？\n\n'
+    async function probeProfile(alias, btn) {
+        var ok = await Console.confirm('探测「' + alias + '」？\n\n'
             + '会发一组最小请求实测它的端点族与模态，可能消耗少量额度：\n'
             + '· 对话：max_tokens=1（约 1 个 token）\n'
             + '· 向量 / 重排：提交一条短文本\n'
             + '· 语音识别 / 语音合成：按极短音频计费\n'
             + '· 生图：若该服务商有生图端点，会真实生成一张默认尺寸的图\n\n'
-            + '实测确认到的会并回档案（只增不减）。继续？');
+            + '实测确认到的会并回档案（只增不减）。继续？',
+            { title: '探测模型端点与模态', okText: '开始探测', danger: false });
         if (!ok) { return; }
 
-        if (btn) { btn.disabled = true; }
+        if (btn) {
+            btn.disabled = true;
+            btn.classList.add('btn-loading');
+            btn.setAttribute('data-orig-label', btn.textContent);
+            btn.textContent = '探测中…';
+        }
         /* P2：A 类，POST 无 body */
         Console.api.post('/admin/model-profiles/detect?alias=' + encodeURIComponent(alias), null)
             .then(function (r) {
                 return loadProfiles().then(function () {
-                    /* 有探针没确认到，就把服务商的原话摆出来，只报"没探到"等于没说；
-                       看到「broken PNG file」「model is not a VLM」这类原文，才知道下一步该改什么 */
-                    if (r && r.note && r.note.indexOf('未确认') >= 0) {
-                        alert('探测完成，但有些项没能确认：\n\n' + r.note);
+                    /* 服务端的 note 现在就是结论清单（支持 / 不支持 / 未确认三行），
+                       原样显示即可 —— 早先那句「探测完成，但有些项没能确认」的前缀
+                       与清单里的「未确认」重复，去掉；有缺口时靠类型（黄/绿）区分。 */
+                    if (r && r.note) {
+                        /* perModality 是逐探针的三态结论：有非 CONFIRMED 的就算有缺口 */
+                        var gap = !!(r.perModality && Object.keys(r.perModality).some(function (k) {
+                            return r.perModality[k] !== 'CONFIRMED';
+                        }));
+                        Console.toast(r.note, {
+                            type: gap ? 'warning' : 'success',
+                            title: '探测完成',
+                            wide: true
+                        });
                     }
                 });
             })
             .catch(function (e) {
-                if (btn) { btn.disabled = false; }
-                alert('探测失败：' + Console.sanitizeError(e.message));
+                if (btn) {
+                    btn.disabled = false;
+                    btn.classList.remove('btn-loading');
+                    btn.textContent = btn.getAttribute('data-orig-label') || '探测';
+                }
+                Console.toast('探测失败：' + Console.sanitizeError(e.message), { type: 'error' });
             });
     }
 
@@ -1405,7 +1440,7 @@ Console.renderSidebar('models');
                 + '<div class="mono hint" style="margin:2px 0 0;">' + Console.escapeHtml(c.baseUrl) + '</div></div>'
                 + '<span class="spacer"></span>'
                 + '<span class="mono hint" style="margin:0;">' + Console.escapeHtml(key) + '</span>'
-                + '<button class="ghost btn btn-sm btn-outline-primary" data-cn-del="' + Console.escapeHtml(c.name) + '">删除</button>'
+                + '<button class="btn btn-sm btn-outline-danger" data-cn-del="' + Console.escapeHtml(c.name) + '">删除</button>'
                 + '</div></div>';
         }).join('');
     }
@@ -1436,6 +1471,7 @@ Console.renderSidebar('models');
         if (!baseUrl) { cnSay(false, '服务商地址不能为空'); return; }
         var btn = pfEl('cnAddBtn');
         btn.disabled = true;
+        btn.classList.add('btn-loading');
         Console.api.post('/admin/provider-connections', { name: name, baseUrl: baseUrl, apiKey: secret })
             .then(function (r) {
                 /* 成功就把明文从表单里抹掉：它已经落盘，继续留在输入框只会多一处副本 */
@@ -1448,11 +1484,13 @@ Console.renderSidebar('models');
             })
             .then(function () { renderConnectionList(); })
             .catch(function (e) { cnSay(false, Console.sanitizeError(e.message)); })
-            .then(function () { btn.disabled = false; });
+            .then(function () { btn.disabled = false; btn.classList.remove('btn-loading'); });
     }
-    function deleteConnection(name) {
-        if (!confirm('删除自定义配置「' + name + '」？\n\n'
-            + '已保存的模型档案不受影响：它们各自保存的是独立副本，不是对这一条的引用。')) { return; }
+    async function deleteConnection(name) {
+        var ok = await Console.confirm('删除自定义配置「' + name + '」？\n\n'
+            + '已保存的模型档案不受影响：它们各自保存的是独立副本，不是对这一条的引用。',
+            { title: '删除自定义配置', okText: '删除', danger: true });
+        if (!ok) { return; }
         /* P2：B 类。信封判断已由 api.del 承担 */
         Console.api.del('/admin/provider-connections?name=' + encodeURIComponent(name))
             .then(function (r) {

@@ -2,6 +2,7 @@ package com.zzkingcc.domainplane.server.capability;
 
 import com.zzkingcc.domainplane.api.annotation.Tool;
 import com.zzkingcc.domainplane.api.annotation.ToolParam;
+import com.zzkingcc.domainplane.api.tool.ToolDescriptor;
 import com.zzkingcc.domainplane.runtime.vision.MediaAttachmentStore;
 import com.zzkingcc.domainplane.runtime.vision.MediaAttachmentStore.Kind;
 import com.zzkingcc.domainplane.server.model.DefaultModelResolver;
@@ -23,12 +24,17 @@ import java.util.Locale;
  * 用户在对话里要一段语音（朗读、播报、配音），平台得有一条真正产出音频的路，
  * 而不是让模型假装产出了。</p>
  *
+ * <p><b>可见性</b>：由「该域（链上）绑没绑可用的语音合成模型」决定，不写死在注解里
+ * （初始哨兵 {@link ToolDescriptor#UNBOUND_DOMAIN}，由 {@code ModelCapabilityToolBinder} 重算）：
+ * 没配 TTS 的域，模型看到这个工具只会白调一次。</p>
+ *
  * @author zzkingcc
  */
 @Component
 public class SpeechTool extends CapabilityToolSupport {
 
-    private static final String TOOL_NAME = "synthesizeSpeech";
+    /** 工具名（模型看到的函数名）。{@code ModelCapabilityToolBinder} 按它改可用域 */
+    public static final String TOOL_NAME = "synthesizeSpeech";
 
     public SpeechTool(DefaultModelResolver resolver,
                       ModelEndpointClient client,
@@ -43,7 +49,8 @@ public class SpeechTool extends CapabilityToolSupport {
                     + "参数 text 填要念出来的文字内容，直接写最终要听到的文本，不要写'请朗读以下内容'之类的指令。"
                     + "结果会以音频编号返回，你可以在回答里提到它。"
                     + "本工具依赖当前域已绑定的语音合成模型；没有时会明确告知，此时不要假装已经生成了音频。",
-            effect = Tool.Effect.WRITE)
+            effect = Tool.Effect.WRITE,
+            domains = ToolDescriptor.UNBOUND_DOMAIN)
     public String synthesize(@ToolParam("要合成为语音的文本内容（直接给最终要听到的字句）") String text,
                              @ToolParam(value = "音色名称（如 alloy / nova，或服务商自定义音色）；"
                                      + "不确定就留空，由服务商默认", required = false) String voice,

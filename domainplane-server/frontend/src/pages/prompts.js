@@ -1,26 +1,47 @@
 /* ==========================================================================
-   P1 · prompts 页脚本
-   自 prompts.html 的内联 <script> 机械平移（1 块合并），逻辑未改。
+   prompts 页脚本 · 与 prompts.html 一一对应
+   左侧域列表（domainList）+ 右侧编辑器 + 统计行 + 孤儿条目提示。
+   旧版是 prompts.html 上一代 DOM（整页表格 domainBody / editorCard）的遗留，
+   引用的节点已不存在（整页报废），本次按现 HTML 重写。
    ========================================================================== */
 (function () {
-var esc = Console.escapeHtml;
-    var COLORS = { primary: '#2563eb', muted: '#6b7280', red: '#dc2626', amber: '#d97706' };
+    var esc = Console.escapeHtml;
 
-    /* 编辑中的值（保存时整对象提交） vs 服务端基线（用于脏标记与"清空"） */
+    /* 编辑中的值（保存时整对象提交） vs 服务端基线（用于保存按钮的可用判定） */
     var model = { prompts: {} };
-    var baseline = { prompts: {} };
+    var baseline = { prompts: {}, orphans: [] };
     var domains = [];
     var currentDomain = null;
+    var LOADED = false;          /* 首次加载是否已完成（决定要不要放占位） */
 
-    function snapshot(o) { return JSON.stringify({ prompts: o.prompts || {} }); }
-
-    function isDirty() { return snapshot(model) !== snapshot(baseline); }
-
-    function setDirty() {
-        document.getElementById('dirtyFlag').style.display = isDirty() ? 'inline' : 'none';
+    function setValue(id, v, tone) {
+        var el = document.getElementById(id);
+        if (el) {
+            el.textContent = v;
+            el.className = 'dp-stat-value' + (tone ? ' ' + tone : '');
+        }
     }
 
-    /* 完整路径 → 从根到自身的链，与服务端 Domains.chainOf 同构 */
+    function currentText() {
+        return currentDomain ? (model.prompts[currentDomain] || '') : '';
+    }
+
+    function baselineText() {
+        return currentDomain ? (baseline.prompts[currentDomain] || '') : '';
+    }
+
+    /* 保存按钮只在检测到当前域文本相对基线有改动时可点 */
+    function updateSaveBtn() {
+        var btn = document.getElementById('saveBtn');
+        if (btn) {
+            btn.disabled = currentDomain === null || currentText() === baselineText();
+        }
+        var dirty = document.getElementById('dirtyFlag');
+        if (dirty) {
+            dirty.style.display = (currentDomain !== null && currentText() !== baselineText()) ? 'inline' : 'none';
+        }
+    }
+
     function chainOf(domain) {
         var segs = String(domain || '').split('.');
         var out = [];
@@ -33,11 +54,10 @@ var esc = Console.escapeHtml;
     }
 
     function counts() {
-        document.getElementById('domainLen').textContent =
-            currentDomain ? (model.prompts[currentDomain] || '').trim().length : 0;
+        document.getElementById('domainLen').textContent = currentText().trim().length;
     }
 
-    /* 沿链拼接：根域在前、当前域在后，未配置的段跳过 */
+    /* 生效提示词 = 沿域链从根域拼接 */
     function compose(domain) {
         var parts = [];
         chainOf(domain).forEach(function (step) {
@@ -53,92 +73,100 @@ var esc = Console.escapeHtml;
         var from = chainOf(currentDomain).filter(function (step) {
             return (model.prompts[step] || '').trim();
         });
-        document.getElementById('edChain').textContent = from.length
-            ? '拼接自：' + from.join(' → ')
-            : '';
-        document.getElementById('preview').innerHTML =
-            esc(text) || '（该域及其祖先链都未配置，本轮不会下发任何系统提示词）';
+        document.getElementById('edChain').textContent = from.length ? '拼接自：' + from.join(' → ') : '';
+        document.getElementById('preview').innerHTML = esc(text)
+            || '（该域及其祖先链都未配置，本轮不会下发任何系统提示词）';
     }
 
     function openEditor(domain) {
         currentDomain = domain;
-        document.getElementById('editorCard').style.display = 'block';
-        document.getElementById('edDomain').textContent = '域：' + domain;
+        document.getElementById('editorEmpty').style.display = 'none';
+        document.getElementById('editorForm').style.display = 'block';
+        document.getElementById('edDomain').textContent = domain;
         var d = domains.filter(function (x) { return x.name === domain; })[0];
-        document.getElementById('edTools').textContent = d
-            ? ('可见工具 ' + d.tools.length + ' 个，来自 ' + d.providerCount + ' 个提供者')
-            : '';
+        document.getElementById('edChain').textContent = d ? '可见工具 ' + (d.tools || []).length + ' 个' : '';
         document.getElementById('domainText').value = model.prompts[domain] || '';
         counts();
         renderPreview();
-        document.getElementById('editorCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        updateSaveBtn();
+        renderDomainList();
     }
 
-    function renderDomains() {
-        var tbody = document.getElementById('domainBody');
+    function renderDomainList() {
+        var box = document.getElementById('domainList');
         if (!domains.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="perm-none">'
-                + '当前没有任何域。根域 default（正常装配时必定存在）、'
-                + '管控台人工创建、工具声明派生；若连 default 都没有，说明服务端未正常装配域注册表。</td></tr>';
+            box.innerHTML = '<div class="dp-domain-empty">当前没有任何域。若连根域 default 都没有，'
+                + '说明服务端未正常装配域注册表。</div>';
             return;
         }
-        tbody.innerHTML = domains.map(function (d) {
+        box.innerHTML = domains.map(function (d) {
             var val = (model.prompts[d.name] || '').trim();
-            var status = val
-                ? '<span class="tag read">已配置</span>'
-                : '<span class="tag write">缺提示词</span>';
-            var toolNames = d.tools.map(function (t) { return t.name; });
-            var chips = toolNames.slice(0, 6).map(function (n) {
-                return '<span class="tag perm">' + esc(n) + '</span>';
-            }).join('') + (toolNames.length > 6
-                ? '<span class="card-note">等 ' + toolNames.length + ' 个</span>' : '');
-            return '<tr class="domain-row" data-dom="' + esc(d.name) + '">'
-                + '<td><b>' + esc(d.name) + '</b></td>'
-                + '<td style="min-width:220px;">' + (chips || '<span class="perm-none">无</span>') + '</td>'
-                + '<td>' + d.providerCount + '</td>'
-                + '<td>' + val.length + ' 字</td>'
-                + '<td>' + status + '</td>'
-                + '<td><a href="javascript:void(0)" class="ghost" style="padding:4px 10px;">编辑</a></td>'
-                + '</tr>';
+            var tag = val
+                ? '<span class="dp-domain-tag ok">已配置</span>'
+                : '<span class="dp-domain-tag miss">缺提示词</span>';
+            return '<div class="dp-domain-item' + (d.name === currentDomain ? ' on' : '') + '" data-dom="' + esc(d.name) + '">'
+                + '<span class="dp-domain-name" title="' + esc(d.name) + '">' + esc(d.name) + '</span>'
+                + tag + '</div>';
         }).join('');
-
-        Array.prototype.forEach.call(tbody.querySelectorAll('.domain-row'), function (row) {
-            row.addEventListener('click', function () { openEditor(row.getAttribute('data-dom')); });
+        box.querySelectorAll('.dp-domain-item').forEach(function (item) {
+            item.addEventListener('click', function () {
+                openEditor(item.getAttribute('data-dom'));
+            });
         });
+    }
+
+    function renderStats() {
+        var total = domains.length;
+        var missing = domains.filter(function (d) {
+            return !(model.prompts[d.name] || '').trim();
+        }).length;
+        setValue('statDomains', String(total));
+        setValue('statConfigured', String(total - missing));
+        setValue('statMissing', String(missing), missing ? 'warn' : '');
+        setValue('statOrphans', String(baseline.orphans.length), baseline.orphans.length ? 'warn' : '');
     }
 
     function renderAll() {
         counts();
-        renderDomains();
+        renderDomainList();
         renderPreview();
-        setDirty();
+        renderStats();
+        updateSaveBtn();
     }
 
     function load() {
-        /* P2：/admin/prompts 是 D 类裸对象，api.get 直接返回 data */
+        /* 首次加载先给占位：左列表初始是空白，转圈比白屏直观。
+           之后的 load（保存后的重拉）列表已有内容，交给顶部进度条。 */
+        if (!LOADED) {
+            var box0 = document.getElementById('domainList');
+            if (box0) { box0.innerHTML = Console.loadingHtml('正在加载提示词配置…'); }
+        }
         Console.api.get('/admin/prompts').then(function (r) {
-            baseline = { prompts: Object.assign({}, r.prompts || {}) };
+            LOADED = true;
+            baseline = { prompts: Object.assign({}, r.prompts || {}), orphans: r.orphanPrompts || [] };
             model = { prompts: Object.assign({}, baseline.prompts) };
             domains = r.domains || [];
-
-            var orphans = r.orphanPrompts || [];
+            var orphans = baseline.orphans;
             var box = document.getElementById('orphanBox');
             if (orphans.length) {
                 box.style.display = 'block';
                 box.innerHTML = '<b>孤儿提示词条目：</b>' + orphans.map(esc).join('、')
-                    + '<br>这些域从未被任何工具声明过，配置留着不生效、也不自动清理；若确认不再需要，可在下方编辑区之外手工删除配置项。';
+                    + '<br>这些域从未被任何工具声明过，配置留着不生效、也不自动清理；'
+                    + '若确认不再需要，可在下方编辑区之外手工删除配置项。';
             } else {
                 box.style.display = 'none';
             }
-
             if (currentDomain && !domains.some(function (d) { return d.name === currentDomain; })) {
                 currentDomain = null;
-                document.getElementById('editorCard').style.display = 'none';
+                document.getElementById('editorEmpty').style.display = 'block';
+                document.getElementById('editorForm').style.display = 'none';
             }
             renderAll();
         }).catch(function (e) {
-            document.getElementById('domainBody').innerHTML =
-                '<tr><td colspan="6" style="color:' + COLORS.red + ';">加载失败: ' + esc(e.message) + '</td></tr>';
+            var box = document.getElementById('domainList');
+            if (box) {
+                box.innerHTML = '<div class="dp-domain-empty" style="color:var(--red);">加载失败: ' + esc(e.message) + '</div>';
+            }
         });
     }
 
@@ -147,39 +175,36 @@ var esc = Console.escapeHtml;
         model.prompts[currentDomain] = e.target.value;
         counts();
         renderPreview();
-        renderDomains();
-        setDirty();
+        renderDomainList();
+        updateSaveBtn();
     });
 
-    document.getElementById('clearBtn').addEventListener('click', function () {
-        /* 清空 = 把编辑区归零，之后点「保存并生效」才会真正回落 yaml；不是"撤销" */
-        model = { prompts: {} };
-        document.getElementById('domainText').value = '';
-        renderAll();
-    });
-
-    document.getElementById('refreshBtn').addEventListener('click', function () {
-        if (isDirty() && !confirm('有未保存的修改，重新读取会丢弃它们。继续？')) { return; }
+    document.getElementById('refreshBtn').addEventListener('click', async function () {
+        if (currentDomain && currentText() !== baselineText()) {
+            var ok = await Console.confirm(
+                '有未保存的修改，重新读取会丢弃它们。继续？',
+                { title: '放弃未保存的修改', okText: '继续读取', danger: true }
+            );
+            if (!ok) { return; }
+        }
         load();
     });
 
     document.getElementById('saveBtn').addEventListener('click', function () {
-        var el = document.getElementById('saveResult');
-        el.textContent = '正在保存…';
-        el.className = 'result show ok';
-
-        var payload = { prompts: model.prompts };
-        /* P2：/admin/prompts POST 是 C 类（只有 success）。
-           原来的 `if (!r.success) {...} else {...}` 两分支合并成一条成功路径：
-           失败由 api.post 的 reject 送进 catch，成功文案照旧取 r.message。 */
-        Console.api.post('/admin/prompts', payload).then(function (r) {
-            el.textContent = r.message || '已保存并生效';
+        var btn = this;
+        Console.busy(btn, function () {
+            var el = document.getElementById('saveResult');
+            el.textContent = '正在保存…';
             el.className = 'result show ok';
-            load();
-        }).catch(function (e) {
-            el.textContent = e.message;
-            el.className = 'result show err';
-        });
+            return Console.api.post('/admin/prompts', { prompts: model.prompts }).then(function (r) {
+                el.textContent = r.message || '已保存并生效';
+                el.className = 'result show ok';
+                load();
+            }).catch(function (e) {
+                el.textContent = e.message;
+                el.className = 'result show err';
+            });
+        }, '保存中…');
     });
 
     Console.renderSidebar('prompts');

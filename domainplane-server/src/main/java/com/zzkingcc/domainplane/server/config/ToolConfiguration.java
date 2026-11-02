@@ -3,6 +3,7 @@ package com.zzkingcc.domainplane.server.config;
 import com.zzkingcc.domainplane.api.agent.Domains;
 import com.zzkingcc.domainplane.api.annotation.Tool;
 import com.zzkingcc.domainplane.api.tool.DomainPlaneToolProvider;
+import com.zzkingcc.domainplane.runtime.config.Timeouts;
 import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
 import com.zzkingcc.domainplane.runtime.tool.AnnotatedToolScanner;
 import com.zzkingcc.domainplane.runtime.tool.ToolExecutorService;
@@ -147,10 +148,9 @@ public class ToolConfiguration {
      */
     @Bean(destroyMethod = "close")
     @ConditionalOnMissingBean
-    public ToolExecutorService toolExecutorService(
-            AgentProperties agentProperties,
-            @Value("${domainplane.tool.invoke-timeout-ms:30000}") long timeoutMs) {
+    public ToolExecutorService toolExecutorService(AgentProperties agentProperties, Timeouts timeouts) {
         int threads = Math.max(8, agentProperties.getMaxPoolSize());
+        long timeoutMs = timeouts.toolInvokeMs();
         ToolExecutorService service = ToolExecutorService.create(threads, timeoutMs);
         log.info("[工具路由] 本地工具执行隔离池 {} 线程（零队列，满即拒），单次调用上限 {}ms",
                 threads, service.timeoutMs());

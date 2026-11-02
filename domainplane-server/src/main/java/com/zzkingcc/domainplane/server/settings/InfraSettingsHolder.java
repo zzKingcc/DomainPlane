@@ -3,10 +3,14 @@ package com.zzkingcc.domainplane.server.settings;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.json.jackson.JacksonJsonpMapper;
 import co.elastic.clients.transport.rest_client.RestClientTransport;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzkingcc.domainplane.common.exception.NotConfiguredException;
+import com.zzkingcc.domainplane.infrastructure.kb.qdrant.QdrantHttpClient;
+import com.zzkingcc.domainplane.infrastructure.kb.qdrant.VectorTarget;
 import com.zzkingcc.domainplane.server.config.ElasticsearchProperties;
+import com.zzkingcc.domainplane.server.config.KnowledgeProperties;
 import com.zzkingcc.domainplane.server.config.RedisProperties;
 import com.zzkingcc.domainplane.server.config.SwappableElasticsearchTransport;
 import com.zzkingcc.domainplane.server.config.SwappableRedisConnectionFactory;
@@ -25,13 +29,25 @@ import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.CopyOnWriteArrayList;
 import javax.net.ssl.SSLException;
 
 /**
  * 基础设施存储配置持有者 —— 合并 yaml、落盘、热替换、探活。
+ *
+ * <p><b>合并口径（一条就够）</b>：管控台配过连接（{@code connections} 非空）就以管控台为准；
+ * 一条都没配时，用 yaml 的 {@code domainplane.knowledge.backends} 合成默认连接与默认知识体，
+ * 让"yaml 配了就开箱可用、管控台填了就覆盖"两件事同时成立。Redis 不参与这个开关，
+ * 始终按字段回落 yaml——它是平台基础设施，不存在"多个连接"这回事。</p>
+ *
+ * <p>为什么不按连接逐条合并 yaml：那会让"删掉一条连接"变成删不掉（yaml 里那条又冒出来），
+ * 用户永远说不清表里那一行到底是谁的。开关式口径只有一个方向，排障时不需要推理。</p>
+ *
  * @author zzkingcc
  */
 @Slf4j
@@ -43,6 +59,7 @@ public class InfraSettingsHolder {
 
     private final ElasticsearchProperties yamlEs;
     private final RedisProperties yamlRedis;
+    private final KnowledgeProperties yamlKnowledge;
     private final InfraSettingsStore store;
 
     /** 管控台那一份（未合并），用于判断配置来源 */
@@ -51,14 +68,16 @@ public class InfraSettingsHolder {
     /** 合并后的生效配置 */
     private volatile InfraSettings settings;
 
-    /** 注册进来的可热替换实现（两个代理类在构造时自注册） */
+    /** 注册进来的可热替换实现（ES / Redis 代理与后端注册表在构造时自注册） */
     private final List<InfraSwappable> swappables = new CopyOnWriteArrayList<>();
 
     public InfraSettingsHolder(ElasticsearchProperties yamlEs,
                                RedisProperties yamlRedis,
+                               KnowledgeProperties yamlKnowledge,
                                InfraSettingsStore store) {
         this.yamlEs = yamlEs;
         this.yamlRedis = yamlRedis;
+        this.yamlKnowledge = yamlKnowledge;
         this.store = store;
         this.stored = store.load();
         this.settings = merge(this.stored);
@@ -90,10 +109,15 @@ public class InfraSettingsHolder {
         return current().isRedisUsable();
     }
 
+    /** 向量用途是否至少有一个可用知识体（ES / Qdrant 都算） */
+    public boolean isVectorSlotConfigured() {
+        return current().isVectorKindUsable();
+    }
+
     /** 该值当前从哪来：管控台 / yaml（含环境变量）/ 未配置 */
     public String esSource() {
         InfraSettings s = stored;
-        if (s != null && s.getEs() != null && hasText(s.getEs().getHost())) {
+        if (s != null && s.connection(s.platformConnectionId(InfraSettings.KIND_KEYWORD)) != null) {
             return "管控台";
         }
         return hasText(yamlEs.getHost()) ? "yaml / 环境变量" : "未配置";
@@ -107,14 +131,28 @@ public class InfraSettingsHolder {
         return hasText(yamlRedis.getHost()) ? "yaml / 环境变量" : "未配置";
     }
 
+    /** 向量用途来源：只有管控台一个（yaml 侧无 Qdrant 地址键） */
+    public String vectorSlotSource() {
+        InfraSettings s = stored;
+        if (s != null && s.connection(s.platformConnectionId(InfraSettings.KIND_VECTOR)) != null) {
+            return "管控台";
+        }
+        return "未配置";
+    }
+
     // ===== 保存并立即生效 =====
 
     /**
-     * 保存设置并立即生效
+     * 保存设置并立即生效。
+     *
+     * <p>顺序是有意的：先落盘再审生效值，最后才热替换。反过来（先生效后落盘）在写盘失败时
+     * 会留下"这台机器生效了新配置、重启后回退"的错位——排障时最费劲的那种。</p>
      */
     public synchronized void apply(InfraSettings incoming) {
         fillBlankSecrets(incoming);
         rejectInvalid(incoming);
+        // 先标记"管控台配过"，再落盘与合并：merge() 靠这个位决定要不要用 yaml 兜底
+        incoming.setConfigured(true);
         store.save(incoming);
         this.stored = incoming;
         this.settings = merge(incoming);
@@ -129,24 +167,40 @@ public class InfraSettingsHolder {
     }
 
     /**
-     * 口令留空 = "不修改"，用当前生效值补齐
+     * 口令留空 = "不修改"，用当前生效值按<b>连接 id</b>补齐。
+     *
+     * <p>按 id 而不是按"第一个 ES"：同一台实例可以被关键字槽和向量槽各引用一次，
+     * 补口令时两边都该补上；而不同实例之间绝不能互相串口令。</p>
      */
     public void fillBlankSecrets(InfraSettings incoming) {
-        InfraSettings cur = current();
         if (incoming == null) {
             return;
         }
-        if (incoming.getEs() == null) {
-            incoming.setEs(new InfraSettings.Elasticsearch());
-        }
+        InfraSettings cur = current();
         if (incoming.getRedis() == null) {
             incoming.setRedis(new InfraSettings.Redis());
         }
-        if (!hasText(incoming.getEs().getPassword())) {
-            incoming.getEs().setPassword(cur.getEs().getPassword());
-        }
         if (!hasText(incoming.getRedis().getPassword())) {
             incoming.getRedis().setPassword(cur.getRedis().getPassword());
+        }
+        if (incoming.getConnections() == null) {
+            return;
+        }
+        for (Map.Entry<String, InfraSettings.Connection> entry : incoming.getConnections().entrySet()) {
+            InfraSettings.Connection cand = entry.getValue();
+            if (cand == null) {
+                continue;
+            }
+            InfraSettings.Connection old = cur.connection(cand.getId() != null ? cand.getId() : entry.getKey());
+            if (old == null) {
+                continue;
+            }
+            if (cand.getEs() != null && !hasText(cand.getEs().getPassword())) {
+                cand.getEs().setPassword(old.getEs() == null ? null : old.getEs().getPassword());
+            }
+            if (cand.getVector() != null && !hasText(cand.getVector().getToken())) {
+                cand.getVector().setToken(old.getVector() == null ? null : old.getVector().getToken());
+            }
         }
     }
 
@@ -154,33 +208,130 @@ public class InfraSettingsHolder {
      * 合并：管控台填写优先，缺失字段回落到 yaml / 环境变量。
      */
     private InfraSettings merge(InfraSettings ui) {
-        InfraSettings.Elasticsearch ue = ui == null || ui.getEs() == null ? new InfraSettings.Elasticsearch() : ui.getEs();
+        InfraSettings merged = new InfraSettings();
+
         InfraSettings.Redis ur = ui == null || ui.getRedis() == null
                 ? new InfraSettings.Redis() : ui.getRedis();
-
-        InfraSettings merged = new InfraSettings();
-        merged.getEs().setHost(pick(ue.getHost(), yamlEs.getHost()));
-        merged.getEs().setPort(ue.getPort() != null ? ue.getPort() : yamlEs.getPort());
-        merged.getEs().setScheme(pick(ue.getScheme(), yamlEs.getScheme()));
-        merged.getEs().setUsername(pick(ue.getUsername(), yamlEs.getUsername()));
-        merged.getEs().setPassword(pick(ue.getPassword(), yamlEs.getPassword()));
-        merged.getEs().setConnectTimeout(ue.getConnectTimeout() != null
-                ? ue.getConnectTimeout() : yamlEs.getConnectTimeout());
-        merged.getEs().setSocketTimeout(ue.getSocketTimeout() != null
-                ? ue.getSocketTimeout() : yamlEs.getSocketTimeout());
-
         merged.getRedis().setHost(pick(ur.getHost(), yamlRedis.getHost()));
         merged.getRedis().setPort(ur.getPort() != null ? ur.getPort() : yamlRedis.getPort());
         merged.getRedis().setPassword(pick(ur.getPassword(), yamlRedis.getPassword()));
         merged.getRedis().setDatabase(ur.getDatabase() != null
                 ? ur.getDatabase() : yamlRedis.getDatabase());
+
+        if (ui != null && (ui.isConfigured()
+                || (ui.getConnections() != null && !ui.getConnections().isEmpty()))) {
+            merged.setConfigured(true);
+            merged.setConnections(copy(ui.getConnections()));
+            merged.setBodies(ui.getBodies() == null ? new LinkedHashMap<>() : copyBodies(ui.getBodies()));
+            return merged;
+        }
+        synthesizeFromYaml(merged);
         return merged;
+    }
+
+    /**
+     * 用 yaml 的后端清单合成连接与默认知识体。
+     *
+     * <p>ES 连接吃 {@code domainplane.elasticsearch.*}；Qdrant 连接在 yaml 里没有地址键，
+     * 合成出来是"类型对、地址空"，等管控台填——与改造前"向量库地址只能管控台填"一致。</p>
+     */
+    private void synthesizeFromYaml(InfraSettings target) {
+        Map<String, KnowledgeProperties.Backend> backends = yamlKnowledge.getBackends();
+        if (backends == null || backends.isEmpty()) {
+            return;
+        }
+        Map<String, InfraSettings.Connection> connections = new LinkedHashMap<>();
+        backends.forEach((id, backend) -> {
+            InfraSettings.Connection c = new InfraSettings.Connection();
+            c.setId(id);
+            c.setName(id);
+            String type = backend == null || backend.getType() == null || backend.getType().isBlank()
+                    ? InfraSettings.TYPE_ELASTICSEARCH
+                    : backend.getType().trim().toLowerCase();
+            c.setType(type);
+            if (InfraSettings.TYPE_ELASTICSEARCH.equals(type)) {
+                c.setEs(yamlEs());
+            } else if (InfraSettings.TYPE_QDRANT.equals(type)) {
+                c.setVector(new InfraSettings.VectorStore());
+            }
+            connections.put(id, c);
+        });
+        target.setConnections(connections);
+
+        /* yaml 的两个角色位合成<b>一个双路知识体</b>：关键字槽指向 keyword-backend、
+           向量槽指向 vector-backend。这正是"yaml 配了就开箱可用"的等价物——
+           改造前它们藏在同一个存储集的两个槽里，只是那时候域没得选。 */
+        InfraSettings.KnowledgeBody body = new InfraSettings.KnowledgeBody();
+        body.setId("default");
+        body.setName("默认知识体");
+        body.setKeyword(yamlKnowledge.getKeywordBackend());
+        body.setVector(yamlKnowledge.getVectorBackend());
+        Map<String, InfraSettings.KnowledgeBody> bodies = new LinkedHashMap<>();
+        if (body.configured()) {
+            bodies.put(body.getId(), body);
+        }
+        target.setBodies(bodies);
+    }
+
+    /** yaml 侧的 ES 连接参数 */
+    private InfraSettings.Elasticsearch yamlEs() {
+        InfraSettings.Elasticsearch es = new InfraSettings.Elasticsearch();
+        es.setHost(yamlEs.getHost());
+        es.setPort(yamlEs.getPort());
+        es.setScheme(yamlEs.getScheme());
+        es.setUsername(yamlEs.getUsername());
+        es.setPassword(yamlEs.getPassword());
+        es.setConnectTimeout(yamlEs.getConnectTimeout());
+        es.setSocketTimeout(yamlEs.getSocketTimeout());
+        return es;
+    }
+
+    private static Map<String, InfraSettings.Connection> copy(Map<String, InfraSettings.Connection> src) {
+        return JSON.convertValue(src, new TypeReference<LinkedHashMap<String, InfraSettings.Connection>>() {
+        });
+    }
+
+    private static Map<String, InfraSettings.KnowledgeBody> copyBodies(
+            Map<String, InfraSettings.KnowledgeBody> src) {
+        return JSON.convertValue(src,
+                new TypeReference<LinkedHashMap<String, InfraSettings.KnowledgeBody>>() {
+                });
     }
 
     private void logStatus() {
         InfraSettings s = current();
-        log.info("[存储配置] 生效配置：Elasticsearch = {}（来源：{}）；Redis = {}（来源：{}）",
-                s.getEs().describe(), esSource(), s.getRedis().describe(), redisSource());
+        StringBuilder sb = new StringBuilder();
+        s.connectionsOrEmpty().forEach((id, c) -> {
+            if (c != null && sb.length() > 0) {
+                sb.append("；");
+            }
+            if (c != null) {
+                sb.append(id).append("=").append(c.describe()).append("（").append(c.effectiveType()).append("）");
+            }
+        });
+        StringBuilder bodySb = new StringBuilder();
+        s.bodiesOrEmpty().forEach((id, b) -> {
+            if (b != null && bodySb.length() > 0) {
+                bodySb.append("；");
+            }
+            if (b != null) {
+                bodySb.append(id).append("=");
+                if (!b.configured()) {
+                    bodySb.append("一路都没配");
+                    return;
+                }
+                if (b.hasKeyword()) {
+                    bodySb.append("关键字@").append(b.keywordId());
+                }
+                if (b.hasVector()) {
+                    bodySb.append(b.hasKeyword() ? " + " : "").append("向量@").append(b.vectorId());
+                }
+            }
+        });
+        log.info("[存储配置] 生效配置：Redis = {}（来源：{}）；连接 = {}；知识体 = {}",
+                s.getRedis().describe(), redisSource(),
+                sb.length() == 0 ? "无" : sb,
+                bodySb.length() == 0 ? "无" : bodySb);
     }
 
     // ===== 连通性测试（临时客户端，用完即关，不接触生效链路） =====
@@ -314,6 +465,56 @@ public class InfraSettingsHolder {
                 // 临时工厂清理失败不影响结论
             }
         }
+    }
+
+    /**
+     * 向量库探活结果。
+     *
+     * @param version       服务端版本（读不到为 null）
+     * @param metric        距离度量
+     * @param collectionCount 已有集合数
+     * @param note          能力提示（读不到就如实说读不到）
+     */
+    public record VectorStoreProbe(String version, String metric, int collectionCount, String note) {
+    }
+
+    /**
+     * 用候选参数探活向量库：ping + 读版本 + 枚举集合。
+     *
+     * <p>与 ES / Redis 的探活同族：<b>用完即关、不接触生效链路</b>。
+     * 这里新建一个临时客户端（不复用装配期那个），所以不会把生效中的
+     * 连接参数改掉——探活失败不该有副作用。</p>
+     */
+    public VectorStoreProbe testVectorStore(InfraSettings.VectorStore candidate) {
+        if (candidate == null || !candidate.isUsable()) {
+            throw new NotConfiguredException("请先填写向量库地址");
+        }
+        rejectInvalid(candidate.validate(), "向量库");
+        // 探活用一个"固定目标"的临时客户端：用完即关，不接触生效链路。
+        // 不能复用装配期那个 provider 客户端——那会把候选参数当成生效值用。
+        QdrantHttpClient client = QdrantHttpClient.fixed(
+                new VectorTarget(candidate.getUri(), candidate.getToken(),
+                        candidate.effectiveMetric(), candidate.effectiveCollectionPrefix()),
+                Duration.ofSeconds(10));
+        try {
+            if (!client.ping()) {
+                throw new IllegalStateException("向量库 ping 失败（地址不可达或鉴权不通过）");
+            }
+            String version = client.version();
+            List<String> collections = client.listCollections();
+            return new VectorStoreProbe(version, candidate.effectiveMetric(), collections.size(),
+                    vectorNote(version, collections.size()));
+        } catch (Exception e) {
+            throw new IllegalStateException(describe(e), e);
+        }
+    }
+
+    /** 向量库侧的能力提示 */
+    private static String vectorNote(String version, int collectionCount) {
+        if (version == null) {
+            return "连接正常，但未读到版本号（该服务可能不是 Qdrant，或未开放根路径）。";
+        }
+        return "向量库连接正常：版本 " + version + "，已有 " + collectionCount + " 个集合。";
     }
 
     /**

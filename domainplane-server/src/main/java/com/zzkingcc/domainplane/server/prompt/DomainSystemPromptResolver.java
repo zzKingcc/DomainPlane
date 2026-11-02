@@ -69,6 +69,29 @@ public class DomainSystemPromptResolver implements SystemPromptResolver {
     }
 
     /**
+     * 提示词链的分段视图：生效提示词由链上哪几个域拼成、各多少字。
+     *
+     * 与 {@link #compose} 同一套取数口径（管控台优先、yaml 兜底），只是不拼接、不打日志。
+     * 给管控台「域空间」展示"这段系统提示词的来源构成"——沿链累加语义下，
+     * 用户看到自己域里只有 200 字，实际生效 800 字，差的 600 字全在祖先链上。
+     */
+    public List<PromptSegment> chain(String domainId, DomainSettings console) {
+        DomainSettings fromConsole = console == null ? new DomainSettings() : console;
+        List<PromptSegment> out = new ArrayList<>();
+        for (String step : Domains.chainOf(Domains.normalize(domainId))) {
+            String text = firstNonBlank(fromConsole.domainPrompt(step), yamlProperties.domainPrompt(step));
+            if (!isBlank(text)) {
+                out.add(new PromptSegment(step, text.trim().length()));
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    /** 提示词链上的一段：来自哪个域、多少字（未配置的段不进链） */
+    public record PromptSegment(String domain, int chars) {
+    }
+
+    /**
      * 沿链拼接：根域在前、当前域在后；未配置的段跳过。
      */
     private String compose(String domainId, DomainSettings console) {

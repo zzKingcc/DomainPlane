@@ -58,6 +58,25 @@ public record ToolDescriptor(
     public static final String REVOKED_DOMAIN = "<revoked>";
 
     /**
+     * 「还没有任何域该有它」的哨兵：{@code <unbound>}。
+     *
+     * <p>给<b>域相关能力</b>用：有些工具的存在意义取决于业务配置（如 {@code searchKnowledge}
+     * 只对"绑了知识体"的域开放），写入前它必须是"对谁都不开"的状态。而声明留空表示
+     * 挂在根域、全树可见——恰好是相反的意思，所以需要一个和 {@link #REVOKED_DOMAIN}
+     * 同类的哨兵把初始态表达出来。</p>
+     *
+     * <p>两者都只表示"对任何域都不可见"，区别只在<b>原因</b>：{@code <revoked>} 是被删域
+     * 撤销掉的，{@code <unbound>} 是还没绑到任何域。日志与排障要看得出这个区别，
+     * 判定逻辑则完全一样。</p>
+     */
+    public static final String UNBOUND_DOMAIN = "<unbound>";
+
+    /** 是不是"对任何域都不可见"的哨兵（域段字符集里没有尖括号，永远命中不了任何域链） */
+    public static boolean isSentinel(String domain) {
+        return REVOKED_DOMAIN.equals(domain) || UNBOUND_DOMAIN.equals(domain);
+    }
+
+    /**
      * 本工具是否对指定域可见：授权判定，不是过滤偏好。
      *
      * 判定按累加语义：声明命中该域，或命中它的任一祖先，即视为可见。
@@ -82,9 +101,10 @@ public record ToolDescriptor(
     /**
      * 声明的可用域；留空视为只挂根域 {@link Domains#DEFAULT}。
      *
-     * 含 {@link #REVOKED_DOMAIN} 时直接返回它自己，不回落根域：
-     * 回落意味着全树可见，那会让「删域撤销授权」变成「删域放开授权」。
-     * 部分撤销（还剩别的域）时把哨兵滤掉、只留真实域。
+     * <p>含<b>哨兵</b>（{@link #REVOKED_DOMAIN} / {@link #UNBOUND_DOMAIN}）时直接返回它自己，
+     * 不回落根域：回落意味着全树可见，那会让「删域撤销授权」变成「删域放开授权」，
+     * 也会让「还没绑定」变成「全域开放」。
+     * 部分撤销（还剩别的域）时把哨兵滤掉、只留真实域。</p>
      */
     public List<String> declaredDomains() {
         if (domains == null || domains.isEmpty()) {
@@ -96,8 +116,8 @@ public record ToolDescriptor(
                 continue;
             }
             String normalized = Domains.normalize(declared);
-            if (REVOKED_DOMAIN.equals(normalized)) {
-                return List.of(REVOKED_DOMAIN);
+            if (isSentinel(normalized)) {
+                return List.of(normalized);
             }
             out.add(normalized);
         }

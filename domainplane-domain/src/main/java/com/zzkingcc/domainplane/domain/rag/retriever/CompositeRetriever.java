@@ -5,6 +5,7 @@ import com.zzkingcc.domainplane.domain.rag.fusion.FusionConfig;
 import com.zzkingcc.domainplane.domain.rag.fusion.FusionStrategy;
 import com.zzkingcc.domainplane.domain.rag.model.Modality;
 import com.zzkingcc.domainplane.domain.rag.model.RankedList;
+import com.zzkingcc.domainplane.domain.rag.store.QueryVectorResolver;
 import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.query.Query;
@@ -22,13 +23,17 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 混合检索编排器：对「多个索引 × 两路模态」的通道集合做召回编排
+ * 混合检索编排器：对「多个来源 × 两路模态」的通道集合做召回编排
  * （串行 / 并行 + 超时，失败互不影响），把每路结果组成排名表，融合重排交给
  * {@link FusionStrategy}。
  *
- * 本类只负责「召回编排 + 失败处理」，不内联融合算法，也不知道 ES：
- * 通道由 {@link ChannelProvider} 按当前域解析给出（多索引时 = 域链上各域的索引 × 2）。
+ * 本类只负责「召回编排 + 失败处理」，不内联融合算法，也不知道 ES 与任何后端：
+ * 通道由 {@link ChannelProvider} 按当前域解析给出（多来源时 = 域链上各来源 × 2）。
  * 这样融合策略（分数制 / RRF）可以自由替换而不动编排。
+ *
+ * 查询向量化在编排层统一做（{@link QueryVectorResolver}）：一轮一次 embed 供全部
+ * 向量通道复用——旧实现每条向量通道各 embed 一次，域链 5 层就是 5 次相同 query 的
+ * 调用，模型按次计费、延迟按串行累加，而结果完全相同。
  *
  * @author zzkingcc
  */
@@ -47,18 +52,26 @@ public class CompositeRetriever implements ContentRetriever {
     };
 
     /**
-     * 一条召回通道：某个索引上的某一路模态。
+     * 一条召回通道：某个来源上的某一路模态。
      *
-     * @param sourceId  来源标识（索引名）
-     * @param modality  模态
-     * @param retriever 该通道的检索器
-     * @param depth     该来源距查询域的距离（0 = 查询域自身）；融合阶段据此做层级衰减
+     * @param sourceId    来源标识：**知识来源**（域）。融合层按它的去重计数判
+     *                    "有命中的来源数"，不许漂成物理位置（一审修订 A1）
+     * @param locationId  物理位置（{@code backendId|collection}），只用于日志与排障
+     * @param modality    模态
+     * @param retriever   该通道的检索器；向量通道应实现 {@link VectorContentRetriever}，
+     *                    由编排层把统一算好的查询向量传进去
+     * @param depth       该来源距查询域的距离（0 = 查询域自身）；融合阶段据此做层级衰减
      */
-    public record Channel(String sourceId, Modality modality, ContentRetriever retriever, int depth) {
+    public record Channel(String sourceId, String locationId, Modality modality, ContentRetriever retriever, int depth) {
 
-        /** 单来源（或来源即查询域自身）的简写。 */
+        /** 旧三参构造：depth 缺省 0、locationId 缺省为 sourceId（单来源场景，语义无损） */
         public Channel(String sourceId, Modality modality, ContentRetriever retriever) {
-            this(sourceId, modality, retriever, 0);
+            this(sourceId, sourceId, modality, retriever, 0);
+        }
+
+        /** 旧四参构造：locationId 缺省为 sourceId（单后端下二者同值） */
+        public Channel(String sourceId, Modality modality, ContentRetriever retriever, int depth) {
+            this(sourceId, sourceId, modality, retriever, depth);
         }
     }
 
@@ -74,6 +87,8 @@ public class CompositeRetriever implements ContentRetriever {
     private final ChannelProvider channelProvider;
     private final FusionConfig fusion;
     private final FusionStrategy fusionStrategy;
+    /** 查询向量化；null 表示不做统一 embed（检索器自行向量化的旧路径） */
+    private final QueryVectorResolver queryVectorResolver;
     /** 并行召回线程池;null 表示串行执行 */
     private final Executor executor;
     /** 单通道召回超时(毫秒);<=0 表示取默认兜底值 */
@@ -83,7 +98,7 @@ public class CompositeRetriever implements ContentRetriever {
                               FusionConfig fusion,
                               Executor executor,
                               long timeoutMs) {
-        this(channelProvider, fusion, executor, timeoutMs, null);
+        this(channelProvider, fusion, executor, timeoutMs, null, null);
     }
 
     /**
@@ -94,11 +109,25 @@ public class CompositeRetriever implements ContentRetriever {
                               Executor executor,
                               long timeoutMs,
                               FusionStrategy fusionStrategy) {
+        this(channelProvider, fusion, executor, timeoutMs, fusionStrategy, null);
+    }
+
+    /**
+     * 含查询向量化的构造器：{@code queryVectorResolver} 非空时，每轮检索开头统一
+     * embed 一次，结果供全部向量通道复用（{@link VectorContentRetriever}）。
+     */
+    public CompositeRetriever(ChannelProvider channelProvider,
+                              FusionConfig fusion,
+                              Executor executor,
+                              long timeoutMs,
+                              FusionStrategy fusionStrategy,
+                              QueryVectorResolver queryVectorResolver) {
         this.channelProvider = channelProvider;
         this.fusion = fusion == null ? FusionConfig.defaults() : fusion;
         this.executor = executor;
         this.timeoutMs = timeoutMs;
         this.fusionStrategy = fusionStrategy == null ? new DefaultFusionStrategy() : fusionStrategy;
+        this.queryVectorResolver = queryVectorResolver;
     }
 
     @Override
@@ -109,6 +138,31 @@ public class CompositeRetriever implements ContentRetriever {
         if (channels == null || channels.isEmpty()) {
             log.info("[组合检索] 当前域链上没有可召回的索引，返回空结果");
             return List.of();
+        }
+
+        /* 查询向量化统一在这一轮开头做：一轮一个 embed，全部向量通道复用。
+           失败语义钉死（一审修订 A2）：embed 抛异常时本轮全部向量通道标记失败、
+           关键词通道照常执行——不 try-catch 的话，一次 embed 失败会让整轮检索抛异常，
+           "链路坏了"与"真没命中"再次同形，调用方会反复换问法重试而不是去查模型配置。
+
+           两个结果量一次赋值定终值：并行分支的 lambda 要捕获它们。 */
+        final float[] queryVector;
+        final boolean vectorFailed;
+        if (queryVectorResolver != null && hasVectorChannel(channels)) {
+            float[] embedded = null;
+            boolean failed = false;
+            try {
+                embedded = queryVectorResolver.embed(query.text());
+            } catch (Exception e) {
+                failed = true;
+                log.warn("[组合检索] 查询向量化失败，本轮向量通道全部降级（关键词通道照常）: {}",
+                        e.getMessage());
+            }
+            queryVector = embedded;
+            vectorFailed = failed;
+        } else {
+            queryVector = null;
+            vectorFailed = false;
         }
 
         // 整轮共享一个 deadline：超时是「这次检索多久还不返回」的总预算，不是每条通道各等一次。
@@ -126,17 +180,18 @@ public class CompositeRetriever implements ContentRetriever {
             // 整轮通道在同一个线程上排队（仍是串行），但每条都能被 cancel(true) 打断。
             try (ExecutorService serial = Executors.newSingleThreadExecutor(SERIAL_FACTORY)) {
                 for (Channel ch : channels) {
-                    ChannelResult r = retrieveSafely(ch, query, deadline, serial);
+                    ChannelResult r = retrieveSafely(ch, query, deadline, serial, queryVector, vectorFailed);
                     if (!r.failed()) {
                         succeeded++;
                     }
-                    lists.add(new RankedList(ch.sourceId(), ch.modality(), ch.depth(), r.contents()));
+                    lists.add(new RankedList(ch.sourceId(), ch.locationId(), ch.modality(), ch.depth(), r.contents()));
                 }
             }
         } else {
             List<CompletableFuture<ChannelResult>> futures = new ArrayList<>(channels.size());
             for (Channel ch : channels) {
-                futures.add(CompletableFuture.supplyAsync(() -> retrieveDirectly(ch, query), executor));
+                futures.add(CompletableFuture.supplyAsync(
+                        () -> dispatch(ch, query, queryVector, vectorFailed), executor));
             }
             for (int i = 0; i < channels.size(); i++) {
                 Channel ch = channels.get(i);
@@ -144,7 +199,7 @@ public class CompositeRetriever implements ContentRetriever {
                 if (!r.failed()) {
                     succeeded++;
                 }
-                lists.add(new RankedList(ch.sourceId(), ch.modality(), ch.depth(), r.contents()));
+                lists.add(new RankedList(ch.sourceId(), ch.locationId(), ch.modality(), ch.depth(), r.contents()));
             }
         }
 
@@ -171,6 +226,15 @@ public class CompositeRetriever implements ContentRetriever {
         return left > 1 ? left : 1;
     }
 
+    private static boolean hasVectorChannel(List<Channel> channels) {
+        for (Channel ch : channels) {
+            if (ch.modality() == Modality.VECTOR) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * 单通道召回结果
      */
@@ -186,19 +250,29 @@ public class CompositeRetriever implements ContentRetriever {
     }
 
     /**
-     * 在调用线程上直接召回，仅做异常隔离。
+     * 单通道分发：向量通道走 {@link VectorContentRetriever} 收编排层算好的向量，
+     * 其余（关键词通道 / 旧式自行向量化的检索器）走原入口。
      *
-     * 用于并行分支：那里每条通道已经提交到 {@code executor}，超时由
-     * {@link #await} 按整轮 deadline 控制，不需要再包一层线程。
+     * embed 失败（{@code vectorFailed}）或没有向量可用时，向量通道直接记为失败——
+     * 这就是 A2 的降级口径：向量路整体不可用不影响关键词路。
      */
-    private ChannelResult retrieveDirectly(Channel channel, Query query) {
-        try {
-            return ChannelResult.ok(channel.retriever().retrieve(query));
-        } catch (Exception e) {
-            log.warn("[组合检索] 通道[{}·{}]检索异常,本次降级为忽略该路: {}",
-                    channel.sourceId(), channel.modality(), e.getMessage());
-            return ChannelResult.failure();
+    private static ChannelResult dispatch(Channel channel, Query query,
+                                          float[] queryVector, boolean vectorFailed) {
+        if (channel.modality() == Modality.VECTOR && channel.retriever() instanceof VectorContentRetriever vcr) {
+            if (vectorFailed || queryVector == null) {
+                log.warn("[组合检索] 通道[{}·{}]无可用查询向量，本次降级为忽略该路",
+                        channel.sourceId(), channel.modality());
+                return ChannelResult.failure();
+            }
+            try {
+                return ChannelResult.ok(vcr.retrieve(query, queryVector));
+            } catch (Exception e) {
+                log.warn("[组合检索] 通道[{}·{}]检索异常,本次降级为忽略该路: {}",
+                        channel.sourceId(), channel.modality(), e.getMessage());
+                return ChannelResult.failure();
+            }
         }
+        return ChannelResult.ok(channel.retriever().retrieve(query));
     }
 
     /**
@@ -208,10 +282,11 @@ public class CompositeRetriever implements ContentRetriever {
      * 直接跑的话调用线程会被阻塞在通道上，超时无从生效，那正是串行模式
      * 完全没有超时保护的根因。
      */
-    private ChannelResult retrieveSafely(Channel channel, Query query, long deadline, ExecutorService pool) {
+    private ChannelResult retrieveSafely(Channel channel, Query query, long deadline, ExecutorService pool,
+                                         float[] queryVector, boolean vectorFailed) {
         Future<ChannelResult> task = null;
         try {
-            task = pool.submit(() -> ChannelResult.ok(channel.retriever().retrieve(query)));
+            task = pool.submit(() -> dispatch(channel, query, queryVector, vectorFailed));
             return task.get(remaining(deadline), TimeUnit.MILLISECONDS);
         } catch (Exception e) {
             if (task != null) {

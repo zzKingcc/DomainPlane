@@ -5,7 +5,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -18,6 +20,14 @@ public class AuthService {
 
     /** 账号名长度上限。它会进入凭证 payload，过长没有实际意义，也让异常输入在设置期就被拦住 */
     private static final int MAX_USERNAME_LENGTH = 64;
+
+    /**
+     * 登录记录保留条数（账号页「登录记录」表格的数据源）。
+     *
+     * 20 条：单人管控台的登录频率极低（部署方 + 偶发运维），20 条足够覆盖"最近都在哪登录"；
+     * 再多只是把账号文件撑大——它是鉴权关键路径上的文件，每次登录都要整体读写。
+     */
+    private static final int LOGIN_RECORD_LIMIT = 20;
 
     private final AccountStore accountStore;
     private final CredentialService credentialService;
@@ -154,8 +164,20 @@ public class AuthService {
                     return;
                 }
                 AccountSettings updated = current.copy();
-                updated.setLastLoginAt(Instant.now().toString());
+                String at = Instant.now().toString();
+                updated.setLastLoginAt(at);
                 updated.setLastLoginFrom(from);
+                // 登录记录：新的在前、截到上限。只记成功登录——失败尝试已有日志，
+                // 且把失败也写进账号文件会让"读-改-写"暴露在登录爆破路径上。
+                List<AccountSettings.LoginRecord> records = new ArrayList<>();
+                if (updated.getLoginRecords() != null) {
+                    records.addAll(updated.getLoginRecords());
+                }
+                records.add(0, new AccountSettings.LoginRecord(at, from));
+                while (records.size() > LOGIN_RECORD_LIMIT) {
+                    records.remove(records.size() - 1);
+                }
+                updated.setLoginRecords(records);
                 accountStore.save(updated);
             }
         } catch (RuntimeException e) {
@@ -223,6 +245,7 @@ public class AuthService {
             body.put("username", account.getUsername());
             body.put("lastLoginAt", account.getLastLoginAt());
             body.put("lastLoginFrom", account.getLastLoginFrom());
+            body.put("loginRecords", account.getLoginRecords() == null ? List.of() : account.getLoginRecords());
             body.put("defaultCredential", isDefaultCredential(account));
         }
         return body;

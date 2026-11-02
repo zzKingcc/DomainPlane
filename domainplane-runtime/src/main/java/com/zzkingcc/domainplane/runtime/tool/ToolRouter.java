@@ -112,6 +112,20 @@ public class ToolRouter {
     }
 
     /**
+     * 该域是否处于软删宽限期（新开轮入口判据，与 {@link #isCallableDomain} 分工）：
+     * 结构判据管"能不能当入口"，这个管"还接不接新客"。软删域结构上仍是可调用单元，
+     * 只是宽限期内不再接受新会话（resume 收尾放行）。
+     */
+    public boolean isPendingDelete(String domainId) {
+        return domainRegistry.isPendingDelete(domainId);
+    }
+
+    /** 软删时间戳（毫秒）；未软删返回 {@code null}（供拒绝文案说明宽限期） */
+    public Long pendingDeleteAt(String domainId) {
+        return domainRegistry.pendingDeleteAt(domainId);
+    }
+
+    /**
      * 该域是否已知（任一处存在即为真）。
      */
     public boolean containsDomain(String domainId) {

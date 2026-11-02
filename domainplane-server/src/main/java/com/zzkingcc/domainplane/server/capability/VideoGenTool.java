@@ -2,6 +2,7 @@ package com.zzkingcc.domainplane.server.capability;
 
 import com.zzkingcc.domainplane.api.annotation.Tool;
 import com.zzkingcc.domainplane.api.annotation.ToolParam;
+import com.zzkingcc.domainplane.api.tool.ToolDescriptor;
 import com.zzkingcc.domainplane.runtime.vision.MediaAttachmentStore;
 import com.zzkingcc.domainplane.runtime.vision.MediaAttachmentStore.Kind;
 import com.zzkingcc.domainplane.server.model.DefaultModelResolver;
@@ -31,13 +32,18 @@ import java.util.Base64;
  * {@link MediaAttachmentStore}，返回值只有引用名与说明。服务商给了成品地址时优先按
  * <b>地址引用</b>存（省掉一次整段下载与大块字节进 Redis）；只有拿不到地址才把字节取回来存。</p>
  *
+ * <p><b>可见性</b>：两个工具由「该域（链上）绑没绑可用的生视频模型」决定
+ * （初始哨兵 {@link ToolDescriptor#UNBOUND_DOMAIN}，由 {@code ModelCapabilityToolBinder} 重算），
+ * 且<b>同进同退</b>——单独放出 {@code checkVideo} 会出现"能查任务却不能提交任务"的怪状态。</p>
+ *
  * @author zzkingcc
  */
 @Component
 public class VideoGenTool extends CapabilityToolSupport {
 
-    private static final String SUBMIT_TOOL = "generateVideo";
-    private static final String CHECK_TOOL = "checkVideo";
+    /** 工具名（模型看到的函数名）。{@code ModelCapabilityToolBinder} 按它们改可用域 */
+    public static final String SUBMIT_TOOL = "generateVideo";
+    public static final String CHECK_TOOL = "checkVideo";
 
     /** 轮询间隔：视频任务动辄几分钟，3 秒一次足够及时又不会把服务商打爆 */
     private static final long POLL_INTERVAL_MS = 3_000L;
@@ -70,7 +76,8 @@ public class VideoGenTool extends CapabilityToolSupport {
                     + "还没出会返回一个任务号，此时必须稍后用 checkVideo 带上该任务号继续查询，"
                     + "不要凭空告诉用户视频已经生成好了。"
                     + "本工具依赖当前域已绑定的生视频模型；没有时会明确告知。",
-            effect = Tool.Effect.WRITE)
+            effect = Tool.Effect.WRITE,
+            domains = ToolDescriptor.UNBOUND_DOMAIN)
     public String generate(@ToolParam("视频内容描述：出现什么、做什么动作、什么场景与风格、"
             + "镜头怎么走。例如'一只柴犬在草地上追飞盘，午后暖光，镜头缓慢跟随'") String prompt,
                            @ToolParam(value = "分辨率 / 尺寸，如 1280x720；"
@@ -117,7 +124,8 @@ public class VideoGenTool extends CapabilityToolSupport {
                     + "参数 taskId 填 generateVideo 返回的任务号。"
                     + "任务已完成时返回视频编号，未完成时返回当前状态并提示稍后再查，失败时返回失败原因。"
                     + "在 generateVideo 返回了任务号（而不是视频编号）之后才需要调用本工具。",
-            effect = Tool.Effect.READ)
+            effect = Tool.Effect.READ,
+            domains = ToolDescriptor.UNBOUND_DOMAIN)
     public String check(@ToolParam("generateVideo 返回的任务号") String taskId) {
         if (isBlank(taskId)) {
             return "没有指定任务号。请把 generateVideo 返回的 taskId 传进来。";

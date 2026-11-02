@@ -5,50 +5,50 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>登录 · DomainPlane 管控台</title>
     <link rel="stylesheet" href="assets/console.css">
-    <style>
-        /* 登录页是独立入口：不带侧栏（未登录时不加载一堆无权限的导航与请求） */
-        .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
-        .login-card { width: 100%; max-width: 380px; }
-        .login-card .brand-line { margin-bottom: 18px; }
-        .login-card .brand-line h1 { font-size: 17px; font-weight: 600; }
-        .login-card .brand-line .sub { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
-        .login-card form { display: block; }
-        .login-card .btn-primary { width: 100%; margin-top: 4px; }
-        .login-note { font-size: 12px; color: var(--muted); line-height: 1.7; margin-top: 14px; }
-        .login-note code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-family: ui-monospace, Consolas, monospace; }
-        .banner { font-size: 12.5px; line-height: 1.7; padding: 10px 12px; border-radius: 6px; margin-bottom: 14px; }
-        .banner.warn { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
-        .banner.info { background: var(--primary-dim); color: var(--primary); border: 1px solid #bfdbfe; }
-    </style>
 </head>
-<body>
-<div class="login-wrap">
-    <div class="login-card dp-card">
-        <div class="brand-line">
-            <h1>DomainPlane 管控台</h1>
-            <div class="sub" id="modeSub">正在检测服务端状态…</div>
+<body class="dp-login">
+<!-- 登录页是独立入口：不带侧栏（未登录时不加载一堆无权限的导航与请求）。
+     骨架走 Tabler 官方 sign-in：.page.page-center 纵向居中 + .container-tight 窄栏
+     + 表单本身就是 .card.card-md（.form-footer 里的按钮 w-100 撑满）。
+     不写 .container —— 本地这份 tabler 压根没有 .container 规则（只有 .toast-container），
+     挂上去是个死类；窄栏全靠 .container-tight（自带 margin-inline:auto + max-width:32rem）。 -->
+<div class="page page-center">
+    <div class="container-tight py-4">
+
+        <div class="text-center mb-4">
+            <div class="dp-login-brand">DomainPlane</div>
+            <div class="text-muted" id="modeSub">正在检测服务端状态…</div>
         </div>
 
-        <div id="banner" class="banner info" style="display:none;"></div>
+        <div id="banner" class="banner info" hidden></div>
 
-        <form id="loginForm" autocomplete="off" onsubmit="return false;">
-            <div class="field">
-                <label for="username">账号</label>
-                <input class="form-control" id="username" name="username" type="text" autocomplete="username" placeholder="服务端配置的账号">
+        <form id="loginForm" class="card card-md" autocomplete="off" onsubmit="return false;">
+            <div class="card-body">
+                <h2 class="card-title text-center mb-4">登录管控台</h2>
+                <div class="mb-3">
+                    <label class="form-label" for="username">账号</label>
+                    <input class="form-control" id="username" name="username" type="text"
+                           autocomplete="username" placeholder="服务端配置的账号">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="password">密码</label>
+                    <input class="form-control" id="password" name="password" type="password"
+                           autocomplete="current-password" placeholder="登录密码">
+                </div>
+                <!-- 仅首次初始化时出现：无账号状态下才有的"设密码"入口 -->
+                <div class="mb-3" id="confirmField" hidden>
+                    <label class="form-label" for="password2">确认密码</label>
+                    <input class="form-control" id="password2" name="password2" type="password"
+                           autocomplete="new-password" placeholder="再输一遍">
+                </div>
+                <div class="result" id="result"></div>
+                <div class="form-footer">
+                    <button class="btn btn-primary w-100" id="submitBtn" type="submit">登录</button>
+                </div>
             </div>
-            <div class="field">
-                <label for="password">密码</label>
-                <input class="form-control" id="password" name="password" type="password" autocomplete="current-password" placeholder="登录密码">
-            </div>
-            <div class="field" id="confirmField" style="display:none;">
-                <label for="password2">确认密码</label>
-                <input class="form-control" id="password2" name="password2" type="password" autocomplete="new-password" placeholder="再输一遍">
-            </div>
-            <div class="result" id="result"></div>
-            <button class="btn btn-primary" id="submitBtn" type="submit">登录</button>
         </form>
 
-        <div class="login-note" id="note"></div>
+        <div class="text-center text-muted mt-3" id="note"></div>
     </div>
 </div>
 

@@ -47,9 +47,11 @@ class AdminDomainToolCallEchoTest {
         env.getPropertySources().addFirst(new MapPropertySource("test", props));
         StorageLocations storage = new StorageLocations(env);
         store = new DomainSettingsStore(storage);
-        // domainStore 本路径不落盘，但 view() 要读它的 filePath() 展示给前端，给真实实例
+        // domainStore 本路径不落盘，但 view() 要读它的 filePath() 展示给前端，给真实实例；
+        // toolRegistry / purgeService / domainProperties / versionWatcher / infraHolder
+        // 本路径不涉及，传 null
         return new AdminDomainController(registry, new DomainStore(storage), null, store,
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null);
     }
 
     private static AdminDomainController.ToolCallEchoBody body(Boolean echo) {

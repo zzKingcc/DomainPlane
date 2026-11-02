@@ -11,16 +11,22 @@ import com.zzkingcc.domainplane.infrastructure.redis.memory.RedisChatMemoryStore
 import com.zzkingcc.domainplane.runtime.cancellation.CancellationRegistry;
 import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
 import com.zzkingcc.domainplane.runtime.tool.ToolRegistry;
+import com.zzkingcc.domainplane.server.config.DomainProperties;
+import com.zzkingcc.domainplane.server.config.KnowledgeProperties;
 import com.zzkingcc.domainplane.server.config.RagProperties;
 import com.zzkingcc.domainplane.server.knowledge.DomainChannelProvider;
 import com.zzkingcc.domainplane.server.knowledge.KnowledgeBaseService;
+import com.zzkingcc.domainplane.server.knowledge.MapKnowledgeBackendRegistry;
+import com.zzkingcc.domainplane.server.knowledge.RetrievalPlan;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
 import com.zzkingcc.domainplane.server.model.ModelProfileStore;
 import com.zzkingcc.domainplane.server.mcp.McpConnectionStore;
+import com.zzkingcc.domainplane.server.settings.DomainPurgeService;
 import com.zzkingcc.domainplane.server.settings.DomainSettingsStore;
 import com.zzkingcc.domainplane.server.settings.DomainStore;
+import com.zzkingcc.domainplane.server.settings.DomainVersionSignal;
+import com.zzkingcc.domainplane.server.settings.DomainVersionWatcher;
 import com.zzkingcc.domainplane.server.env.StorageLocations;
-import dev.langchain4j.model.embedding.EmbeddingModel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.env.MapPropertySource;
@@ -103,7 +109,7 @@ class AdminDomainDeleteOrderTest {
 
         StubKnowledgeBase() {
             // RagProperties 不能传 null：KnowledgeBaseService 构造器会真的按它建导入线程池
-            super(null, null, new RagProperties(), null, null, null);
+            super(null, new RagProperties(), null, null, null, emptyPlan(), null, null);
         }
 
         @Override public List<String> deleteIndices(Collection<String> domains) {
@@ -140,8 +146,20 @@ class AdminDomainDeleteOrderTest {
     }
 
     private static class StubChannelProvider extends DomainChannelProvider {
-        StubChannelProvider() { super(null, (EmbeddingModel) null, null); }
-        @Override public void evictIndices(Collection<String> indexNames) { record("channel.evictIndices"); }
+        StubChannelProvider() {
+            super(emptyPlan());
+        }
+        @Override public void evict(Collection<String> indexNames) { record("channel.evict"); }
+    }
+
+    /**
+     * 空注册表上的检索计划：桩只覆盖 deleteIndices / evict，不解析通道，
+     * 但构造器要能跑完（计划不碰 Spring，空注册表也能建）
+     */
+    private static RetrievalPlan emptyPlan() {
+        return new RetrievalPlan(KnowledgeProperties.Strategy.HYBRID,
+                new MapKnowledgeBackendRegistry(List.of()),
+                "es-main", 20, "es-main", 30);
     }
 
     private static class StubMemoryStore extends RedisChatMemoryStore {
@@ -236,22 +254,37 @@ class AdminDomainDeleteOrderTest {
         StubHistorySearch index = new StubHistorySearch();
         StubConversationSummary summary = new StubConversationSummary();
         StubCheckpointSaver checkpoint = new StubCheckpointSaver();
-        AdminDomainController controller = new AdminDomainController(
+        StubDomainStore store = new StubDomainStore();
+        StubSettingsStore settingsStore = new StubSettingsStore();
+        StubToolRegistry toolRegistry = new StubToolRegistry();
+        // 级联清理已抽到 DomainPurgeService（管控台立即删与宽限期到点的定时删共用）；
+        // 本用例钉的还是同一套顺序，只是调用方从控制器变成服务
+        DomainPurgeService purgeService = new DomainPurgeService(
                 registry,
-                new StubDomainStore(),
+                store,
                 kb,
-                new StubSettingsStore(),
+                settingsStore,
                 new StubModelRegistry(),
                 new McpConnectionStore(storage()),
-                new StubToolRegistry(),
+                toolRegistry,
                 new StubChannelProvider(),
                 memory,
                 checkpoint,
                 archive,
                 index,
                 summary,
-                // 删域前会先停掉该域在跑的会话；本用例不关注，传真实实例即可（无 running key）
+                // 删域前会先停掉该域在飞的会话；本用例不关注，传真实实例即可（无 running key）
                 new CancellationRegistry());
+        AdminDomainController controller = new AdminDomainController(
+                registry,
+                store,
+                toolRegistry,
+                settingsStore,
+                purgeService,
+                new DomainProperties(),
+                new DomainVersionWatcher(store, new DomainVersionSignal(null, null)),
+                // 绑知识体那条路径本用例不走，存储配置持有者传 null
+                null);
         return new Harness(controller, registry, kb, memory, archive, index, summary, checkpoint);
     }
 
@@ -271,11 +304,11 @@ class AdminDomainDeleteOrderTest {
     void fullDeleteFollowsRequiredOrder() {
         Harness h = harness();
 
-        h.controller().delete("default.sales");
+        h.controller().delete("default.sales", true, null);
 
         int firstMemory = indexOf("memory.deleteByDomain");
         int firstIndex = indexOf("kb.deleteIndices");
-        int evict = indexOf("channel.evictIndices");
+        int evict = indexOf("channel.evict");
         int prompts = indexOf("settings.removeDomains");
         int unbind = indexOf("model.unbindDomains");
         int forget = indexOf("tool.forgetDomains");
@@ -300,7 +333,7 @@ class AdminDomainDeleteOrderTest {
     void memoryCheckpointAndArchiveArePairedPerDomain() {
         Harness h = harness();
 
-        h.controller().delete("default.sales");
+        h.controller().delete("default.sales", true, null);
 
         // 每个域都是 memory → checkpoint → archive → index → summary，互不交叉
         List<String> redisCalls = CALLS.stream()
@@ -329,7 +362,7 @@ class AdminDomainDeleteOrderTest {
         Harness h = harness();
         h.memory().failure = new ChatMemoryException(ErrorCode.CHAT_MEMORY_DELETE_ERROR, "Redis 挂了");
 
-        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales"));
+        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales", true, null));
 
         assertEquals(ErrorCode.CHAT_MEMORY_DELETE_ERROR, e.getErrorCode());
         assertTrue(e.getMessage().contains("已中止、域未删除"), "文案要说明中止：" + e.getMessage());
@@ -344,7 +377,7 @@ class AdminDomainDeleteOrderTest {
         Harness h = harness();
         h.index().failure = new ChatMemoryException(ErrorCode.CHAT_MEMORY_DELETE_ERROR, "索引损坏");
 
-        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales"));
+        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales", true, null));
 
         assertEquals(ErrorCode.CHAT_MEMORY_DELETE_ERROR, e.getErrorCode());
         assertEquals(-1, indexOf("kb.deleteIndices"), "知识库索引还没被删：" + CALLS);
@@ -357,7 +390,7 @@ class AdminDomainDeleteOrderTest {
         Harness h = harness();
         h.checkpoint().failure = new ChatMemoryException(ErrorCode.CHECKPOINT_ERROR, "断点损坏");
 
-        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales"));
+        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales", true, null));
 
         assertEquals(ErrorCode.CHAT_MEMORY_DELETE_ERROR, e.getErrorCode());
         assertEquals(-1, indexOf("kb.deleteIndices"), "索引还没被删：" + CALLS);
@@ -370,7 +403,7 @@ class AdminDomainDeleteOrderTest {
         Harness h = harness();
         h.archive().failure = new ChatMemoryException(ErrorCode.CHAT_MEMORY_DELETE_ERROR, "归档损坏");
 
-        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales"));
+        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales", true, null));
 
         assertEquals(ErrorCode.CHAT_MEMORY_DELETE_ERROR, e.getErrorCode());
         assertEquals(-1, indexOf("kb.deleteIndices"), "索引还没被删：" + CALLS);
@@ -383,7 +416,7 @@ class AdminDomainDeleteOrderTest {
         Harness h = harness();
         h.summary().failure = new ChatMemoryException(ErrorCode.CHAT_MEMORY_DELETE_ERROR, "摘要损坏");
 
-        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales"));
+        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales", true, null));
 
         assertEquals(ErrorCode.CHAT_MEMORY_DELETE_ERROR, e.getErrorCode());
         assertEquals(-1, indexOf("kb.deleteIndices"), "知识库索引还没被删：" + CALLS);
@@ -397,7 +430,7 @@ class AdminDomainDeleteOrderTest {
         h.kb().failure = new com.zzkingcc.domainplane.common.exception.KnowledgeBaseException(
                 ErrorCode.KNOWLEDGE_BASE_ERROR, "ES 不可达");
 
-        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales"));
+        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales", true, null));
 
         assertEquals(ErrorCode.KNOWLEDGE_BASE_ERROR, e.getErrorCode());
         assertEquals(-1, indexOf("settings.removeDomains"), "域属性还没被动：" + CALLS);
@@ -410,14 +443,14 @@ class AdminDomainDeleteOrderTest {
     @DisplayName("域不存在 / 根域：直接拒绝，一个 Redis 命令都不发")
     void rejectsBeforeTouchingAnything() {
         Harness missing = harness();
-        assertThrows(BaseException.class, () -> missing.controller().delete("default.nope"));
+        assertThrows(BaseException.class, () -> missing.controller().delete("default.nope", true, null));
         assertTrue(CALLS.stream().noneMatch(c -> c.startsWith("memory.") || c.startsWith("checkpoint.")
                 || c.startsWith("archive.") || c.startsWith("index.") || c.startsWith("summary.")
                 || c.startsWith("kb.")),
                 "前置校验失败不该有任何副作用：" + CALLS);
 
         Harness root = harness();
-        BaseException e = assertThrows(BaseException.class, () -> root.controller().delete("default"));
+        BaseException e = assertThrows(BaseException.class, () -> root.controller().delete("default", true, null));
         assertTrue(e.getMessage().contains("根域不可删除"));
         assertFalse(CALLS.contains("kb.deleteIndices"), "根域不可删时不该删索引：" + CALLS);
     }
@@ -428,7 +461,7 @@ class AdminDomainDeleteOrderTest {
         Harness h = harness();
         h.registry().deleteResult = false;
 
-        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales"));
+        BaseException e = assertThrows(BaseException.class, () -> h.controller().delete("default.sales", true, null));
         assertEquals(ErrorCode.INVALID_PARAMETER, e.getErrorCode());
     }
 
@@ -437,7 +470,7 @@ class AdminDomainDeleteOrderTest {
     void successReturnsFullView() {
         Harness h = harness();
 
-        Map<String, Object> view = h.controller().delete("default.sales");
+        Map<String, Object> view = h.controller().delete("default.sales", true, null);
 
         assertEquals(0, view.get("code"));
         assertEquals("deleted", view.get("action"));

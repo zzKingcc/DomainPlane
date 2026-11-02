@@ -8,6 +8,11 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 /**
  * 管理操作审计。
+ *
+ * <p>只写 AUDIT 日志：完整历史以日志为准。内存环曾作为查询副本供概览
+ * 「最近管理操作」展示，该组件已下架，环一并移除——无消费方的缓存
+ * 与死代码无异。</p>
+ *
  * @author zzkingcc
  */
 public final class AuditLog {

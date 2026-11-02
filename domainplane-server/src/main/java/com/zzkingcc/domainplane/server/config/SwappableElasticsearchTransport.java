@@ -48,8 +48,8 @@ public class SwappableElasticsearchTransport implements ElasticsearchTransport, 
 
     public SwappableElasticsearchTransport(InfraSettingsHolder holder) {
         this.holder = holder;
-        this.delegate = build(holder.current().getEs());
-        log.info("[存储配置] Elasticsearch 通信层就绪：{}", holder.current().getEs().describe());
+        this.delegate = build(holder.current().defaultEs());
+        log.info("[存储配置] Elasticsearch 通信层就绪：{}", holder.current().defaultEs().describe());
         // 先建好 delegate 再注册，避免注册后立刻被并发 swap 覆盖
         holder.register(this);
     }
@@ -85,7 +85,7 @@ public class SwappableElasticsearchTransport implements ElasticsearchTransport, 
 
     @Override
     public synchronized void swap() {
-        InfraSettings.Elasticsearch cfg = holder.current().getEs();
+        InfraSettings.Elasticsearch cfg = holder.current().defaultEs();
         RestClientTransport fresh = build(cfg);
         RestClientTransport old = this.delegate;
         this.delegate = fresh;
@@ -99,7 +99,7 @@ public class SwappableElasticsearchTransport implements ElasticsearchTransport, 
             // 理论不可达（构造时必定赋值），保底避免 NPE
             synchronized (this) {
                 if (this.delegate == null) {
-                    this.delegate = build(holder.current().getEs());
+                    this.delegate = build(holder.current().defaultEs());
                 }
                 return this.delegate;
             }

@@ -197,16 +197,26 @@ class ModelCapabilityProbeTest {
                 | ((b[off + 2] & 0xFF) << 8) | (b[off + 3] & 0xFF);
     }
 
-    /** 非 2xx 时服务商的原话要进 note：「未确认」三个字本身不提供任何可行动信息 */
+    /**
+     * note 只给**结论清单**，不给理由：支持 / 不支持 / 未确认各一行。
+     *
+     * <p>早先这里把每个未确认探针的服务商原话（JSON 回执）都拼进 note，
+     * 弹窗里一屏几百个字，管理员得自己从里面挑「到底支持什么」。
+     * 原话回服务端日志（{@code log.info}），要追具体哪次被拒翻日志即可。
+     */
     @Test
-    void 未确认的探针把服务商回执带进说明() {
+    void 说明只列结论清单不带服务商原话() {
         ModelCapabilityProbe probe = new ModelCapabilityProbe();
 
         String note = probe.probeCapabilities("http://127.0.0.1:" + port + "/v1", "sk-test", "m").note();
 
-        assertTrue(note.contains("chat-video-in=UNCONFIRMED"), "视频输入 400 → 未确认，要列进说明");
-        assertTrue(note.contains("服务商回：{}"), "非 2xx 的响应体摘要要带上（本桩回的就是 {}）");
-        assertFalse(note.contains("chat-image-in"),
-                "图片输入在本桩里是通的（2xx），不该出现在未确认清单里");
+        assertTrue(note.contains("支持："), "确认到的要单独成行");
+        assertTrue(note.contains("图片输入"), "图片输入在本桩里是通的（2xx），要列进支持");
+        assertTrue(note.contains("不支持："), "端点确实不存在的要单独成行");
+        assertTrue(note.contains("音频输入"), "音频输入 404 → 不支持，要列进清单");
+        assertTrue(note.contains("未确认："), "没探到的要单独成行");
+        assertTrue(note.contains("视频输入"), "视频输入 400 → 未确认，要列进清单");
+        assertFalse(note.contains("服务商回"), "服务商原话回服务端日志，不进弹窗");
+        assertFalse(note.contains("chat-video-in"), "探针键是内部名，弹窗里给人看的是中文名");
     }
 }

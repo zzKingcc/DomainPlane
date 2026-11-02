@@ -1,44 +1,68 @@
 /* ==========================================================================
-   P1 · infra 页脚本
-   自 infra.html 的内联 <script> 机械平移（1 块合并），逻辑未改。
+   存储配置页脚本
+   —— 01 Redis：平台自身基础设施，单例
+   —— 02 连接：两张可编辑的表（关键字 / 向量），每行是一台具体实例；原文内置
+   —— 03 知识体：一个体 = 一套知识库，关键字 / 向量各占一路、各自可选
+   两段是「用途」不是「产品」：ES 既能做关键字也能做向量，所以它可以在两张表里
+   各出现一次，各填各的地址；地址一致时由后端按协议+主机+端口判定为同一台实例。
+   知识体为什么两路装在一个体里：两路都配 = 混合召回，只配一路 = 单路，域绑一个体
+   就回答了"这个域走几路"；拆成两个体则会出现"绑了一个、忘了另一个"的静默退化。
+   原文不在知识体里：它一律写平台内置磁盘（换模型要能从原文重灌），没有"配到哪台
+   机器"这回事。
    ========================================================================== */
 (function () {
-/* 字段表：[输入框 id, 接口字段名, 类型(s=字符串 / n=数字)]，一处定义驱动全页 */
-    var MAP = {
-        es: [
-            ['esHost', 'host', 's'],
-            ['esPort', 'port', 'n'],
-            ['esScheme', 'scheme', 's'],
-            ['esUsername', 'username', 's'],
-            ['esPassword', 'password', 's'],
-            ['esConnectTimeout', 'connectTimeout', 'n'],
-            ['esSocketTimeout', 'socketTimeout', 'n']
-        ],
-        redis: [
-            ['redisHost', 'host', 's'],
-            ['redisPort', 'port', 'n'],
-            ['redisPassword', 'password', 's'],
-            ['redisDatabase', 'database', 'n']
-        ]
-    };
-    var RESULT = { es: 'esResult', redis: 'redisResult' };
-    var DIRTY = { es: 'esDirty', redis: 'redisDirty' };
-    var BADGE = { es: 'esBadge', redis: 'redisBadge' };
-    var LABEL = { es: 'Elasticsearch', redis: 'Redis' };
-    var KEY_INPUT = { es: 'esPassword', redis: 'redisPassword' };
-    var KEY_HELP = { es: 'esKeyHelp', redis: 'redisKeyHelp' };
-    var KEY_EMPTY_HINT = { es: '未设置（留空则不发送认证头）', redis: '未设置（无密码模式）' };
 
-    var saved = { es: {}, redis: {} };
-    var CONFIGURED = { es: false, redis: false };
-    var SOURCE = { es: '-', redis: '-' };
+    /* 字段表：[输入框 id, 接口字段名, 类型(s=字符串 / n=数字)]，一处定义驱动全页 */
+    var REDIS_FIELDS = [
+        ['redisHost', 'host', 's'],
+        ['redisPort', 'port', 'n'],
+        ['redisPassword', 'password', 's'],
+        ['redisDatabase', 'database', 'n']
+    ];
+    var ES_FIELDS = [
+        ['esHost', 'host', 's'],
+        ['esPort', 'port', 'n'],
+        ['esScheme', 'scheme', 's'],
+        ['esUsername', 'username', 's'],
+        ['esPassword', 'password', 's'],
+        ['esConnectTimeout', 'connectTimeout', 'n'],
+        ['esSocketTimeout', 'socketTimeout', 'n']
+    ];
+    var QD_FIELDS = [
+        ['vectorUri', 'uri', 's'],
+        ['vectorToken', 'token', 's'],
+        ['vectorCollectionPrefix', 'collectionPrefix', 's'],
+        ['vectorMetric', 'metric', 's']
+    ];
+    /* 2-2 的 ES 预设：与 2-1 同一套字段，独立的输入框（两个弹窗互不共享状态） */
+    var VES_FIELDS = [
+        ['vesHost', 'host', 's'],
+        ['vesPort', 'port', 'n'],
+        ['vesScheme', 'scheme', 's'],
+        ['vesUsername', 'username', 's'],
+        ['vesPassword', 'password', 's'],
+        ['vesConnectTimeout', 'connectTimeout', 'n'],
+        ['vesSocketTimeout', 'socketTimeout', 'n']
+    ];
+
+    var NAME_HELP = '同一段内不能重名；名称会出现在知识体的连接下拉里。';
+    var FOOT_HINT_ES = '「测试连接」额外报版本、兼容性判读与 <b>IK 分词器</b>状态。';
+
+    /* 服务端那一份：连接、知识体、Redis 已保存值 */
+    var STATE = { redis: {}, connections: [], bodies: [] };
+    var FLAGS = { es: false, redis: false, vector: false, esSource: '-', redisSource: '-', vectorSource: '-' };
 
     function el(id) { return document.getElementById(id); }
 
-    function group(which) {
+    /* ===== 表单读写 ===== */
+    /* 字段表驱动读写。模板里少一个输入框时不要整页挂掉：跳过缺失的那个，
+       否则 openModal 里的异常会被事件派发吞掉，表现为"点新增没反应"。 */
+    function readFields(fields) {
         var out = {};
-        MAP[which].forEach(function (f) {
-            var raw = el(f[0]).value.trim();
+        fields.forEach(function (f) {
+            var node = el(f[0]);
+            if (!node) { return; }
+            var raw = node.value.trim();
             if (f[2] === 'n') {
                 out[f[1]] = raw === '' ? null : Number(raw);
             } else {
@@ -47,29 +71,16 @@
         });
         return out;
     }
-    function collectAll() { return { es: group('es'), redis: group('redis') }; }
-
-    function restore(which, src) {
-        MAP[which].forEach(function (f) {
-            var v = src[f[1]];
-            el(f[0]).value = (v == null) ? '' : v;
+    function writeFields(fields, src) {
+        fields.forEach(function (f) {
+            var node = el(f[0]);
+            if (!node) { return; }
+            var v = src ? src[f[1]] : null;
+            node.value = (v == null) ? '' : v;
         });
     }
 
-    /* 只跟「已保存值」比对：口令框服务端从不回填，快照里本就是空，因此不会误报 */
-    function refreshDirty(which) {
-        var list = which ? [which] : ['es', 'redis'];
-        list.forEach(function (w) {
-            var dirty = JSON.stringify(group(w)) !== JSON.stringify(saved[w]);
-            el(DIRTY[w]).style.display = dirty ? 'inline' : 'none';
-        });
-    }
-
-    function setBadge(which, ok, text) {
-        var node = el(BADGE[which]);
-        node.textContent = text;
-        node.className = 'mbadge ' + (ok ? 'ok' : 'off');
-    }
+    /* ===== 提示与结果 ===== */
     function setStatus(html, cls) {
         var node = el('infraStatus');
         node.className = 'status-line ' + cls;
@@ -80,20 +91,24 @@
         box.textContent = text;
         box.className = 'result show ' + (cls || '');
     }
-    /* 结构化结果：探测返回的不只是"连上了"，还有版本/发行版/兼容性判读/IK 状态 */
     function showHtmlResult(id, html, cls) {
         var box = el(id);
         box.innerHTML = html;
         box.className = 'result show ' + (cls || '');
     }
-    function applyKeyHint(which, masked, isSet) {
-        el(KEY_HELP[which]).textContent = isSet ? '当前已配置：' + masked : '当前未配置';
-        el(KEY_INPUT[which]).placeholder = isSet ? '已配置，留空不变' : KEY_EMPTY_HINT[which];
+    function hideResult(id) {
+        /* 别用 showResult('') —— 那会挂上 .show，弹窗里留一条空灰条 */
+        el(id).className = 'result';
+        el(id).textContent = '';
     }
-
-    /* ===== 探测结果渲染 ===== */
+    function setNameHelp(id, text, isErr) {
+        var node = el(id);
+        node.className = 'help' + (isErr ? ' err' : '');
+        node.textContent = text;
+    }
     function esc(v) { return Console.escapeHtml(v == null || v === '' ? '-' : v); }
 
+    /* ===== 探测结果渲染 ===== */
     function facts(pairs) {
         return '<div class="facts">' + pairs.map(function (p) {
             return '<span class="fact">' + Console.escapeHtml(p[0]) + ' <b>' + esc(p[1]) + '</b></span>';
@@ -138,164 +153,703 @@
         return html + '</div>';
     }
 
+    function renderVectorProbe(data) {
+        var html = '<div class="probe">'
+            + '<div class="summary">✅ ' + esc(data.message) + '</div>'
+            + facts([['版本', data.version], ['距离度量', data.metric],
+                     ['已有集合数', data.collectionCount]]);
+        /* note 与 message 常是同一句（探测接口把提示语当结论用），重复就只留 message */
+        if (data.note && data.note !== data.message) {
+            html += '<div class="note strong">⚠️ ' + esc(data.note) + '</div>';
+        }
+        return html + '</div>';
+    }
+
+    /* ===== 状态行 ===== */
     function renderStatus() {
-        var esOk = CONFIGURED.es, rOk = CONFIGURED.redis;
+        var esOk = FLAGS.es, rOk = FLAGS.redis, vOk = FLAGS.vector;
         var msg;
         if (esOk && rOk) {
-            msg = 'Elasticsearch 与 Redis 均已配置';
+            msg = vOk
+                ? 'Redis、关键字连接与向量连接均已就绪'
+                : 'Redis 与关键字连接已就绪；向量槽未绑定，知识库只走关键词路';
         } else if (esOk) {
-            msg = 'Elasticsearch 已配置；Redis 未配置，会话记忆与中断断点不可用';
+            msg = '关键字连接已就绪；Redis 未配置，会话记忆与中断断点不可用';
         } else if (rOk) {
-            msg = 'Redis 已配置；Elasticsearch 未配置，知识库检索与灌库不可用';
+            msg = 'Redis 已配置；关键字槽未绑定，知识库检索与灌库不可用';
         } else {
-            msg = 'ES 与 Redis 均未配置。服务可以正常启动，但知识库与会话记忆不可用，请先填写地址。';
+            msg = 'Redis 与关键字连接均未配置。服务可以正常启动，但会话记忆与知识库不可用，请先填 Redis 地址。';
         }
         setStatus('<span>' + msg + '</span>'
-            + '<span class="pill">ES ' + (esOk ? '✓ ' : '✗ ') + Console.escapeHtml(SOURCE.es) + '</span>'
-            + '<span class="pill">Redis ' + (rOk ? '✓ ' : '✗ ') + Console.escapeHtml(SOURCE.redis) + '</span>',
+            + '<span class="pill">Redis ' + (rOk ? '✓ ' : '✗ ') + Console.escapeHtml(FLAGS.redisSource) + '</span>'
+            + '<span class="pill">关键字 ' + (esOk ? '✓ ' : '✗ ') + Console.escapeHtml(FLAGS.esSource) + '</span>'
+            + '<span class="pill">向量 ' + (vOk ? '✓ ' : '✗ ') + Console.escapeHtml(FLAGS.vectorSource) + '</span>',
             (esOk && rOk) ? 'ok' : 'warn');
     }
 
-    function loadInfra() {
-        setStatus('<span>加载中…</span>', 'warn');
-        /* P2：/admin/infra GET 是 D 类裸对象 */
-        Console.api.get('/admin/infra').then(function (s) {
-            el('esHost').value = s.es.host || '';
-            el('esPort').value = s.es.port == null ? '' : s.es.port;
-            el('esScheme').value = s.es.scheme || '';
-            el('esUsername').value = s.es.username || '';
-            el('esConnectTimeout').value = s.es.connectTimeout == null ? '' : s.es.connectTimeout;
-            el('esSocketTimeout').value = s.es.socketTimeout == null ? '' : s.es.socketTimeout;
-            el('esPassword').value = '';
-            applyKeyHint('es', s.es.passwordMasked, !!s.es.passwordSet);
+    /* ===== 连接 ===== */
+    function normConn(c) {
+        /* 老配置没有 usage：按类型给个合理的默认（ES 归关键字、Qdrant 归向量） */
+        c.usage = c.usage || (c.type === 'qdrant' ? 'vector' : 'keyword');
+        c.name = c.name || c.id;
+        return c;
+    }
+    function findConn(id) {
+        for (var i = 0; i < STATE.connections.length; i++) {
+            if (STATE.connections[i].id === id) { return STATE.connections[i]; }
+        }
+        return null;
+    }
+    function connById(id) { return id ? findConn(id) : null; }
 
-            el('redisHost').value = s.redis.host || '';
-            el('redisPort').value = s.redis.port == null ? '' : s.redis.port;
-            el('redisDatabase').value = s.redis.database == null ? '' : s.redis.database;
-            el('redisPassword').value = '';
-            applyKeyHint('redis', s.redis.passwordMasked, !!s.redis.passwordSet);
+    function addressOf(c) {
+        if (c.type === 'qdrant') {
+            var v = c.vector || {};
+            return v.uri
+                ? v.uri + (v.metric ? ' · ' + v.metric : '')
+                    + (v.collectionPrefix ? ' · 前缀 ' + v.collectionPrefix : '')
+                : '未填地址';
+        }
+        var es = c.es || {};
+        return es.host
+            ? es.host + ':' + (es.port || 9200) + ' · ' + (es.scheme || 'http')
+                + (es.username ? ' · ' + es.username : '')
+            : '未填地址';
+    }
 
-            el('settingsFileHint').textContent = '设置文件：' + (s.settingsFile || '-')
-                + '（知识库索引 ' + (s.indexPattern || '-') + '）';
+    /* 被哪些知识体引用（两路都算）：改连接前先看影响面 */
+    function refsOf(id) {
+        var names = [];
+        STATE.bodies.forEach(function (b) {
+            if (b.keyword === id || b.vector === id) { names.push(b.name || b.id); }
+        });
+        return names;
+    }
 
-            CONFIGURED.es = !!s.esConfigured;
-            CONFIGURED.redis = !!s.redisConfigured;
-            SOURCE.es = s.esSource || '-';
-            SOURCE.redis = s.redisSource || '-';
-            setBadge('es', CONFIGURED.es, CONFIGURED.es ? '已配置' : '未配置');
-            setBadge('redis', CONFIGURED.redis, CONFIGURED.redis ? '已配置' : '未配置');
-            renderStatus();
+    function rowHtml(c) {
+        var dot = c.type === 'qdrant' ? 'dot-vec' : 'dot-es';
+        var refs = refsOf(c.id);
+        var usable = c.usable !== false;
+        return '<tr class="conn-row">'
+            + '<td><span class="conn-name"><i class="conn-dot ' + dot + '"></i>'
+            + Console.escapeHtml(c.id) + '</span></td>'
+            + '<td class="mono">' + Console.escapeHtml(addressOf(c)) + '</td>'
+            + '<td><span class="mbadge ' + (usable ? 'ok' : 'off') + '">'
+            + (usable ? '已配置' : '未配置') + '</span></td>'
+            + '<td><span class="refs">' + (refs.length
+                ? refs.map(function (n) {
+                    return '<span class="ref-chip">' + Console.escapeHtml(n) + '</span>';
+                }).join('')
+                : '<span class="none">未被引用</span>') + '</span></td>'
+            + '<td class="ta-r nowrap">'
+            + '<button class="linkbtn" data-edit="' + Console.escapeHtml(c.id) + '">编辑</button>'
+            + '<button class="linkbtn danger" data-del="' + Console.escapeHtml(c.id) + '">删除</button>'
+            + '</td></tr>';
+    }
 
-            /* 基线：dirty 比对与「清空表单」的参照都取自"刚填好的输入框" */
-            saved.es = group('es');
-            saved.redis = group('redis');
-            refreshDirty();
-        }).catch(function (e) {
-            setStatus('<span>读取存储配置失败：' + Console.escapeHtml(e.message) + '</span>', 'warn');
+    function emptyRow(text) {
+        return '<tr><td colspan="5" class="muted-sm">' + Console.escapeHtml(text) + '</td></tr>';
+    }
+
+    function renderConns() {
+        var kw = [], vec = [];
+        STATE.connections.forEach(function (c) {
+            if (c.usage === 'vector') { vec.push(c); } else { kw.push(c); }
+        });
+        el('connBodyEs').innerHTML = kw.length ? kw.map(rowHtml).join('') : emptyRow('还没有关键字连接，点「+ 新增」加一台');
+        el('connBodyVec').innerHTML = vec.length ? vec.map(rowHtml).join('') : emptyRow('还没有向量连接，点「+ 新增」加一台');
+        el('connCount').textContent = STATE.connections.length + ' 个连接';
+    }
+
+    /* ===== 知识体 ===== */
+    /* 一个体最多两路：关键字（全文检索，只能 ES）、向量（kNN，ES / Qdrant）。
+       两路都填 = 混合召回；只填一路 = 单路。原文不在这里——它一律写内置磁盘，
+       没有"配到哪台机器"这回事。后端保存时按同一套规则再拦一次（接口可以手工构造）。 */
+    var SLOT_META = {
+        keyword: {
+            label: '关键字',
+            hint: '全文检索（BM25）· 只能绑 Elasticsearch',
+            empty: '（不做全文检索）',
+            types: ['elasticsearch']
+        },
+        vector: {
+            label: '向量',
+            hint: 'kNN 语义检索 · Elasticsearch / Qdrant 都行',
+            empty: '（不做语义检索）',
+            types: ['elasticsearch', 'qdrant']
+        }
+    };
+    var SLOT_ORDER = ['keyword', 'vector'];
+
+    /* 这一路能选哪些连接 */
+    function connsFor(slot) {
+        var types = SLOT_META[slot].types;
+        return STATE.connections.filter(function (c) {
+            return types.indexOf(c.type) >= 0;
         });
     }
 
-    function testConnection(which, btn) {
+    function slotOptions(slot, selected) {
+        var meta = SLOT_META[slot];
+        var list = connsFor(slot);
+        if (!list.length) {
+            return '<option value="">（没有可用于' + meta.label + '的连接）</option>';
+        }
+        var html = '<option value="">' + meta.empty + '</option>';
+        list.forEach(function (c) {
+            html += '<option value="' + Console.escapeHtml(c.id) + '"'
+                + (c.id === selected ? ' selected' : '') + '>'
+                + Console.escapeHtml(c.name || c.id)
+                + '（' + (c.type === 'qdrant' ? 'Qdrant' : 'Elasticsearch') + '）'
+                + '</option>';
+        });
+        return html;
+    }
+
+    /* 这个体走几路——卡片头上那枚徽章 */
+    function modesOf(b) {
+        var hasKw = !!b.keyword;
+        var hasVec = !!b.vector;
+        if (hasKw && hasVec) { return { text: '关键字 + 向量', cls: 'ok' }; }
+        if (hasKw) { return { text: '仅关键字', cls: 'ok' }; }
+        if (hasVec) { return { text: '仅向量', cls: 'ok' }; }
+        return { text: '未配', cls: 'off' };
+    }
+
+    function slotLine(label, control, hint, filled) {
+        return '<div class="slot' + (filled ? '' : ' empty') + '">'
+            + '<span class="slot-k">' + label + '</span>'
+            + control
+            + '<span class="slot-h">' + hint + '</span>'
+            + '</div>';
+    }
+
+    function bodyCard(b) {
+        var modes = modesOf(b);
+        var rows = SLOT_ORDER.map(function (slot) {
+            var selected = (slot === 'keyword' ? b.keyword : b.vector) || '';
+            var c = selected ? findConn(selected) : null;
+            /* 选好了就显示它连到哪：地址比连接名更能说明"这两路是不是同一台" */
+            var hint = selected
+                ? ((c && c.location) || selected) + (c && c.usable === false ? '（未填地址）' : '')
+                : SLOT_META[slot].hint;
+            var control = '<select class="form-control slot-v" data-body="'
+                + Console.escapeHtml(b.id) + '" data-field="' + slot + '">'
+                + slotOptions(slot, selected) + '</select>';
+            return slotLine(SLOT_META[slot].label, control, hint, !!selected);
+        }).join('');
+        return '<article class="profile">'
+            + '<header class="profile-head">'
+            + '<span class="p-dot"></span>'
+            + '<h4>' + Console.escapeHtml(b.name || b.id) + '</h4>'
+            + '<span class="mbadge ' + modes.cls + '">' + modes.text + '</span>'
+            + '<span class="spacer"></span>'
+            + '<button class="linkbtn danger" data-delbody="' + Console.escapeHtml(b.id)
+            + '">删除</button>'
+            + '</header>'
+            + rows
+            + '</article>';
+    }
+
+    function renderProfiles() {
+        var box = el('profileList');
+        if (!STATE.bodies.length) {
+            box.innerHTML = '<div class="muted-sm">还没有知识体</div>';
+        } else {
+            box.innerHTML = STATE.bodies.map(bodyCard).join('');
+        }
+        el('profCount').textContent = STATE.bodies.length + ' 个知识体';
+    }
+
+    /* ===== 提交 ===== */
+    function body() {
+        return {
+            redis: readFields(REDIS_FIELDS),
+            connections: STATE.connections,
+            bodies: STATE.bodies
+        };
+    }
+
+    async function postJson(payload) {
+        /* P2：/admin/infra POST 是 C 类，`if (!data.success)` 两态由 reject 承担 */
+        return Console.api.post('/admin/infra', payload);
+    }
+
+    /* 整份提交：先乐观改本地状态（好让"引用"立刻更新），失败再回滚。
+       不做增量补丁是有意的——"少传一条当没动过"会让删掉的行在重启后复活。 */
+    async function commit(rollback, resultId, okText, btn) {
+        if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
+        showResult(resultId, '保存中…', '');
+        try {
+            var data = await postJson(body());
+            await loadInfra(true);
+            if (resultId) { showResult(resultId, '✅ ' + okText, 'ok'); }
+            /* 保存时的自检结论（知识库能力不匹配 / Redis 没持久化等）以前只在启动日志里，
+               现在跟着响应回来：有就明说，没有就照常只报成功 */
+            var warns = (data && data.warnings) || [];
+            if (warns.length) {
+                Console.toast('已保存，但有 ' + warns.length + ' 条提醒：\n' + warns.join('\n'),
+                    { type: 'warning', wide: true });
+            } else {
+                Console.toast(okText, { type: 'success' });
+            }
+            return data;
+        } catch (e) {
+            if (rollback) { rollback(); }
+            renderConns();
+            renderProfiles();
+            showResult(resultId, '❌ 保存失败：' + e.message, 'err');
+            return null;
+        } finally {
+            if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
+        }
+    }
+
+    /* ===== 读取 ===== */
+    async function loadInfra(quiet) {
+        if (!quiet) { setStatus('<span>加载中…</span>', 'warn'); }
+        /* P2：/admin/infra GET 是 D 类裸对象 */
+        var s = await Console.api.get('/admin/infra');
+        STATE.redis = s.redis || {};
+        STATE.connections = (s.connections || []).map(normConn);
+        STATE.bodies = s.bodies || [];
+
+        writeFields(REDIS_FIELDS, {
+            host: s.redis.host, port: s.redis.port, database: s.redis.database, password: null
+        });
+        applyRedisKeyHint(s.redis);
+
+        FLAGS.es = !!s.esConfigured;
+        FLAGS.redis = !!s.redisConfigured;
+        FLAGS.vector = !!s.vectorSlotConfigured;
+        FLAGS.esSource = s.esSource || '-';
+        FLAGS.redisSource = s.redisSource || '-';
+        FLAGS.vectorSource = s.vectorSlotSource || '-';
+        renderStatus();
+
+        /* 卡片头的小徽章与状态行同源，免得一处说已生效、一处说未配置 */
+        var badge = el('redisBadge');
+        badge.className = 'mbadge ' + (FLAGS.redis ? 'ok' : 'off');
+        badge.textContent = FLAGS.redis ? '已生效' : '未配置';
+
+        el('settingsFileHint').textContent = '设置文件：' + (s.settingsFile || '-')
+            + '（知识库索引 ' + (s.indexPattern || '-') + '）';
+        renderConns();
+        renderProfiles();
+        return s;
+    }
+
+    function applyRedisKeyHint(redis) {
+        var isSet = redis && redis.passwordSet;
+        el('redisKeyHelp').textContent = isSet ? '当前已配置：' + redis.passwordMasked : '当前未配置';
+        el('redisPassword').placeholder = isSet ? '已配置，留空不变' : '留空表示不修改';
+    }
+    function applyEsKeyHint(conn, helpId, inputId) {
+        var es = (conn && conn.es) || {};
+        var isSet = !!es.passwordSet;
+        el(helpId).textContent = isSet ? '当前已配置：' + es.passwordMasked : '当前未配置';
+        el(inputId).placeholder = isSet ? '已配置，留空不变' : '留空则不发送认证头';
+    }
+    function applyQdKeyHint(conn) {
+        var v = (conn && conn.vector) || {};
+        var isSet = !!v.tokenSet;
+        el('vectorKeyHelp').textContent = isSet ? '当前已配置：' + v.tokenMasked : '当前未配置';
+        el('vectorToken').placeholder = isSet ? '已配置，留空不变' : '留空则不发送鉴权头';
+    }
+
+    /* ===== 弹窗开关 ===== */
+    function showModal(id) {
+        el(id).hidden = false;
+        document.body.style.overflow = 'hidden';
+    }
+    function hideModal(id) {
+        el(id).hidden = true;
+        document.body.style.overflow = '';
+    }
+    function resetPresetCards(pickId) {
+        Array.prototype.forEach.call(
+            document.querySelectorAll('#' + pickId + ' .preset-card'), function (c) {
+                c.classList.remove('is-on');
+            });
+    }
+
+    /* ===== 连接测试 ===== */
+    function testConn(kind, payload, resultId, btn) {
         btn.disabled = true;
-        showResult(RESULT[which], '测试中…（会真实建立一次连接，并探测版本与能力）', '');
+        showResult(resultId, '测试中…（会真实建立一次连接，并探测版本与能力）', '');
         /* P2：/admin/infra/test 是 C 类（只有 success）。
-           原来的 success 两态合并：业务失败由 api.post 的 reject 承担，
-           message 已由 normalize 的 pick() 走过 sanitizeError（detail||error||message），
-           所以这里直接显示 e.message，不必再手动洗 data.error。 */
-        Console.api.post('/admin/infra/test?type=' + encodeURIComponent(which), collectAll())
+           业务失败由 api.post 的 reject 承担，message 已由 normalize 洗过（detail||error||message） */
+        Console.api.post('/admin/infra/test?type=' + encodeURIComponent(kind), payload)
             .then(function (data) {
-                showHtmlResult(RESULT[which],
-                    which === 'redis' ? renderRedisProbe(data) : renderEsProbe(data), 'ok');
+                var render = kind === 'redis' ? renderRedisProbe
+                    : (kind === 'es' ? renderEsProbe : renderVectorProbe);
+                showHtmlResult(resultId, render(data), 'ok');
             })
             .catch(function (e) {
                 console.debug('[domainplane] 连接测试失败：', e);
-                showResult(RESULT[which], '连接失败：' + e.message, 'err');
+                showResult(resultId, '连接失败：' + e.message, 'err');
             })
             .then(function () { btn.disabled = false; });
     }
 
-    /* 清空表单 = 只清本卡片输入框，纯前端：不发请求、不动已保存配置。
-       保存接口是"留空即回落 yaml"，所以清空后再保存 = 把本卡片回退到 yaml 配置。
-       口令清空后语义是"不修改"，不会把服务端已存的密码抹掉。 */
-    function clearForm(which) {
-        restore(which, {});
-        refreshDirty(which);
-        showResult(RESULT[which],
-            '已清空「' + LABEL[which] + '」表单内容（仅本页，尚未生效）。'
-            + '点「保存并生效」后，留空字段会回落到服务端 yaml 配置；口令留空表示保持不变。', '');
+    /* ---------- 2-1 关键字 ---------- */
+    var esMode = 'new';
+    var esEditId = null;
+
+    function openEsModal(mode, id) {
+        esMode = mode;
+        esEditId = id || null;
+        var conn = connById(esEditId);
+        el('connModalEsTitle').textContent = mode === 'new' ? '新增关键字连接' : ('编辑连接 · ' + id);
+        el('esPresetPick').hidden = mode !== 'new';
+        el('esPresetHint').hidden = mode !== 'new';
+        el('esNameRow').hidden = mode !== 'new';
+        /* 新增必须先点预设才铺表单（"选择之后可以配置对应内容"）；编辑跳过这一步 */
+        el('esFormWrap').hidden = mode === 'new';
+        resetPresetCards('esPresetPick');
+        hideResult('esResult');
+        setNameHelp('esConnNameHelp', NAME_HELP, false);
+        if (mode === 'new') {
+            el('esConnName').value = '';
+            writeFields(ES_FIELDS, null);
+            applyEsKeyHint(null, 'esKeyHelp', 'esPassword');
+        } else {
+            writeFields(ES_FIELDS, conn && conn.es);
+            applyEsKeyHint(conn, 'esKeyHelp', 'esPassword');
+        }
+        el('saveEsBtn').textContent = mode === 'new' ? '加入连接' : '保存并生效';
+        el('esFootHint').innerHTML = FOOT_HINT_ES;
+        showModal('connModalEs');
     }
 
-    /* 保存接口是整对象覆盖：另一张卡片必须用已保存值占位，否则它已有的配置会被抹掉 */
-    function buildPayload(which) {
-        var all = collectAll();
-        all[which === 'es' ? 'redis' : 'es'] = saved[which === 'es' ? 'redis' : 'es'];
-        return all;
+    Array.prototype.forEach.call(
+        document.querySelectorAll('#esPresetPick .preset-card'), function (card) {
+            card.addEventListener('click', function () {
+                Array.prototype.forEach.call(
+                    document.querySelectorAll('#esPresetPick .preset-card'), function (c) {
+                        c.classList.toggle('is-on', c === card);
+                    });
+                el('esFormWrap').hidden = false;
+                el('esConnName').focus();
+            });
+        });
+
+    async function saveEs(btn) {
+        var name = esMode === 'new' ? el('esConnName').value.trim() : esEditId;
+        if (esMode === 'new') {
+            if (!name) {
+                setNameHelp('esConnNameHelp', '先给这个连接起个名字。', true);
+                el('esConnName').focus();
+                return false;
+            }
+            if (findConn(name)) {
+                setNameHelp('esConnNameHelp', '已经有叫「' + name + '」的连接了，换一个。', true);
+                el('esConnName').focus();
+                return false;
+            }
+        }
+        var conn = {
+            id: name, name: name, type: 'elasticsearch', usage: 'keyword',
+            es: readFields(ES_FIELDS), vector: null
+        };
+        var idx = -1;
+        STATE.connections.forEach(function (c, i) { if (c.id === name) { idx = i; } });
+        var prev = idx >= 0 ? STATE.connections[idx] : null;
+        if (idx >= 0) { STATE.connections[idx] = conn; } else { STATE.connections.push(conn); }
+        renderConns();
+        var data = await commit(function () {
+            if (prev) { STATE.connections[idx] = prev; } else { STATE.connections.pop(); }
+        }, 'esResult', '连接「' + name + '」已保存并生效', btn);
+        if (data) { hideModal('connModalEs'); }
+        return !!data;
     }
 
-    /* Redis 换地址或换库号 = 换数据源，历史会话与断点不迁移，必须先问一句 */
+    /* ---------- 2-2 向量（两个预设：Qdrant / Elasticsearch） ---------- */
+    var vecMode = 'new';
+    var vecEditId = null;
+    var vecPreset = 'qdrant';
+
+    function openVecModal(mode, id) {
+        vecMode = mode;
+        vecEditId = id || null;
+        var conn = connById(vecEditId);
+        vecPreset = conn ? (conn.type === 'qdrant' ? 'qdrant' : 'es') : null;
+
+        el('connModalVecTitle').textContent = mode === 'new' ? '新增向量连接' : ('编辑连接 · ' + id);
+        el('vecPresetPick').hidden = mode !== 'new';
+        el('vecPresetHint').hidden = mode !== 'new';
+        el('vecNameRow').hidden = mode !== 'new';
+        resetPresetCards('vecPresetPick');
+        hideResult('vectorResult');
+        hideResult('vesResult');
+        setNameHelp('vecConnNameHelp', NAME_HELP, false);
+
+        if (mode === 'new') {
+            el('vecConnName').value = '';
+            el('vecFormQdrant').hidden = true;
+            el('vecFormEs').hidden = true;
+            writeFields(QD_FIELDS, null);
+            writeFields(VES_FIELDS, null);
+            applyQdKeyHint(null);
+            applyEsKeyHint(null, 'vesKeyHelp', 'vesPassword');
+        } else {
+            var isQd = vecPreset === 'qdrant';
+            el('vecFormQdrant').hidden = !isQd;
+            el('vecFormEs').hidden = isQd;
+            if (isQd) {
+                writeFields(QD_FIELDS, conn.vector);
+                applyQdKeyHint(conn);
+            } else {
+                writeFields(VES_FIELDS, conn.es);
+                applyEsKeyHint(conn, 'vesKeyHelp', 'vesPassword');
+            }
+        }
+        el('saveVectorBtn').textContent = mode === 'new' ? '加入连接' : '保存并生效';
+        el('saveVecEsBtn').textContent = mode === 'new' ? '加入连接' : '保存并生效';
+        el('vectorFootHint').innerHTML = '「测试连接」额外报版本、距离度量与已有集合数。';
+        showModal('connModalVec');
+    }
+
+    /* 预设卡：选谁铺谁的表单（Qdrant 填地址；ES 填这台实例的地址与认证） */
+    Array.prototype.forEach.call(
+        document.querySelectorAll('#vecPresetPick .preset-card'), function (card) {
+            card.addEventListener('click', function () {
+                vecPreset = card.getAttribute('data-preset');
+                Array.prototype.forEach.call(
+                    document.querySelectorAll('#vecPresetPick .preset-card'), function (c) {
+                        c.classList.toggle('is-on', c === card);
+                    });
+                el('vecFormQdrant').hidden = vecPreset !== 'qdrant';
+                el('vecFormEs').hidden = vecPreset !== 'es';
+                el('vecConnName').focus();
+            });
+        });
+
+    async function saveVec(btn, resultId) {
+        var isEs = vecPreset === 'es';
+        var name = vecMode === 'new' ? el('vecConnName').value.trim() : vecEditId;
+        if (vecMode === 'new') {
+            if (!name) {
+                setNameHelp('vecConnNameHelp', '先给这个连接起个名字。', true);
+                el('vecConnName').focus();
+                return false;
+            }
+            if (findConn(name)) {
+                setNameHelp('vecConnNameHelp', '已经有叫「' + name + '」的连接了，换一个。', true);
+                el('vecConnName').focus();
+                return false;
+            }
+        }
+        var conn = {
+            id: name, name: name, usage: 'vector',
+            type: isEs ? 'elasticsearch' : 'qdrant',
+            es: isEs ? readFields(VES_FIELDS) : null,
+            vector: isEs ? null : readFields(QD_FIELDS)
+        };
+        var idx = -1;
+        STATE.connections.forEach(function (c, i) { if (c.id === name) { idx = i; } });
+        var prev = idx >= 0 ? STATE.connections[idx] : null;
+        if (idx >= 0) { STATE.connections[idx] = conn; } else { STATE.connections.push(conn); }
+        renderConns();
+        var data = await commit(function () {
+            if (prev) { STATE.connections[idx] = prev; } else { STATE.connections.pop(); }
+        }, resultId, '连接「' + name + '」已保存并生效', btn);
+        if (data) { hideModal('connModalVec'); }
+        return !!data;
+    }
+
+    /* ===== Redis 保存（换地址/库号 = 换数据源，要先问一句） ===== */
     function redisTargetChanged() {
-        var cur = group('redis');
-        return String(saved.redis.host == null ? '' : saved.redis.host) !== String(cur.host == null ? '' : cur.host)
-            || String(saved.redis.database == null ? '' : saved.redis.database)
-                !== String(cur.database == null ? '' : cur.database);
+        var cur = readFields(REDIS_FIELDS);
+        var tag = function (src) {
+            return String(src.host == null ? '' : src.host) + '|' + String(src.database == null ? '' : src.database);
+        };
+        return tag(STATE.redis) !== tag(cur);
     }
 
-    function afterSaved(which, data) {
-        el(KEY_INPUT[which]).value = '';
-        saved[which] = group(which);
-        refreshDirty(which);
-        applyKeyHint(which, data[which + 'PasswordMasked'], !!data[which + 'PasswordSet']);
-        CONFIGURED[which] = which === 'es' ? !!data.esConfigured : !!data.redisConfigured;
-        SOURCE[which] = (which === 'es' ? data.esSource : data.redisSource) || SOURCE[which];
-        setBadge(which, CONFIGURED[which], CONFIGURED[which] ? '已配置' : '未配置');
-        renderStatus();
-    }
-
-    function saveInfra(which, btn) {
-        if (which === 'redis' && redisTargetChanged()) {
-            var ok = window.confirm(
+    async function saveRedis(btn) {
+        if (redisTargetChanged()) {
+            var ok = await Console.confirm(
                 '⚠️ 你修改了 Redis 的地址或库号，这等于换了一个数据源。\n\n'
                 + '平台的历史会话记忆、以及未完成的检查点（等待人工确认的取消/退款单断点）'
                 + '都留在原来的地址/库号里，不会自动迁移过来；'
                 + '表现为"历史对话查不到、待确认的断点丢失"。\n\n'
-                + '确认继续保存吗？');
+                + '确认继续保存吗？',
+                { title: '换 Redis 数据源', okText: '继续保存', danger: true });
             if (!ok) {
-                showResult(RESULT.redis,
+                showResult('redisResult',
                     '已取消，本次未保存（配置保持原样）。换 Redis 前请确认旧库数据不再需要。', 'err');
-                return;
+                return false;
             }
         }
-        btn.disabled = true;
-        showResult(RESULT[which], '保存中…', '');
-        /* P2：/admin/infra POST 是 C 类，`if (!data.success)` 两态由 reject 承担 */
-        Console.api.post('/admin/infra', buildPayload(which))
-            .then(function (data) {
-                afterSaved(which, data);
-                var msg = '✅ 「' + LABEL[which] + '」已保存并立即生效（来源：'
-                    + (which === 'es' ? data.esSource : data.redisSource) + '）。';
-                showResult(RESULT[which], msg, 'ok');
-            })
-            .catch(function (e) {
-                showResult(RESULT[which], '❌ 保存失败：' + e.message, 'err');
-            })
-            .then(function () { btn.disabled = false; });
+        var data = await commit(null, 'redisResult', 'Redis 配置已保存并立即生效', btn);
+        return !!data;
     }
 
+    /* ===== 事件绑定 ===== */
     Console.renderSidebar('infra');
 
-    /* 任何输入变化都重算 dirty 标记 */
-    var ALL_INPUTS = MAP.es.concat(MAP.redis).map(function (f) { return f[0]; });
-    ALL_INPUTS.forEach(function (id) {
-        el(id).addEventListener('input', function () { refreshDirty(); });
+    el('reloadBtn').addEventListener('click', function () {
+        loadInfra(false).catch(function (e) {
+            setStatus('<span>读取存储配置失败：' + Console.escapeHtml(e.message) + '</span>', 'warn');
+        });
+    });
+    el('saveRedisBtn').addEventListener('click', function () { saveRedis(this); });
+    el('testRedisBtn').addEventListener('click', function () {
+        testConn('redis', { redis: readFields(REDIS_FIELDS) }, 'redisResult', this);
     });
 
-    el('reloadBtn').addEventListener('click', loadInfra);
-    el('testEsBtn').addEventListener('click', function () { testConnection('es', this); });
-    el('testRedisBtn').addEventListener('click', function () { testConnection('redis', this); });
-    el('clearEsBtn').addEventListener('click', function () { clearForm('es'); });
-    el('clearRedisBtn').addEventListener('click', function () { clearForm('redis'); });
-    el('saveEsBtn').addEventListener('click', function () { saveInfra('es', this); });
-    el('saveRedisBtn').addEventListener('click', function () { saveInfra('redis', this); });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-add-conn]'), function (btn) {
+        btn.addEventListener('click', function () {
+            var seg = btn.getAttribute('data-add-conn');
+            if (seg === 'es') { openEsModal('new'); } else { openVecModal('new'); }
+        });
+    });
 
-    Console.ready(loadInfra);
+    /* 表格里的编辑 / 删除（行是动态渲染的，用委托） */
+    function bindTable(bodyId, seg) {
+        el(bodyId).addEventListener('click', async function (e) {
+            var t = e.target;
+            if (!t.getAttribute) { return; }
+            var edit = t.getAttribute('data-edit');
+            if (edit) {
+                if (seg === 'es') { openEsModal('edit', edit); } else { openVecModal('edit', edit); }
+                return;
+            }
+            var del = t.getAttribute('data-del');
+            if (!del) { return; }
+            var refs = refsOf(del);
+            if (refs.length) {
+                Console.toast('「' + del + '」正被知识体 ' + refs.join('、') + ' 使用，先在知识体里换掉再删',
+                    { type: 'error' });
+                return;
+            }
+            var ok = await Console.confirm('确定删除连接「' + del + '」吗？删除后立即生效。',
+                { title: '删除连接', okText: '删除', danger: true });
+            if (!ok) { return; }
+            var idx = -1;
+            STATE.connections.forEach(function (c, i) { if (c.id === del) { idx = i; } });
+            if (idx < 0) { return; }
+            var backup = STATE.connections.slice();
+            STATE.connections.splice(idx, 1);
+            renderConns();
+            renderProfiles();
+            /* 删除不在弹窗里，结果落在状态行，别用隐藏的 result 框 */
+            setStatus('<span>正在删除连接「' + Console.escapeHtml(del) + '」…</span>', 'warn');
+            try {
+                await postJson(body());
+                await loadInfra(true);
+                Console.toast('已删除连接「' + del + '」', { type: 'success' });
+            } catch (err) {
+                STATE.connections = backup;
+                renderConns();
+                renderProfiles();
+                setStatus('<span>删除失败：' + Console.escapeHtml(err.message) + '</span>', 'warn');
+            }
+        });
+    }
+    bindTable('connBodyEs', 'es');
+    bindTable('connBodyVec', 'vector');
+
+    /* 2-1 弹窗 */
+    el('saveEsBtn').addEventListener('click', function () { saveEs(this); });
+    el('testEsBtn').addEventListener('click', function () {
+        testConn('es', {
+            connection: {
+                id: esEditId || el('esConnName').value.trim() || '',
+                type: 'elasticsearch', es: readFields(ES_FIELDS)
+            }
+        }, 'esResult', this);
+    });
+    el('clearEsBtn').addEventListener('click', function () {
+        writeFields(ES_FIELDS, null);
+        showResult('esResult', '已清空表单内容（仅本页，尚未生效）。口令留空表示保持不变。', '');
+    });
+    el('cancelEsBtn').addEventListener('click', function () { hideModal('connModalEs'); });
+    el('connModalEsClose').addEventListener('click', function () { hideModal('connModalEs'); });
+    el('connModalEs').addEventListener('click', function (e) {
+        if (e.target === el('connModalEs')) { hideModal('connModalEs'); }
+    });
+
+    /* 2-2 弹窗 */
+    el('saveVectorBtn').addEventListener('click', function () { saveVec(this, 'vectorResult'); });
+    el('saveVecEsBtn').addEventListener('click', function () { saveVec(this, 'vesResult'); });
+    el('testVectorBtn').addEventListener('click', function () {
+        testConn('qdrant', {
+            connection: {
+                id: vecEditId || el('vecConnName').value.trim() || '',
+                type: 'qdrant', vector: readFields(QD_FIELDS)
+            }
+        }, 'vectorResult', this);
+    });
+    el('clearVectorBtn').addEventListener('click', function () {
+        writeFields(QD_FIELDS, null);
+        showResult('vectorResult', '已清空表单内容（仅本页，尚未生效）。Token 留空表示保持不变。', '');
+    });
+    el('cancelVectorBtn').addEventListener('click', function () { hideModal('connModalVec'); });
+    el('cancelVecEsBtn').addEventListener('click', function () { hideModal('connModalVec'); });
+    el('connModalVecClose').addEventListener('click', function () { hideModal('connModalVec'); });
+    el('connModalVec').addEventListener('click', function (e) {
+        if (e.target === el('connModalVec')) { hideModal('connModalVec'); }
+    });
+
+    /* 2-3 原文：内置磁盘，无可配项（表格里只有一行只读说明） */
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') { return; }
+        if (!el('connModalEs').hidden) { hideModal('connModalEs'); return; }
+        if (!el('connModalVec').hidden) { hideModal('connModalVec'); }
+    });
+
+    /* ===== 知识体交互 ===== */
+    /* 改某一路的连接（行是动态渲染的，用委托）。两路互不影响：只改被点的那一路，
+       这样"只想把向量从 ES 换到 Qdrant"不用重填关键字 */
+    el('profileList').addEventListener('change', function (e) {
+        var t = e.target;
+        if (!t.getAttribute) { return; }
+        var bodyId = t.getAttribute('data-body');
+        var field = t.getAttribute('data-field');
+        if (!bodyId || !field) { return; }
+        var target = null;
+        STATE.bodies.forEach(function (b) { if (b.id === bodyId) { target = b; } });
+        if (!target) { return; }
+        target[field] = t.value || null;
+        renderProfiles();
+        /* 两路都空 = 这个体没意义（保存会被后端拒），当场说清楚，别等点保存 */
+        if (!target.keyword && !target.vector) {
+            setStatus('<span>知识体「' + Console.escapeHtml(target.name || target.id)
+                + '」两路都空着：至少选一个连接，否则保存会被拒</span>', 'warn');
+        }
+    });
+
+    el('profileList').addEventListener('click', function (e) {
+        var t = e.target;
+        if (!t.getAttribute) { return; }
+        var del = t.getAttribute('data-delbody');
+        if (!del) { return; }
+        STATE.bodies = STATE.bodies.filter(function (b) { return b.id !== del; });
+        renderProfiles();
+        /* 删体只改本页；域上若还绑着它，那台域会显示"知识体已失效"，保存后绑定不再解析 */
+        setStatus('<span>已移除知识体「' + Console.escapeHtml(del)
+            + '」（尚未保存）；保存后仍绑着它的域将没有知识库</span>', 'warn');
+    });
+
+    el('addProfileBtn').addEventListener('click', function () {
+        var n = 1;
+        while (STATE.bodies.some(function (b) { return b.id === 'kb-' + n; })) { n++; }
+        STATE.bodies.push({ id: 'kb-' + n, name: '知识体 ' + n, keyword: null, vector: null });
+        renderProfiles();
+    });
+
+    el('saveProfileBtn').addEventListener('click', function () {
+        var backup = JSON.parse(JSON.stringify(STATE.bodies));
+        commit(function () { STATE.bodies = backup; }, null, '知识体已保存并立即生效', null);
+    });
+
+    /* 页面首次加载失败（后端没起、未登录）也要给出可读的原因 */
+    Console.ready(function () {
+        loadInfra(false).catch(function (e) {
+            setStatus('<span>读取存储配置失败：' + Console.escapeHtml(e.message) + '</span>', 'warn');
+        });
+    });
 })();

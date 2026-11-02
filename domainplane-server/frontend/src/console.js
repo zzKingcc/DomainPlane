@@ -9,6 +9,7 @@
    sanitizeError，避免两处各写一遍 10002 分流逻辑。
    ========================================================================== */
 import { createApi } from './core/request.js';
+import { createFeedback } from './core/feedback.js';
 
 (function (global) {
     'use strict';
@@ -27,6 +28,7 @@ import { createApi } from './core/request.js';
     /* ===== 统一请求 ===== */
     function request(path, options) {
         var url = baseUrl() + path;
+        progressStart();
         return fetch(url, options || {})
             .catch(function (e) {
                 throw new Error('无法连接服务端 ' + (baseUrl() || location.origin) + '：' + e.message);
@@ -61,7 +63,89 @@ import { createApi } from './core/request.js';
                     }
                     return data;
                 });
-            });
+            })
+            .then(
+                function (v) { progressEnd(); return v; },
+                function (e) { progressEnd(); throw e; }
+            );
+    }
+
+    /* ===== 全局加载指示（三件套）=====
+       · 顶部进度条：挂在 request() 上，全站任何请求（含侧栏会话检查、登录）自动覆盖，
+         页面不用自己接；<120ms 的快请求不显示，避免闪烁。
+       · Console.busy(btn, fn, text)：按钮级 loading（禁用 + 转圈 + 可选换文案），
+         用于探测 / 测试 / 保存这类点了要等好几秒的动作，防止用户以为没点上而连点。
+       · Console.loadingHtml / loadingRowHtml：列表区占位（转圈 + 文案），
+         首次加载塞进列表容器，数据到了整个 innerHTML 一起被替换，不需要手动摘除。 */
+    var progCount = 0;
+    var progTimer = null;
+    var progEl = null;
+    var PROG_DELAY = 120;
+
+    function ensureProgressEl() {
+        if (progEl) { return progEl; }
+        if (!document.body) { return null; }
+        progEl = document.createElement('div');
+        progEl.id = 'dpProgress';
+        document.body.appendChild(progEl);
+        return progEl;
+    }
+
+    function progressStart() {
+        progCount++;
+        if (progTimer || progCount > 1) { return; }
+        progTimer = setTimeout(function () {
+            progTimer = null;
+            if (progCount > 0) {
+                var el = ensureProgressEl();
+                if (el) { el.classList.add('on'); }
+            }
+        }, PROG_DELAY);
+    }
+
+    function progressEnd() {
+        progCount = Math.max(0, progCount - 1);
+        if (progCount === 0) {
+            if (progTimer) { clearTimeout(progTimer); progTimer = null; }
+            if (progEl) { progEl.classList.remove('on'); }
+        }
+    }
+
+    /* 按钮级 loading。fn 可以是函数（内部发请求）或直接是 promise；
+       结束（无论成败）恢复按钮原状。返回原 promise，调用方仍可接 then/catch。 */
+    function busy(btn, fn, loadingText) {
+        if (!btn) { return Promise.resolve(typeof fn === 'function' ? fn() : fn); }
+        var origText = btn.textContent;
+        var prevDisabled = btn.disabled;
+        btn.disabled = true;
+        btn.classList.add('btn-loading');
+        if (loadingText) { btn.textContent = loadingText; }
+        var p;
+        try {
+            p = Promise.resolve(typeof fn === 'function' ? fn() : fn);
+        } catch (e) {
+            p = Promise.reject(e);
+        }
+        return p.then(function (v) { restore(); return v; },
+            function (e) { restore(); throw e; });
+
+        function restore() {
+            btn.disabled = prevDisabled;
+            btn.classList.remove('btn-loading');
+            if (loadingText) { btn.textContent = origText; }
+        }
+    }
+
+    function loadingHtml(text) {
+        return '<div class="dp-loading"><span class="dp-spin"></span><span>'
+            + escapeHtml(text || '加载中…') + '</span></div>';
+    }
+
+    /* 表格 tbody 用的占位行：colspan 要和表头列数一致 */
+    function loadingRowHtml(colspan, text) {
+        return '<tr><td colspan="' + (colspan || 1) + '">'
+            + '<div class="dp-loading dp-loading-inline"><span class="dp-spin"></span><span>'
+            + escapeHtml(text || '加载中…') + '</span></div></td></tr>';
     }
 
     function redirectToLogin() {
@@ -132,6 +216,8 @@ import { createApi } from './core/request.js';
         domains: '<path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 12l10 5 10-5"/><path d="M2 17l10 5 10-5"/>',
         /* 熔断工具调用：心跳线，实例还在不在跳，决定它的工具是否还能被调用 */
         instances: '<path d="M2 12h4l3-7 4 14 3-7h6"/>',
+        /* 会话档案：归档盒（体量盘点 + 装配清单 + 副本导出，全页只读） */
+        sessions: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/>',
         /* MCP 连接：链接符号，对接外部 MCP server */
         mcp: '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/>',
         account: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/>'
@@ -157,6 +243,7 @@ import { createApi } from './core/request.js';
         { key: 'prompts', label: '提示词设定', href: 'prompts.html', icon: 'prompts' },
         { key: 'knowledge', label: '知识库', href: 'knowledge.html', icon: 'knowledge' },
         { key: 'instances', label: '熔断工具调用', href: 'instances.html', icon: 'instances' },
+        { key: 'sessions', label: '会话档案', href: 'sessions.html', icon: 'sessions' },
         { key: 'account', label: '账号', href: 'account.html', icon: 'account' }
     ];
 
@@ -309,6 +396,12 @@ import { createApi } from './core/request.js';
        normalize 与两个出口的实现在 core/request.js（那里有两套信封的处理规则）。 */
     var api = createApi(request, jsonRequest, { sanitizeError: sanitizeError });
 
+    /* ===== Tabler 反馈组件：提示气泡 + 二次确认 =====
+       实现在 core/feedback.js（借用 Tabler 的 .toast / .modal 外观，行为自己写，
+       不引 tabler.min.js）。页面里统一用 Console.toast(...) / await Console.confirm(...)，
+       不再出现浏览器原生的 alert() / confirm()。 */
+    var feedback = createFeedback({ escapeHtml: escapeHtml });
+
     global.Console = {
         baseUrl: baseUrl,
         sameOrigin: function () { return SERVED_BY_HTTP; },
@@ -317,6 +410,11 @@ import { createApi } from './core/request.js';
         api: api,
         escapeHtml: escapeHtml,
         sanitizeError: sanitizeError,
+        toast: feedback.toast,
+        confirm: feedback.confirm,
+        busy: busy,
+        loadingHtml: loadingHtml,
+        loadingRowHtml: loadingRowHtml,
         renderSidebar: renderSidebar,
         ready: ready,
         warnIfCrossOrigin: warnIfCrossOrigin,

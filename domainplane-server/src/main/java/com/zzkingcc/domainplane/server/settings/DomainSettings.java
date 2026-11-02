@@ -30,6 +30,15 @@ public class DomainSettings {
      */
     private Map<String, Boolean> toolCallEcho = new LinkedHashMap<>();
 
+    /**
+     * 域（完整路径） → 是否把本轮执行计划（规划前置产出的 PLAN 事件）下发给调用方。
+     *
+     * 未配置 = 关：规划照做（模型照样按计划执行），调用方只是看不到计划。
+     * 与 {@code toolCallEcho} 同一套语义：只认自身显式值，不沿链回落；
+     * 只对可调用单元（叶子域）有意义；设置信息在域变成装配节点时原样保留。
+     */
+    private Map<String, Boolean> planDisplay = new LinkedHashMap<>();
+
     public Map<String, String> getPrompts() {
         return prompts;
     }
@@ -46,6 +55,14 @@ public class DomainSettings {
         this.toolCallEcho = toolCallEcho == null ? new LinkedHashMap<>() : new LinkedHashMap<>(toolCallEcho);
     }
 
+    public Map<String, Boolean> getPlanDisplay() {
+        return planDisplay;
+    }
+
+    public void setPlanDisplay(Map<String, Boolean> planDisplay) {
+        this.planDisplay = planDisplay == null ? new LinkedHashMap<>() : new LinkedHashMap<>(planDisplay);
+    }
+
     /** 指定域的片段；未配置返回 {@code null} */
     public String domainPrompt(String domainId) {
         return prompts.get(domainId);
@@ -54,5 +71,10 @@ public class DomainSettings {
     /** 指定域是否回写工具执行信息；未配置按关处理 */
     public boolean toolCallEcho(String domainId) {
         return Boolean.TRUE.equals(toolCallEcho.get(domainId));
+    }
+
+    /** 指定域是否把本轮执行计划下发给调用方；未配置按关处理 */
+    public boolean planDisplay(String domainId) {
+        return Boolean.TRUE.equals(planDisplay.get(domainId));
     }
 }

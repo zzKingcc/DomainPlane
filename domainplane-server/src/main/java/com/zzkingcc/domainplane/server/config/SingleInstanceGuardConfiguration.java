@@ -15,10 +15,11 @@ import java.time.Duration;
 /**
  * 单实例守卫的装配。
  *
- * 与 {@link StartupSelfCheckConfiguration} 里的自检分开：那些是只提醒不阻断的
- * （"配置不对但还能跑"），而本守卫是会拦启动的：它挡的不是配置不当，
- * 而是"多实例共用 Redis 会静默产生错误结果"这种正确性问题。因此它不是普通自检，
- * 也不该跟着 {@code domainplane.single-instance-guard} 之外的自检项一起被误当成提醒。
+ * 与"配置自检"分开：那些是只提醒不阻断的（"配置不对但还能跑"），而本守卫是会拦启动的：
+ * 它挡的不是配置不当，而是"多实例共用 Redis 会静默产生错误结果"这种正确性问题。因此它
+ * 不是普通自检，也不该被当成提醒。（原先启动期还有 {@code StartupSelfCheckConfiguration}
+ * 那组提醒型自检，2026-11-01 已移除：知识库/Redis 都不是启动依赖，相关检查改到
+ * "保存存储配置时"与"真正用到时"执行。）
  *
  * @author zzkingcc
  */

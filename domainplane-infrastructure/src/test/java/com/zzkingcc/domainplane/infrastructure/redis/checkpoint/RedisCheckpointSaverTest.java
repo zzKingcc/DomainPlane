@@ -165,4 +165,32 @@ class RedisCheckpointSaverTest {
         assertEquals("c1", saver.get(config()).orElseThrow().getId(),
                 "写进去的断点必须读得出来");
     }
+
+    @Test
+    @DisplayName("F04-d：checkpoint-ttl 置 0 = 持久化（断点不过期，可跨重启 resume）")
+    void zeroTtlPersistsCheckpoint() throws Exception {
+        StubTemplate template = new StubTemplate();
+        RedisCheckpointSaver saver = saver(template, Duration.ZERO);
+
+        saver.put(config(), checkpoint("c1"));
+
+        assertTrue(template.ttlWrites.isEmpty(),
+                "TTL 置 0 是【持久化】的显式写法：不能落到带过期时间的 SET 上");
+        assertEquals("c1", saver.get(config()).orElseThrow().getId(),
+                "持久化模式下断点必须读得出来 —— 这正是跨重启 resume 的前提");
+    }
+
+    @Test
+    @DisplayName("F04-d：负数 TTL 按永久处理而不是交给 Redis（负数会被服务端当成立即删除）")
+    void negativeTtlIsTreatedAsPermanent() throws Exception {
+        StubTemplate template = new StubTemplate();
+        RedisCheckpointSaver saver = saver(template, Duration.ofSeconds(-1));
+
+        saver.put(config(), checkpoint("c1"));
+
+        assertTrue(template.ttlWrites.isEmpty(),
+                "负数 TTL 落进 EXPIRE 会让 Redis 立即删键：挂起的审批将永远无法 resume");
+        assertEquals("c1", saver.get(config()).orElseThrow().getId(),
+                "负数 TTL 必须按永久处理，断点写完还在");
+    }
 }

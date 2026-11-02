@@ -33,6 +33,15 @@ public class CredentialAuthInterceptor implements HandlerInterceptor {
 
     private static final Logger log = LoggerFactory.getLogger(CredentialAuthInterceptor.class);
 
+    /**
+     * 服务端还没有任何账号时仍可访问的路径。
+     *
+     * <p>只有健康探测：客户端 SDK 用它做启动期连通性校验，不需要任何权限、也不产生副作用。
+     * 其余接口在这一态下一律拒绝——"没有账号"不等于"谁都可以用"。</p>
+     */
+    private static final java.util.Set<String> UNINITIALIZED_PUBLIC_PATHS = java.util.Set.of(
+            "/api/agent/health");
+
     private final AuthService authService;
     private final ObjectMapper objectMapper;
     private final Carrier carrier;
@@ -75,11 +84,23 @@ public class CredentialAuthInterceptor implements HandlerInterceptor {
                                 + "请恢复账号文件后重启服务");
                 return false;
             }
-            if (uninitializedWarned.compareAndSet(false, true)) {
-                log.warn("[鉴权] 服务端尚无账号，本次按【不鉴权】放行（{}）。"
-                        + "请打开管控台完成初始化后即自动生效", request.getRequestURI());
+            /* 从未初始化（首启且种子未落盘成功）。
+               这一态同样不能"全放行"：没有账号就没有任何可归属的主体，放行等于把编排、
+               工具注册、知识库写入全部开放给任何能连上端口的人。只留健康探测——
+               它是客户端启动期的连通性校验，不需要任何权限。
+               初始化入口（/admin/init、/admin/session、静态资源）走的是 exclude 清单，
+               根本不会进到这个拦截器里，因此收紧这里不会堵住引导路径。 */
+            if (UNINITIALIZED_PUBLIC_PATHS.contains(request.getRequestURI())) {
+                if (uninitializedWarned.compareAndSet(false, true)) {
+                    log.warn("[鉴权] 服务端尚无账号，仅放行健康探测（{}）。"
+                            + "请打开管控台（本机）完成首次初始化", request.getRequestURI());
+                }
+                return true;
             }
-            return true;
+            log.error("[鉴权] 服务端尚无账号，拒绝请求：{} {}", request.getMethod(), request.getRequestURI());
+            reject(response, ErrorCode.AUTH_NOT_INITIALIZED,
+                    "服务端还没有账号：请在本机打开管控台完成首次初始化后再调用接口");
+            return false;
         }
 
         String credential = resolve(request);

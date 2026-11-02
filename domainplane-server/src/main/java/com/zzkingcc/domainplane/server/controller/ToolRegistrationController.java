@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.zzkingcc.domainplane.runtime.tool.InstanceRegistry;
 import com.zzkingcc.domainplane.runtime.tool.ToolRegistry;
 import com.zzkingcc.domainplane.server.tool.RemoteToolExecutor;
+import com.zzkingcc.domainplane.server.tool.ToolEndpointPolicy;
 import com.zzkingcc.domainplane.server.tool.ToolManifest;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -35,15 +36,33 @@ public class ToolRegistrationController {
     private final ToolRegistry tools;
     private final RemoteToolExecutor remoteExecutor;
 
+    /**
+     * 回流地址准入策略。
+     *
+     * <p>这个接口是"上报方决定服务端往哪发请求"的地方：心跳报文里的 {@code endpoint}
+     * 会成为后续每一次工具调用的目标地址。地址合法性必须在这里判一次，
+     * 而不是等到真的发请求时才发现——那时错误只会表现为"工具调用全失败"。</p>
+     */
+    private final ToolEndpointPolicy endpointPolicy;
+
     /** 已告警的实例 → 告警时的回流地址；心跳周期很短，同一组合只提示一次 */
     private final Map<String, String> warnedEndpoints = new ConcurrentHashMap<>();
 
     public ToolRegistrationController(InstanceRegistry instances,
                                       ToolRegistry tools,
                                       RemoteToolExecutor remoteExecutor) {
+        this(instances, tools, remoteExecutor, new ToolEndpointPolicy());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ToolRegistrationController(InstanceRegistry instances,
+                                      ToolRegistry tools,
+                                      RemoteToolExecutor remoteExecutor,
+                                      ToolEndpointPolicy endpointPolicy) {
         this.instances = instances;
         this.tools = tools;
         this.remoteExecutor = remoteExecutor;
+        this.endpointPolicy = endpointPolicy == null ? new ToolEndpointPolicy() : endpointPolicy;
     }
 
     /**
@@ -72,6 +91,20 @@ public class ToolRegistrationController {
                     "accepted", false,
                     "reason", "instanceId 以 'mcp:' 开头是 MCP 连接的保留前缀，外部工具实例不可使用",
                     "hint", "see docs/API.md §2.6"));
+        }
+
+        /* 回流地址准入：这个字符串会成为后续每次工具调用的目标地址。不合法就在这里拒，
+           让实例侧立刻拿到可读原因；放过去的话，故障会推迟到"模型真的调用该工具"时，
+           表现为一屏"工具调用失败"。 */
+        String rejectedEndpoint = endpointPolicy.rejectReason(parsed.endpoint());
+        if (rejectedEndpoint != null) {
+            log.warn("[工具注册] 拒绝实例 {} 的回流地址 {}：{}",
+                    parsed.instanceId(), parsed.endpoint(), rejectedEndpoint);
+            return ResponseEntity.badRequest().body(Map.of(
+                    "accepted", false,
+                    "reason", rejectedEndpoint,
+                    "hint", "回流地址须为 http/https 且指向工具实例的 /invoke 端点；"
+                            + "需要限定主机时配置 domainplane.tool.endpoint.allowed-hosts"));
         }
 
         warnIfEndpointUnreachable(parsed.instanceId(), parsed.endpoint(), request.getRemoteAddr());

@@ -175,4 +175,183 @@ class DomainStoreTest {
 
         assertTrue(store().load().callableMigrated());
     }
+
+    // ==================== 版本与历史版本库 ====================
+
+    @Test
+    void versionStartsAtOneAndBumpsOnEverySave() {
+        DomainStore store = store();
+
+        store.save(Map.of("default.sales", true), true);
+        assertEquals(1L, store.currentVersion());
+
+        store.saveDeclarations(Map.of("default.sales", true, "default.hr", false));
+        assertEquals(2L, store.currentVersion(), "每次变更 version+1");
+        assertEquals(2L, store().load().version(), "版本号要能跨重启读回");
+    }
+
+    @Test
+    void everySaveLeavesAHistorySnapshot() throws IOException {
+        DomainStore store = store();
+        store.save(Map.of("default.sales", true), true);
+        store.saveDeclarations(Map.of("default.sales", true, "default.hr", false));
+
+        Path historyDir = tempDir.resolve("config").resolve("domains-history");
+        assertTrue(Files.exists(historyDir.resolve("v1.json")), "第一次变更落 v1");
+        assertTrue(Files.exists(historyDir.resolve("v2.json")), "第二次变更落 v2");
+        // 历史快照与权威文件内容一致（含当时的软删标记）
+        assertEquals(Files.readString(settingsFile(), StandardCharsets.UTF_8),
+                Files.readString(historyDir.resolve("v2.json"), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void historyListReportsEntriesWithCurrentFlag() {
+        DomainStore store = store();
+        store.save(Map.of("default.sales", true), true);
+        store.saveDeclarations(Map.of("default.sales", true, "default.hr", false));
+
+        java.util.List<DomainStore.HistoryEntry> entries = store.listHistory();
+
+        assertEquals(2, entries.size());
+        assertEquals(2L, entries.get(0).version(), "版本从新到旧");
+        assertTrue(entries.get(0).current(), "最新版本即当前");
+        assertEquals(2, entries.get(0).domainCount());
+        assertEquals(1, entries.get(0).callableCount(), "default.hr 是装配节点");
+    }
+
+    @Test
+    void corruptFileRecoversFromLatestSnapshot() throws IOException {
+        DomainStore store = store();
+        store.save(Map.of("default.sales", true), true);
+        store.saveDeclarations(Map.of("default.sales", true, "default.hr", false));
+        Files.writeString(settingsFile(), "{ truncated", StandardCharsets.UTF_8);
+
+        DomainStore.StoredDomains stored = store().load();
+
+        assertEquals(DomainStore.StoredDomains.Status.RECOVERED, stored.status());
+        assertEquals(2L, stored.version(), "恢复到的版本 = 最新快照的版本");
+        assertEquals(Boolean.FALSE, stored.callables().get("default.hr"));
+    }
+
+    /**
+     * 有快照却全部读不出 = 存储介质层面坏了：拒绝启动（fail-closed），
+     * 不放行"带着空注册表跑"——同路径域重建会让旧对话历史与待执行的破坏性调用复活。
+     */
+    @Test
+    void corruptFileWithAllSnapshotsUnreadableRefusesToStart() throws IOException {
+        DomainStore store = store();
+        store.save(Map.of("default.sales", true), true);
+        Files.writeString(settingsFile(), "{ truncated", StandardCharsets.UTF_8);
+        Files.writeString(tempDir.resolve("config").resolve("domains-history").resolve("v1.json"),
+                "{ also broken", StandardCharsets.UTF_8);
+
+        assertThrows(IllegalStateException.class, () -> store().load(),
+                "快照全坏必须拒绝启动，而不是静默按空配置放行");
+    }
+
+    @Test
+    void recoveredStateIsWritableSoNextSaveRepairsTheFile() throws IOException {
+        DomainStore store = store();
+        store.save(Map.of("default.sales", true), true);
+        Files.writeString(settingsFile(), "{ truncated", StandardCharsets.UTF_8);
+
+        DomainStore recovering = store();
+        recovering.load();
+        // 恢复出的配置是完整的：写盘是修复权威文件，不是用空配置覆盖
+        recovering.saveDeclarations(Map.of("default.sales", false));
+
+        assertEquals(DomainStore.StoredDomains.Status.OK, store().load().status());
+        assertEquals(Boolean.FALSE, store().load().callables().get("default.sales"));
+    }
+
+    // ==================== 软删标记 ====================
+
+    @Test
+    void pendingDeleteMarkersRoundTripThroughDisk() {
+        DomainStore store = store();
+        store.save(Map.of("default.sales", true), true);
+        store.markDeleted("default.sales");
+        store.saveDeclarations(Map.of("default.sales", true));
+
+        DomainStore.StoredDomains stored = store().load();
+
+        assertTrue(stored.pendingDeletes().containsKey("default.sales"),
+                "软删标记必须落盘：否则重启后宽限期状态丢失，删了一半的域又开始接新客");
+        DomainStore reloaded = store();
+        reloaded.load();
+        assertTrue(reloaded.isPendingDelete("default.sales"));
+    }
+
+    @Test
+    void clearDeletedRemovesMarkerOnNextSave() {
+        DomainStore store = store();
+        store.save(Map.of("default.sales", true), true);
+        store.markDeleted("default.sales");
+        store.saveDeclarations(Map.of("default.sales", true));
+
+        store.clearDeleted("default.sales");
+        store.saveDeclarations(Map.of("default.sales", true));
+
+        assertTrue(store().load().pendingDeletes().isEmpty(), "撤销软删后标记不得复活");
+    }
+
+    @Test
+    void rollbackCommitReplacesMarkersAndBumpsVersion() {
+        DomainStore store = store();
+        store.save(Map.of("default.sales", true), true);       // v1
+        store.markDeleted("default.sales");
+        store.saveDeclarations(Map.of("default.sales", true)); // v2 带软删标记
+
+        DomainStore.DomainDeclarations snapshot = store.readSnapshot(1L);
+        store.commitRollback(DomainStore.callablesOf(snapshot),
+                DomainStore.markersOf(snapshot), snapshot.isCallableMigrated());
+
+        assertEquals(3L, store.currentVersion(), "回滚是新变更，不是时间倒流");
+        assertTrue(store.pendingDeletes().isEmpty(), "v1 快照没有标记，回滚后随之消失");
+        assertTrue(store().load().callables().containsKey("default.sales"));
+    }
+
+    @Test
+    void readSnapshotRejectsUnknownVersion() {
+        DomainStore store = store();
+        store.save(Map.of("default.sales", true), true);
+
+        assertThrows(IllegalArgumentException.class, () -> store.readSnapshot(99L));
+    }
+
+    @Test
+    void historyRollsOverBeyondKeepLimit() {
+        DomainStore store = store();
+        for (int i = 0; i < 105; i++) {
+            store.saveDeclarations(Map.of("default.sales", i % 2 == 0));
+        }
+        assertEquals(105L, store.currentVersion());
+
+        java.util.List<DomainStore.HistoryEntry> entries = store.listHistory();
+
+        assertEquals(100, entries.size(), "保留最近 100 份，超出删最旧");
+        assertEquals(105L, entries.get(0).version(), "最新的必须保住");
+        assertEquals(6L, entries.get(entries.size() - 1).version(), "最旧的五个被清掉");
+        assertFalse(Files.exists(tempDir.resolve("config").resolve("domains-history").resolve("v5.json")),
+                "被删的快照文件也要真的消失");
+    }
+
+    @Test
+    void everyChangeListenerRunsAndOneFailureDoesNotBlockTheRest() {
+        DomainStore store = store();
+        StringBuilder seen = new StringBuilder();
+        store.onChange(() -> seen.append("tool,"));
+        store.onChange(() -> {
+            throw new IllegalStateException("派生视图算炸了");
+        });
+        store.onChange(() -> seen.append("stats,"));
+
+        Map<String, Boolean> callables = new LinkedHashMap<>();
+        callables.put("default.sales", true);
+        store.save(callables, true);
+
+        assertEquals("tool,stats,", seen.toString(),
+                "多个消费者必须都收到通知：单监听位会让后注册的把先注册的顶掉，"
+                        + "现象是某块派生视图再也不刷新；单个监听器抛异常也不能影响其余");
+    }
 }

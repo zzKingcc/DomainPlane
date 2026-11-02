@@ -13,19 +13,10 @@
             background: #fff; border: 1px solid var(--border); border-radius: 6px;
             padding: 10px 12px; min-height: 180px;
         }
-        textarea:focus { outline: none; border-color: var(--primary); }
-        .meta { font-size: 12px; color: var(--muted); margin-top: 6px; display: flex; gap: 16px; flex-wrap: wrap; }
-        .sticky-actions {
-            position: sticky; bottom: 0; z-index: 5;
-            display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-            padding: 12px 0 0; margin-top: 16px;
-            background: linear-gradient(to top, var(--bg) 62%, rgba(245,246,248,0));
-        }
-        .domain-row { cursor: pointer; }
-        .domain-row:hover { background: #f8fafc; }
-        .editor { margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 14px; }
-        .editor-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
-        .editor-head .dom { font-weight: 600; font-size: 14px; }
+        /* 焦点光圈对齐规范输入框：原来 outline:none 只有边框变色，
+           键盘导航时"焦点在哪"全靠眼色找。 */
+        textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,.1); }
+        .meta { font-size: 12px; color: var(--muted); margin-top: 8px; display: flex; gap: 16px; flex-wrap: wrap; }
         pre.preview {
             margin: 10px 0 0; padding: 12px 14px; border-radius: 6px;
             background: #0f172a; color: #e2e8f0;
@@ -34,11 +25,8 @@
             max-height: 320px; overflow: auto;
         }
         pre.preview .mark { color: #93c5fd; }
-        .tool-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
         .orphan-box { background: #fffbeb; border: 1px solid #fde68a; color: #b45309;
-            padding: 10px 12px; border-radius: 6px; font-size: 12.5px; line-height: 1.7; margin-bottom: 14px; }
-        .tool-list { font-size: 12px; color: var(--muted); line-height: 1.8; }
-        .tool-list code { font-family: ui-monospace, Consolas, monospace; color: var(--slate); }
+            padding: 10px 12px; border-radius: 6px; font-size: 12.5px; line-height: 1.7; }
     </style>
 </head>
 <body>
@@ -46,68 +34,112 @@
     <aside class="sidebar" id="sidebar"></aside>
 
     <main class="main">
-        <div class="page-head">
-            <h2>提示词设定</h2>
-            <p>
-                系统提示词<b>沿域链从根域拼接</b>：根域 <span class="mono">default</span> 为基底，后代域片段追加在后，改祖先一处则整条链生效。新建 / 删除域在<a href="domains.html">域空间</a>。
-            </p>
-        </div>
-
-        <div id="orphanBox" class="orphan-box" style="display:none;"></div>
-
-        <div class="dp-card">
-            <div class="card-head">
-                <h2>域</h2>
-                <span class="spacer"></span>
-                <button class="ghost btn btn-sm btn-outline-primary" id="refreshBtn">重新读取</button>
-            </div>
-            <div class="table-wrap">
-                <table class="table">
-                    <thead>
-                    <tr>
-                        <th>域</th>
-                        <th>可见工具</th>
-                        <th>提供者</th>
-                        <th>提示词</th>
-                        <th>状态</th>
-                        <th></th>
-                    </tr>
-                    </thead>
-                    <tbody id="domainBody">
-                    <tr><td colspan="6" class="perm-none">加载中…</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <details class="disclose">
-                <summary>可见工具与提示词的关系</summary>
-                <div class="disclose-body">
-                    可见工具 = 该域真实能用的工具集（声明留空或挂在根域的工具对全树可见；
-                    挂在父域的工具，其所有后代域都能用）。
-                    <b>提示词不决定工具可见性</b>：就算某个域一个字都没配，它对工具的限制照样生效，缺提示词只是体验降级。
-                </div>
-            </details>
-        </div>
-
-        <div class="dp-card" id="editorCard" style="display:none;">
-            <div class="editor" style="border-top:none; margin-top:0; padding-top:0;">
-                <div class="editor-head">
-                    <span class="dom" id="edDomain">—</span>
-                    <span class="card-note" id="edTools"></span>
-                </div>
-                <textarea class="form-control" id="domainText" placeholder="该域自己的片段，例如口吻、该场景下何时调用哪类能力。留空 = 只用祖先链上的内容。"></textarea>
-                <div class="meta">
-                    <span>字数 <b id="domainLen">0</b></span>
-                    <span class="card-note" id="edChain"></span>
-                </div>
-                <pre class="preview" id="preview"></pre>
+        <div class="page-header">
+            <div class="page-head">
+                <h2>提示词设定</h2>
             </div>
         </div>
+        <div class="page-body dp-prompts">
 
-        <div class="sticky-actions">
-            <button class="btn-primary btn" id="saveBtn">保存并生效</button>
-            <button class="ghost btn btn-sm btn-outline-primary" id="clearBtn">清空表单</button>
-            <span class="dirty" id="dirtyFlag" style="display:none;">● 有未保存修改</span>
-            <span class="result" id="saveResult" style="margin:0;"></span>
+            <div id="orphanBox" class="orphan-box" style="display:none;"></div>
+
+            <!-- 统计行：四个数都从 /admin/prompts 的返回里现场算，零新请求。
+                 「缺提示词 / 孤儿条目」是这页的治理指标——前者影响体验，后者是无效配置。 -->
+            <div class="row row-cards row-deck">
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-blue">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H9l-4 4v-4H6a2 2 0 0 1-2-2z"/><path d="M8 8.5h8M8 11.5h5"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">域总数</div>
+                                <div class="dp-stat-value" id="statDomains">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-green">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">已配置</div>
+                                <div class="dp-stat-value" id="statConfigured">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-purple">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">缺提示词</div>
+                                <div class="dp-stat-value" id="statMissing">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-pink">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">孤儿条目</div>
+                                <div class="dp-stat-value" id="statOrphans">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dp-prompts-split">
+                <div class="card dp-panel">
+                    <div class="card-body">
+                        <div class="card-head">
+                            <h2>域</h2>
+                            <span class="spacer"></span>
+                            <button class="btn btn-sm btn-outline-secondary" id="refreshBtn">重新读取</button>
+                        </div>
+                        <div class="dp-domain-scroll" id="domainList"></div>
+                        <details class="disclose">
+                            <summary>可见工具与提示词的关系</summary>
+                            <div class="disclose-body">
+                                可见工具 = 该域真实能用的工具集（声明留空或挂在根域的工具对全树可见；
+                                挂在父域的工具，其所有后代域都能用）。
+                                <b>提示词不决定工具可见性</b>：就算某个域一个字都没配，它对工具的限制照样生效，缺提示词只是体验降级。
+                            </div>
+                        </details>
+                    </div>
+                </div>
+                <div class="card dp-panel">
+                    <div class="card-body">
+                        <div class="card-head">
+                            <h2><span id="edDomain">—</span></h2>
+                            <span class="spacer"></span>
+                            <span class="dirty" id="dirtyFlag" style="display:none;">● 有未保存修改</span>
+                            <button class="btn btn-primary btn-sm" id="saveBtn" disabled>保存并生效</button>
+                        </div>
+                        <div class="dp-editor-empty" id="editorEmpty">从左侧选择一个域开始编辑</div>
+                        <div id="editorForm" style="display:none;">
+                            <textarea class="form-control" id="domainText" placeholder="该域自己的片段，例如口吻、该场景下何时调用哪类能力。留空 = 只用祖先链上的内容。"></textarea>
+                            <div class="meta">
+                                <span>字数 <b id="domainLen">0</b></span>
+                                <span class="card-note" id="edChain"></span>
+                            </div>
+                            <pre class="preview" id="preview"></pre>
+                            <div class="result" id="saveResult"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </main>
 </div>

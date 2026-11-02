@@ -6,15 +6,23 @@
     <title>MCP 连接 · DomainPlane 管控台</title>
     <link rel="stylesheet" href="assets/console.css">
     <style>
-        .mcp-icon { width: 17px; height: 17px; flex: 0 0 17px; color: var(--primary); }
-        .kv { display: grid; grid-template-columns: 92px 1fr; gap: 4px 10px; font-size: 12.5px; margin-top: 8px; }
+        .mcp-icon { width: 18px; height: 18px; flex: 0 0 18px; color: var(--primary); }
+        .kv { display: grid; grid-template-columns: 84px 1fr; gap: 6px 10px; font-size: 12.5px; }
         .kv .k { color: var(--muted); }
         .kv .v { word-break: break-all; font-family: ui-monospace, Consolas, monospace; }
+        /* 绑定域行：标签可能多个，label 与 tag 流同行、自然换行 */
+        .mcp-bound { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 10px; font-size: 12.5px; }
+        .mcp-bound .k { color: var(--muted); flex: 0 0 auto; }
+        /* 卡片底部操作行：一个连接有 6~7 个操作（编辑/绑定域/工具/测试/授权/停启用/删除），
+           全堆在标题行会横向溢出、换行后也更难扫读；收拢成底部 flex-wrap 行，
+           主操作（编辑）在左起、破坏性操作（删除）收尾，与卡宽自适应换行。 */
+        .mcp-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
         .pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
         .pick-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; cursor: pointer; background: var(--card); }
         .pick-card:hover { border-color: var(--primary); }
         .pick-card.on { border-color: var(--primary); background: var(--primary-dim); }
         .pick-card .pc-name { font-size: 13px; font-weight: 600; font-family: ui-monospace, Consolas, monospace; }
+        .pick-card .pc-note { font-size: 12px; color: var(--muted); margin-top: 2px; }
         .form-row { margin-bottom: 12px; }
         .form-row label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 5px; }
         .form-row input, .form-row select, .form-row textarea {
@@ -34,22 +42,81 @@
     <aside class="sidebar" id="sidebar"></aside>
 
     <main class="main">
-        <div class="page-head">
-            <div class="head-line">
-                <div>
-                    <h2>MCP 连接</h2>
-                    <p>对接外部 MCP server（Model Context Protocol）。一个连接 = 一个 MCP 实例，其工具经命名规范化后注册进平台，
-                       再按"域绑定"授权给指定域可见。v1 实装 Streamable HTTP 传输。</p>
+        <div class="page-header">
+            <div class="page-head">
+                <div class="head-line">
+                    <div>
+                        <h2>MCP 连接</h2>
+                    </div>
                 </div>
-                <span class="count-badge" id="connCount">—</span>
-            </div>
-            <div class="actions">
-                <button class="btn btn-primary" id="createBtn">新增连接</button>
-                <button class="ghost btn btn-sm btn-outline-primary" id="refreshBtn">重新读取</button>
+                <div class="actions">
+                    <button class="btn btn-sm btn-outline-primary" id="createBtn">新增连接</button>
+                    <button class="btn btn-sm btn-outline-secondary" id="refreshBtn">重新读取</button>
+                </div>
             </div>
         </div>
+        <div class="page-body dp-mcp">
 
-        <div id="connList"></div>
+            <!-- 总览行：四个治理指标，全部由 /admin/mcp-connections 的返回现场算，零新请求。
+                 就绪/需授权/失败是这页最常被问的三个状态；「需授权」要点授权按钮，
+                 「失败」意味着该连接的工具对绑定域不可用。 -->
+            <div class="row row-cards row-deck">
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-blue">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">连接总数</div>
+                                <div class="dp-stat-value" id="statConns">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-green">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">已就绪</div>
+                                <div class="dp-stat-value" id="statReady">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-purple">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">需授权</div>
+                                <div class="dp-stat-value" id="statNeedsAuth">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-pink">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">连接失败</div>
+                                <div class="dp-stat-value" id="statFailed">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="connList" class="dp-list"></div>
+        </div>
     </main>
 </div>
 
@@ -59,7 +126,7 @@
         <div class="modal-head">
             <h3 id="editTitle">新增 MCP 连接</h3>
             <span class="spacer"></span>
-            <button class="ghost btn btn-sm btn-outline-primary" id="editClose">关闭</button>
+            <button class="btn btn-outline-secondary" id="editClose">关闭</button>
         </div>
         <div class="modal-body" style="padding:6px 2px;">
             <div class="form-row">
@@ -133,8 +200,8 @@
             </div>
         </div>
         <footer class="card-foot">
-            <button class="btn btn-primary" id="editSaveBtn">保存</button>
-            <button class="ghost btn btn-sm btn-outline-primary" id="editClearBtn">重置</button>
+            <button class="btn btn-outline-primary" id="editSaveBtn">保存</button>
+            <button class="btn btn-outline-secondary" id="editClearBtn">重置</button>
         </footer>
     </div>
 </div>
@@ -145,13 +212,13 @@
         <div class="modal-head">
             <h3>配置 <span class="mono" id="bindConnName"></span> 的域绑定</h3>
             <span class="spacer"></span>
-            <button class="ghost btn btn-sm btn-outline-primary" id="bindClose">关闭</button>
+            <button class="btn btn-outline-secondary" id="bindClose">关闭</button>
         </div>
         <div id="bindCardList" class="pick-grid" style="margin-top:10px;"></div>
         <div id="bindEmpty" class="perm-none" style="margin-top:10px; display:none;"></div>
         <footer class="card-foot">
-            <button class="btn btn-primary" id="bindSaveBtn">保存绑定</button>
-            <button class="ghost btn btn-sm btn-outline-primary" id="bindClearBtn">全部解绑</button>
+            <button class="btn btn-outline-primary" id="bindSaveBtn">保存绑定</button>
+            <button class="btn btn-outline-secondary" id="bindClearBtn">全部解绑</button>
         </footer>
     </div>
 </div>
@@ -162,7 +229,7 @@
         <div class="modal-head">
             <h3><span class="mono" id="toolsConnName"></span> 的工具目录</h3>
             <span class="spacer"></span>
-            <button class="ghost btn btn-sm btn-outline-primary" id="toolsClose">关闭</button>
+            <button class="btn btn-outline-secondary" id="toolsClose">关闭</button>
         </div>
         <div id="toolsBody" style="margin-top:10px;"></div>
     </div>

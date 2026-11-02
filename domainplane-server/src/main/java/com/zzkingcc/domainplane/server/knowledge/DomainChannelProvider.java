@@ -1,16 +1,8 @@
 package com.zzkingcc.domainplane.server.knowledge;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import com.zzkingcc.domainplane.api.agent.Domains;
-import com.zzkingcc.domainplane.api.support.KbIndexes;
 import com.zzkingcc.domainplane.api.support.RetrievalScope;
-import com.zzkingcc.domainplane.domain.rag.model.Modality;
 import com.zzkingcc.domainplane.domain.rag.retriever.CompositeRetriever;
 import com.zzkingcc.domainplane.domain.rag.retriever.CompositeRetriever.Channel;
-import com.zzkingcc.domainplane.infrastructure.elasticsearch.retriever.KeywordMatchContentRetriever;
-import com.zzkingcc.domainplane.infrastructure.elasticsearch.retriever.NativeScriptScoreContentRetriever;
-import com.zzkingcc.domainplane.server.config.RetrievalProperties;
-import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 
 import java.util.ArrayList;
@@ -20,86 +12,87 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 按当前检索域解析召回通道：一域一索引 → 每个「域链上的索引 × 两路模态」各一条通道。
+ * 域通道提供者：把 {@link RetrievalPlan} 开出的通道规格包成编排层认识的检索器。
  *
- * 域链 = {@code Domains.chainOf(当前域)}，即自身 + 全部祖先（含根域），
- * 与工具可见性、提示词的同构语义一致：挂在父域的内容，子域天然可用。
+ * <p>本类只做两件与"查什么"无关的事：</p>
+ * <ul>
+ *   <li><b>取当前检索域</b>（{@link RetrievalScope}，对话上下文里的域；未绑域传 null 走通配），
+ *       交给计划解析；</li>
+ *   <li><b>检索器缓存</b>：规格 → 检索器实例按 {@code locationId} 缓存复用（检索器无状态），
+ *       避免每轮重建。</li>
+ * </ul>
  *
- * 不预判索引是否存在，某条祖先域还没上传过任何文档时它没有索引，此时通道安静地返回空
- * （检索器开了 {@code ignoreUnavailable / allowNoIndices}），比先探测一遍省掉 N 次往返。
+ * <p>通道解析（域链 → collection × 模态、通配降级、策略门控）全在 {@link RetrievalPlan}，
+ * 那里不依赖 Spring、可单测；本类是它在编排层的适配壳。</p>
  *
- * 每条通道带 depth（距查询域的距离，0 = 自身），供融合阶段做层级衰减：
- * 本域自有知识优先于从祖先继承来的知识。
- *
- * 未绑定域（非对话路径：管控台预览、诊断等）走通配：对全部知识库索引做一次检索，
- * 保持升级前"全库检索"的行为，避免这些调用凭空查不到东西。
+ * <p>提成独立 bean 而不是内联 new 进 {@link CompositeRetriever}：删域流程要用它失效
+ * 检索器缓存（索引删了但还在缓存里会被旧检索器继续命中），那是与"查询"无关的另一条
+ * 使用路径。内联构造时它拿不到 bean 引用，{@code AdminDomainController} 就只能声明一个
+ * 根本不存在类型的依赖：于是 ES 未配置、检索器未装配的场景下整个应用起不来。</p>
  *
  * @author zzkingcc
  */
 public class DomainChannelProvider implements CompositeRetriever.ChannelProvider {
 
-    private final ElasticsearchClient esClient;
-    private final EmbeddingModel embeddingModel;
-    private final RetrievalProperties properties;
+    private final RetrievalPlan plan;
 
-    /** 索引名 → 检索器（检索器无状态，可安全复用；避免每轮重建） */
-    private final Map<String, ContentRetriever> vectorCache = new ConcurrentHashMap<>();
-    private final Map<String, ContentRetriever> keywordCache = new ConcurrentHashMap<>();
+    /** locationId → 检索器（检索器无状态，可安全复用；避免每轮重建） */
+    private final Map<String, ContentRetriever> retrieverCache = new ConcurrentHashMap<>();
 
-    public DomainChannelProvider(ElasticsearchClient esClient,
-                                 EmbeddingModel embeddingModel,
-                                 RetrievalProperties properties) {
-        this.esClient = esClient;
-        this.embeddingModel = embeddingModel;
-        this.properties = properties;
+    public DomainChannelProvider(RetrievalPlan plan) {
+        this.plan = plan;
     }
 
     @Override
     public List<Channel> channels() {
-        String domain = RetrievalScope.current();
-        if (domain == null) {
-            return List.of(
-                    new Channel(KbIndexes.WILDCARD, Modality.VECTOR, vector(KbIndexes.WILDCARD)),
-                    new Channel(KbIndexes.WILDCARD, Modality.KEYWORD, keyword(KbIndexes.WILDCARD)));
-        }
-
-        // chainOf 是「由根向下」的顺序：[root, ..., 查询域自身]。
-        // depth 是"距查询域的距离"，0 = 自身，所以要反向算：末位是 0，越靠前越大。
-        List<String> chain = Domains.chainOf(Domains.normalize(domain));
-        int last = chain.size() - 1;
-        List<Channel> channels = new ArrayList<>(chain.size() * 2);
-        for (int i = 0; i < chain.size(); i++) {
-            String index = KbIndexes.nameOf(chain.get(i));
-            int depth = last - i;
-            channels.add(new Channel(index, Modality.VECTOR, vector(index), depth));
-            channels.add(new Channel(index, Modality.KEYWORD, keyword(index), depth));
+        List<RetrievalPlan.ChannelSpec> specs = plan.channels(RetrievalScope.current());
+        List<Channel> channels = new ArrayList<>(specs.size());
+        for (RetrievalPlan.ChannelSpec spec : specs) {
+            channels.add(new Channel(
+                    spec.sourceId(), spec.locationId(), spec.modality(),
+                    retrieverOf(spec), spec.depth()));
         }
         return channels;
     }
 
-    private ContentRetriever vector(String index) {
-        return vectorCache.computeIfAbsent(index, name -> new NativeScriptScoreContentRetriever(
-                esClient, name, embeddingModel, properties.getVectorTopK(), properties.getVectorMinScore()));
-    }
-
-    private ContentRetriever keyword(String index) {
-        return keywordCache.computeIfAbsent(index, name -> new KeywordMatchContentRetriever(
-                esClient, name, properties.getKeywordTopK(), properties.getMinimumShouldMatch()));
+    private ContentRetriever retrieverOf(RetrievalPlan.ChannelSpec spec) {
+        // 缓存 key = locationId（backendId|collection|modality）：同一物理位置只有
+        // 一个检索器实例；规格里的 searcher 引用不变（后端实例是单例），可安全复用
+        return retrieverCache.computeIfAbsent(spec.locationId(), key ->
+                spec.vectorSearcher() != null
+                        ? new VectorChannelRetriever(spec.vectorSearcher(), spec.collection(), spec.topK())
+                        : new KeywordChannelRetriever(spec.keywordSearcher(), spec.collection(), spec.topK()));
     }
 
     /**
-     * 删域时清理：失效这些索引对应的检索器缓存。
+     * 后端集合被整份替换时清空全部检索器缓存。
      *
-     * 不失效的话，删除的索引还会被缓存里的旧检索器继续命中（ES 层报索引缺失），
-     * 且同路径域将来重建时会复用指向旧 mapping 的检索器。
+     * <p>缓存里的检索器抓着<b>旧后端实例</b>（旧客户端、旧连接参数）。后端集合一换，
+     * 那些实例就指向已经不生效的配置了——不清就会出现"页面改了地址、检索还在打旧机器"，
+     * 而且这种错不会报任何异常，只会表现为结果不对。</p>
      */
-    public void evictIndices(Collection<String> indexNames) {
-        if (indexNames == null || indexNames.isEmpty()) {
+    public void evictAll() {
+        retrieverCache.clear();
+    }
+
+    /**
+     * 删域时清理：失效这些 collection 对应的检索器缓存。
+     *
+     * 不失效的话，删除的 collection 还会被缓存里的旧检索器继续命中（ES 层报索引缺失），
+     * 且同路径域将来重建时会复用指向旧 mapping 的检索器。
+     *
+     * 缓存 key 是 {@code backendId|collection|modality}，这里按"中一段含 collection"匹配清理——
+     * 同一 collection 可能挂在多个后端下（混合后端），只按 key 头部的 backendId 匹配会漏。
+     *
+     * @param collections 域链上被删除的 collection 名（{@code KbIndexes.nameOf} 的全名）
+     */
+    public void evict(Collection<String> collections) {
+        if (collections == null || collections.isEmpty()) {
             return;
         }
-        for (String index : indexNames) {
-            vectorCache.remove(index);
-            keywordCache.remove(index);
+        for (String collection : collections) {
+            String middle = "|" + collection + "|";
+            retrieverCache.keySet().removeIf(key -> key.contains(middle));
         }
     }
 }

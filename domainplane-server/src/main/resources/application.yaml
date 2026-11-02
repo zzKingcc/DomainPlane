@@ -79,8 +79,13 @@ domainplane:
     max-tokens: 30000
     # 保留期：这里不写 = 永久不过期（记忆是长期存储，靠 Redis RDB+AOF 保住）。
     # 需要保留期时设环境变量 DOMAINPLANE_MEMORY_TTL=30d，或在此加一行 ttl: 30d
+    # 检查点保留期：中断后未 resume 的会话靠此兜底清理。
+    # 置 0（或负数）= 持久化：断点不过期，服务重启后仍可 resume（负数按永久处理并告警）。
+    # 改这一项必须同步 domain.delete-grace：两者是同一时钟的两半。
     checkpoint-ttl: 24h
     # 其余子项走代码默认值（MemoryProperties），需要覆盖时在下面按需加：
+    #   history-vector-enabled（默认 true）：历史检索的语义路（归档轮次向量索引 + RRF 融合）；
+    #     未配向量模型时静默退化为纯关键词，检索行为与不开这一路一字不变
     #   assembly-budget / assembly-window-share / assembly-window-turns / assembly-summary-budget / assembly-max-cards
     #   recall-word-weight / recall-bigram-weight / recall-unigram-weight / recall-extra-stop-words
     #     停用词同时决定写索引与查询两侧的切词，改完要重放归档重建索引；权重只在查询打分生效、即时生效
@@ -93,6 +98,63 @@ domainplane:
     core-pool-size: 8
     max-pool-size: 32
     queue-capacity: 200
+
+  # 超时总表：全平台"等多久算太长"的唯一口径（F07/F08/F11 是同一项，不各配一次）。
+  # 下面五项就是默认值，写出来只为有据可查；不写任何一行行为完全一致。
+  # 注意区分两族"多久算过期"：这里是**单次调用的上限**，
+  # instance.timeout-seconds（心跳）/ memory.checkpoint-ttl / domain.delete-grace 是**生命周期**，
+  # 两者互不影响。
+  timeout:
+    # 等模型终态的总上限：兜住"上游既不吐 token 也不报错"的半开连接
+    model-wait-ms: 600000
+    # 等模型终态的单次阻塞上限：每片醒来先看停止标志，这个值决定「点停止」的响应延迟。
+    # 调大省 CPU、调小更跟手，不影响总上限；不得大于 model-wait-ms
+    model-wait-slice-ms: 200
+    # 规划前置调用的总上限：规划卡住到点即降级直进 loop，不拖累本轮（分片复用 model-wait-slice-ms）
+    planner-wait-ms: 60000
+    # 本地工具单次调用上限（有界池执行，超时即中断）
+    tool-invoke-ms: 30000
+    # 看图调用上限
+    vision-call-ms: 60000
+    # 能力调用上限（生图动辄 30–90 秒，故最长）
+    capability-call-ms: 120000
+    # 作废的旧键：domainplane.tool.invoke-timeout-ms / vision.timeout-ms / capability.timeout-ms
+    # 由上面对应的三项取代（默认值一致，未显式配过的部署行为不变）
+
+  # 规划前置（每轮进图前用主模型做一次规划调用，direct/plan 由模型自判）
+  # 全局默认关（灰度起步）；计划是否展示给前端是另一颗开关：域级 planDisplay（管控台「域空间」页，默认关）
+  planning:
+    enabled: false
+
+  # 域树（域存储增强：本地文件权威 + 版本库 + 软删三阶段，见 docs/L1领域与存储改造升级计划.md F03 附注）
+  domain:
+    # 软删宽限期：删除请求先打标记，到期才硬删。与检查点 TTL（上面 memory.checkpoint-ttl）对齐，
+    # 改一个就要同时改另一个。置 0 = 维持"立即硬删"旧语义（在飞会话停不掉即拒删）。
+    delete-grace: 24h
+    # 多实例版本落后巡检间隔（只告警；自动同步随 F13 落地）
+    version-check-ms: 30000
+
+  # blob 存储根目录（媒体附件字节；引用名登记表仍在 Redis，见 docs/L2运行时内核改造升级计划.md 横切附注）
+  # 附件按 attachments/ 前缀分目录；OSS/COS/S3 切换随 F13 落地，届时此处改由管控台"存储配置"页管理。
+  storage:
+    path: ${DOMAINPLANE_STORAGE_PATH:/var/lib/domainplane/blobs}
+
+  # 多模态（媒体暂存区 = Redis 登记表 + blob 存储字节）
+  vision:
+    # 附件引用 TTL（分钟）：暂存区不是存档，过期即无主；活跃会话由每轮续期保鲜
+    attachment-ttl-minutes: 30
+    # 孤儿 blob 回收间隔（毫秒）：登记表过期即字节无主，扫描负责回收无主对象
+    blob-sweep-ms: 300000
+    # 回收竞态护栏（分钟）：写入顺序是"先落字节、后登记"，年龄小于该值的对象本轮不回收，
+    # 免得把还在登记的活附件当孤儿删掉。正常孤儿诞生时字节年龄已超过 TTL，不受此线延迟
+    blob-sweep-min-age-minutes: 5
+
+  # 账号与初始化
+  auth:
+    # 首次初始化（POST /admin/init）是否允许非本机发起。默认 false：
+    # 该入口在账号不存在时免鉴权，放它公网可达等于"谁先到谁当管理员"。
+    # 正常部署用不到它——种子账号首启就会落盘；只有账号文件被删、需要在远程重建时才需要打开。
+    allow-remote-init: false
 
   # 工具实例（动态注册 / 保活）
   instance:
@@ -107,23 +169,41 @@ domainplane:
     # 单次调用最多尝试几个不同副本
     invoke-max-attempts: 2
 
+  # 工具回流地址准入（POST /api/agent/tools/register 的 endpoint）
+  # 这个地址由实例上报、服务端随后主动 POST 过去，等于"上报方决定请求打到哪"。
+  # 默认空 = 不限主机（工具实例本来就在内网、常常同机），只拦：非 http/https、
+  # 带 user:pass 的地址、通配地址 0.0.0.0/::、链路本地（169.254.0.0/16、fe80::/10）
+  # 与云元数据（含 100.100.100.200 / fd00:ec2::254）。
+  # 要收紧到"只能连这几台实例"时配上白名单：支持精确主机与 *.后缀
+  # 例：allowed-hosts: 10.0.0.5,10.0.0.6,*.tools.internal
+  tool:
+    endpoint:
+      allowed-hosts: ${DOMAINPLANE_TOOL_ENDPOINT_ALLOWED_HOSTS:}
+
   # 混合检索（向量 + 关键词并行召回与融合排序）
   # 检索域 = 自身 + 祖先链；域链上每个索引各召回两路。
   # 结果只来自单个索引 → 分数制；来自多个索引 → RRF（k 默认 10，带层级衰减）。
+  #
+  # 注意：下面四项已降级为「废弃兼容键」，真相来源在 domainplane.knowledge.backends：
+  #   vector-top-k / keyword-top-k → backends.<id>.{vector,keyword}.top-k
+  #   vector-min-score            → backends.<id>.vector.min-score
+  #   minimum-should-match        → backends.<id>.keyword.minimum-should-match
+  # 新键未设时原样回退到这里的值并打 WARN（语义没变、不换算）；改配置请改新键。
   retrieval:
     parallel: true
     timeout-ms: 5000
     core-pool-size: 4
     max-pool-size: 16
     queue-capacity: 200
-    # 每张索引的召回条数（须 ≥ top-n）
+    # 每张索引的召回条数（须 ≥ top-n）【废弃兼容键】
     vector-top-k: 30
     keyword-top-k: 20
-    # 向量最低余弦相似度（脚本里已 +1.0 回归，这里按原始余弦填）
+    # 向量最低余弦相似度（脚本里已 +1.0 回归，这里按原始余弦填）【废弃兼容键】
     vector-min-score: 0.35
     # 关键词查询的 minimum_should_match：至少命中查询词的这个比例，用于压"只命中一个词"的噪音。
     # 有效区间 40%~50%：ik_smart 把"会员退款的时效说明"切成 5 个词（助词"的"也占额度），
     # 60% 会要求命中 3 个词、把正常问题打成零命中；30% 及以下等于没限制。留空 = 不限制。
+    # 【废弃兼容键】
     minimum-should-match: "50%"
     vector-weight: 0.6
     keyword-weight: 0.4
@@ -138,6 +218,36 @@ domainplane:
     inject-top-n: 8
     # 注入的正文总字符预算（首条无论如何都保留）
     max-context-chars: 3000
+
+  # 知识库存储后端与召回策略（F05：去掉对 ES 的强依赖；能力不满足启动即失败）
+  # ES 连接地址不在这里——继续复用 InfraSettings.es（管控台「存储配置」页，A5），
+  # 绝不出现"两套 ES 配置"。type 与 strategy 变更必须重启（bean 图不同）。
+  knowledge:
+    # 召回策略：keyword | vector | hybrid（默认）。配不满启动即失败（60007），
+    # 不留给运行期——运行期空结果会让"配错了"和"知识库是空的"长得一模一样
+    strategy: hybrid
+    # 融合算法：auto（默认，单来源分数制 / 多来源 RRF 自动切换）| score | rrf
+    fusion: auto
+    # 关键词路 / 向量路各自走哪个后端（可不同：如关键词留 ES、向量走向量库）
+    keyword-backend: es-main
+    vector-backend: es-main
+    # 档案对账（ChunkArchiveReconciler）：间隔与年龄护栏。
+    # 间隔由 @Scheduled 占位符直接读；护栏（分钟）防撞"刚写完还没登记"的窗口
+    archive-reconcile-ms: 300000
+    archive-reconcile-min-age-minutes: 5
+    backends:
+      es-main:
+        # P0 唯一放行的后端类型，其它值启动即报错并列出支持列表
+        type: elasticsearch
+        vector:
+          # 每张索引的向量召回条数（通用配置，通道层每次 search 时传入）
+          topK: 30
+          # 原始余弦阈值（ES 内部 +1.0 偏移是适配器方言，不外泄）
+          minScore: 0.35
+        keyword:
+          topK: 20
+          # BM25 方言：有效区间 40%~50%，别凭直觉调大（ik_smart 把助词也切成词占额度）
+          minimumShouldMatch: "50%"
 
   # 知识库（一域一索引，索引名由域路径派生，首次上传时按需创建；故此处无索引名配置）
   rag:
@@ -162,6 +272,14 @@ domainplane:
       max-chars: 400
       overlap-sentences: 1
       min-chars: 60
+      # 语义分块（F05 P2，结构感知切片的互补模式，默认关闭）：开启后在标题已切好的
+      # 小节内部，再按句子嵌入向量的相邻余弦相似度切分；需要 EmbeddingModel 可用，
+      # 模型不可用或嵌入失败时自动退回结构感知切片，导入不中断。
+      # semantic-enabled: false
+      # 相邻句子余弦相似度低于该阈值时断开一片（0~1，越大切得越细）
+      # semantic-similarity-threshold: 0.6
+      # 语义分块最小每片句子数（>=1，避免过碎）
+      # semantic-min-sentences: 2
 
   # 切片预览文件的落盘目录（与 config / logs 同级）
   # 上传完成后把该文档的全部切片写成一个 UTF-8 txt，管控台只展示这个路径，不提供在线查看。

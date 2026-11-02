@@ -1,5 +1,6 @@
 package com.zzkingcc.domainplane.runtime.tool;
 
+import com.zzkingcc.domainplane.common.metrics.MetricsRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,6 +43,7 @@ public class InstanceRegistry {
             throw new IllegalArgumentException("instanceId 不能为空");
         }
         String digest = manifestDigest == null ? "" : manifestDigest;
+        MetricsRegistry.instanceHeartbeat();
 
         synchronized (StripedLocks.of(instanceId)) {
             InstanceSession existing = sessions.get(instanceId);
@@ -49,6 +51,7 @@ public class InstanceRegistry {
             // 强制下线不可恢复：即便实例不理会 410 继续发心跳，也持续被拒，副本不会复活
             if (existing != null && existing.state().isRejecting()) {
                 log.warn("[实例心跳] {} 已被强制下线，拒绝本次心跳（410 Gone）", instanceId);
+                MetricsRegistry.instanceHeartbeatFailure();
                 return false;
             }
 

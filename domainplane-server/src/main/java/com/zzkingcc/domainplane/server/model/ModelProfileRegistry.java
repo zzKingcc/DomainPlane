@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * 模型档案注册表 —— 档案与「域 → 档案」绑定的唯一真相。
@@ -35,6 +36,17 @@ import java.util.Set;
 public class ModelProfileRegistry {
 
     private final ModelProfileStore store;
+
+    /**
+     * 配置变更监听：任何一次落盘成功后回调（照 {@code DomainStore.onChange} 的骨架）。
+     *
+     * <p>五个写入口（save / delete / bindDomain / setEmbeddingAlias / unbindDomains，
+     * {@code bind} 只是 {@code bindDomain} 的简化调用）最终都收敛到
+     * {@link #persist}，监听挂在这里一处就全覆盖。消费方是 {@code ModelCapabilityToolBinder}：
+     * 能力工具的可见域由「哪个域绑了哪族模型」推出来，绑定一变工具就得跟着变，
+     * 没有这个回调就只能等下一次无关的配置变更才被顺带纠正。</p>
+     */
+    private final CopyOnWriteArrayList<Runnable> changeListeners = new CopyOnWriteArrayList<>();
 
     /** 当前配置（写操作整体替换，读操作拿不可变副本） */
     private volatile ModelProfileSettings settings;
@@ -495,6 +507,28 @@ public class ModelProfileRegistry {
                                       boolean wasEmbedding) {
     }
 
+    // ==================== 变更监听 ====================
+
+    /**
+     * 注册配置变更监听（落盘成功后回调）。
+     *
+     * <p>监听异常被逐个隔离：一个监听失败不能拖垮其他监听，更不能让"配置其实已经保存成功"
+     * 这件事在调用方看来变成失败——落盘发生在回调之前，到这里配置已经生效了。</p>
+     */
+    public void onChange(Runnable listener) {
+        changeListeners.add(listener);
+    }
+
+    private void fireChange() {
+        for (Runnable listener : changeListeners) {
+            try {
+                listener.run();
+            } catch (RuntimeException e) {
+                log.warn("[模型档案] 配置变更监听执行失败：{}", e.getMessage());
+            }
+        }
+    }
+
     // ==================== 内部 ====================
 
     /** 绑定了该别名的域（作为主模型或任一能力族被绑定，都算"在用"） */
@@ -538,10 +572,11 @@ public class ModelProfileRegistry {
         return out;
     }
 
-    /** 落盘成功后整体替换内存态（写失败时抛异常，内存态保持原样） */
+    /** 落盘成功后整体替换内存态（写失败时抛异常，内存态保持原样），随后通知监听 */
     private void persist(ModelProfileSettings next) {
         store.save(next);
         this.settings = next;
+        fireChange();
     }
 
     private static boolean hasText(String s) {

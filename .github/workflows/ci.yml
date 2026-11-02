@@ -1,0 +1,62 @@
+# DomainPlane 持续集成
+#
+# 三条纪律：
+#   1. 每个 push / PR 都要跑全模块 mvn verify —— 测试是唯一能证明「配了没生效」的手段。
+#   2. 依赖缓存只按 pom 哈希失效：源码变了不该重装一遍依赖。
+#   3. Java 25 那一格是 continue-on-error 的**探路格**，不是发布门禁 —— 项目锁 Java 21
+#      正式线（见 docs/设计文档.md 版本策略），25 只是提前暴露 API 移除与 Lombok 兼容问题。
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: JDK ${{ matrix.java }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - java: "21"
+            experimental: false
+          - java: "25"
+            experimental: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 JDK ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+
+      - name: 编译 + 全量测试
+        # -B：批处理模式，去掉 CI 日志里的 ANSI 与下载进度噪音
+        # 不加 -o：CI 必须从远端解析，本地仓库不是权威
+        run: mvn -B -ntp verify
+
+      - name: 归档各模块测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-jdk${{ matrix.java }}
+          path: "**/target/surefire-reports/**"
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: 归档可执行 jar（仅正式 JDK）
+        if: matrix.java == '21'
+        uses: actions/upload-artifact@v4
+        with:
+          name: domainplane-server-jar
+          path: domainplane-server/target/*.jar
+          retention-days: 7
+          if-no-files-found: error

@@ -45,6 +45,10 @@ public enum ErrorCode {
     DOMAIN_REQUIRED(10009, "未指定本轮所处的域", 400, false, "显式指定 domain"),
     DOMAIN_NOT_CALLABLE(10010, "该域不是可调用单元", 400, false,
             "改用可调用的叶子域，或在管控台「域空间」把该域标记为可调用"),
+    DOMAIN_PENDING_DELETE(10011, "该域已进入删除宽限期，不再接受新会话", 409, false,
+            "等待该域彻底删除，或联系管理员撤销删除"),
+    DOMAIN_DELETE_BLOCKED(10012, "删除清理已启动，不能撤销", 409, false,
+            "删除已进入不可逆阶段，请稍后刷新查看结果"),
 
     // ===== 20xxx 限流与容量 =====
     RATE_LIMITED(20000, "请求过于频繁，请稍后再试", 429, true, "退避后重试"),
@@ -68,6 +72,8 @@ public enum ErrorCode {
     CLIENT_CANCELLED(40004, "用户已中断请求", 499, false, "无需处理"),
     INPUT_TOO_LONG(40005, "输入内容超长", 400, false,
             "缩短输入后重发（服务端不做截断：截断后的回答基于残缺输入，而调用方收不到任何信号）"),
+    VERSION_CONFLICT(40006, "配置已被其他实例修改，请刷新后重试", 409, false,
+            "重新读取最新配置后再提交变更"),
     RESOURCE_NOT_FOUND(40400, "请求的资源不存在", 404, false, "检查请求路径"),
 
     // ===== 50xxx 系统 / 通用 =====
@@ -88,6 +94,16 @@ public enum ErrorCode {
             "暂不支持这种文档格式"),
     KNOWLEDGE_DOCUMENT_DUPLICATE(60005, "知识库已存在同名文档", 409, false, "改名后重传，或带 replace=true 覆盖更新"),
     KNOWLEDGE_UPLOAD_REJECTED(60006, "知识库文档上传被拒绝", 400, false, "检查文件类型是否在白名单内、是否超过大小上限"),
+    /* 召回策略与后端能力不匹配（如 strategy=vector 但所配后端没有 vector 能力）：
+       部署配置错误，重试无意义，retryable=false。校验在启动与管控台保存两个时机跑，
+       文案点名缺哪个后端哪种能力（KnowledgeBackendValidator 负责拼详情）。 */
+    KNOWLEDGE_BACKEND_MISCONFIGURED(60007, "知识库检索后端配置不满足当前召回策略", 500, false,
+            "补齐缺失的后端能力，或把召回策略调整为后端支持的模式",
+            "知识库检索服务暂未就绪，请联系管理员"),
+    // 后端运行期不可用（KnowledgeStore/检索通道抛 StoreAccessException 的统一出口）：
+    // 与 60000 的区别是"存储链路故障"而非"知识库业务异常"，可重试。
+    KNOWLEDGE_STORE_UNAVAILABLE(60008, "知识库存储不可用", 503, true, "稍后重试；持续失败联系管理员检查存储服务",
+            "资料查询暂时不可用，请稍后重试"),
 
     // ===== 70xxx 会话记忆 / 检查点 =====
     CHAT_MEMORY_ERROR(70000, "会话记忆服务异常", 500, true, "稍后重试",

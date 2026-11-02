@@ -68,9 +68,12 @@ class KnowledgeSearchToolTest {
 
         assertEquals("searchKnowledge", d.name());
         assertFalse(d.description().isBlank(), "desc 是模型判断何时调用的唯一依据，不能空");
-        // 不声明域 = 挂根域、全树可见；检索范围靠执行时绑定的 RetrievalScope（本轮域）收窄
-        assertTrue(d.visibleIn("default"), "根域必须可见");
-        assertTrue(d.visibleIn("default.sales"), "子域按累加语义可见（父域知识子域天然可用）");
+        // 域相关工具：哪个域能用取决于"这个域绑了可用知识体没有"，注解写不出这种条件，
+        // 故初始声明 UNBOUND 哨兵（对任何域都不可见），由 KnowledgeToolBinder 在启动 /
+        // 域变更 / 存储变更三个时点改写成实际域列表。写死根域会让没有知识库的域也看得到它。
+        assertEquals(List.of(ToolDescriptor.UNBOUND_DOMAIN), d.declaredDomains());
+        assertFalse(d.visibleIn("default"), "还没绑定任何域：根域也不可见");
+        assertFalse(d.visibleIn("default.sales"), "还没绑定任何域：子域同样不可见");
         assertEquals(ToolDescriptor.Approval.none().mode(), d.approval().mode(), "只读检索免审批");
         assertFalse(d.requiresApproval());
         assertEquals("READ", d.sideEffect().name());

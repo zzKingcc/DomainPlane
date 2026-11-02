@@ -1,13 +1,20 @@
 package com.zzkingcc.domainplane.server.config;
 
+import com.zzkingcc.domainplane.api.conversation.AssemblyReportStore;
+import com.zzkingcc.domainplane.api.conversation.HistoryVectorIndex;
+import com.zzkingcc.domainplane.api.conversation.TextEmbedder;
 import com.zzkingcc.domainplane.common.util.TokenizerProfile;
 import com.zzkingcc.domainplane.domain.memory.DualConstraintChatMemory;
 import com.zzkingcc.domainplane.infrastructure.redis.checkpoint.RedisCheckpointSaver;
+import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisAssemblyReportStore;
 import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisConversationArchive;
 import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisConversationSummary;
 import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisHistorySearch;
+import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisHistoryVectorIndex;
+import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisSessionStorage;
 import com.zzkingcc.domainplane.infrastructure.redis.memory.RedisChatMemoryStore;
 import com.zzkingcc.domainplane.runtime.message.JsonContentSerializer;
+import com.zzkingcc.domainplane.server.settings.LlmModelHolder;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.Content;
@@ -32,7 +39,7 @@ import java.util.LinkedHashSet;
  * 上限与保留期取自 {@code domainplane.memory.*}。
  * M2 起记忆不再因上限拒绝新一轮（改为召回装配逐级降级，会话无限增长），
  * 双约束上限退化为内部自检口径；Redis 侧靠 RDB+AOF 保住
- * （启动期由 {@code RedisPersistenceAudit} 自检并告警）。
+ * （保存 Redis 配置时由 {@code RedisPersistenceAudit} 自检并告警）。
  *
  * @author zzkingcc
  */
@@ -88,17 +95,85 @@ public class MemoryConfiguration {
     public RedisHistorySearch redisHistorySearch(
             @Qualifier("domainplaneStringRedisTemplate") StringRedisTemplate stringRedisTemplate,
             RedisConversationArchive redisConversationArchive,
-            MemoryProperties memoryProperties) {
+            MemoryProperties memoryProperties,
+            RedisHistoryVectorIndex redisHistoryVectorIndex,
+            TextEmbedder historyTextEmbedder) {
         TokenizerProfile profile = new TokenizerProfile(
                 memoryProperties.getRecallWordWeight(),
                 memoryProperties.getRecallBigramWeight(),
                 memoryProperties.getRecallUnigramWeight(),
                 new LinkedHashSet<>(memoryProperties.getRecallExtraStopWords()));
+        boolean semantic = memoryProperties.isHistoryVectorEnabled();
         log.info("[会话检索] RedisHistorySearch 初始化：键前缀 domainplane:conv:idx: / domainplane:conv:terms:，"
-                        + "一词根一 ZSET，member/score=turnId；分词权重 word={} bigram={} unigram={}，追加停用词 {} 个",
+                        + "一词根一 ZSET，member/score=turnId；分词权重 word={} bigram={} unigram={}，追加停用词 {} 个；"
+                        + "语义路（F04-b）={}",
                 profile.wordWeight(), profile.bigramWeight(), profile.unigramWeight(),
-                profile.extraStopWords().size());
-        return new RedisHistorySearch(stringRedisTemplate, redisConversationArchive, profile);
+                profile.extraStopWords().size(), semantic ? "开启（关键词 + 向量 RRF 融合）" : "关闭（纯关键词）");
+        return new RedisHistorySearch(stringRedisTemplate, redisConversationArchive, profile,
+                redisHistoryVectorIndex, historyTextEmbedder, semantic);
+    }
+
+    /**
+     * 历史轮次的向量索引 Bean（F04-b）。
+     *
+     * <p>与倒排索引同族前缀 {@code domainplane:conv:vec:}，同为派生数据（可重放归档重建），
+     * 同一套 30 天 TTL 与删域级联。它只服务"字面不同但语义相同"的那类召回：
+     * 关键词路照旧负责专有名词、编号、金额这些向量路不擅长的东西。</p>
+     */
+    @Bean
+    public RedisHistoryVectorIndex redisHistoryVectorIndex(
+            @Qualifier("domainplaneStringRedisTemplate") StringRedisTemplate stringRedisTemplate) {
+        log.info("[会话检索] RedisHistoryVectorIndex 初始化：键前缀 domainplane:conv:vec:，"
+                + "一会话一 Hash（field=turnId），每会话上限 {} 轮", HistoryVectorIndex.MAX_TURNS_PER_SESSION);
+        return new RedisHistoryVectorIndex(stringRedisTemplate);
+    }
+
+    /**
+     * 历史检索用的嵌入器（F04-b）。
+     *
+     * <p>未配嵌入模型时返回 {@code null} 而不是抛：语义路是增强不是依赖，
+     * "没配"应当静默退化成纯关键词，而不是给每轮对话刷一条警告。</p>
+     */
+    @Bean
+    public TextEmbedder historyTextEmbedder(LlmModelHolder modelHolder) {
+        return text -> {
+            if (!modelHolder.isEmbeddingConfigured()) {
+                return null;
+            }
+            return modelHolder.embeddingModel().embed(text).content().vector();
+        };
+    }
+
+    /**
+     * 装配清单账本 Bean（F04-a）。
+     *
+     * <p>每会话一 List，只留最近 {@link AssemblyReportStore#KEEP_PER_SESSION} 条：
+     * 它是排障用的账，不是档案，老账没有保留价值。</p>
+     */
+    @Bean
+    public RedisAssemblyReportStore redisAssemblyReportStore(
+            @Qualifier("domainplaneStringRedisTemplate") StringRedisTemplate stringRedisTemplate) {
+        log.info("[装配清单] RedisAssemblyReportStore 初始化：键前缀 domainplane:conv:asm:，"
+                + "每会话保留最近 {} 条", AssemblyReportStore.KEEP_PER_SESSION);
+        return new RedisAssemblyReportStore(stringRedisTemplate);
+    }
+
+    /**
+     * 会话体量盘点与导出 Bean（F04-c）。
+     *
+     * <p>只读：接口层没有任何删除动作。存储增长靠"看得见 + 搬得走"来应对，
+     * 不靠清理——那与"原始记忆不主动删除"的硬约束正面冲突。</p>
+     */
+    @Bean
+    public RedisSessionStorage redisSessionStorage(
+            @Qualifier("domainplaneStringRedisTemplate") StringRedisTemplate stringRedisTemplate,
+            RedisConversationArchive redisConversationArchive,
+            RedisAssemblyReportStore redisAssemblyReportStore,
+            RedisHistoryVectorIndex redisHistoryVectorIndex) {
+        log.info("[会话体量] RedisSessionStorage 初始化：只读盘点（记忆条数 / 归档轮数 / 向量轮数 / 清单条数）"
+                + " + 会话副本导出，不含任何清理动作");
+        return new RedisSessionStorage(stringRedisTemplate, redisConversationArchive,
+                redisAssemblyReportStore, redisHistoryVectorIndex);
     }
 
     /**

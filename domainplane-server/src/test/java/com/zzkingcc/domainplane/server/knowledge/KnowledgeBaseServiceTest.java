@@ -5,9 +5,6 @@ import com.zzkingcc.domainplane.api.support.KbIndexes;
 import com.zzkingcc.domainplane.common.exception.KnowledgeBaseException;
 import org.junit.jupiter.api.Test;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -62,20 +59,7 @@ class KnowledgeBaseServiceTest {
         assertNotEquals(KnowledgeBaseService.indexOf("default.a"),
                 KnowledgeBaseService.indexOf("default.A"));
     }
-
-    @Test
-    void 没有domain字段时按根域读() {
-        Map<String, Object> md = new LinkedHashMap<>();
-        md.put("file_name", "退款政策.md");
-        assertEquals(Domains.DEFAULT, KnowledgeBaseService.domainOf(md),
-                "未声明域的文档按根域算");
-    }
-
-    @Test
-    void 能读出归属域() {
-        assertEquals("default.sales",
-                KnowledgeBaseService.domainOf(Map.of("domain", "default.sales")));
-        assertEquals(Domains.DEFAULT,
-                KnowledgeBaseService.domainOf(Map.of("domain", "  ")), "空值等同未声明");
-    }
+    /* "没有 domain 字段时按根域读 / 空值等同未声明" 两条行为锁随读取侧
+       （EsKnowledgeStore.documents 的聚合逻辑）移到了 infrastructure，
+       在 EsKnowledgeStore 的测试里继续锁（Task 8 测试补齐时落地）。 */
 }

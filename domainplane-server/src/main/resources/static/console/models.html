@@ -11,57 +11,56 @@
     <aside class="sidebar" id="sidebar"></aside>
 
     <main class="main">
-        <div class="page-head">
-            <div class="head-line">
-                <div><h2>模型设置</h2></div>
-                <button class="btn btn-primary" id="openConnBtn">预设配置信息</button>
-                <button class="btn btn-primary" id="addModelBtn">+ 添加模型</button>
+        <div class="page-header">
+            <div class="page-head">
+                <div class="head-line">
+                    <div><h2>模型设置</h2></div>
+                    <button class="btn btn-sm btn-outline-primary" id="openConnBtn">预设配置信息</button>
+                    <button class="btn btn-sm btn-outline-primary" id="addModelBtn">+ 添加模型</button>
+                </div>
             </div>
         </div>
+        <div class="page-body">
 
-        <div class="info-box">
-            <div class="line">点右上角「+ 添加模型」登记一个连接；保存后归入「模型」分段。</div>
-            <div class="line">配置文件：<span class="mono" id="settingsFileHint">—</span></div>
-        </div>
+            <!-- ============ 分段一：向量模型（全局唯一一个，全部域共享） ============ -->
+            <div class="seg">
+                <h3>向量模型</h3>
+                <span class="seg-note">全局只能启用一个，所有域共用；知识库的灌库与向量检索都走它</span>
+                <span class="spacer"></span>
+                <span class="count-badge" id="embeddingCount"
+                      title="已登记的向量档案数（含尚未选用的，它们在下方的选择框里）">—</span>
+            </div>
+            <div id="embeddingList">
+                <div class="dp-card perm-none">加载中…</div>
+            </div>
 
-        <!-- ============ 分段一：向量模型（全局唯一一个，全部域共享） ============ -->
-        <div class="seg">
-            <h3>向量模型</h3>
-            <span class="seg-note">全局只能启用一个，所有域共用；知识库的灌库与向量检索都走它</span>
-            <span class="spacer"></span>
-            <span class="count-badge" id="embeddingCount"
-                  title="已登记的向量档案数（含尚未选用的，它们在下方的选择框里）">—</span>
-        </div>
-        <div id="embeddingList">
-            <div class="dp-card perm-none">加载中…</div>
-        </div>
+            <!-- ============ 分段二：模型（除当前向量模型外的全部档案） ============
+                 刻意不叫「对话模型」：识别把档案分成 chat / embedding / images / tts / rerank …
+                 好几类，只列 chat 会让生图、语音这类档案存进去之后在页面上彻底消失
+                 （看不到、测不了、也删不掉）。这里除当前占着向量槽位的那一个之外全部列出，
+                 对话模型在其中按域绑定使用。 -->
+            <div class="seg">
+                <h3>模型</h3>
+                <span class="seg-note">除向量模型外的全部档案；对话模型要在「域空间」页绑给域才能被调用</span>
+                <span class="spacer"></span>
+                <span class="count-badge" id="modelCount"
+                      title="本段列出的档案数（不参与域绑定的生图 / 语音等类型也计在内）">—</span>
+            </div>
+            <div id="modelList">
+                <div class="dp-card perm-none">加载中…</div>
+            </div>
 
-        <!-- ============ 分段二：模型（除当前向量模型外的全部档案） ============
-             刻意不叫「对话模型」：识别把档案分成 chat / embedding / images / tts / rerank …
-             好几类，只列 chat 会让生图、语音这类档案存进去之后在页面上彻底消失
-             （看不到、测不了、也删不掉）。这里除当前占着向量槽位的那一个之外全部列出，
-             对话模型在其中按域绑定使用。 -->
-        <div class="seg">
-            <h3>模型</h3>
-            <span class="seg-note">除向量模型外的全部档案；对话模型要在「域空间」页绑给域才能被调用</span>
-            <span class="spacer"></span>
-            <span class="count-badge" id="modelCount"
-                  title="本段列出的档案数（不参与域绑定的生图 / 语音等类型也计在内）">—</span>
-        </div>
-        <div id="modelList">
-            <div class="dp-card perm-none">加载中…</div>
-        </div>
+            <!-- ============ 添加模型：遮罩层弹窗 ============
+                 只有一种表单：登记一份新档案。类型不由用户声明（下拉已移除），
+                 保存时由服务端读提供商的模型清单（GET /models，不发推理请求、不花 token）：
+                 读到的端点族决定它归入「模型」段还是「向量模型」段，读到的模态就是卡片上那两行；
+                 清单不给这些字段（OpenAI / DeepSeek 官方都是标准规范形态）时如实留空，
+                 卡片标「未声明类型」。向量模型不是独立表单，它是「被选中的那份 embedding 档案」。
 
-        <!-- ============ 添加模型：遮罩层弹窗 ============
-             只有一种表单：登记一份新档案。类型不由用户声明（下拉已移除），
-             保存时由服务端读提供商的模型清单（GET /models，不发推理请求、不花 token）：
-             读到的端点族决定它归入「模型」段还是「向量模型」段，读到的模态就是卡片上那两行；
-             清单不给这些字段（OpenAI / DeepSeek 官方都是标准规范形态）时如实留空，
-             卡片标「未声明类型」。向量模型不是独立表单，它是「被选中的那份 embedding 档案」。
-
-             弹窗只负责"建"：档案建好之后，调优走卡片上的绿色调优框 + 「更新」，
-             「是否回写思考内容」是卡片头部的开关（见 thinkSwitch），都不必再弹这个窗。
-             新档案的思考回写默认关闭。 -->
+                 弹窗只负责"建"：档案建好之后，调优走卡片上的绿色调优框 + 「更新」，
+                 「是否回写思考内容」是卡片头部的开关（见 thinkSwitch），都不必再弹这个窗。
+                 新档案的思考回写默认关闭。 -->
+        </div>
         <div class="modal-mask" id="profileModal" hidden>
             <div class="modal-panel" role="dialog" aria-modal="true"
                  aria-labelledby="profileModalTitle">
@@ -131,8 +130,8 @@
                 <div id="profileResult" class="result"></div>
 
                 <footer class="card-foot">
-                    <button class="sec btn btn-outline-secondary" id="resetProfileFormBtn">清空表单</button>
-                    <button class="btn btn-primary" id="saveProfileBtn">保存</button>
+                    <button class="btn btn-outline-secondary" id="resetProfileFormBtn">清空表单</button>
+                    <button class="btn btn-outline-primary" id="saveProfileBtn">保存</button>
                 </footer>
             </div>
         </div>
@@ -156,12 +155,6 @@
                     <button type="button" class="modal-close" id="connModalClose" aria-label="关闭">×</button>
                 </div>
 
-                <div class="hint" style="margin:0 0 12px;">
-                    按<b>唯一名称</b>存放「服务商地址 + 密钥」。模型表单顶部的预设下拉里，
-                    它们在「自定义配置项」一段下，选中即把两项一起填入。
-                    名称不可与内置配置项重名；列表里密钥只显示脱敏值。
-                </div>
-
                 <div class="field">
                     <label>名称（与内置配置项合起来唯一）</label>
                     <input class="form-control" id="cnName" placeholder="如：硅基流动-主 / 内网 vLLM / openrouter-免费档">
@@ -176,16 +169,12 @@
                 </div>
 
                 <footer class="card-foot">
-                    <button class="sec btn btn-outline-secondary" id="cnClearBtn">清空</button>
-                    <button class="btn btn-primary" id="cnAddBtn">添加</button>
+                    <button class="btn btn-outline-secondary" id="cnClearBtn">清空</button>
+                    <button class="btn btn-outline-primary" id="cnAddBtn">添加</button>
                 </footer>
 
                 <div id="cnResult" class="result"></div>
                 <div id="cnList"></div>
-                <div class="hint" style="margin-top:12px;">
-                    落盘位置：<span class="mono" id="cnFileHint">—</span>。
-                    删除只影响这一份配置，已保存的模型档案各自存的是独立副本，不会被牵连。
-                </div>
             </div>
         </div>
     </main>

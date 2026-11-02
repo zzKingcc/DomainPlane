@@ -384,9 +384,16 @@ public class ModelAdapterRegistry {
         PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver(resourceLoader);
         Resource[] resources;
         try {
-            resources = resolver.getResources("classpath:adapters/*.json");
+            resources = resolver.getResources(ADAPTERS_GLOB);
         } catch (IOException e) {
-            log.error("[服务商适配] 扫描 classpath:adapters/*.json 失败：{}", e.getMessage());
+            log.error("[服务商适配] 扫描 {} 失败：{}", ADAPTERS_GLOB, e.getMessage());
+            /* 扫描本身失败也必须记账，而且是记 0：不写这一行的话，账目会停在<b>上一次</b>
+               成功加载的数字上（"扫到 2 个、成功 2 条"），而实际上一条适配都没生效。
+               那正是这条保险丝要防的事 —— 账目本来是给"卡片上的参数面为什么会空"找原因用的，
+               留个过期的 2 等于把人往反方向带。 */
+            lastLoadStats = new LoadStats(0, 0, 0);
+            log.warn("[服务商适配] 一个适配文件都没扫到：全部模型卡片上的参数面将为空。"
+                    + "若这是预期之外的，请检查 resources/adapters 是否被误删或改名");
             return List.of();
         }
         /* 按文件名排序：跨文件 id 重复时"先到先得"的判定因此确定 */
@@ -395,27 +402,68 @@ public class ModelAdapterRegistry {
         ObjectMapper mapper = new ObjectMapper();
         List<Adapter> out = new ArrayList<>();
         Set<String> seen = new HashSet<>();
+        int skipped = 0;
         for (Resource r : resources) {
             String name = r.getFilename();
             try (InputStream in = r.getInputStream()) {
                 Adapter a = parseAdapter(mapper.readTree(in), name);
                 if (!seen.add(a.id())) {
                     log.error("[服务商适配] 适配 id 重复：{}（{} 已加载，后者跳过）", a.id(), name);
+                    skipped++;
                     continue;
                 }
                 out.add(a);
             } catch (Exception e) {
+                skipped++;
                 /* 单个文件坏只跳过它：适配是 curated 数据，一处手误不该让服务起不来 */
                 log.error("[服务商适配] 适配文件 {} 加载失败，已跳过（不影响其余适配与启动）：{}",
                         name, e.getMessage());
             }
         }
         out.sort(Comparator.comparing(Adapter::id));
-        if (!out.isEmpty()) {
-            log.info("[服务商适配] 已加载 {} 条适配：{}", out.size(),
+
+        LoadStats stats = new LoadStats(resources.length, out.size(), skipped);
+        lastLoadStats = stats;
+        /* 加载过程必须 fail-loud。
+           这个目录现在的常态是"只剩一两条样板适配"（F10 定线：不按厂商补适配，改走用户自助填参），
+           "扫到 0 个"与"扫到了但全部加载失败"都意味着卡片上的参数面凭空消失，
+           而消失是静默的 —— 用户只会看到"这个模型没有可调参数"，不会有人怀疑是适配丢了。
+           这条日志是它唯一的保险丝。 */
+        if (stats.scanned() == 0) {
+            log.warn("[服务商适配] 扫描 {} 一个适配文件都没有：全部模型卡片上的参数面将为空。"
+                    + "若这是预期之外的，请检查 resources/adapters 是否被误删或改名", ADAPTERS_GLOB);
+        } else if (out.isEmpty()) {
+            log.warn("[服务商适配] 扫到 {} 个适配文件，但一个都没加载成功：卡片上的参数面将为空，"
+                    + "请查看上面的加载失败日志", stats.scanned());
+        } else {
+            log.info("[服务商适配] 扫到 {} 个适配文件，成功 {} 条，跳过 {} 条：{}",
+                    stats.scanned(), stats.loaded(), stats.skipped(),
                     out.stream().map(Adapter::id).reduce((a, b) -> a + ", " + b).orElse(""));
         }
         return List.copyOf(out);
+    }
+
+    /** 适配文件的扫描路径；非递归 —— {@code adapters/disabled/} 下的归档不参与加载 */
+    public static final String ADAPTERS_GLOB = "classpath:adapters/*.json";
+
+    /**
+     * 最近一次加载的账目。
+     *
+     * <p>它存在的理由与上面那条 WARN 相同：只剩一两条适配是<b>现在的常态</b>，
+     * 常态一旦出问题就没人会往这个方向想，所以必须有一个能被断言、能被运维读到的数。</p>
+     *
+     * @param scanned 扫到的文件数
+     * @param loaded  成功加载的适配条数
+     * @param skipped 被跳过的文件数（解析失败或 id 重复）
+     */
+    public record LoadStats(int scanned, int loaded, int skipped) {
+    }
+
+    /** 进程内最近一次 classpath 加载的账目；未经加载时为全 0 */
+    private static volatile LoadStats lastLoadStats = new LoadStats(0, 0, 0);
+
+    public static LoadStats lastLoadStats() {
+        return lastLoadStats;
     }
 
     // ==================== 解析与 schema 校验 ====================

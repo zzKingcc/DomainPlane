@@ -12,6 +12,7 @@ public enum AgentEventType {
 
     TOKEN("模型增量输出"),
     THINKING("模型思考增量输出"),
+    PLAN("本轮执行计划"),
     TOOL_CALL("工具调用请求"),
     TOOL_RESULT("工具执行结果"),
     INTERRUPT("挂起等待人工授权"),

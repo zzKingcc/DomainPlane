@@ -31,7 +31,7 @@ class ModelProfileContextWindowTest {
                 List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_TEXT),
                 "https://api.example.com/v1", "sk-test", "m",
                 0.5, 2048, 32_000, Boolean.TRUE, Boolean.TRUE, null, List.of("fb"),
-                Map.of("enable_thinking", true));
+                Map.of("enable_thinking", true), ModelProfile.PROTOCOL_OPENAI);
     }
 
     @Test

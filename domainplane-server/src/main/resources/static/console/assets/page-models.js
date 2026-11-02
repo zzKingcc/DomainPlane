@@ -1,5 +1,26 @@
 (() => {
-  // domainplane-server/frontend/src/pages/models.js
+  var __async = (__this, __arguments, generator) => {
+    return new Promise((resolve, reject) => {
+      var fulfilled = (value) => {
+        try {
+          step(generator.next(value));
+        } catch (e) {
+          reject(e);
+        }
+      };
+      var rejected = (value) => {
+        try {
+          step(generator.throw(value));
+        } catch (e) {
+          reject(e);
+        }
+      };
+      var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
+      step((generator = generator.apply(__this, __arguments)).next());
+    });
+  };
+
+  // src/pages/models.js
   (function() {
     Console.renderSidebar("models");
     var PROFILES = [];
@@ -45,7 +66,6 @@
         PROFILES = r && r.profiles || [];
         EMBEDDING = { alias: r && r.embeddingAlias || null };
         VECTOR_PROFILES = r && r.embeddingProfiles || [];
-        pfEl("settingsFileHint").textContent = r && r.settingsFile || "\u2014";
         renderProfiles();
       }).catch(function(e) {
         pfEl("modelList").innerHTML = '<div class="dp-card" style="color:var(--red);">\u52A0\u8F7D\u5931\u8D25\uFF1A' + Console.escapeHtml(e.message) + "</div>";
@@ -127,11 +147,11 @@
       return '<div class="empty-box"><div class="empty-title">\u5C1A\u672A\u914D\u7F6E\u5411\u91CF\u6A21\u578B</div><div class="empty-sub">\u77E5\u8BC6\u5E93\u7684\u6587\u6863\u5411\u91CF\u5316\u4E0E\u5411\u91CF\u68C0\u7D22\u90FD\u4F9D\u8D56\u5B83\uFF1B<br>BM25 \u5173\u952E\u8BCD\u68C0\u7D22\u4E0D\u4F9D\u8D56\u5411\u91CF\u6A21\u578B\uFF0C\u672A\u914D\u7F6E\u65F6\u90A3\u6761\u901A\u9053\u4ECD\u53EF\u7528\u3002</div></div>';
     }
     function vectorCard(p, active, prefix) {
-      var actions = (active ? "" : '<button class="ghost btn btn-sm btn-outline-primary" data-enable="' + Console.escapeHtml(p.alias) + '"' + (p.usable ? "" : " disabled") + ">\u542F\u7528</button>") + '<button class="ghost btn btn-sm btn-outline-primary" data-probe="' + Console.escapeHtml(p.alias) + '">\u63A2\u6D4B</button><button class="ghost btn btn-sm btn-outline-primary" data-del="' + Console.escapeHtml(p.alias) + '">\u5220\u9664</button>';
+      var actions = (active ? "" : '<button class="btn btn-sm btn-outline-primary" data-enable="' + Console.escapeHtml(p.alias) + '"' + (p.usable ? "" : " disabled") + ">\u542F\u7528</button>") + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">\u63A2\u6D4B</button><button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">\u5220\u9664</button>';
       var adapterBadge = p.adapter ? '<span class="mbadge">\u5DF2\u9002\u914D</span>' : "";
       var hasTune = !!(p.adapter && (p.adapter.params || []).length);
       var tuneBox = hasTune ? adapterTuneBox(p, prefix) : "";
-      var tuneCtl = hasTune ? '<span class="tune-status"></span><button type="button" class="tune-save btn btn-sm btn-primary" disabled>\u66F4\u65B0</button>' : "";
+      var tuneCtl = hasTune ? '<span class="tune-status"></span><button type="button" class="btn btn-sm btn-outline-primary tune-save" disabled>\u66F4\u65B0</button>' : "";
       return '<section class="dp-card model-card emb"><header class="card-head"><span class="model-dot"></span><h2>' + modelTitle(p.modelName || p.alias) + "</h2>" + cardTags(p) + (active ? '<span class="mbadge ok">\u5DF2\u542F\u7528</span>' : "") + (p.usable ? "" : '<span class="mbadge off">\u4E0D\u53EF\u7528</span>') + adapterBadge + '<span class="spacer"></span>' + tuneCtl + actions + '</header><div class="dp-card-body"><div class="model-meta">' + kv("\u5411\u91CF\u7EF4\u5EA6", p.dimensions == null ? '<span class="perm-none">\u6309\u6A21\u578B\u9ED8\u8BA4</span>' : p.dimensions + "") + kv("\u670D\u52A1\u5546\u5730\u5740", '<span class="mono">' + Console.escapeHtml(p.baseUrl || "-") + "</span>") + (p.apiKeyMasked ? kv("API Key", '<span class="mono">' + Console.escapeHtml(p.apiKeyMasked) + "</span>") : "") + "</div>" + tuneBox + "</div></section>";
     }
     function renderEmbedding() {
@@ -162,38 +182,45 @@
       box.querySelectorAll(".dp-card.model-card").forEach(bindTuneBox);
     }
     function askRebuildOrPurge(message) {
-      var rebuild = window.confirm(message + "\n\n\u73B0\u5728\u7528\u65B0\u7684\u5411\u91CF\u628A\u77E5\u8BC6\u5E93\u91CD\u65B0\u7B97\u4E00\u904D\u5417\uFF1F\u6587\u6863\u90FD\u8FD8\u5728\uFF0C\u4E0D\u7528\u91CD\u65B0\u4E0A\u4F20\u3002");
-      if (rebuild) {
-        return "rebuild";
-      }
-      var purge = window.confirm(
-        "\u6E05\u7A7A\u77E5\u8BC6\u5E93\uFF1F\n\n\u91CC\u9762\u7684\u6587\u6863\u548C\u5411\u91CF\u4F1A\u88AB\u5168\u90E8\u5220\u9664\uFF0C\u4EE5\u540E\u8981\u91CD\u65B0\u4E0A\u4F20\u3002"
-      );
-      return purge ? "purge" : null;
+      return __async(this, null, function* () {
+        var rebuild = yield Console.confirm(
+          message + "\n\n\u73B0\u5728\u7528\u65B0\u7684\u5411\u91CF\u628A\u77E5\u8BC6\u5E93\u91CD\u65B0\u7B97\u4E00\u904D\u5417\uFF1F\u6587\u6863\u90FD\u8FD8\u5728\uFF0C\u4E0D\u7528\u91CD\u65B0\u4E0A\u4F20\u3002",
+          { title: "\u6362\u5411\u91CF\u6A21\u578B\uFF1A\u91CD\u704C\u77E5\u8BC6\u5E93", okText: "\u91CD\u65B0\u7B97\u4E00\u904D", cancelText: "\u4E0D\u91CD\u704C", danger: false }
+        );
+        if (rebuild) {
+          return "rebuild";
+        }
+        var purge = yield Console.confirm(
+          "\u6E05\u7A7A\u77E5\u8BC6\u5E93\uFF1F\n\n\u91CC\u9762\u7684\u6587\u6863\u548C\u5411\u91CF\u4F1A\u88AB\u5168\u90E8\u5220\u9664\uFF0C\u4EE5\u540E\u8981\u91CD\u65B0\u4E0A\u4F20\u3002",
+          { title: "\u6362\u5411\u91CF\u6A21\u578B\uFF1A\u6E05\u7A7A\u77E5\u8BC6\u5E93", okText: "\u6E05\u7A7A", danger: true }
+        );
+        return purge ? "purge" : null;
+      });
     }
     function applyEmbedding(alias) {
       Console.api.put("/admin/embedding-model", { alias }).then(function(r) {
         if (r && r.requiresConfirmation) {
-          var choice = askRebuildOrPurge(r.message || "\u77E5\u8BC6\u5E93\u5DF2\u6709\u5185\u5BB9\u3002");
-          if (!choice) {
-            loadProfiles();
-            return;
-          }
-          return Console.api.put(
-            "/admin/embedding-model",
-            { alias, mode: choice }
-          );
+          return askRebuildOrPurge(r.message || "\u77E5\u8BC6\u5E93\u5DF2\u6709\u5185\u5BB9\u3002").then(function(choice) {
+            if (!choice) {
+              loadProfiles();
+              return null;
+            }
+            return Console.api.put(
+              "/admin/embedding-model",
+              { alias, mode: choice }
+            );
+          });
         }
         return r;
       }).then(function(r) {
         if (!r) {
           return;
         }
-        alert(r.message || "\u5DF2\u5207\u6362");
+        Console.toast(r.message || "\u5DF2\u5207\u6362", { type: "success" });
         loadProfiles();
         loadSettings();
       }).catch(function(e) {
-        alert("\u5207\u6362\u5931\u8D25\uFF1A" + e.message);
+        Console.toast("\u5207\u6362\u5931\u8D25\uFF1A" + e.message, { type: "error" });
       });
     }
     function renderProfiles() {
@@ -222,9 +249,9 @@
           var adapterBadge = p.adapter ? '<span class="mbadge">\u5DF2\u9002\u914D</span>' : "";
           var hasTune = !!(p.adapter && (p.adapter.params || []).length);
           var tuneBox = hasTune ? adapterTuneBox(p, "tb" + tuneSeq++) : "";
-          var tuneCtl = hasTune ? '<span class="tune-status"></span><button type="button" class="tune-save btn btn-sm btn-primary" disabled>\u66F4\u65B0</button>' : "";
+          var tuneCtl = hasTune ? '<span class="tune-status"></span><button type="button" class="btn btn-sm btn-outline-primary tune-save" disabled>\u66F4\u65B0</button>' : "";
           var thinkCtl = chat ? thinkSwitch(p) : "";
-          return '<section class="dp-card model-card"><header class="card-head"><span class="model-dot"></span><h2>' + modelTitle(p.modelName || p.alias) + "</h2>" + dupBadge(p) + noType + visionBadge(p) + cardTags(p) + adapterBadge + '<span class="spacer"></span>' + thinkCtl + tuneCtl + '<button class="ghost btn btn-sm btn-outline-primary" data-probe="' + Console.escapeHtml(p.alias) + '">\u63A2\u6D4B</button><button class="ghost btn btn-sm btn-outline-primary" data-del="' + Console.escapeHtml(p.alias) + '">\u5220\u9664</button></header><div class="dp-card-body"><div class="model-meta"><div><span class="k">\u8F93\u5165\u6A21\u6001</span>' + modalityCell(p, p.input) + '</div><div><span class="k">\u8F93\u51FA\u6A21\u6001</span>' + modalityCell(p, p.output) + '</div><div><span class="k">\u670D\u52A1\u5546\u5730\u5740</span><span class="mono">' + Console.escapeHtml(p.baseUrl || "-") + '</span></div><div><span class="k">\u88AB\u54EA\u4E9B\u57DF\u4F7F\u7528</span>' + used + "</div>" + (chat ? '<div><span class="k">\u4E0A\u4E0B\u6587\u957F\u5EA6</span>' + ctxCell(p) + "</div>" : "") + "</div>" + tuneBox + "</div></section>";
+          return '<section class="dp-card model-card"><header class="card-head"><span class="model-dot"></span><h2>' + modelTitle(p.modelName || p.alias) + "</h2>" + dupBadge(p) + noType + visionBadge(p) + cardTags(p) + adapterBadge + '<span class="spacer"></span>' + thinkCtl + tuneCtl + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">\u63A2\u6D4B</button><button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">\u5220\u9664</button></header><div class="dp-card-body"><div class="model-meta"><div><span class="k">\u8F93\u5165\u6A21\u6001</span>' + modalityCell(p, p.input) + '</div><div><span class="k">\u8F93\u51FA\u6A21\u6001</span>' + modalityCell(p, p.output) + '</div><div><span class="k">\u670D\u52A1\u5546\u5730\u5740</span><span class="mono">' + Console.escapeHtml(p.baseUrl || "-") + '</span></div><div><span class="k">\u88AB\u54EA\u4E9B\u57DF\u4F7F\u7528</span>' + used + "</div>" + (chat ? '<div class="ctx-row"><span class="k">\u4E0A\u4E0B\u6587\u957F\u5EA6</span>' + ctxCell(p) + "</div>" : "") + "</div>" + tuneBox + "</div></section>";
         }).join("");
       }
       box.querySelectorAll("button[data-del]").forEach(function(b) {
@@ -674,7 +701,7 @@
         if (on && i2 === active) {
           cls += " active";
         }
-        return '<button type="button" class="' + cls + ' btn btn-primary"' + (on ? "" : " disabled") + ' data-bar-val="' + Console.escapeHtml(o.value) + '" title="' + Console.escapeHtml(o.label || o.value) + '">' + Console.escapeHtml(o.value) + "</button>";
+        return '<button type="button" class="' + cls + ' btn btn-outline-primary"' + (on ? "" : " disabled") + ' data-bar-val="' + Console.escapeHtml(o.value) + '" title="' + Console.escapeHtml(o.label || o.value) + '">' + Console.escapeHtml(o.value) + "</button>";
       }).join("");
       var capText = !on ? "" : active >= 0 ? opts[active].label || cur : cur === "" ? tuneDefaultText(spec) : cur;
       var defAttr = spec.default == null ? "" : ' data-bar-def="' + Console.escapeHtml(String(spec.default)) + '"';
@@ -891,6 +918,7 @@
       if (btn) {
         btn.addEventListener("click", function() {
           btn.disabled = true;
+          btn.classList.add("btn-loading");
           if (status) {
             status.textContent = "";
             status.className = "tune-status";
@@ -904,6 +932,7 @@
               base = current();
             }
             btn.disabled = ok;
+            btn.classList.remove("btn-loading");
           });
         });
       }
@@ -947,7 +976,7 @@
         }
       }).catch(function(e) {
         input.checked = !on;
-        alert("\u4FDD\u5B58\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message));
+        Console.toast("\u4FDD\u5B58\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message), { type: "error" });
       }).then(function() {
         input.disabled = false;
       });
@@ -959,7 +988,7 @@
       if (raw !== "") {
         value = Number(raw);
         if (!isFinite(value) || value <= 0 || Math.floor(value) !== value) {
-          alert("\u4E0A\u4E0B\u6587\u957F\u5EA6\u5FC5\u987B\u662F\u6B63\u6574\u6570\uFF08\u5355\u4F4D token\uFF09\uFF1B\u7559\u7A7A\u8868\u793A\u672A\u58F0\u660E");
+          Console.toast("\u4E0A\u4E0B\u6587\u957F\u5EA6\u5FC5\u987B\u662F\u6B63\u6574\u6570\uFF08\u5355\u4F4D token\uFF09\uFF1B\u7559\u7A7A\u8868\u793A\u672A\u58F0\u660E", { type: "warning" });
           input.value = prev;
           return;
         }
@@ -974,7 +1003,7 @@
         input.value = value == null ? "" : String(value);
       }).catch(function(e) {
         input.value = prev;
-        alert("\u4FDD\u5B58\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message));
+        Console.toast("\u4FDD\u5B58\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message), { type: "error" });
       }).then(function() {
         input.disabled = false;
       });
@@ -1014,56 +1043,85 @@
       if (tuning.dimensions != null) {
         body.dimensions = tuning.dimensions;
       }
+      var btn = pfEl("saveProfileBtn");
+      btn.disabled = true;
+      btn.classList.add("btn-loading");
       Console.api.post("/admin/model-profiles", body).then(function() {
         closeModal();
         return loadProfiles();
       }).catch(function(e) {
         showResult(false, "\u4FDD\u5B58\u5931\u8D25\uFF1A" + e.message);
+      }).then(function() {
+        btn.disabled = false;
+        btn.classList.remove("btn-loading");
       });
     }
     function deleteProfile(alias) {
-      var target = findProfile(alias);
-      var isEmb = target && isEmbeddingProfile(target);
-      var isCurrentEmbedding = isEmb && EMBEDDING.alias === alias;
-      var text = "\u786E\u8BA4\u5220\u9664\u6A21\u578B " + alias + "\uFF1F\n\n";
-      if (isCurrentEmbedding) {
-        text += "\u26A0\uFE0F \u5B83\u6B63\u662F\u5F53\u524D\u5411\u91CF\u6A21\u578B\uFF0C\u5220\u9664\u540E\u5411\u91CF\u914D\u7F6E\u4F1A\u4E00\u5E76\u53D6\u6D88\uFF0C\u77E5\u8BC6\u5E93\u7684\u704C\u5E93\u4E0E\u5411\u91CF\u68C0\u7D22\u5C06\u505C\u7528\uFF08\u5DF2\u704C\u5E93\u7684\u5411\u91CF\u4ECD\u5728\u7D22\u5F15\u91CC\uFF0C\u9700\u6362\u6A21\u578B\u540E\u91CD\u704C\uFF09\u3002\n\n";
-      } else if (isEmb) {
-        text += "\u5B83\u662F\u4E00\u4E2A\u5411\u91CF\u6863\u6848\uFF0C\u5220\u9664\u540E\u9700\u8981\u91CD\u65B0\u9009\u7528\u5411\u91CF\u6A21\u578B\u3002\n\n";
-      } else {
-        text += "\u8BE5\u6A21\u578B\u4F1A\u4ECE\u6240\u6709\u57DF\u7684\u7ED1\u5B9A\u91CC\u4E00\u5E76\u79FB\u9664\uFF08\u7EA7\u8054\u6E05\u7406\uFF09\uFF0C\u8FD9\u4E9B\u57DF\u5C06\u7ACB\u5373\u53D8\u4E3A\u300C\u65E0\u53EF\u8C03\u7528\u6A21\u578B\u300D\u3002\n\n";
-      }
-      if (!confirm(text)) {
-        return;
-      }
-      Console.api.del("/admin/model-profiles?alias=" + encodeURIComponent(alias)).then(function(r) {
-        if (r && r.message) {
-          alert(r.message);
+      return __async(this, null, function* () {
+        var target = findProfile(alias);
+        var isEmb = target && isEmbeddingProfile(target);
+        var isCurrentEmbedding = isEmb && EMBEDDING.alias === alias;
+        var text = "\u786E\u8BA4\u5220\u9664\u6A21\u578B " + alias + "\uFF1F\n\n";
+        if (isCurrentEmbedding) {
+          text += "\u26A0\uFE0F \u5B83\u6B63\u662F\u5F53\u524D\u5411\u91CF\u6A21\u578B\uFF0C\u5220\u9664\u540E\u5411\u91CF\u914D\u7F6E\u4F1A\u4E00\u5E76\u53D6\u6D88\uFF0C\u77E5\u8BC6\u5E93\u7684\u704C\u5E93\u4E0E\u5411\u91CF\u68C0\u7D22\u5C06\u505C\u7528\uFF08\u5DF2\u704C\u5E93\u7684\u5411\u91CF\u4ECD\u5728\u7D22\u5F15\u91CC\uFF0C\u9700\u6362\u6A21\u578B\u540E\u91CD\u704C\uFF09\u3002\n\n";
+        } else if (isEmb) {
+          text += "\u5B83\u662F\u4E00\u4E2A\u5411\u91CF\u6863\u6848\uFF0C\u5220\u9664\u540E\u9700\u8981\u91CD\u65B0\u9009\u7528\u5411\u91CF\u6A21\u578B\u3002\n\n";
+        } else {
+          text += "\u8BE5\u6A21\u578B\u4F1A\u4ECE\u6240\u6709\u57DF\u7684\u7ED1\u5B9A\u91CC\u4E00\u5E76\u79FB\u9664\uFF08\u7EA7\u8054\u6E05\u7406\uFF09\uFF0C\u8FD9\u4E9B\u57DF\u5C06\u7ACB\u5373\u53D8\u4E3A\u300C\u65E0\u53EF\u8C03\u7528\u6A21\u578B\u300D\u3002\n\n";
         }
-        loadProfiles();
-      }).catch(function(e) {
-        alert("\u5220\u9664\u5931\u8D25\uFF1A" + e.message);
+        var ok = yield Console.confirm(
+          text,
+          { title: "\u5220\u9664\u6A21\u578B", okText: "\u5220\u9664", danger: true }
+        );
+        if (!ok) {
+          return;
+        }
+        Console.api.del("/admin/model-profiles?alias=" + encodeURIComponent(alias)).then(function(r) {
+          if (r && r.message) {
+            Console.toast(r.message, { type: "success" });
+          }
+          loadProfiles();
+        }).catch(function(e) {
+          Console.toast("\u5220\u9664\u5931\u8D25\uFF1A" + e.message, { type: "error" });
+        });
       });
     }
     function probeProfile(alias, btn) {
-      var ok = confirm("\u63A2\u6D4B\u300C" + alias + "\u300D\uFF1F\n\n\u4F1A\u53D1\u4E00\u7EC4\u6700\u5C0F\u8BF7\u6C42\u5B9E\u6D4B\u5B83\u7684\u7AEF\u70B9\u65CF\u4E0E\u6A21\u6001\uFF0C\u53EF\u80FD\u6D88\u8017\u5C11\u91CF\u989D\u5EA6\uFF1A\n\xB7 \u5BF9\u8BDD\uFF1Amax_tokens=1\uFF08\u7EA6 1 \u4E2A token\uFF09\n\xB7 \u5411\u91CF / \u91CD\u6392\uFF1A\u63D0\u4EA4\u4E00\u6761\u77ED\u6587\u672C\n\xB7 \u8BED\u97F3\u8BC6\u522B / \u8BED\u97F3\u5408\u6210\uFF1A\u6309\u6781\u77ED\u97F3\u9891\u8BA1\u8D39\n\xB7 \u751F\u56FE\uFF1A\u82E5\u8BE5\u670D\u52A1\u5546\u6709\u751F\u56FE\u7AEF\u70B9\uFF0C\u4F1A\u771F\u5B9E\u751F\u6210\u4E00\u5F20\u9ED8\u8BA4\u5C3A\u5BF8\u7684\u56FE\n\n\u5B9E\u6D4B\u786E\u8BA4\u5230\u7684\u4F1A\u5E76\u56DE\u6863\u6848\uFF08\u53EA\u589E\u4E0D\u51CF\uFF09\u3002\u7EE7\u7EED\uFF1F");
-      if (!ok) {
-        return;
-      }
-      if (btn) {
-        btn.disabled = true;
-      }
-      Console.api.post("/admin/model-profiles/detect?alias=" + encodeURIComponent(alias), null).then(function(r) {
-        return loadProfiles().then(function() {
-          if (r && r.note && r.note.indexOf("\u672A\u786E\u8BA4") >= 0) {
-            alert("\u63A2\u6D4B\u5B8C\u6210\uFF0C\u4F46\u6709\u4E9B\u9879\u6CA1\u80FD\u786E\u8BA4\uFF1A\n\n" + r.note);
-          }
-        });
-      }).catch(function(e) {
-        if (btn) {
-          btn.disabled = false;
+      return __async(this, null, function* () {
+        var ok = yield Console.confirm(
+          "\u63A2\u6D4B\u300C" + alias + "\u300D\uFF1F\n\n\u4F1A\u53D1\u4E00\u7EC4\u6700\u5C0F\u8BF7\u6C42\u5B9E\u6D4B\u5B83\u7684\u7AEF\u70B9\u65CF\u4E0E\u6A21\u6001\uFF0C\u53EF\u80FD\u6D88\u8017\u5C11\u91CF\u989D\u5EA6\uFF1A\n\xB7 \u5BF9\u8BDD\uFF1Amax_tokens=1\uFF08\u7EA6 1 \u4E2A token\uFF09\n\xB7 \u5411\u91CF / \u91CD\u6392\uFF1A\u63D0\u4EA4\u4E00\u6761\u77ED\u6587\u672C\n\xB7 \u8BED\u97F3\u8BC6\u522B / \u8BED\u97F3\u5408\u6210\uFF1A\u6309\u6781\u77ED\u97F3\u9891\u8BA1\u8D39\n\xB7 \u751F\u56FE\uFF1A\u82E5\u8BE5\u670D\u52A1\u5546\u6709\u751F\u56FE\u7AEF\u70B9\uFF0C\u4F1A\u771F\u5B9E\u751F\u6210\u4E00\u5F20\u9ED8\u8BA4\u5C3A\u5BF8\u7684\u56FE\n\n\u5B9E\u6D4B\u786E\u8BA4\u5230\u7684\u4F1A\u5E76\u56DE\u6863\u6848\uFF08\u53EA\u589E\u4E0D\u51CF\uFF09\u3002\u7EE7\u7EED\uFF1F",
+          { title: "\u63A2\u6D4B\u6A21\u578B\u7AEF\u70B9\u4E0E\u6A21\u6001", okText: "\u5F00\u59CB\u63A2\u6D4B", danger: false }
+        );
+        if (!ok) {
+          return;
         }
-        alert("\u63A2\u6D4B\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message));
+        if (btn) {
+          btn.disabled = true;
+          btn.classList.add("btn-loading");
+          btn.setAttribute("data-orig-label", btn.textContent);
+          btn.textContent = "\u63A2\u6D4B\u4E2D\u2026";
+        }
+        Console.api.post("/admin/model-profiles/detect?alias=" + encodeURIComponent(alias), null).then(function(r) {
+          return loadProfiles().then(function() {
+            if (r && r.note) {
+              var gap = !!(r.perModality && Object.keys(r.perModality).some(function(k) {
+                return r.perModality[k] !== "CONFIRMED";
+              }));
+              Console.toast(r.note, {
+                type: gap ? "warning" : "success",
+                title: "\u63A2\u6D4B\u5B8C\u6210",
+                wide: true
+              });
+            }
+          });
+        }).catch(function(e) {
+          if (btn) {
+            btn.disabled = false;
+            btn.classList.remove("btn-loading");
+            btn.textContent = btn.getAttribute("data-orig-label") || "\u63A2\u6D4B";
+          }
+          Console.toast("\u63A2\u6D4B\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message), { type: "error" });
+        });
       });
     }
     var CONNECTIONS = null;
@@ -1092,7 +1150,7 @@
       }
       box.innerHTML = CONNECTIONS.map(function(c) {
         var key = c.hasApiKey ? c.maskedApiKey || "****" : "\uFF08\u65E0\u5BC6\u94A5\uFF09";
-        return '<div class="dp-card"><div class="card-head"><div><b>' + Console.escapeHtml(c.name) + '</b><div class="mono hint" style="margin:2px 0 0;">' + Console.escapeHtml(c.baseUrl) + '</div></div><span class="spacer"></span><span class="mono hint" style="margin:0;">' + Console.escapeHtml(key) + '</span><button class="ghost btn btn-sm btn-outline-primary" data-cn-del="' + Console.escapeHtml(c.name) + '">\u5220\u9664</button></div></div>';
+        return '<div class="dp-card"><div class="card-head"><div><b>' + Console.escapeHtml(c.name) + '</b><div class="mono hint" style="margin:2px 0 0;">' + Console.escapeHtml(c.baseUrl) + '</div></div><span class="spacer"></span><span class="mono hint" style="margin:0;">' + Console.escapeHtml(key) + '</span><button class="btn btn-sm btn-outline-danger" data-cn-del="' + Console.escapeHtml(c.name) + '">\u5220\u9664</button></div></div>';
       }).join("");
     }
     function openConnModal() {
@@ -1127,11 +1185,11 @@
       }
       var btn = pfEl("cnAddBtn");
       btn.disabled = true;
+      btn.classList.add("btn-loading");
       Console.api.post("/admin/provider-connections", { name, baseUrl, apiKey: secret }).then(function(r) {
         pfEl("cnName").value = "";
         pfEl("cnBaseUrl").value = "";
         pfEl("cnApiKey").value = "";
-        pfEl("cnFileHint").textContent = r && r.settingsFile || "\u2014";
         cnSay(true, r && r.message || "\u5DF2\u6DFB\u52A0\u300C" + name + "\u300D");
         return loadConnections(true);
       }).then(function() {
@@ -1140,19 +1198,26 @@
         cnSay(false, Console.sanitizeError(e.message));
       }).then(function() {
         btn.disabled = false;
+        btn.classList.remove("btn-loading");
       });
     }
     function deleteConnection(name) {
-      if (!confirm("\u5220\u9664\u81EA\u5B9A\u4E49\u914D\u7F6E\u300C" + name + "\u300D\uFF1F\n\n\u5DF2\u4FDD\u5B58\u7684\u6A21\u578B\u6863\u6848\u4E0D\u53D7\u5F71\u54CD\uFF1A\u5B83\u4EEC\u5404\u81EA\u4FDD\u5B58\u7684\u662F\u72EC\u7ACB\u526F\u672C\uFF0C\u4E0D\u662F\u5BF9\u8FD9\u4E00\u6761\u7684\u5F15\u7528\u3002")) {
-        return;
-      }
-      Console.api.del("/admin/provider-connections?name=" + encodeURIComponent(name)).then(function(r) {
-        cnSay(true, r && r.message || "\u5DF2\u5220\u9664\u300C" + name + "\u300D");
-        return loadConnections(true);
-      }).then(function() {
-        renderConnectionList();
-      }).catch(function(e) {
-        cnSay(false, Console.sanitizeError(e.message));
+      return __async(this, null, function* () {
+        var ok = yield Console.confirm(
+          "\u5220\u9664\u81EA\u5B9A\u4E49\u914D\u7F6E\u300C" + name + "\u300D\uFF1F\n\n\u5DF2\u4FDD\u5B58\u7684\u6A21\u578B\u6863\u6848\u4E0D\u53D7\u5F71\u54CD\uFF1A\u5B83\u4EEC\u5404\u81EA\u4FDD\u5B58\u7684\u662F\u72EC\u7ACB\u526F\u672C\uFF0C\u4E0D\u662F\u5BF9\u8FD9\u4E00\u6761\u7684\u5F15\u7528\u3002",
+          { title: "\u5220\u9664\u81EA\u5B9A\u4E49\u914D\u7F6E", okText: "\u5220\u9664", danger: true }
+        );
+        if (!ok) {
+          return;
+        }
+        Console.api.del("/admin/provider-connections?name=" + encodeURIComponent(name)).then(function(r) {
+          cnSay(true, r && r.message || "\u5DF2\u5220\u9664\u300C" + name + "\u300D");
+          return loadConnections(true);
+        }).then(function() {
+          renderConnectionList();
+        }).catch(function(e) {
+          cnSay(false, Console.sanitizeError(e.message));
+        });
       });
     }
     (function() {

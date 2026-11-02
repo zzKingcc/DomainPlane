@@ -1,9 +1,8 @@
 package com.zzkingcc.domainplane.infrastructure.ingestion.processor;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import com.zzkingcc.domainplane.domain.rag.store.IngestTarget;
 import com.zzkingcc.domainplane.infrastructure.ingestion.IngestSource;
 import dev.langchain4j.model.embedding.EmbeddingModel;
-import dev.langchain4j.store.embedding.EmbeddingStore;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
@@ -22,9 +21,7 @@ public class UnknownDocumentProcessStrategy implements DocumentProcessStrategy {
 
     @Override
     public IngestReport process(List<IngestSource> documents,
-                                ElasticsearchClient esClient,
-                                String indexName,
-                                EmbeddingStore embeddingStore,
+                                IngestTarget target,
                                 EmbeddingModel embeddingModel,
                                 String sourceTag) {
         int docCount = documents.size();

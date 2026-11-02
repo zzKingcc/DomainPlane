@@ -1,12 +1,12 @@
 package com.zzkingcc.domainplane.infrastructure.ingestion.processor;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import co.elastic.clients.elasticsearch._types.FieldValue;
-import co.elastic.clients.elasticsearch._types.query_dsl.Query;
-import co.elastic.clients.elasticsearch.core.SearchResponse;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.common.constant.ChunkMetadataKeys;
 import com.zzkingcc.domainplane.common.exception.KnowledgeBaseException;
+import com.zzkingcc.domainplane.domain.rag.store.DedupKey;
+import com.zzkingcc.domainplane.domain.rag.store.IngestTarget;
+import com.zzkingcc.domainplane.domain.rag.store.KbChunk;
+import com.zzkingcc.domainplane.domain.rag.store.StoreAccessException;
 import com.zzkingcc.domainplane.infrastructure.ingestion.IngestSource;
 import com.zzkingcc.domainplane.infrastructure.ingestion.IngestLimits;
 import dev.langchain4j.data.document.Document;
@@ -14,45 +14,48 @@ import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
-import dev.langchain4j.store.embedding.EmbeddingStore;
 import lombok.extern.slf4j.Slf4j;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 文档处理策略抽象基类（模板方法模式）
  *
- * 封装分片后的通用处理流程：content_hash 生成 → 批次内去重 → ES 去重 → 分批向量化写入。
+ * 封装分片后的通用处理流程：content_hash 生成 → 批次内去重 → 后端去重 → 分批向量化写入。
  * 子类只需实现 {@link #splitDocuments(List)} 提供差异化的分片逻辑。
+ *
+ * 写入经 SPI（{@link IngestTarget#store()}）："谁做 embed"钉死在调用侧（本类），
+ * 后端只管存已带向量的切片。每批 embed 后组装成 {@link KbChunk} 一次
+ * {@code write}——bulk 任一条失败即整体失败，由上层按 docId 回滚兜底，
+ * 不会留下"部分切片没有向量"的中间态。
+ *
  * @author zzkingcc
  */
 @Slf4j
 public abstract class AbstractDocumentProcessStrategy implements DocumentProcessStrategy {
-
-    /** ES terms 查询单次最大条数限制 */
-    private static final int ES_TERMS_BATCH_SIZE = 10000;
 
     /** 百炼 text-embedding-v2 模型限制的单次请求最大行数 */
     private static final int EMBEDDING_BATCH_SIZE = 25;
 
     @Override
     public final IngestReport process(List<IngestSource> documents,
-                                      ElasticsearchClient esClient,
-                                      String indexName,
-                                      EmbeddingStore embeddingStore,
+                                      IngestTarget target,
                                       EmbeddingModel embeddingModel,
                                       String sourceTag) {
         int docCount = documents.size();
-        log.info("[分片写入-{}][{}] 开始处理 {} 个文档", sourceTag, strategyName(), docCount);
+        String collection = target.collection();
+        log.info("[分片写入-{}][{}] 开始处理 {} 个文档（collection={}）",
+                sourceTag, strategyName(), docCount, collection);
 
         // 1. 分片（子类实现差异化逻辑）
         SplitResult split = splitDocuments(documents);
@@ -86,9 +89,9 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
         //    而"改了文件名重传同一份文档"不再是同一身份，这是可接受的，
         //    因为文档管理侧本来就有同名校验与 replace 覆盖。
         for (TextSegment seg : allSegments) {
-            seg.metadata().put("content_hash", computeContentHash(seg.text()));
+            seg.metadata().put(ChunkMetadataKeys.CONTENT_HASH, computeContentHash(seg.text()));
             seg.metadata().put("dedup_key", computeDedupKey(
-                    seg.metadata().getString("content_hash"),
+                    seg.metadata().getString(ChunkMetadataKeys.CONTENT_HASH),
                     seg.metadata().getString(ChunkMetadataKeys.FILE_NAME)));
         }
 
@@ -103,20 +106,22 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
                     sourceTag, strategyName(), allSegments.size(), uniqueSegments.size(), batchDupCount);
         }
 
-        // 4. ES 去重：先按正文哈希召回候选，再在内存里按 (哈希 + 文件名) 配对
+        // 4. 后端去重：先按正文哈希召回候选，再在内存里按 (哈希 + 文件名) 配对
         //
-        //    分两步是有意的：ES 的 terms 查询没法表达「哈希 A 且文件名 X」这种配对条件，
-        //    而 mapping 里也没有 dedup_key 字段（新增字段要重建存量索引，代价太大）。
+        //    分两步是有意的：后端的 terms 查询没法表达「哈希 A 且文件名 X」这种配对条件，
+        //    而索引里也没有 dedup_key 字段（新增字段要重建存量索引，代价太大）。
         //    先用 terms 取回候选文档的 (content_hash, file_name)，在内存里算去重键比对：
         //    存量索引无需迁移，行为也正确。
         Set<String> candidateHashes = new LinkedHashSet<>();
         for (TextSegment seg : uniqueSegments.values()) {
-            candidateHashes.add(seg.metadata().getString("content_hash"));
+            candidateHashes.add(seg.metadata().getString(ChunkMetadataKeys.CONTENT_HASH));
         }
-        Set<String> existingKeys = queryExistingKeys(esClient, indexName, candidateHashes);
+        Set<DedupKey> existingKeys = target.dedup().existingDedupKeys(collection, candidateHashes);
         List<TextSegment> newSegments = new ArrayList<>();
         for (TextSegment seg : uniqueSegments.values()) {
-            if (!existingKeys.contains(seg.metadata().getString("dedup_key"))) {
+            String hash = seg.metadata().getString(ChunkMetadataKeys.CONTENT_HASH);
+            String fileName = seg.metadata().getString(ChunkMetadataKeys.FILE_NAME);
+            if (!existingKeys.contains(new DedupKey(hash, fileName))) {
                 newSegments.add(seg);
             }
         }
@@ -150,13 +155,28 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
                             "向量模型返回条数与请求不一致（请求 " + batch.size() + " 条，返回 "
                                     + (embeddings == null ? 0 : embeddings.size()) + " 条）");
                 }
+                // 组装成 SPI 的 KbChunk 一次写出：bulk 任一条失败即整批失败，
+                // 与"逐条 add、失败时前面的已写入"相比，失败面更小、回滚口径更简单
+                List<KbChunk> chunks = new ArrayList<>(batch.size());
                 for (int i = 0; i < batch.size(); i++) {
-                    embeddingStore.add(embeddings.get(i), batch.get(i));
+                    TextSegment seg = batch.get(i);
+                    chunks.add(new KbChunk(
+                            UUID.randomUUID().toString(),
+                            seg.text(),
+                            metadataOf(seg),
+                            embeddings.get(i).vector()));
                 }
+                target.store().write(collection, chunks);
                 written += batch.size();
                 log.info("[分片写入-{}][{}] 向量化进度: {}/{}", sourceTag, strategyName(), written, total);
             }
             log.info("[分片写入-{}][{}] 写入完成，新增 {} 个片段", sourceTag, strategyName(), newSegments.size());
+        } catch (StoreAccessException e) {
+            // 后端写入失败按导入失败上抛：吞掉后仍返回 docCount（非 0），调用方会当成
+            // "导入成功"并跳过回滚，留下半个文档且占住文件名
+            log.error("[分片写入-{}][{}] 写入后端失败: {}", sourceTag, strategyName(), e.getMessage(), e);
+            throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_INGEST_ERROR,
+                    "写入知识库存储失败：" + e.getMessage(), e);
         } catch (Exception e) {
             // 不能吞：吞掉后方法仍返回 docCount（非 0），调用方会当成"导入成功"，
             // 而实际一个片段都没写进去。失败必须往上抛，让上层回滚并如实报错。
@@ -166,6 +186,23 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
         }
 
         return report;
+    }
+
+    /**
+     * TextSegment 的 metadata → SPI 的 {@code Map<String,String>}。
+     *
+     * 值统一 toString：{@code KbChunk} 跨后端中立，不认 langchain4j 的装箱类型；
+     * 数值键（{@code chunk_seq} 等）由 ES 适配器的写回路还原成 integer，
+     * 与旧写入路径（切片侧 Integer 原样进 _source）同形。
+     */
+    private static Map<String, String> metadataOf(TextSegment seg) {
+        Map<String, String> out = new LinkedHashMap<>();
+        if (seg.metadata() == null) {
+            return out;
+        }
+        seg.metadata().toMap().forEach((key, value) ->
+                out.put(key, value == null ? null : value.toString()));
+        return out;
     }
 
     /**
@@ -240,77 +277,6 @@ public abstract class AbstractDocumentProcessStrategy implements DocumentProcess
      */
     protected static String computeDedupKey(String contentHash, String fileName) {
         return (contentHash == null ? "" : contentHash) + "\n" + (fileName == null ? "" : fileName);
-    }
-
-    /**
-     * 分批 terms 查询索引中已存在的去重键。
-     * 查询失败返回空集，不阻塞导入。
-     *
-     * @param hashesToCheck 本次要检查的正文哈希（不是去重键）
-     * @return 已存在的 {@code (哈希 + 文件名)} 去重键集合
-     */
-    protected Set<String> queryExistingKeys(ElasticsearchClient esClient,
-                                             String indexName,
-                                             Set<String> hashesToCheck) {
-        if (hashesToCheck == null || hashesToCheck.isEmpty()) {
-            return Set.of();
-        }
-
-        Set<String> existing = new HashSet<>();
-        List<String> hashList = new ArrayList<>(hashesToCheck);
-
-        for (int start = 0; start < hashList.size(); start += ES_TERMS_BATCH_SIZE) {
-            int end = Math.min(start + ES_TERMS_BATCH_SIZE, hashList.size());
-            List<String> chunk = hashList.subList(start, end);
-
-            try {
-                List<FieldValue> fieldValues = new ArrayList<>();
-                for (String h : chunk) {
-                    fieldValues.add(FieldValue.of(h));
-                }
-
-                Query termsQuery = new Query.Builder()
-                        .terms(t -> t
-                                .field("metadata.content_hash")
-                                .terms(tf -> tf.value(fieldValues)))
-                        .build();
-
-                // 不能拿 chunk.size() 当上限：一个正文哈希可能命中"同内容的多份文件"，
-                // 命中数被卡在哈希个数上时，多出来的去重键读不到，同内容切片会被重复写入。
-                // 留 10 倍余量并封顶；触顶时告警，宁可少判一次重复，也别悄悄写重。
-                int fetchSize = Math.min(2000, Math.max(chunk.size() * 10, chunk.size()));
-                SearchResponse<Map> resp = esClient.search(s -> s
-                                .index(indexName)
-                                .size(fetchSize)
-                                .source(src -> src.filter(f -> f.includes("metadata")))
-                                .query(termsQuery),
-                        Map.class);
-
-                resp.hits().hits().forEach(h -> {
-                    if (h.source() == null) {
-                        return;
-                    }
-                    Object metadataObj = h.source().get("metadata");
-                    if (!(metadataObj instanceof Map)) {
-                        return;
-                    }
-                    Map<?, ?> meta = (Map<?, ?>) metadataObj;
-                    Object hash = meta.get("content_hash");
-                    if (hash == null) {
-                        return;
-                    }
-                    Object name = meta.get(ChunkMetadataKeys.FILE_NAME);
-                    existing.add(computeDedupKey(hash.toString(), name == null ? null : name.toString()));
-                });
-            } catch (Exception e) {
-                // 升到 error：这里是"本次去重整体失效"，同内容切片会被重复写入。
-                // warn 级别混在常规告警里没人会注意，而后果是索引里越来越多重复条目。
-                log.error("[分片去重-{}] 查询 ES 已有 content_hash 失败（索引可能不存在或无 content_hash 字段），"
-                        + "本次导入将跳过 ES 去重，可能写入重复切片: {}", strategyName(), e.getMessage());
-            }
-        }
-
-        return existing;
     }
 
     /**

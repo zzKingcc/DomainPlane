@@ -2,6 +2,7 @@ package com.zzkingcc.domainplane.server.capability;
 
 import com.zzkingcc.domainplane.api.annotation.Tool;
 import com.zzkingcc.domainplane.api.annotation.ToolParam;
+import com.zzkingcc.domainplane.api.tool.ToolDescriptor;
 import com.zzkingcc.domainplane.runtime.vision.MediaAttachmentStore;
 import com.zzkingcc.domainplane.runtime.vision.MediaAttachmentStore.Kind;
 import com.zzkingcc.domainplane.runtime.vision.MediaAttachmentStore.StoredAttachment;
@@ -26,12 +27,16 @@ import java.util.Base64;
  * <p>返回值是识别出的文字本身（不落暂存区）：ASR 的产物就是文本，
  * 主模型拿到就能直接用，没有必要再绕一圈引用名。</p>
  *
+ * <p><b>可见性</b>：由「该域（链上）绑没绑可用的语音识别模型」决定，不写死在注解里
+ * （初始哨兵 {@link ToolDescriptor#UNBOUND_DOMAIN}，由 {@code ModelCapabilityToolBinder} 重算）。</p>
+ *
  * @author zzkingcc
  */
 @Component
 public class TranscribeTool extends CapabilityToolSupport {
 
-    private static final String TOOL_NAME = "transcribeAudio";
+    /** 工具名（模型看到的函数名）。{@code ModelCapabilityToolBinder} 按它改可用域 */
+    public static final String TOOL_NAME = "transcribeAudio";
 
     public TranscribeTool(DefaultModelResolver resolver,
                           ModelEndpointClient client,
@@ -47,7 +52,8 @@ public class TranscribeTool extends CapabilityToolSupport {
                     + "参数 audio 只能填本轮附件清单里形如 aud_xxxxxxxx 的引用名（不接受音频地址）。"
                     + "返回音频里说出的文字内容。"
                     + "凡涉及音频中的具体内容而你又听不到时，必须先调用本工具取证，不要凭猜测作答。",
-            effect = Tool.Effect.READ)
+            effect = Tool.Effect.READ,
+            domains = ToolDescriptor.UNBOUND_DOMAIN)
     public String transcribe(@ToolParam("本轮附件清单里的音频引用名（形如 aud_xxxxxxxx）；"
             + "不接受音频地址") String audio,
                              @ToolParam(value = "音频语言，如 zh / en；"

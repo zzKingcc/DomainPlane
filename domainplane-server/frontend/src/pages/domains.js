@@ -1,38 +1,46 @@
 /* ==========================================================================
-   P1 · domains 页脚本
-   自 domains.html 的内联 <script> 机械平移（1 块合并），逻辑未改。
+   domains 页脚本 · 与 domains.html 一一对应
+   左侧域结构树（treeList，按 parentId 前端组树）+ 右侧选中域详情（detailBody）
+   + 配置模型 / 配置 MCP 两个遮罩层。
+   旧版是 domains.html 上一代 DOM（整页平铺卡片 domainList）的遗留，
+   引用的 #domainList 已不存在（load 第一步就 TypeError，整页报废），本次按现 HTML 重写。
    ========================================================================== */
 (function () {
-var esc = Console.escapeHtml;
+    var esc = Console.escapeHtml;
 
     var DATA = null;             /* /admin/domains */
+    var SELECTED = '';           /* 当前选中的域 */
+    var EXPANDED = {};           /* 域名 -> true 表示展开子树 */
     var PROFILES = [];           /* /admin/model-profiles */
     var BINDINGS = {};           /* /admin/model-profiles 的域→档案绑定 */
-    var MCP_BINDINGS = {};       /* /admin/mcp-bindings 的域→[MCP 连接] 绑定 */
-    var MCP_CONNS = [];          /* /admin/mcp-connections 的连接列表（配置弹窗候选用） */
-
-    /* 遮罩层编辑态：当前域 + 各族已选别名（结构同落盘的「族 → 别名列表」） */
+    var MCP_BINDINGS = {};       /* /admin/mcp-bindings 的域→连接绑定 */
+    var MCP_CONNS = [];          /* /admin/mcp-connections */
     var BIND_DOMAIN = '';
     var BIND_PICK = emptyPick();
-
-    var DOM_ICON = '<svg class="dom-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
-        + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-        + '<path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 12l10 5 10-5"/><path d="M2 17l10 5 10-5"/></svg>';
-
-    var EP_LABEL = { chat: '对话', embedding: '向量', rerank: '重排', images: '生图',
-                     tts: '语音合成', asr: '语音识别', video: '视频' };
-    var MOD_LABEL = { text: '文本', image: '图片', audio: '音频', video: '视频',
-                      file: '文件', embedding: '向量' };
-
-    /* 可绑定的族：主模型只收能对话的档案，其余四族由主模型通过工具调用。
-       与服务端 ModelProfile.BINDABLE_FAMILIES 一致；向量与重排不参与域绑定。
-       谁能不能绑到哪一族，一律读服务端下发的 bindableFamilies，前端不自己判端点族。 */
+    var GRACE_MS = null;         /* /admin/domains/storage 的 deleteGraceMs（软删宽限期） */
+    /* /admin/domains 的 knowledgeBodies：能绑的知识体（每个体自己决定走几路）。
+       域绑的是"一个体"，且**不继承**——父域绑了子域也不会跟着用。 */
+    var KNOWLEDGE_BODIES = [];
+    /* /admin/kb/stats：知识体维度的文档/切片数（异步补数，不参与域树首屏）。
+       失败时 failed=true —— "取不到数"和"这里是 0"要分开说。 */
+    var KB_STATS = null;
+    var KIND_LABEL = { keyword: '关键字', vector: '向量' };
+    var DOM_ICON = '<svg class="dom-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 12l10 5 10-5"/><path d="M2 17l10 5 10-5"/></svg>';
+    var EP_LABEL = {
+        chat: '对话', embedding: '向量', rerank: '重排',
+        images: '生图', tts: '语音合成', asr: '语音识别', video: '视频'
+    };
+    var MOD_LABEL = {
+        text: '文本', image: '图片', audio: '音频',
+        video: '视频', file: '文件', embedding: '向量'
+    };
     var BIND_FAMILIES = ['images', 'tts', 'asr', 'video'];
-    var FAMILY_LABEL = { chat: '主模型（对话）', images: '生图', tts: '语音合成',
-                         asr: '语音识别', video: '生视频' };
+    var FAMILY_LABEL = {
+        chat: '主模型（对话）', images: '生图', tts: '语音合成', asr: '语音识别', video: '生视频'
+    };
+    var SOURCE_TAG_CLS = { BUILTIN: 'src-builtin', MANUAL: 'src-manual', DERIVED: 'src-derived' };
 
-
-    function num(n) { return (n == null ? 0 : n); }
+    function num(n) { return (n == null) ? 0 : n; }
 
     function tagList(list, map) {
         return (list || []).map(function (k) {
@@ -40,10 +48,10 @@ var esc = Console.escapeHtml;
         }).join('');
     }
 
-    /* 同名模型（两家服务商各配一份）自动编号：别名 = 模型名[-N]，N 在卡片上显示成 #N */
     function aliasBase(modelName) {
         return (modelName || '').trim().replace(/\s+/g, '-') || 'model';
     }
+
     function dupNo(p) {
         var base = aliasBase(p.modelName);
         var alias = (p.alias || '').trim();
@@ -51,13 +59,14 @@ var esc = Console.escapeHtml;
         var m = alias.match(/-(\d+)$/);
         return (m && alias.slice(0, m.index) === base) ? parseInt(m[1], 10) : 0;
     }
+
     function modelLabel(p) {
         var n = dupNo(p);
         return (p.modelName || p.alias) + (n > 1 ? ' #' + n : '');
     }
 
     function sourceTag(d) {
-        var s = String((d && d.source) || '').toUpperCase();
+        var s = String(d && d.source || '').toUpperCase();
         if (s === 'BUILTIN') {
             return '<span class="tag approval" title="根域：整棵域树的起点，不可删除">根域</span>';
         }
@@ -73,14 +82,14 @@ var esc = Console.escapeHtml;
         if (se === 'read') { cls = 'read'; }
         else if (se === 'write') { cls = 'write'; }
         else if (se === 'destructive') { cls = 'destructive'; }
-        var tip = [esc(t.category || ''), esc(t.provider || ''),
-                   t.requiresApproval ? '需人工确认' : ''].filter(Boolean).join(' · ');
+        var tip = [
+            esc(t.category || ''),
+            esc(t.provider || ''),
+            t.requiresApproval ? '需人工确认' : ''
+        ].filter(Boolean).join(' · ');
         return '<span class="tag ' + cls + '" title="' + tip + '">' + esc(t.name) + '</span>';
     }
 
-    /* 某族的候选档案：一律读服务端下发的 bindableFamilies，前端不自己判端点族。
-       两边各实现一遍判据必然漂移：主模型要"能当对话模型用"，能力族只要"确实声明了那个端点族"，
-       生图档案当不了主模型、却恰恰是生图段唯一合格的东西，这种差别只有服务端知道。 */
     function candidatesFor(family) {
         var list = [];
         PROFILES.forEach(function (p) {
@@ -89,9 +98,8 @@ var esc = Console.escapeHtml;
                 alias: p.alias,
                 label: modelLabel(p),
                 note: p.baseUrl || '',
-                /* 能不能看图：input 含 image（后端 ModelProfile.MOD_IMAGE）。这一条在绑定弹窗里
-                   必须显式给出，它决定"用户发图时图进谁的消息"，而绑错了要等用户真发一张图
-                   才报 91001 才发现，那时已经绑完保存过了。 */
+                /* 能不能看图：input 含 image。绑定弹窗里必须显式给出：
+                   它决定"用户发图时图进谁的消息"，绑错了要等真发一张图才报 91001 */
                 vision: (p.input || []).indexOf('image') >= 0,
                 tags: tagList(p.endpoints, EP_LABEL) + tagList(p.input, MOD_LABEL)
             });
@@ -99,7 +107,6 @@ var esc = Console.escapeHtml;
         return list;
     }
 
-    /* 完整路径 → 从根到自身的链，与服务端 Domains.chainOf 同构 */
     function chainOf(domain) {
         var segs = String(domain || '').split('.');
         var out = [];
@@ -111,29 +118,22 @@ var esc = Console.escapeHtml;
         return out;
     }
 
-    /* 卡片头部的「是否回写工具执行信息」开关：只渲染在可调用单元（叶子域）上，
-       装配节点不能作为入口，开关对它没有意义。结构上内层套一个 .tune-switch，
-       藏起来的 input 与轨道 / 滑块的样式都挂在那个类上，这里只借它的视觉。 */
     function echoSwitch(d) {
         return '<label class="echo-switch" title="关闭后调用方只收到最终答复，不收到工具调用与执行结果">'
-            + '<span class="tune-switch">'
-            + '<input type="checkbox" data-echo="' + esc(d.name) + '"'
-            + (d.toolCallEcho === true ? ' checked' : '') + '>'
-            + '<span class="tune-switch-track"><span class="tune-switch-knob"></span></span>'
-            + '</span>'
-            + '<span class="echo-switch-label">是否回写工具执行信息</span>'
-            + '</label>';
+            + '<span class="tune-switch"><input type="checkbox" data-echo="' + esc(d.name) + '"'
+            + (d.toolCallEcho === true ? ' checked' : '')
+            + '><span class="tune-switch-track"><span class="tune-switch-knob"></span></span></span>'
+            + '<span class="echo-switch-label">是否回写工具执行信息</span></label>';
     }
 
-    /* 沿链回落到最近一份**主模型**绑定（与服务端 resolveAlong 同构）：自身没绑就用祖先的。
-       落盘结构是「域 → {族 → 别名列表}」，主模型那一桶的键是 chat。 */
-    function resolveBinding(domain) {
-        return resolveAlong(domain, 'chat');
+    function planSwitch(d) {
+        return '<label class="echo-switch" title="打开后调用方在本轮第一个 TOKEN 前收到本轮执行计划（PLAN 事件）；规划本身做不做由全局开关 domainplane.planning.enabled 控制">'
+            + '<span class="tune-switch"><input type="checkbox" data-plan="' + esc(d.name) + '"'
+            + (d.planDisplay === true ? ' checked' : '')
+            + '><span class="tune-switch-track"><span class="tune-switch-knob"></span></span></span>'
+            + '<span class="echo-switch-label">是否展示执行计划</span></label>';
     }
 
-    /* 沿链回落到最近一份某族的绑定，与服务端 resolveCapabilityAlong 同构。
-       按族分开回落而不是"取整份绑定再过滤"：一个域可能绑了生图却没绑语音，
-       此时语音该继续向祖先找，而不是被"本域已有绑定"截断。 */
     function resolveAlong(domain, family) {
         var chain = chainOf(domain);
         for (var i = chain.length - 1; i >= 0; i--) {
@@ -144,10 +144,6 @@ var esc = Console.escapeHtml;
         return { aliases: [], source: null };
     }
 
-    /* 主模型 = 绑定列表里第一个「可用且可绑」的档案，与后端 streamingChat 同一口径
-       （按序顺延到第一个能用的，不是无条件下标 0，首项缺 Key 时主模型会顺延到下一位）。
-       usable / bindable 由服务端下发（口径 = ModelProfile#isUsable() + #domainBindable()），
-       前端不再自己实现谓词：两边各算一次必然漂移。 */
     function primaryAliasOf(aliases) {
         var hit = (aliases || []).filter(function (a) {
             var p = PROFILES.filter(function (x) { return x.alias === a; })[0];
@@ -156,9 +152,187 @@ var esc = Console.escapeHtml;
         return hit || null;
     }
 
-    /* 卡片上的「能力模型」一行：把四个能力族沿链解出来的档案列出来，只有绑了才显示。
-       生图 / 语音 / 视频这些档案当不了主模型，绑完之后在卡片上没有任何痕迹的话，
-       用户会以为没绑上，然后重复绑一遍。 */
+    function shortName(domain) {
+        var i = String(domain || '').lastIndexOf('.');
+        return i < 0 ? String(domain || '') : domain.slice(i + 1);
+    }
+
+    /* ==================== 左侧域结构树 ==================== */
+    function childrenMap() {
+        var map = {};
+        var names = {};
+        ((DATA && DATA.domains) || []).forEach(function (d) { names[d.name] = true; });
+        ((DATA && DATA.domains) || []).forEach(function (d) {
+            var p = (d.parentId && names[d.parentId]) ? d.parentId : '';
+            (map[p] || (map[p] = [])).push(d);
+        });
+        return map;
+    }
+
+    function renderTree() {
+        var box = document.getElementById('treeList');
+        var domains = (DATA && DATA.domains) || [];
+        if (!box) { return; }
+        document.getElementById('domainCount').textContent = domains.length + ' 个域';
+        if (!domains.length) {
+            box.innerHTML = '<div class="dp-domain-empty">当前没有任何域。根域 <span class="mono">default</span> 由服务端自建，'
+                + '其余域用上方输入框新建，标识须为从根域出发的完整路径。</div>';
+            return;
+        }
+        var map = childrenMap();
+        box.innerHTML = treeLevel(map[''] || [], map, 0);
+        bindTreeEvents(box);
+    }
+
+    function treeLevel(list, map, depth) {
+        return list.map(function (d) {
+            var kids = map[d.name] || [];
+            /* 第一层默认展开；其余层听 EXPANDED 的 */
+            var expanded = !!EXPANDED[d.name] || depth === 0;
+            var hasKids = kids.length > 0;
+            var tagCls = SOURCE_TAG_CLS[String(d.source || '').toUpperCase()] || 'src-derived';
+            var srcLabel = d.source === 'BUILTIN' ? '根域' : (d.source === 'MANUAL' ? '人工' : '派生');
+            var html = '<div class="dp-tree-row' + (d.name === SELECTED ? ' on' : '') + '" data-domain="' + esc(d.name) + '">'
+                + (hasKids
+                    ? '<button class="dp-tree-chev" data-chev="' + esc(d.name) + '" title="' + (expanded ? '折叠' : '展开') + '">' + (expanded ? '▾' : '▸') + '</button>'
+                    : '<span class="dp-tree-chev leaf"></span>')
+                + '<span class="dp-tree-dot ' + (d.callable ? 'on' : 'off') + '" title="' + (d.callable ? '可调用单元' : '装配节点') + '"></span>'
+                + '<span class="dp-tree-name" title="' + esc(d.name) + (d.pendingDelete ? '（待删除）' : '') + '">'
+                + esc(shortName(d.name)) + (d.pendingDelete ? ' <span class="tag destructive">待删除</span>' : '') + '</span>'
+                + '<span class="dp-tree-tag ' + tagCls + '">' + srcLabel + '</span>'
+                + '<span class="dp-tree-count">' + num(d.toolCount) + '</span>'
+                + '</div>';
+            if (hasKids && expanded) {
+                html += '<div class="dp-tree-kids">' + treeLevel(kids, map, depth + 1) + '</div>';
+            }
+            return html;
+        }).join('');
+    }
+
+    function bindTreeEvents(box) {
+        box.querySelectorAll('.dp-tree-row').forEach(function (row) {
+            row.addEventListener('click', function () {
+                selectDomain(row.getAttribute('data-domain'));
+            });
+        });
+        box.querySelectorAll('.dp-tree-chev[data-chev]').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var name = btn.getAttribute('data-chev');
+                EXPANDED[name] = !EXPANDED[name];
+                renderTree();
+            });
+        });
+    }
+
+    function selectDomain(name) {
+        SELECTED = name;
+        renderTree();
+        renderDetail();
+    }
+
+    function expandAncestors(name) {
+        chainOf(name).slice(0, -1).forEach(function (seg) { EXPANDED[seg] = true; });
+    }
+
+    function currentDomain() {
+        var domains = (DATA && DATA.domains) || [];
+        for (var i = 0; i < domains.length; i++) {
+            if (domains[i].name === SELECTED) { return domains[i]; }
+        }
+        return null;
+    }
+
+    /* ==================== 右侧详情卡 ==================== */
+    function renderDetail() {
+        var box = document.getElementById('detailBody');
+        if (!box) { return; }
+        var d = currentDomain();
+        if (!d) {
+            box.innerHTML = '<div class="card dp-panel"><div class="card-body">'
+                + '<div class="dp-editor-empty">从左侧选一个域查看与配置。</div></div></div>';
+            return;
+        }
+        var resolved = resolveAlong(d.name, 'chat');
+        var primaryAlias = primaryAliasOf(resolved.aliases);
+        var boundTags = resolved.aliases.length
+            ? resolved.aliases.map(function (a) {
+                var p = PROFILES.filter(function (x) { return x.alias === a; })[0];
+                var label = p ? modelLabel(p) : a;
+                var marks = '';
+                if (p && (p.input || []).indexOf('image') >= 0) {
+                    marks += ' <span class="tag read" title="输入模态含 image：能看图">可看图</span>';
+                }
+                if (a === primaryAlias) {
+                    marks += ' <span class="tag perm" title="主模型：列表首个可用的档案，本轮对话由它回答">主</span>';
+                }
+                return '<span class="tag public mono">' + esc(label) + '</span>' + marks;
+            }).join(' ')
+                + (resolved.source === d.name ? '' : '<span class="card-note">继承自 ' + esc(resolved.source) + '</span>')
+            : '<span class="tag write">无可调用模型</span>';
+        var tools = (d.tools || []).map(toolTag).join('');
+        var toolLine = tools ? '<div class="tool-tags">' + tools + '</div>' : '<span class="perm-none">该域没有可见工具</span>';
+        var mcpConns = (d.mcp && d.mcp.connections) || [];
+        var mcpInherited = d.mcp && d.mcp.inheritedFrom;
+        var mcpLine = (mcpConns.length || mcpInherited)
+            ? '<div><span class="k">MCP 连接</span>'
+                + mcpConns.map(function (c) { return '<span class="tag public mono">' + esc(c) + '</span>'; }).join(' ')
+                + (mcpInherited ? ' <span class="card-note">继承自 ' + esc(mcpInherited) + '</span>' : '')
+                + '</div>'
+            : '';
+        var kb = d.knowledge || {};
+        /* 主数字是本域可检索的量（本域 + 已绑知识体的上级域，与检索通道同口径）；
+           体总量是基础设施视角，多个域共用一个体时只作为附注出现，免得被当成本域独有 */
+        var stat = kb.body ? kbRetrievableOf(d.name) : null;
+        var bodyStat = kb.body ? kbStatOf(kb.body) : null;
+        var statNote = !kb.body ? ''
+            : !KB_STATS ? '<span class="card-note">统计加载中…</span>'
+            : KB_STATS.failed ? '<span class="card-note">统计不可用</span>'
+            : '<span class="card-note">文档 ' + num(stat && stat.documents) + ' · 切片 ' + num(stat && stat.chunks)
+                + (KB_STATS.stale ? '（旧数据）' : '') + '</span>'
+                + (bodyStat && bodyStat.domainCount > 1
+                    ? ' <span class="card-note">体共 ' + num(bodyStat.documents) + ' · ' + bodyStat.domainCount + ' 域共用</span>'
+                    : '');
+        var kbLine = '<div><span class="k">知识体</span>' + kbSelect(d.name, kb) + statNote
+            + (kb.bodyMissing ? ' <span class="tag destructive" title="这个域绑的知识体已被删，本站没有知识库">知识体已失效</span>' : '')
+            + (kb.bodyDead ? ' <span class="tag destructive" title="知识体的连接全都不可用，检索工具已从这个域下线">知识体连接不可用</span>' : '')
+            + (d.runningSessions ? ' <span class="tag approval">在飞会话 ' + num(d.runningSessions) + '</span>' : '')
+            + '</div>';
+        var parentLine = d.parentId
+            ? '<div><span class="k">上级域</span><button class="dp-jump" data-jump="' + esc(d.parentId) + '">' + esc(d.parentId) + '</button></div>'
+            : '';
+        box.innerHTML = '<section class="card dp-panel dp-detail-card"><div class="card-body">'
+            + '<header class="card-head">' + DOM_ICON + '<h2 class="mono">' + esc(d.name) + '</h2>' + sourceTag(d)
+            + (d.pendingDelete ? '<span class="tag destructive" title="处于软删除宽限期，到期后彻底清理">待删除</span>' : '')
+            + (d.callable
+                ? '<span class="tag read" title="可调用单元：能作为入口被调用">可调用</span>'
+                : '<span class="tag approval" title="装配节点：只把工具 / 提示词 / 模型 / 知识传给后代，不能直接当入口">装配节点</span>')
+            + '<span class="spacer"></span>'
+            + (d.callable ? echoSwitch(d) + planSwitch(d) : '')
+            + '<span class="card-note">工具 ' + num(d.toolCount) + ' · 需确认 ' + num(d.approvalCount) + '</span>'
+            + (d.hasChildren ? '' : '<button class="btn btn-sm btn-outline-secondary" data-callable="' + esc(d.name) + '" data-to="' + (d.callable ? 'false' : 'true') + '">'
+                + (d.callable ? '设为装配节点' : '设为可调用') + '</button>')
+            + '<button class="btn btn-sm btn-outline-secondary" data-cfg="' + esc(d.name) + '">配置模型</button>'
+            + '<button class="btn btn-sm btn-outline-secondary" data-mcpcfg="' + esc(d.name) + '">配置 MCP</button>'
+            + (d.deletable && !d.pendingDelete ? '<button class="btn btn-sm btn-outline-danger" data-del="' + esc(d.name) + '">删除</button>' : '')
+            + '</header>'
+            + (d.pendingDelete ? pendingDeleteBox(d) : '')
+            + (d.hasChildren
+                ? '<p class="dp-kb-note">该域有 ' + num(d.directChildCount) + ' 个直接子域（全部后代 ' + num(d.childrenCount)
+                    + ' 个），按"只有叶子域可作为可调用单元"的规则，它只能作装配节点，不能当入口。需要这一层入口请另建无子域的域。</p>'
+                : '')
+            + '<div class="model-meta">'
+            + parentLine
+            + '<div><span class="k">可调用模型</span>' + boundTags + '</div>'
+            + capabilityLineOf(d.name)
+            + mcpLine
+            + kbLine
+            + '</div>'
+            + '<h3>可见工具（含沿链继承）</h3>' + toolLine
+            + '</div></section>';
+        bindDetailEvents(box);
+    }
+
     function capabilityLineOf(domain) {
         var parts = [];
         BIND_FAMILIES.forEach(function (family) {
@@ -169,109 +343,12 @@ var esc = Console.escapeHtml;
                 return '<span class="tag public mono">' + esc(p ? modelLabel(p) : a) + '</span>';
             }).join(' ');
             parts.push('<span class="k">' + esc(FAMILY_LABEL[family]) + '</span> ' + names
-                + (resolved.source === domain ? '' : ' <span class="card-note">继承自 '
-                   + esc(resolved.source) + '</span>'));
+                + (resolved.source === domain ? '' : ' <span class="card-note">继承自 ' + esc(resolved.source) + '</span>'));
         });
-        return parts.length
-            ? '<div><span class="k">能力模型</span>' + parts.join(' · ') + '</div>'
-            : '';
+        return parts.length ? '<div><span class="k">能力模型</span>' + parts.join(' · ') + '</div>' : '';
     }
 
-    function render() {
-        var box = document.getElementById('domainList');
-        var domains = (DATA && DATA.domains) || [];
-        document.getElementById('domainCount').textContent = domains.length + ' 个域';
-
-        if (!domains.length) {
-            box.innerHTML = '<div class="dp-card"><span class="perm-none">'
-                + '当前没有任何域。根域 <span class="mono">default</span> 是整棵域树的起点，'
-                + '其余域由上方人工创建或工具声明派生，标识须为从根域出发的完整路径。</span></div>';
-            return;
-        }
-
-        box.innerHTML = domains.map(function (d) {
-            var resolved = resolveBinding(d.name);
-            var primaryAlias = primaryAliasOf(resolved.aliases);
-            /* 每个已绑档案跟两个标识，都是「看图」这条链上真正起作用的信息：
-               ① 可看图（input 含 image）—— 决定图进谁的消息：主模型可看图 → 图直接进它的
-                  上下文；主模型看不了而列表里有别的能看 → 走 seeImage 委派；
-                  全都看不了 → 带图请求直接报 91001。所以"列表里有没有一个能看图的"
-                  比"谁排第一"更该先看见，绑定弹窗里也只在这里能提前看到。
-               ② 主 —— 本轮对话实际由它回答。 */
-            var boundTags = resolved.aliases.length
-                ? resolved.aliases.map(function (a) {
-                    var p = PROFILES.filter(function (x) { return x.alias === a; })[0];
-                    var label = p ? modelLabel(p) : a;
-                    var marks = '';
-                    if (p && (p.input || []).indexOf('image') >= 0) {
-                        marks += ' <span class="tag read" title="输入模态含 image：能看图">可看图</span>';
-                    }
-                    if (a === primaryAlias) {
-                        marks += ' <span class="tag perm" title="主模型：列表首个可用的档案，本轮对话由它回答">主</span>';
-                    }
-                    return '<span class="tag public mono">' + esc(label) + '</span>' + marks;
-                  }).join(' ')
-                    + (resolved.source === d.name ? ''
-                        : '<span class="card-note">继承自 ' + esc(resolved.source) + '</span>')
-                : '<span class="tag write">无可调用模型</span>';
-
-            var tools = (d.tools || []).map(toolTag).join('');
-            var toolLine = tools
-                ? '<div class="tool-tags">' + tools + '</div>'
-                : '<span class="perm-none">该域没有可见工具</span>';
-
-            /* MCP 连接绑定：本域直接绑定的 MCP 连接会显示在这里（MCP 工具已混入上方「工具」列表） */
-            var mcpConns = (MCP_BINDINGS[d.name] || []);
-            var mcpLine = mcpConns.length
-                ? '<div style="margin-top:6px;"><span class="k" style="color:var(--muted);'
-                  + 'font-size:12px;">MCP 连接：</span> '
-                  + mcpConns.map(function (c) {
-                        return '<span class="tag public mono">' + esc(c) + '</span>';
-                    }).join(' ') + '</div>'
-                : '';
-
-            return '<section class="dp-card model-card">'
-                + '<header class="card-head">'
-                +   DOM_ICON
-                +   '<h2 class="mono">' + esc(d.name) + '</h2>'
-                +   sourceTag(d)
-                +   (d.callable
-                        ? '<span class="tag read" title="可调用单元：能作为入口被调用">可调用</span>'
-                        : '<span class="tag approval" title="装配节点：只把工具 / 提示词 / 模型 / 知识传给后代，不能直接当入口">装配节点</span>')
-                +   '<span class="spacer"></span>'
-                +   (d.callable ? echoSwitch(d) : '')
-                +   '<span class="card-note">工具 ' + num(d.toolCount) + ' · 需确认 '
-                +     num(d.approvalCount) + '</span>'
-                +   (d.hasChildren
-                        ? ''
-                        : '<button class="ghost btn btn-sm btn-outline-primary" data-callable="' + esc(d.name) + '" data-to="'
-                          + (d.callable ? 'false' : 'true') + '">'
-                          + (d.callable ? '设为装配节点' : '设为可调用') + '</button>')
-                +   '<button class="ghost btn btn-sm btn-outline-primary" data-cfg="' + esc(d.name) + '">配置模型</button>'
-                +   '<button class="ghost btn btn-sm btn-outline-primary" data-mcpcfg="' + esc(d.name) + '">配置 MCP</button>'
-                +   (d.deletable
-                        ? '<button class="ghost btn btn-sm btn-outline-primary" data-del="' + esc(d.name) + '">删除</button>'
-                        : '')
-                + '</header>'
-                + (d.hasChildren
-                        ? '<div class="card-note" style="margin-top:6px;">'
-                          + '该域有子域，按"只有叶子域可作为可调用单元"的规则，它只能作装配节点'
-                          + '（把工具 / 提示词 / 模型 / 知识传给后代），不能当入口。需要这一层入口请另建无子域的域。</div>'
-                        : '')
-                + '<div class="model-meta">'
-                +   '<div><span class="k">可调用模型</span>' + boundTags + '</div>'
-                +   capabilityLineOf(d.name)
-                +   '<div><span class="k">提示词</span>'
-                +     (d.hasPrompt
-                        ? '<span class="tag read">' + num(d.promptLength) + ' 字</span>'
-                        : '<span class="tag write">缺提示词</span>')
-                +   '</div>'
-                +   '<div><span class="k">工具</span></div>'
-                + '</div>'
-                + '<div style="margin-top:8px;">' + toolLine + mcpLine + '</div>'
-                + '</section>';
-        }).join('');
-
+    function bindDetailEvents(box) {
         box.querySelectorAll('button[data-cfg]').forEach(function (b) {
             b.addEventListener('click', function () { openBind(b.getAttribute('data-cfg')); });
         });
@@ -280,35 +357,107 @@ var esc = Console.escapeHtml;
         });
         box.querySelectorAll('button[data-callable]').forEach(function (b) {
             b.addEventListener('click', function () {
-                toggleCallable(b.getAttribute('data-callable'),
-                    b.getAttribute('data-to') === 'true');
+                toggleCallable(b.getAttribute('data-callable'), b.getAttribute('data-to') === 'true');
             });
         });
         box.querySelectorAll('button[data-del]').forEach(function (b) {
             b.addEventListener('click', function () { deleteDomain(b.getAttribute('data-del')); });
         });
+        box.querySelectorAll('button[data-restore]').forEach(function (b) {
+            b.addEventListener('click', function () { restoreDomain(b.getAttribute('data-restore'), b); });
+        });
+        box.querySelectorAll('button[data-purge]').forEach(function (b) {
+            b.addEventListener('click', function () { purgeNow(b.getAttribute('data-purge'), b); });
+        });
         box.querySelectorAll('input[data-echo]').forEach(function (input) {
             input.addEventListener('change', function () { saveEcho(input); });
         });
+        box.querySelectorAll('input[data-plan]').forEach(function (input) {
+            input.addEventListener('change', function () { savePlan(input); });
+        });
+        box.querySelectorAll('select[data-kb]').forEach(function (sel) {
+            sel.addEventListener('change', function () { saveKb(sel); });
+        });
+        box.querySelectorAll('.dp-jump[data-jump]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var name = b.getAttribute('data-jump');
+                expandAncestors(name);
+                selectDomain(name);
+            });
+        });
     }
 
-    /* 拨「是否回写工具执行信息」：PUT 落盘，失败把开关弹回原值 */
+    function savePlan(input) {
+        var domain = input.getAttribute('data-plan');
+        var on = input.checked;
+        input.disabled = true;
+        Console.api.put('/admin/domains/' + encodeURIComponent(domain) + '/plan-display', { display: on })
+            .catch(function (e) {
+                input.checked = !on;
+                Console.toast('保存失败：' + Console.sanitizeError(e.message), { type: 'error' });
+            }).then(function () {
+                input.disabled = false;
+            });
+    }
+
     function saveEcho(input) {
         var domain = input.getAttribute('data-echo');
         var on = input.checked;
         input.disabled = true;
-        /* P2：/admin/domains/{id}/tool-call-echo 是 A 类（只有 code），
-           `if (r.code !== 0) throw` 由 api.put 的 reject 承担，这里不再手判。 */
-        Console.api.put('/admin/domains/' + encodeURIComponent(domain) + '/tool-call-echo',
-                        { echo: on })
+        Console.api.put('/admin/domains/' + encodeURIComponent(domain) + '/tool-call-echo', { echo: on })
             .catch(function (e) {
                 input.checked = !on;
-                alert('保存失败：' + Console.sanitizeError(e.message));
-            })
-            .then(function () { input.disabled = false; });
+                Console.toast('保存失败：' + Console.sanitizeError(e.message), { type: 'error' });
+            }).then(function () {
+                input.disabled = false;
+            });
     }
 
-    /* ===== 遮罩层：点卡片选模型（主模型 + 四个能力族各一段） ===== */
+    /* 知识体下拉：只列"能检索"的体（原文体不参与召回，绑了等于没有知识库）。
+       空 = 这个域没有知识库，**不去找父域借**——域链决定"查得到谁的数据"，
+       不决定"用谁的知识体"。 */
+    function kbSelect(domain, kb) {
+        var bound = kb.body || '';
+        var known = KNOWLEDGE_BODIES.some(function (b) { return b.id === bound; });
+        var options = '';
+        /* 绑的体已被删：补一条占位。不补的话下拉会静默显示成"不挂知识库"——
+           用户看到的是"没配"，实际是"配了但被删了"，两种情况的处置完全不同 */
+        if (bound && !known) {
+            options += '<option value="' + esc(bound) + '" selected>'
+                + esc(kb.bodyName || bound) + '（已删除）</option>';
+        }
+        options += '<option value=""' + (bound ? '' : ' selected') + '>（不挂知识库）</option>';
+        KNOWLEDGE_BODIES.forEach(function (b) {
+            /* 体的两路都在选项文案里：绑之前就能看出"这个体走几路" */
+            var modes = (b.modes || []).map(function (k) { return KIND_LABEL[k] || k; }).join('+');
+            var tail = modes || '未配';
+            if (b.usable === false) { tail += ' · 连接不可用'; }
+            options += '<option value="' + esc(b.id) + '"' + (b.id === bound ? ' selected' : '') + '>'
+                + esc(b.name || b.id) + '（' + esc(tail) + '）</option>';
+        });
+        return '<select class="form-select" style="width:auto;min-width:12rem;display:inline-block;'
+            + 'vertical-align:middle;" data-kb="' + esc(domain) + '">' + options + '</select>';
+    }
+
+    function saveKb(select) {
+        var domain = select.getAttribute('data-kb');
+        var body = select.value || null;
+        select.disabled = true;
+        Console.api.put('/admin/domains/' + encodeURIComponent(domain) + '/body', { body: body })
+            .then(function () {
+                Console.toast('「' + shortName(domain) + '」的知识体已更新', { type: 'success' });
+            })
+            .catch(function (e) {
+                Console.toast('保存失败：' + Console.sanitizeError(e.message), { type: 'error' });
+            })
+            .then(function () {
+                select.disabled = false;
+                /* 无论成败都重拉：失败时下拉回到服务端的真实状态，不留在骗人的选项上 */
+                load();
+            });
+    }
+
+    /* ==================== 配置模型遮罩层 ==================== */
     function emptyPick() {
         return { chat: [], images: [], tts: [], asr: [], video: [] };
     }
@@ -341,24 +490,16 @@ var esc = Console.escapeHtml;
             return;
         }
         empty.style.display = 'none';
-
         var chatList = candidatesFor('chat');
-        /* 一个能看图的都没有时要把这句摆在主模型候选卡上面：否则用户绑完保存，
-           直到真的发一张图才撞上「没有可用的视觉模型」，而那时界面上没有任何线索
-           指向"链上没有视觉档案"这个根因。 */
         var visionNote = chatList.length && !chatList.some(function (c) { return c.vision; })
-            ? '<div class="card-note" style="grid-column:1/-1;">'
-              + '当前没有可看图的档案（输入模态含 image），绑定后用户发图会报「没有可用的视觉模型」。'
-              + '模态读不出来的档案要在「模型设置」点一次「探测」补齐。</div>'
+            ? '<div class="card-note" style="grid-column:1/-1;">当前没有可看图的档案（输入模态含 image），绑定后用户发图会报「没有可用的视觉模型」。模态读不出来的档案要在「模型设置」点一次「探测」补齐。</div>'
             : '';
-
         var html = sectionHead('chat', chatList.length) + visionNote + cardsHtml('chat', chatList);
         BIND_FAMILIES.forEach(function (family) {
             var list = candidatesFor(family);
             html += sectionHead(family, list.length) + cardsHtml(family, list);
         });
         box.innerHTML = html;
-
         box.querySelectorAll('div[data-pick]').forEach(function (card) {
             card.addEventListener('click', function () {
                 var family = card.getAttribute('data-family');
@@ -371,56 +512,49 @@ var esc = Console.escapeHtml;
         });
     }
 
-    /* 一段的标题（含"没有可绑档案"的提示），整行铺满，与候选卡同在一个 grid 里 */
     function sectionHead(family, count) {
-        var note = count
-            ? ''
-            : ' · 没有可用于「' + esc(FAMILY_LABEL[family]) + '」的档案，'
-              + '到「模型设置」添加它、并点一次「探测」确认端点族';
-        return '<div class="card-note" style="grid-column:1/-1; margin-top:8px;">'
-            + '<strong>' + esc(FAMILY_LABEL[family]) + '</strong>' + note + '</div>';
+        var note = count ? '' : ' · 没有可用于「' + esc(FAMILY_LABEL[family]) + '」的档案，到「模型设置」添加它、并点一次「探测」确认端点族';
+        return '<div class="card-note" style="grid-column:1/-1; margin-top:8px;"><strong>' + esc(FAMILY_LABEL[family]) + '</strong>' + note + '</div>';
     }
 
     function cardsHtml(family, list) {
         var picked = BIND_PICK[family] || [];
         return list.map(function (c) {
             var on = picked.indexOf(c.alias) >= 0;
-            return '<div class="pick-card' + (on ? ' on' : '') + '"'
-                +   ' data-pick="' + esc(c.alias) + '" data-family="' + esc(family) + '">'
-                +   '<div class="pc-name">' + esc(c.label) + (on ? ' ✓' : '')
-                +     (c.vision
-                ?         ' <span class="tag read" title="输入模态含 image：能看图">可看图</span>'
-                :         '')
-                +   '</div>'
-                +   (c.note ? '<div class="pc-note mono">' + esc(c.note) + '</div>' : '')
-                +   (c.tags ? '<div class="pc-tags">' + c.tags + '</div>' : '')
+            return '<div class="pick-card' + (on ? ' on' : '') + '" data-pick="' + esc(c.alias) + '" data-family="' + esc(family) + '">'
+                + '<div class="pc-name">' + esc(c.label) + (on ? ' ✓' : '')
+                + (c.vision ? ' <span class="tag read" title="输入模态含 image：能看图">可看图</span>' : '')
+                + '</div>'
+                + (c.note ? '<div class="pc-note mono">' + esc(c.note) + '</div>' : '')
+                + (c.tags ? '<div class="pc-tags">' + c.tags + '</div>' : '')
                 + '</div>';
         }).join('');
     }
 
-    /* 保存：主模型 + 四个能力族一次提交（服务端整体校验通过才落盘）。
-       四族一律显式带上，空数组即"解绑该族"，省略等于"不动"，清空就清不掉了。 */
     function saveBind(pick) {
         var capabilities = {};
         BIND_FAMILIES.forEach(function (family) {
             capabilities[family] = pick[family] || [];
         });
-        /* P2：/admin/model-bindings/{domain} 是 B 类（code + success 双写），统一按 code 判 */
-        Console.api.put('/admin/model-bindings/' + encodeURIComponent(BIND_DOMAIN),
-                        { aliases: pick.chat || [], capabilities: capabilities })
-            .then(function () {
-                closeBind();
-                loadBindings();
-            })
-            .catch(function (e) { alert('设置失败：' + e.message); });
+        return Console.api.put('/admin/model-bindings/' + encodeURIComponent(BIND_DOMAIN), {
+            aliases: pick.chat || [],
+            capabilities: capabilities
+        }).then(function () {
+            closeBind();
+            load();
+        }).catch(function (e) {
+            Console.toast('设置失败：' + e.message, { type: 'error' });
+        });
     }
 
-    /* ===== 遮罩层：点卡片选 MCP 连接（与模型绑定同构；保存走域维度全量覆盖） ===== */
+    /* ==================== 配置 MCP 遮罩层 ==================== */
     var MCP_BIND_DOMAIN = '';
     var MCP_BIND_PICK = [];
 
     function mcpStatusTag(c) {
-        if (!c.enabled) { return '<span class="tag" title="已停用：不连接、不注册工具">已禁用</span>'; }
+        if (!c.enabled) {
+            return '<span class="tag" title="已停用：不连接、不注册工具">已禁用</span>';
+        }
         if (c.ready) { return '<span class="tag read">已就绪</span>'; }
         if (c.status === 'FAILED') {
             return '<span class="tag destructive" title="' + esc(c.lastError || '') + '">连接失败</span>';
@@ -442,7 +576,6 @@ var esc = Console.escapeHtml;
         document.body.style.overflow = '';
     }
 
-    /* 祖先域已绑的连接向下继承可见：标出来，避免在本域重复绑一遍 */
     function inheritedMcp(domain) {
         var chain = chainOf(domain);
         for (var i = chain.length - 2; i >= 0; i--) {
@@ -467,16 +600,11 @@ var esc = Console.escapeHtml;
             var on = MCP_BIND_PICK.indexOf(c.name) >= 0;
             var viaAncestor = inherited && inherited.conns.indexOf(c.name) >= 0;
             return '<div class="pick-card' + (on ? ' on' : '') + '" data-mcpick="' + esc(c.name) + '">'
-                +   '<div class="pc-name">' + esc(c.name) + (on ? ' ✓' : '') + ' ' + mcpStatusTag(c) + '</div>'
-                +   (c.url ? '<div class="pc-note mono">' + esc(c.url) + '</div>' : '')
-                +   '<div class="pc-tags">'
-                +     '<span class="tag">工具 ' + (c.ready ? c.toolCount : 0) + '</span>'
-                +     (viaAncestor
-                            ? '<span class="tag approval" title="已绑定在 ' + esc(inherited.domain)
-                              + '，其工具对本域可见，不必重复绑定">继承自 ' + esc(inherited.domain) + '</span>'
-                            : '')
-                +   '</div>'
-                + '</div>';
+                + '<div class="pc-name">' + esc(c.name) + (on ? ' ✓' : '') + ' ' + mcpStatusTag(c) + '</div>'
+                + (c.url ? '<div class="pc-note mono">' + esc(c.url) + '</div>' : '')
+                + '<div class="pc-tags"><span class="tag">工具 ' + (c.ready ? c.toolCount : 0) + '</span>'
+                + (viaAncestor ? '<span class="tag approval" title="已绑定在 ' + esc(inherited.domain) + '，其工具对本域可见，不必重复绑定">继承自 ' + esc(inherited.domain) + '</span>' : '')
+                + '</div></div>';
         }).join('');
         box.querySelectorAll('div[data-mcpick]').forEach(function (card) {
             card.addEventListener('click', function () {
@@ -489,114 +617,280 @@ var esc = Console.escapeHtml;
     }
 
     function saveMcpBind(connections) {
-        /* P2：/admin/mcp-bindings/{domain} 是 B 类 */
-        Console.api.put('/admin/mcp-bindings/' + encodeURIComponent(MCP_BIND_DOMAIN),
-                        { connections: connections })
+        return Console.api.put('/admin/mcp-bindings/' + encodeURIComponent(MCP_BIND_DOMAIN), { connections: connections })
             .then(function () {
                 closeMcpBind();
-                loadBindings();
-            })
-            .catch(function (e) { alert('设置失败：' + e.message); });
+                load();
+            }).catch(function (e) {
+                Console.toast('设置失败：' + e.message, { type: 'error' });
+            });
     }
 
+    /* ==================== 新建 / 切换可调用 / 删除 ==================== */
     function createDomain() {
         var input = document.getElementById('newDomain');
         var id = (input.value || '').trim();
-        if (!id) { alert('请先填写域标识'); input.focus(); return; }
+        if (!id) {
+            Console.toast('请先填写域标识', { type: 'warning' });
+            input.focus();
+            return;
+        }
         var callable = document.getElementById('newDomainCallable').checked;
-        /* P2：/admin/domains POST 是 D 类裸对象，api.post 直接放行 */
-        Console.api.post('/admin/domains', { id: id, callable: callable })
-            .then(function () {
-                input.value = '';
-                load();
-            })
-            .catch(function (e) { alert('创建失败：' + e.message); });
+        Console.api.post('/admin/domains', { id: id, callable: callable }).then(function () {
+            input.value = '';
+            EXPANDED[id] = true;
+            SELECTED = id;
+            load();
+        }).catch(function (e) {
+            Console.toast('创建失败：' + e.message, { type: 'error' });
+        });
     }
 
-    /* 切换可调用性：只影响这一个域，不向下传播 */
-    function toggleCallable(id, callable) {
+    async function toggleCallable(id, callable) {
         var tip = callable
             ? '把 ' + id + ' 设为可调用单元？之后它可以作为入口被调用。'
-            : '把 ' + id + ' 设为装配节点？之后它不能再作为入口，'
-                + '只给后代提供工具 / 提示词 / 模型 / 知识。';
-        if (!confirm(tip)) { return; }
-        /* P2：/admin/domains/{id}/callable 是 D 类 */
-        Console.api.put('/admin/domains/' + encodeURIComponent(id) + '/callable',
-                        { callable: callable })
-            .then(function () { load(); })
-            .catch(function (e) { alert('切换失败：' + e.message); });
-    }
-
-    function deleteDomain(id) {
-        var ok = confirm('确认删除域 ' + id + '？\n\n'
-            + '· 会递归删除它的全部子域\n'
-            + '· 绑定该域的调用方会在启动校验或首次调用时报「域不存在」\n'
-            + '· 该域及其子域的知识库索引与切片预览文件会被删除\n'
-            + '· 该域及其子域的提示词、模型绑定、工具声明记录会一并清理');
+            : '把 ' + id + ' 设为装配节点？之后它不能再作为入口，只给后代提供工具 / 提示词 / 模型 / 知识。';
+        var ok = await Console.confirm(tip, {
+            title: '切换可调用性',
+            okText: '确认切换',
+            danger: false
+        });
         if (!ok) { return; }
-        /* P2：/admin/domains/{id} DELETE 是 A 类 */
-        Console.api.del('/admin/domains/' + encodeURIComponent(id))
+        Console.api.put('/admin/domains/' + encodeURIComponent(id) + '/callable', { callable: callable })
             .then(function () { load(); })
-            .catch(function (e) { alert('删除失败：' + e.message); });
+            .catch(function (e) {
+                Console.toast('切换失败：' + e.message, { type: 'error' });
+            });
     }
 
+    /* 删除 = 软删（宽限期），不是立即抹掉。弹窗必须把这三件事说清：
+       什么时候真删、期间还允许什么、怎么后悔 —— 只写"确认删除"会让用户以为点下去就没了。 */
+    async function deleteDomain(id) {
+        var ok = await Console.confirm(
+            '确认删除域 ' + id + '？\n\n'
+            + '第一步（本操作）：标记为待删除，进入 ' + graceText(GRACE_MS || 0) + ' 宽限期\n'
+            + '· 域及其子域都还在，知识库 / 提示词 / 模型绑定一个都不动\n'
+            + '· 只是不再接受新会话（报 10011）；进行中的会话与待人工确认的断点照常收尾\n'
+            + '· 宽限期内可以「撤销删除」，撤销后一切照旧\n\n'
+            + '第二步（宽限期到点，自动执行，不可撤销）：\n'
+            + '· 递归删除它的全部子域\n'
+            + '· 该域及其子域的知识库索引与切片预览文件会被删除\n'
+            + '· 该域及其子域的提示词、模型绑定、工具声明记录会一并清理\n'
+            + '· 绑定该域的调用方会在启动校验或首次调用时报「域不存在」',
+            { title: '删除域', okText: '标记删除', danger: true }
+        );
+        if (!ok) { return; }
+        Console.api.del('/admin/domains/' + encodeURIComponent(id)).then(function (r) {
+            /* 软删后不把选中态清掉：留在这里，用户才看得到下面那条"待删除 + 撤销"说明条 */
+            load();
+            if (r && r.pendingDelete) {
+                /* 用 success 而不是 warning：软删成功是一次正常完成的操作，
+                   挂黄三角会被读成"删除没成功"，而它恰恰是"已进入宽限期、可反悔"的完成态 */
+                Console.toast('已标记删除：' + graceText(GRACE_MS || 0) + '后自动彻底清除。'
+                    + '这不是失败——期间可在右侧点「撤销删除」恢复。',
+                    { type: 'success', title: '已进入删除宽限期', wide: true });
+            }
+        }).catch(function (e) {
+            /* wide：服务端给的原因完整展示，别截成半句让人猜 */
+            Console.toast('删除失败：' + e.message, { type: 'error', wide: true });
+        });
+    }
+
+    /* 撤销软删：清标记即恢复，结构与数据从头到尾没动过 */
+    function restoreDomain(id, btn) {
+        Console.busy(btn, function () {
+            return Console.api.post('/admin/domains/' + encodeURIComponent(id) + '/restore', {})
+                .then(function () {
+                    Console.toast('已撤销删除：' + id + ' 恢复正常', { type: 'success' });
+                    load();
+                }).catch(function (e) {
+                    Console.toast('撤销失败：' + e.message, { type: 'error', wide: true });
+                });
+        }, '撤销中…');
+    }
+
+    /* 跳过宽限期立即硬删。强杀语义：不再等在飞会话收尾，也不可撤销 */
+    async function purgeNow(id, btn) {
+        var ok = await Console.confirm(
+            '立即彻底删除域 ' + id + '？\n\n'
+            + '· 跳过宽限期，现在就递归清除它和全部子域\n'
+            + '· 知识库索引与切片、提示词、模型绑定、工具声明一并清理\n'
+            + '· 不等在飞的会话收尾，也不可撤销（误删只能从历史版本库回滚）',
+            { title: '立即彻底删除', okText: '彻底删除', danger: true }
+        );
+        if (!ok) { return; }
+        Console.busy(btn, function () {
+            return Console.api.del('/admin/domains/' + encodeURIComponent(id) + '?force=true')
+                .then(function () {
+                    if (SELECTED === id || chainOf(SELECTED).indexOf(id) >= 0) { SELECTED = ''; }
+                    delete EXPANDED[id];
+                    Console.toast('已彻底删除：' + id, { type: 'success' });
+                    load();
+                }).catch(function (e) {
+                    /* 硬删任一步失败都是"抛异常中止、域未删除"（服务端顺序刻意如此），
+                       这里必须明说没删成：否则用户会以为删了一半 */
+                    Console.toast('彻底删除失败：' + e.message
+                        + '\n（已中止，域与其数据均未删除）', { type: 'error', wide: true });
+                });
+        }, '删除中…');
+    }
+
+    /* 宽限期时长：删域是软删，不给这个数就无法在页面上说清"什么时候真删、还能不能后悔" */
+    function loadGrace() {
+        return Console.api.get('/admin/domains/storage').then(function (r) {
+            GRACE_MS = (r && r.deleteGraceMs != null) ? r.deleteGraceMs : 0;
+        }).catch(function () {
+            GRACE_MS = null;      /* 取不到就不显示倒计时，只说"待删除" */
+        });
+    }
+
+    /* 知识体维度的文档/切片数：唯一要碰存储的聚合，单独一个接口、单独一次异步补数。
+       ES 不可达时服务端要烧一个 connectTimeout，所以绝不和域树绑在同一个 Promise 上 */
+    function loadKbStats() {
+        return Console.api.get('/admin/kb/stats').then(function (r) {
+            KB_STATS = r || { bodies: [] };
+        }).catch(function () {
+            KB_STATS = { bodies: [], stale: true, failed: true };
+        });
+    }
+
+    function kbStatOf(bodyId) {
+        var list = (KB_STATS && KB_STATS.bodies) || [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].id === bodyId) { return list[i]; }
+        }
+        return null;
+    }
+
+    /* 本域可检索的量（本域 + 已绑知识体的上级域）。缺省 = 0，不是"取不到" */
+    function kbRetrievableOf(domain) {
+        var m = (KB_STATS && KB_STATS.domains) || {};
+        return m[domain] || null;
+    }
+
+    function graceText(ms) {
+        if (!ms) { return '立即'; }
+        if (ms >= 86400000) { return (ms / 86400000) + ' 天'; }
+        if (ms >= 3600000) { return (ms / 3600000) + ' 小时'; }
+        return Math.round(ms / 60000) + ' 分钟';
+    }
+
+    function leftText(ms) {
+        if (ms == null) { return '—'; }
+        if (ms <= 0) { return '已到期，随时清除'; }
+        if (ms >= 3600000) { return Math.floor(ms / 3600000) + ' 小时 ' + Math.round((ms % 3600000) / 60000) + ' 分'; }
+        if (ms >= 60000) { return Math.round(ms / 60000) + ' 分钟'; }
+        return Math.round(ms / 1000) + ' 秒';
+    }
+
+    function remainingOf(d) {
+        if (d.deletedAt == null || !GRACE_MS) { return null; }
+        return d.deletedAt + GRACE_MS - Date.now();
+    }
+
+    /* 待删除说明条：软删不是"删了"，是"打了标记等宽限期"。
+       页面上必须给出三件事：还剩多久、期间还允许什么、怎么后悔。 */
+    function pendingDeleteBox(d) {
+        var left = remainingOf(d);
+        return '<div class="dp-pending-box">'
+            + '<span class="tag destructive">待删除</span>'
+            + '<span>已标记删除' + (GRACE_MS ? '，' + esc(graceText(GRACE_MS)) + '后彻底清除' : '')
+            + (left == null ? '' : '（剩余 ' + esc(leftText(left)) + '）') + '。'
+            + '期间它仍是完整的域：知识库 / 提示词 / 模型绑定都还在，只是<b>不再接受新会话</b>，'
+            + '进行中的会话与等待人工确认的断点照常收尾。</span>'
+            + '<span class="spacer"></span>'
+            + '<button class="btn btn-sm btn-outline-primary" data-restore="' + esc(d.name) + '">撤销删除</button>'
+            + '<button class="btn btn-sm btn-outline-danger" data-purge="' + esc(d.name) + '">立即彻底删除</button>'
+            + '</div>';
+    }
     function loadBindings() {
-        /* P2：三个 GET 都是 A 类（只有 code）。原来这页读接口也没判 code，
-           失败会静默走 then 渲染空列表；api.get 后失败统一落到最外层 catch。 */
         return Console.api.get('/admin/model-profiles').then(function (r) {
             PROFILES = (r && r.profiles) || [];
             BINDINGS = (r && r.domainBindings) || {};
-            // MCP 绑定与连接列表：即便端点异常也不阻塞本页（MCP 是可选能力）
             return Promise.all([
-                Console.api.get('/admin/mcp-bindings')
-                    .then(function (m) { MCP_BINDINGS = (m && m.domainBindings) || {}; })
-                    .catch(function () { MCP_BINDINGS = {}; }),
-                Console.api.get('/admin/mcp-connections')
-                    .then(function (m) { MCP_CONNS = (m && m.connections) || []; })
-                    .catch(function () { MCP_CONNS = []; })
+                Console.api.get('/admin/mcp-bindings').then(function (m) {
+                    MCP_BINDINGS = (m && m.domainBindings) || {};
+                }).catch(function () { MCP_BINDINGS = {}; }),
+                Console.api.get('/admin/mcp-connections').then(function (m) {
+                    MCP_CONNS = (m && m.connections) || [];
+                }).catch(function () { MCP_CONNS = []; })
             ]);
-        }).then(render).catch(function (e) {
-            document.getElementById('domainList').innerHTML =
-                '<div class="dp-card" style="color:var(--red);">模型列表加载失败：' + esc(e.message) + '</div>';
+        }).catch(function (e) {
+            Console.toast('模型档案加载失败：' + esc(e.message), { type: 'error' });
         });
     }
 
     function load() {
-        document.getElementById('domainList').innerHTML =
-            '<div class="dp-card"><span class="perm-none">加载中…</span></div>';
-        /* P2：/admin/domains GET 是 D 类裸对象 */
-        Console.api.get('/admin/domains').then(function (r) {
+        /* 首次加载先给占位：域树与详情区是空的，白屏等着最不直观。
+           之后的 load（增删改后的重拉）列表已有内容，交给顶部进度条即可。 */
+        if (!DATA) {
+            var treeBox = document.getElementById('treeList');
+            if (treeBox) { treeBox.innerHTML = Console.loadingHtml('正在加载域空间…'); }
+            var countEl = document.getElementById('domainCount');
+            if (countEl) { countEl.textContent = '加载中…'; }
+            var detailBox = document.getElementById('detailBody');
+            if (detailBox) { detailBox.innerHTML = Console.loadingHtml('正在加载域详情…'); }
+        }
+        return Console.api.get('/admin/domains').then(function (r) {
             DATA = r || {};
-            return loadBindings();
+            var domains = DATA.domains || [];
+            KNOWLEDGE_BODIES = DATA.knowledgeBodies || [];
+            /* 上次选中的域还在列表里就保留选中，否则落到第一个域 */
+            if (!SELECTED || !domains.some(function (d) { return d.name === SELECTED; })) {
+                SELECTED = domains.length ? domains[0].name : '';
+            }
+            if (SELECTED) { expandAncestors(SELECTED); }
+            return Promise.all([loadBindings(), loadGrace()]);
+        }).then(function () {
+            renderTree();
+            renderDetail();
+            /* 知识库统计是异步补数：先渲染树与详情，数字到了再重绘一次。
+               不能并进上面的 Promise.all —— ES 不可达时那个请求要烧一个 connectTimeout，
+               整页会一起卡在"正在加载域空间…"上，这正是这次要修的东西。 */
+            return loadKbStats().then(function () {
+                renderTree();
+                renderDetail();
+            });
         }).catch(function (e) {
-            document.getElementById('domainList').innerHTML =
-                '<div class="dp-card" style="color:var(--red);">读取失败：' + esc(e.message) + '</div>';
+            var box = document.getElementById('treeList');
+            if (box) {
+                box.innerHTML = '<div class="dp-domain-empty" style="color:var(--red);">读取失败：' + esc(e.message) + '</div>';
+            }
         });
     }
 
-    document.getElementById('createDomainBtn').addEventListener('click', createDomain);
+    /* ==================== 事件与入口 ==================== */
+    document.getElementById('createDomainBtn').addEventListener('click', function () {
+        Console.busy(this, createDomain);
+    });
     document.getElementById('newDomain').addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { createDomain(); }
     });
     document.getElementById('refreshBtn').addEventListener('click', load);
-
+    document.getElementById('treeExpandBtn').addEventListener('click', function () {
+        ((DATA && DATA.domains) || []).forEach(function (d) { EXPANDED[d.name] = true; });
+        renderTree();
+    });
+    document.getElementById('treeCollapseBtn').addEventListener('click', function () {
+        EXPANDED = {};
+        renderTree();
+    });
     document.getElementById('bindModalClose').addEventListener('click', closeBind);
     document.getElementById('bindSaveBtn').addEventListener('click', function () {
-        saveBind(BIND_PICK);
+        Console.busy(this, function () { return saveBind(BIND_PICK); }, '保存中…');
     });
     document.getElementById('bindClearBtn').addEventListener('click', function () {
-        saveBind(emptyPick());
+        Console.busy(this, function () { return saveBind(emptyPick()); }, '保存中…');
     });
     document.getElementById('bindModal').addEventListener('click', function (e) {
         if (e.target === document.getElementById('bindModal')) { closeBind(); }
     });
-
     document.getElementById('mcpBindModalClose').addEventListener('click', closeMcpBind);
     document.getElementById('mcpBindSaveBtn').addEventListener('click', function () {
-        saveMcpBind(MCP_BIND_PICK.slice());
+        Console.busy(this, function () { return saveMcpBind(MCP_BIND_PICK.slice()); }, '保存中…');
     });
     document.getElementById('mcpBindClearBtn').addEventListener('click', function () {
-        saveMcpBind([]);
+        Console.busy(this, function () { return saveMcpBind([]); }, '保存中…');
     });
     document.getElementById('mcpBindModal').addEventListener('click', function (e) {
         if (e.target === document.getElementById('mcpBindModal')) { closeMcpBind(); }

@@ -44,8 +44,9 @@ import java.util.zip.Deflater;
  *     不支持，全部走结构化端点实测。
  *   • **只增不减**。失败只记「未确认」，**不写「不支持」**：一次网络抖动或样本格式被挑剔都会失败，
  *     那是"这次没确认到"，不是"确定没有"。写回由 {@link ModelProfile#withConfirmed} 取并集。
- *   • **失败要能看见**。非 2xx 时把服务商响应体摘要带进 {@code note}（见 {@link #buildNote}），
- *     只报「未确认」等于没说，"服务商回了一句什么"才是可行动的信息。
+ *   • **失败要能看见，但不进弹窗**。服务商回执摘要留在服务端日志里（见下方 {@code log.info}），
+ *     返回给页面的 {@code note} 只列「支持 / 不支持 / 未确认」三行清单 ——
+ *     弹窗是给人看结论的，不是给人读 JSON 的。
  *
  * 探针默认**串行**：这是低频手动动作，串行免触发廉价档位的限流，也便于逐条定位失败原因。
  *
@@ -70,6 +71,19 @@ public class ModelCapabilityProbe {
     private static final String P_EMBEDDING = "embedding";
     private static final String P_RERANK = "rerank";
 
+    /** 探针键 → 中文名（给人看的结论用；日志与 perModality 仍用探针键，便于对账） */
+    private static final Map<String, String> PROBE_LABEL = Map.of(
+            P_CHAT_TEXT, "对话（文本）",
+            P_IMAGE_IN, "图片输入",
+            P_AUDIO_IN, "音频输入",
+            P_VIDEO_IN, "视频输入",
+            P_FILE_IN, "文件输入",
+            P_IMAGES, "生图",
+            P_TTS, "语音合成",
+            P_ASR, "语音识别",
+            P_EMBEDDING, "向量化",
+            P_RERANK, "重排");
+
     /** 图片样本的边长：必须 > 28（DeepSeek-OCR 的硬门槛），取 64 兼顾通用 VLM 与图 token 开销 */
     private static final int SAMPLE_SIDE = 64;
 
@@ -89,7 +103,7 @@ public class ModelCapabilityProbe {
      * @param input       实测确认支持的输入模态
      * @param output      实测确认支持的输出模态
      * @param perModality 逐探针结论（诊断 / 卡片回显用）
-     * @param note        人话说明：确认了什么、哪些没确认、没确认时服务商原话是什么
+     * @param note        人话结论清单：实测确认到什么、哪些不支持、哪些没确认到（不带服务商原话）
      */
     public record ProbeResult(List<String> endpoints, List<String> input, List<String> output,
                               Map<String, ProbeState> perModality, String note) {
@@ -183,7 +197,7 @@ public class ModelCapabilityProbe {
             add(output, ModelProfile.MOD_SCORE);
         }
 
-        String note = buildNote(endpoints, input, output, state, details);
+        String note = buildNote(endpoints, input, output, state);
         log.info("[模型探测] model={} 确认端点族={} 输入={} 输出={}", modelName, endpoints, input, output);
         if (!details.isEmpty()) {
             log.info("[模型探测] model={} 未确认探针及服务商回执：{}", modelName, details);
@@ -543,24 +557,48 @@ public class ModelCapabilityProbe {
         }
     }
 
+    /**
+     * 人话结论：**只给清单，不给理由**。
+     *
+     * <p>早先这里把每个没探到的探针都附上服务商原话（JSON 回执），一屏几百个字，
+     * 管理员得自己从里面挑「到底支持什么」。现在只列三行：支持 / 不支持 / 未确认，
+     * 一眼扫完就知道这个模型能干什么。服务商原话不是丢了，是回到服务端日志里
+     * （见上面两行 {@code log.info}）—— 要追具体哪次探测被拒，翻日志比读弹窗快。
+     *
+     * <p>「不支持」只给 404/405/415/501 这类「端点确实不存在」；
+     * 400/5xx/限流/网络抖动一律算「未确认」：那只是这次没探到，
+     * 写成「不支持」等于把一次抖动记成模型的缺陷。
+     */
     private static String buildNote(List<String> endpoints, List<String> input, List<String> output,
-                                    Map<String, ProbeState> state, Map<String, String> details) {
+                                    Map<String, ProbeState> state) {
+        List<String> supported = new ArrayList<>();
+        List<String> unsupported = new ArrayList<>();
         List<String> unconfirmed = new ArrayList<>();
-        state.forEach((k, v) -> {
-            if (v != ProbeState.CONFIRMED) {
-                String d = details.get(k);
-                unconfirmed.add(d == null || d.isEmpty() ? k + "=" + v : k + "=" + v + "（服务商回：" + d + "）");
+        state.forEach((key, s) -> {
+            String label = PROBE_LABEL.getOrDefault(key, key);
+            if (s == ProbeState.CONFIRMED) {
+                supported.add(label);
+            } else if (s == ProbeState.UNSUPPORTED) {
+                unsupported.add(label);
+            } else {
+                unconfirmed.add(label);
             }
         });
+
         StringBuilder sb = new StringBuilder("实测确认：端点族 ")
                 .append(endpoints.isEmpty() ? "（无）" : endpoints)
                 .append("；输入 ").append(input.isEmpty() ? "（无）" : input)
-                .append(" → 输出 ").append(output.isEmpty() ? "（无）" : output).append("。");
-        if (!unconfirmed.isEmpty()) {
-            sb.append("\n未确认（不等于不支持，可能是网络 / 样本格式 / 服务商差异）：")
-                    .append(String.join("、", unconfirmed)).append("。");
+                .append(" → 输出 ").append(output.isEmpty() ? "（无）" : output).append("。")
+                .append("\n支持：").append(supported.isEmpty() ? "无" : String.join("、", supported));
+        if (!unsupported.isEmpty()) {
+            sb.append("\n不支持：").append(String.join("、", unsupported));
         }
-        sb.append("\n输出 video 无通用探测端点，不在探测范围内（须由元数据或手动声明）。");
+        if (!unconfirmed.isEmpty()) {
+            sb.append("\n未确认：").append(String.join("、", unconfirmed));
+        }
+        /* 输出 video 与输出 image 不是一回事：OpenAI 规范下没有统一的视频生成端点，
+           探针探不了，这句是免得把「输出无 video」误读成「模型不支持视频输出」。 */
+        sb.append("\n（输出视频无通用探测端点，需手动声明。）");
         return sb.toString();
     }
 

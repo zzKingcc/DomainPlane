@@ -10,6 +10,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.Data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,17 +33,39 @@ public class AuthController {
 
     private final AuthService authService;
 
-    public AuthController(AuthService authService) {
+    /**
+     * 是否允许远程（非本机）发起首次初始化。
+     *
+     * <p>默认 {@code false}：初始化入口免鉴权，放它公网可达等于"谁先到谁当管理员"。
+     * 正常部署不需要它——种子账号首启就会落盘；这个入口只在账号文件被删、种子缺失的
+     * 兜底场景下有用，而那时候人一定在机器旁边。确实要在远程初始化的部署可以打开
+     * {@code domainplane.auth.allow-remote-init}。</p>
+     */
+    private final boolean allowRemoteInit;
+
+    public AuthController(AuthService authService,
+                          @Value("${domainplane.auth.allow-remote-init:false}") boolean allowRemoteInit) {
         this.authService = authService;
+        this.allowRemoteInit = allowRemoteInit;
     }
 
     // ==================== 管控台 ====================
 
     /**
      * 首次初始化：设置管理员账号。
+     *
+     * <p>只接受本机发起的请求（见 {@link #allowRemoteInit}）：这个入口在账号不存在时免鉴权，
+     * 若公网可达，任何先到的人都能把实例接管成自己的。</p>
      */
     @PostMapping("/admin/init")
-    public Map<String, Object> init(@RequestBody Credentials body) {
+    public Map<String, Object> init(@RequestBody Credentials body, HttpServletRequest request) {
+        if (!allowRemoteInit && !isLocalRequest(request)) {
+            log.warn("[账号] 拒绝来自 {} 的首次初始化请求（默认只允许本机；"
+                    + "确需远程初始化请设 domainplane.auth.allow-remote-init=true）", request.getRemoteAddr());
+            throw new AuthException(ErrorCode.PERMISSION_DENIED,
+                    "首次初始化只允许在本机浏览器执行（服务端所在机器的 127.0.0.1）。"
+                            + "若必须远程初始化，请由部署方开启 domainplane.auth.allow-remote-init");
+        }
         if (body == null || body.getUsername() == null || body.getUsername().isBlank()) {
             throw new AuthException(ErrorCode.INVALID_PARAMETER, "账号不能为空");
         }
@@ -175,6 +198,37 @@ public class AuthController {
             return (comma > 0 ? forwarded.substring(0, comma) : forwarded).trim();
         }
         return request.getRemoteAddr();
+    }
+
+    /**
+     * 请求是否来自本机。
+     *
+     * <p>先看连接对端：不是回环就一定不是本机，直接否——这一步不看任何请求头，
+     * 伪造不了。再看代理链：反代部署时 {@code getRemoteAddr()} 常常是 127.0.0.1（代理自己），
+     * 所以只要有 {@code X-Forwarded-For}，首跳也必须回环才算本机；
+     * 这一步无论如何不会把"公网经代理进来"误判成本机。</p>
+     */
+    private static boolean isLocalRequest(HttpServletRequest request) {
+        if (!isLoopbackLiteral(request.getRemoteAddr())) {
+            return false;
+        }
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded == null || forwarded.isBlank()) {
+            return true;
+        }
+        int comma = forwarded.indexOf(',');
+        String firstHop = (comma > 0 ? forwarded.substring(0, comma) : forwarded).trim();
+        return isLoopbackLiteral(firstHop);
+    }
+
+    private static boolean isLoopbackLiteral(String address) {
+        if (address == null || address.isBlank()) {
+            return false;
+        }
+        String normalized = address.trim().toLowerCase(java.util.Locale.ROOT);
+        return normalized.startsWith("127.")
+                || "::1".equals(normalized)
+                || "0:0:0:0:0:0:0:1".equals(normalized);
     }
 
     /** 登录请求体 */

@@ -11,34 +11,203 @@
     <aside class="sidebar" id="sidebar"></aside>
 
     <main class="main">
-        <div class="page-head">
-            <h2>概览</h2>
-            <p>
-                服务端运行状态一览。已注册工具与各域注册内容的具体清单已移至
-                <a href="domains.html">域空间</a>。
-            </p>
+        <div class="page-header">
+            <div class="page-head">
+                <h2>概览</h2>
+            </div>
         </div>
+        <div class="page-body dp-overview">
 
-        <div class="stats">
-            <div class="stat">
-                <div class="k">对话模型</div>
-                <div class="v" id="statChat">—</div>
-                <div class="note" id="statChatNote"></div>
+            <div class="row row-cards row-deck">
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-blue">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H9l-4 4v-4H6a2 2 0 0 1-2-2z"/><path d="M8 8.5h8M8 11.5h5"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">对话模型</div>
+                                <div class="dp-stat-value" id="statChat">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-purple">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">向量模型</div>
+                                <div class="dp-stat-value" id="statEmb">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-green">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4.5 4.5 0 0 0-6 5.6L4 16.6a1.8 1.8 0 0 0 2.5 2.5l4.7-4.7a4.5 4.5 0 0 0 5.6-6l-3.1 3.1-2.4-.6-.6-2.4z"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">已注册工具</div>
+                                <div class="dp-stat-value" id="statTools">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-pink">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="4" rx="1"/><rect x="3" y="17" width="6" height="4" rx="1"/><rect x="15" y="17" width="6" height="4" rx="1"/><path d="M12 7v5M5.5 17v-3h13v3"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">域数量</div>
+                                <div class="dp-stat-value" id="statDomains">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="stat">
-                <div class="k">向量模型</div>
-                <div class="v" id="statEmb">—</div>
-                <div class="note" id="statEmbNote"></div>
+
+            <!-- 运行状态：/admin/metrics 瞬时值（自启动以来的计数与当前仪表）。
+                 与主指标同一张脸（图标 + 标签 + 数字），不带顶部色条。 -->
+            <div class="row row-cards row-deck">
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-blue">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">已运行</div>
+                                <div class="dp-stat-value" id="statUptime">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-purple">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-5 4 3 5-6 4 4"/><path d="M3 21h18"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">活跃会话</div>
+                                <div class="dp-stat-value" id="statSessions">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-green">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="6" rx="1.5"/><rect x="4" y="14" width="16" height="6" rx="1.5"/><path d="M8 7h.01M8 17h.01"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">堆内存占用</div>
+                                <div class="dp-stat-value" id="statHeap">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="card card-sm dp-stat">
+                        <div class="card-body dp-stat-body">
+                            <div class="dp-stat-icon dp-stat-icon-pink">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v4M15 3v4"/><path d="M7 7h10v5a5 5 0 0 1-10 0z"/><path d="M12 17v4"/></svg>
+                            </div>
+                            <div class="dp-stat-info">
+                                <div class="dp-stat-label">MCP 工具</div>
+                                <div class="dp-stat-value" id="statMcpTools">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="stat">
-                <div class="k">已注册工具</div>
-                <div class="v" id="statTools">—</div>
-                <div class="note" id="statToolsNote"></div>
+
+            <!-- 运行质量 + 工具风险：两列等宽（后台规范 7.2 仪表盘网格）。
+                 不引 Chart.js：console 的零依赖/离线约束下，环形图用 SVG dasharray 手绘。 -->
+            <div class="row row-cards row-deck">
+                <div class="col-lg-6">
+                    <div class="card dp-panel">
+                        <div class="card-body">
+                            <h3 class="card-title">运行质量</h3>
+                            <div class="dp-bar">
+                                <div class="dp-bar-head"><span>会话召回命中率</span><b id="qHitPct">—</b></div>
+                                <div class="dp-bar-track"><div class="dp-bar-fill" id="qHitFill"></div></div>
+                            </div>
+                            <div class="dp-bar">
+                                <div class="dp-bar-head"><span>工具调用失败率</span><b id="qTfPct">—</b></div>
+                                <div class="dp-bar-track"><div class="dp-bar-fill" id="qTfFill"></div></div>
+                            </div>
+                            <div class="dp-bar">
+                                <div class="dp-bar-head"><span>MCP 调用失败率</span><b id="qMcpPct">—</b></div>
+                                <div class="dp-bar-track"><div class="dp-bar-fill" id="qMcpFill"></div></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="card dp-panel" id="riskCard">
+                        <div class="card-body">
+                            <h3 class="card-title">工具风险构成</h3>
+                            <div class="dp-donut-wrap">
+                                <div class="dp-donut">
+                                    <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+                                        <circle cx="60" cy="60" r="45" id="donutRead"/>
+                                        <circle cx="60" cy="60" r="45" id="donutWrite"/>
+                                        <circle cx="60" cy="60" r="45" id="donutDestructive"/>
+                                    </svg>
+                                    <div class="dp-donut-center">
+                                        <b id="donutTotal">—</b>
+                                        <span>个工具</span>
+                                    </div>
+                                </div>
+                                <div class="dp-legend">
+                                    <div class="dp-legend-row"><span class="dp-legend-dot dot-read"></span><span>读操作</span><b id="legReadN">—</b><span class="p" id="legReadP"></span></div>
+                                    <div class="dp-legend-row"><span class="dp-legend-dot dot-write"></span><span>写操作</span><b id="legWriteN">—</b><span class="p" id="legWriteP"></span></div>
+                                    <div class="dp-legend-row"><span class="dp-legend-dot dot-destructive"></span><span>破坏性</span><b id="legDestructiveN">—</b><span class="p" id="legDestructiveP"></span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="stat">
-                <div class="k">域数量</div>
-                <div class="v" id="statDomains">—</div>
-                <div class="note" id="statDomainsNote"></div>
+
+            <!-- 请求趋势：/admin/metrics/history 的后端采样点。不引 Chart.js：
+                 SVG 折线手绘，速率由前端按相邻采样点差分算。点数不足画不出线时
+                 整卡隐藏（服务刚起来时窗口是空的），不留空图。 -->
+            <div class="card dp-panel" id="trendCard" hidden>
+                <div class="card-body">
+                    <h3 class="card-title">请求趋势<span class="dp-trend-window" id="trendWindow"></span></h3>
+                    <div class="dp-trend">
+                        <svg id="trendSvg" viewBox="0 0 600 160" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <g id="trendGrid"></g>
+                            <path id="trendToolArea" class="dp-trend-area area-tool" d=""/>
+                            <path id="trendChatArea" class="dp-trend-area area-chat" d=""/>
+                            <path id="trendToolLine" class="dp-trend-line line-tool" d=""/>
+                            <path id="trendChatLine" class="dp-trend-line line-chat" d=""/>
+                        </svg>
+                        <div class="dp-trend-legend">
+                            <span><i class="chat"></i>对话请求 / 分</span>
+                            <span><i class="tool"></i>工具调用 / 分</span>
+                            <b id="trendPeak"></b>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 待配置项：首屏引导。全部就绪时整卡不渲染（hidden），不留空态废话。 -->
+            <div class="card card-sm" id="todoCard" hidden>
+                <div class="card-body">
+                    <h3 class="card-title">待配置项</h3>
+                    <div class="dp-todo" id="todoList"></div>
+                </div>
             </div>
         </div>
     </main>

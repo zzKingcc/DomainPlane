@@ -192,4 +192,45 @@
             </plugin>
         </plugins>
     </build>
+
+    <!--
+      安全扫描用的插件版本在这里钉死，但**默认不激活**。
+
+      为什么走 profile 而不是直接进 <build>：本机与内网构建是 mvn -o 离线模式，
+      这两个插件都不在本地仓库里 —— 一旦进默认 build，任何一次离线构建都会先失败在
+      插件解析上，而且是"看起来像工程坏了"的那种失败。只有 CI 显式 -Psecurity 才解析。
+    -->
+    <profiles>
+        <profile>
+            <id>security</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.owasp</groupId>
+                        <artifactId>dependency-check-maven</artifactId>
+                        <version>12.2.2</version>
+                        <configuration>
+                            <formats>
+                                <format>HTML</format>
+                                <format>JSON</format>
+                            </formats>
+                            <!-- CVSS >= 9 才判红：7 分以下的项目多为"理论可利用"，
+                                 每次都判红等于把这门铃拆了 -->
+                            <failBuildOnCVSS>9</failBuildOnCVSS>
+                            <skipTestScope>true</skipTestScope>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.cyclonedx</groupId>
+                        <artifactId>cyclonedx-maven-plugin</artifactId>
+                        <version>2.9.1</version>
+                        <configuration>
+                            <outputFormat>json</outputFormat>
+                            <outputName>bom</outputName>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
