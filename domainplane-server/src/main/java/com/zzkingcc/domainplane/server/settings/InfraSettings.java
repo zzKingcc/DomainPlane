@@ -19,9 +19,15 @@ import java.util.Map;
  * <ul>
  *   <li>{@link #connections}：<b>具名连接</b>，id → 一台具体实例（ES 或 Qdrant）。
  *       只管"连哪里"（地址、口令、超时），不管"拿来干什么"。</li>
- *   <li>{@link #bodies}：<b>知识体</b>，一个体 = 一套知识库，最多两路（关键字 / 向量），
- *       每路指向一台连接、可各自留空。只管"这套知识用哪台机器跑哪几路"。</li>
+ *   <li>{@link #bodies}：<b>知识体</b>，一个体 = <b>一份可被多个域共用的知识</b>：
+ *       它有自己的唯一名（{@link KnowledgeBody#getSlug()}）与由此派生、创建后冻结的索引名
+ *       （{@link KnowledgeBody#getIndex()}），再加上两路落点（关键字 / 向量），
+ *       每路指向一台连接、可各自留空。</li>
  * </ul>
+ *
+ * <p><b>体是数据身份，域只是消费者</b>：域绑定一个体，多个域绑同一个体就查同一份数据；
+ * 删域只解绑，不删体的索引与原文。v1 的"一域一索引"由迁移器登记成体（索引名沿用旧值），
+ * 之后新建的索引名一律按体的唯一名派生。</p>
  *
  * <p>两层分开的直接好处：<b>连接可以复用、知识体可以组合</b>。同一个 ES 连接可以同时
  * 填进一个体的两个槽（一台机器干两件事），也可以被多个体共用；地址一致时由
@@ -59,6 +65,17 @@ public class InfraSettings {
 
     /** 知识体可配的两路（一个体里各自可选，互不排斥） */
     public static final List<String> SUPPORTED_KINDS = List.of(KIND_KEYWORD, KIND_VECTOR);
+
+    /** 原文落点：平台内置 BlobStore（当前唯一实现） */
+    public static final String RAW_LOCAL = "local";
+
+    /** 受支持的原文落点白名单（S3 / COS / OSS / 文件服务器接入后在此追加，同时补 BlobStore 驱动） */
+    public static final List<String> SUPPORTED_RAW_LOCATIONS = List.of(RAW_LOCAL);
+
+    /** 原文落点的人话名字：页面与接口共用一处，免得两边说法漂移 */
+    public static String rawLabel(String location) {
+        return RAW_LOCAL.equals(location) ? "本地原文存储" : location;
+    }
 
     /** 归属段：关键字（管控台 2-1） */
     public static final String USAGE_KEYWORD = "keyword";
@@ -114,9 +131,12 @@ public class InfraSettings {
         /**
          * 归属段：{@code keyword} / {@code vector}。
          *
-         * <p>只决定管控台把这一行画在 2-1 还是 2-2 那张表里。<b>不参与检索判定</b>——
-         * 谁干哪活只看知识体绑了哪台连接。同一条 ES 可以在两段各配一条、地址一致时
-         * 由 {@link #location()} 判定为同一台实例。</p>
+         * <p>决定两件事：管控台把这一行画在 2-1 还是 2-2 那张表里，以及知识体的槽下拉
+         * 能不能选到它——关键字段配的 ES 不会出现在向量下拉里，反之亦然。
+         * <b>不参与检索判定</b>：谁干哪活只看知识体绑了哪台连接。</p>
+         *
+         * <p>同一台 ES 想两槽都用，就在两段各配一条（同地址、不同 id）：{@link #location()}
+         * 会判定为同一台实例，写入仍然只落一次，不会双写。</p>
          */
         private String usage;
 
@@ -244,9 +264,10 @@ public class InfraSettings {
      * 的表现是<b>静默退化成单路</b>——召回到了，只是少一半，没人会去查。装在一个体里，
      * "这个域用几条路"由体自己一眼回答：两路都配 = 混合，只配一路 = 单路。</p>
      *
-     * <p><b>原文不在这里</b>：切片原文一律落平台内置的 {@code BlobStore}（换模型/换后端
-     * 要能从原文重灌），没有"配到哪台机器"这回事。曾经把原文当成第三种用途，结果是
-     * 一个永远填不上连接的空槽 + 校验里的一条例外——那不是配置，是噪音。</p>
+     * <p><b>原文落点也在体上</b>（{@link #raw}）：原文是权威源，换模型 / 换索引落点都要从它重灌，
+     * 所以"原文存在哪"是体自己的身份配置，不是平台级开关。当前只有内置 {@code BlobStore}
+     * （{@code local}）；文件服务器 / S3 兼容存储（COS、OSS、MinIO）接入后，同一个字段里
+     * 会出现对应连接，迁移时只搬原文、索引原地从原文重建。</p>
      *
      * <p>两路可以指向<b>同一条连接</b>（一台 ES 既做 BM25 又做 dense_vector），
      * 那时索引只有一份、写入只写一次：判定按 {@link Connection#location()}，
@@ -260,15 +281,75 @@ public class InfraSettings {
 
         private String name;
 
-        /** 关键字路的连接 id（全文检索，只能是 ES）；不配这一路就留空 */
+        /**
+         * 知识体唯一名：小写字母 / 数字 / 连字符，全局唯一。
+         *
+         * <p>它是<b>索引名的来源</b>（{@link #effectiveIndex()}）：创建时派生一次并写进
+         * {@link #index}，之后改名不搬数据。唯一性由保存路径校验（{@code AdminBodyController}），
+         * 这里只做形态兜底（老数据可能没有这个字段）。</p>
+         */
+        private String slug;
+
+        /**
+         * 冻结的索引名：创建时按唯一名派生（{@code domainplane_kb_<slug>_<id哈希>}），
+         * 迁移体的则是旧的域索引名。
+         *
+         * <p><b>永远不要重新派生它</b>：改名 / 换落点 / 改绑定都不该换索引名，
+         * 换名意味着数据搬到另一个集合、旧集合变成永远查不到的孤儿。</p>
+         */
+        private String index;
+
+        /** 关键字路的连接 id（全文检索，<b>约定</b>用 ES）；不配这一路就留空 */
         private String keyword;
 
         /** 向量路的连接 id（kNN 检索，ES / Qdrant）；不配这一路就留空 */
         private String vector;
 
+        /**
+         * 原文落点：{@link #RAW_LOCAL}（平台内置 BlobStore）或将来接入的文件服务连接 id。
+         *
+         * <p>原文是<b>权威源</b>（换模型/换落点都从它重灌），所以它和索引落点一样属于知识体的
+         * 身份配置。当前只有 {@code local} 一个可选值：S3 / COS / OSS / 自建文件服务器要等
+         * {@code BlobStore} 多驱动接入后才会出现在可选列表里（API 的 {@code rawOptions}
+         * 如实反映"现在能选什么"，不给假选项）。</p>
+         */
+        private String raw;
+
+        /** 一句话说明（卡片上显示，可空） */
+        private String description;
+
         @JsonIgnore
         public String effectiveName() {
             return hasText(name) ? name.trim() : id;
+        }
+
+        /** 原文落点：留空按 local（老配置没有这个字段） */
+        @JsonIgnore
+        public String rawLocation() {
+            return hasText(raw) ? raw.trim().toLowerCase() : RAW_LOCAL;
+        }
+
+        /** 唯一名：没写时按 id 规范化兜底（老数据 / yaml 合成的体没有这个字段） */
+        @JsonIgnore
+        public String effectiveSlug() {
+            String raw = hasText(slug) ? slug.trim() : (hasText(id) ? id : name);
+            String normalized = com.zzkingcc.domainplane.api.support.KbIndexes.normalizeSlug(raw);
+            return normalized.isBlank() ? "kb" : normalized;
+        }
+
+        /**
+         * 索引名：有冻结值就用它，否则按唯一名现算（只用于没有身份字段的老体 / yaml 合成体）。
+         *
+         * <p>现算分支只保证"同一份配置每次算出来一样"，不保证改名后不变——所以凡是
+         * 要改名的体，必须先由保存路径把 {@link #index} 写实。</p>
+         */
+        @JsonIgnore
+        public String effectiveIndex() {
+            if (hasText(index)) {
+                return index.trim();
+            }
+            return com.zzkingcc.domainplane.api.support.KbIndexes.nameOfBody(
+                    effectiveSlug(), hasText(id) ? id.trim() : effectiveSlug());
         }
 
         @JsonIgnore
@@ -486,17 +567,25 @@ public class InfraSettings {
             }
             problems.addAll(c.validate());
         }
+        Map<String, String> slugOwners = new LinkedHashMap<>();
         for (KnowledgeBody b : bodiesOrEmpty().values()) {
             if (b == null) {
                 continue;
             }
             checkBody(problems, b);
+            if (hasText(b.getSlug())) {
+                String owner = slugOwners.putIfAbsent(b.getSlug().trim(), b.getId());
+                if (owner != null) {
+                    problems.add("知识体唯一名「" + b.getSlug() + "」重复（已被 " + owner
+                            + " 使用）：唯一名决定索引名，不能共用");
+                }
+            }
         }
         return problems;
     }
 
     /**
-     * 知识体校验：id / 至少一路 / 每一路的连接存不存在、类型对不对。
+     * 知识体校验：id / 唯一名 / 首路 / 每一路的连接存不存在。
      *
      * <p>两路各自独立校验，不因为另一路配错就跳过：一个体里关键字配错、向量配对了，
      * 保存后就变成"悄悄只走向量"——用户看着两行都填了，实际少一路。</p>
@@ -506,6 +595,22 @@ public class InfraSettings {
         if (!hasText(body.getId())) {
             problems.add("有个知识体缺少 id（域绑定时要靠它引用）");
         }
+        if (hasText(body.getSlug())) {
+            String reason = com.zzkingcc.domainplane.api.support.KbIndexes.validateSlug(body.getSlug().trim());
+            if (reason != null) {
+                problems.add(who + " 的" + reason);
+            }
+        }
+        if (hasText(body.getIndex())
+                && !body.getIndex().trim().startsWith(
+                        com.zzkingcc.domainplane.api.support.KbIndexes.PREFIX)) {
+            problems.add(who + " 的索引名「" + body.getIndex() + "」不合规：必须以 "
+                    + com.zzkingcc.domainplane.api.support.KbIndexes.PREFIX + " 开头");
+        }
+        if (!SUPPORTED_RAW_LOCATIONS.contains(body.rawLocation())) {
+            problems.add(who + " 的原文落点「" + body.rawLocation() + "」不受支持，可选值："
+                    + SUPPORTED_RAW_LOCATIONS + "（文件服务接入后才会出现新的落点）");
+        }
         if (!body.configured()) {
             problems.add(who + " 一路都没配：至少选一个关键字连接（全文检索）或向量连接（语义检索）");
             return;
@@ -514,31 +619,21 @@ public class InfraSettings {
         checkSlot(problems, who, KIND_VECTOR, body.vectorId());
     }
 
-    /** 一路的校验：没填放行（可选），填了就必须指向一台干得了这活的连接 */
+    /**
+     * 一路的校验：没填放行（可选），填了就必须指向一条<b>存在的</b>连接。
+     *
+     * <p><b>刻意不判"这种类型干不干得了这活"</b>：那是运行期的事。保存只负责把用户写的
+     * 东西如实落盘——拦在这里会让"我想先配好再换机器"这类操作做不下去，而且配置对不对
+     * 得连上那台后端才知道，不是读一遍枚举类型就能定论的。类型不匹配的后果是
+     * {@code RetrievalPlan.backendFor} 在真正检索时跳过该路并留错误日志，不是保存失败。</p>
+     */
     private void checkSlot(List<String> problems, String who, String kind, String connectionId) {
         if (connectionId == null) {
             return;
         }
-        Connection c = connection(connectionId);
-        if (c == null) {
+        if (connection(connectionId) == null) {
             problems.add(who + " 的" + kindLabel(kind) + "连接「" + connectionId + "」不存在");
-            return;
         }
-        if (!supports(c, kind)) {
-            problems.add(who + " 的" + kindLabel(kind) + "路绑了一台 " + c.effectiveType()
-                    + "（连接 " + c.getId() + "），它提供不了" + kindLabel(kind) + "检索");
-        }
-    }
-
-    /** 这种类型的连接能不能干这个用途：关键字只有 ES；向量 ES 与 Qdrant 都行 */
-    private static boolean supports(Connection c, String kind) {
-        if (KIND_KEYWORD.equals(kind)) {
-            return c.isElasticsearch();
-        }
-        if (KIND_VECTOR.equals(kind)) {
-            return c.isElasticsearch() || c.isQdrant();
-        }
-        return false;
     }
 
     /** 召回路的中文名（只用于拼文案） */

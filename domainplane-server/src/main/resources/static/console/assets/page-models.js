@@ -61,11 +61,18 @@
         console.debug("[domainplane] \u8BFB\u53D6\u8BBE\u7F6E\u5931\u8D25\uFF1A", e);
       });
     }
+    function setHint(id, value) {
+      var el = pfEl(id);
+      if (el) {
+        el.textContent = value || "\u2014";
+      }
+    }
     function loadProfiles() {
       return Console.api.get("/admin/model-profiles").then(function(r) {
         PROFILES = r && r.profiles || [];
         EMBEDDING = { alias: r && r.embeddingAlias || null };
         VECTOR_PROFILES = r && r.embeddingProfiles || [];
+        setHint("settingsFileHint", r && r.settingsFile);
         renderProfiles();
       }).catch(function(e) {
         pfEl("modelList").innerHTML = '<div class="dp-card" style="color:var(--red);">\u52A0\u8F7D\u5931\u8D25\uFF1A' + Console.escapeHtml(e.message) + "</div>";
@@ -251,7 +258,8 @@
           var tuneBox = hasTune ? adapterTuneBox(p, "tb" + tuneSeq++) : "";
           var tuneCtl = hasTune ? '<span class="tune-status"></span><button type="button" class="btn btn-sm btn-outline-primary tune-save" disabled>\u66F4\u65B0</button>' : "";
           var thinkCtl = chat ? thinkSwitch(p) : "";
-          return '<section class="dp-card model-card"><header class="card-head"><span class="model-dot"></span><h2>' + modelTitle(p.modelName || p.alias) + "</h2>" + dupBadge(p) + noType + visionBadge(p) + cardTags(p) + adapterBadge + '<span class="spacer"></span>' + thinkCtl + tuneCtl + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">\u63A2\u6D4B</button><button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">\u5220\u9664</button></header><div class="dp-card-body"><div class="model-meta"><div><span class="k">\u8F93\u5165\u6A21\u6001</span>' + modalityCell(p, p.input) + '</div><div><span class="k">\u8F93\u51FA\u6A21\u6001</span>' + modalityCell(p, p.output) + '</div><div><span class="k">\u670D\u52A1\u5546\u5730\u5740</span><span class="mono">' + Console.escapeHtml(p.baseUrl || "-") + '</span></div><div><span class="k">\u88AB\u54EA\u4E9B\u57DF\u4F7F\u7528</span>' + used + "</div>" + (chat ? '<div class="ctx-row"><span class="k">\u4E0A\u4E0B\u6587\u957F\u5EA6</span>' + ctxCell(p) + "</div>" : "") + "</div>" + tuneBox + "</div></section>";
+          var paramsBox = !p.customParams || p.customParams.schemaDriven ? "" : chat || !(p.endpoints || []).length ? customParamsBox(p) : "";
+          return '<section class="dp-card model-card"><header class="card-head"><span class="model-dot"></span><h2>' + modelTitle(p.modelName || p.alias) + "</h2>" + dupBadge(p) + noType + visionBadge(p) + cardTags(p) + adapterBadge + '<span class="spacer"></span>' + thinkCtl + tuneCtl + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">\u63A2\u6D4B</button><button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">\u5220\u9664</button></header><div class="dp-card-body"><div class="model-meta"><div><span class="k">\u8F93\u5165\u6A21\u6001</span>' + modalityCell(p, p.input) + '</div><div><span class="k">\u8F93\u51FA\u6A21\u6001</span>' + modalityCell(p, p.output) + '</div><div><span class="k">\u670D\u52A1\u5546\u5730\u5740</span><span class="mono">' + Console.escapeHtml(p.baseUrl || "-") + '</span></div><div><span class="k">\u88AB\u54EA\u4E9B\u57DF\u4F7F\u7528</span>' + used + "</div>" + (chat ? '<div class="ctx-row"><span class="k">\u4E0A\u4E0B\u6587\u957F\u5EA6</span>' + ctxCell(p) + "</div>" : "") + "</div>" + tuneBox + paramsBox + "</div></section>";
         }).join("");
       }
       box.querySelectorAll("button[data-del]").forEach(function(b) {
@@ -276,6 +284,7 @@
         });
       });
       box.querySelectorAll(".dp-card.model-card").forEach(bindTuneBox);
+      box.querySelectorAll(".dp-params").forEach(bindParamsBox);
       pfEl("embeddingCount").textContent = VECTOR_PROFILES.length + " \u4E2A";
       pfEl("modelCount").textContent = models.length + " \u4E2A";
     }
@@ -967,6 +976,61 @@
         }
       });
     }
+    function customParamsBox(p) {
+      var cp = p.customParams || {};
+      var lim = cp.limits || {};
+      var stdList = cp.stdKeys || [];
+      var hint = "\u6CA1\u547D\u4E2D\u5185\u7F6E\u9002\u914D\uFF0C\u53C2\u6570\u53EA\u80FD\u81EA\u5DF1\u586B\uFF1AJSON \u5BF9\u8C61\uFF0C\u952E\u503C\u539F\u6837\u900F\u4F20\u5230\u8BF7\u6C42\u4F53\u3002\u7559\u7A7A = \u4E00\u4E2A\u90FD\u4E0D\u53D1\u9001\u3002";
+      if (lim.maxKeys) {
+        hint += "\u4E0A\u9650 " + lim.maxKeys + " \u4E2A\u952E\u3001" + (lim.maxBytes || 0) + " \u5B57\u8282\u3002";
+      }
+      if (stdList.length) {
+        var prefer = ["temperature", "max_tokens", "top_p", "stop", "response_format", "seed"];
+        var shownList = prefer.filter(function(k) {
+          return stdList.indexOf(k) >= 0;
+        });
+        if (!shownList.length) {
+          shownList = stdList;
+        }
+        var shown = shownList.slice(0, 4).join(" / ");
+        hint += "\u6807\u51C6\u53C2\u6570\uFF08" + shown + (stdList.length > shownList.slice(0, 4).length ? " \u7B49 " + stdList.length + " \u4E2A" : "") + "\uFF09\u53E6\u6709\u63A7\u4EF6\uFF0C\u522B\u5199\u5728\u8FD9\u91CC\u3002";
+      }
+      return '<div class="dp-params" data-params-alias="' + Console.escapeHtml(p.alias) + '"><div class="dp-params-head"><span class="k">\u81EA\u5B9A\u4E49\u53C2\u6570</span><span class="dp-params-hint">' + Console.escapeHtml(hint) + `</span></div><textarea class="mono form-control dp-params-json" rows="3" spellcheck="false" placeholder='{"enable_thinking": false}'>` + Console.escapeHtml(cp.paramsJson || "") + '</textarea><div class="dp-params-foot"><span class="dp-params-status"></span><button type="button" class="btn btn-sm btn-outline-primary dp-params-save" disabled>\u4FDD\u5B58\u53C2\u6570</button></div></div>';
+    }
+    function bindParamsBox(boxEl) {
+      var alias = boxEl.getAttribute("data-params-alias");
+      var ta = boxEl.querySelector(".dp-params-json");
+      var btn = boxEl.querySelector(".dp-params-save");
+      var status = boxEl.querySelector(".dp-params-status");
+      if (!alias || !ta || !btn) {
+        return;
+      }
+      var base = (ta.value || "").trim();
+      var sync = function() {
+        btn.disabled = (ta.value || "").trim() === base;
+      };
+      ta.addEventListener("input", sync);
+      btn.addEventListener("click", function() {
+        if (status) {
+          status.textContent = "";
+          status.className = "dp-params-status";
+        }
+        btn.disabled = true;
+        Console.api.put("/admin/model-profiles/custom-params", { alias, paramsJson: ta.value }).then(function(r) {
+          base = (ta.value || "").trim();
+          if (status) {
+            status.textContent = r && r.message || "\u5DF2\u4FDD\u5B58";
+            status.className = "dp-params-status ok";
+          }
+        }).catch(function(e) {
+          if (status) {
+            status.textContent = Console.sanitizeError(e.message);
+            status.className = "dp-params-status err";
+          }
+        }).then(sync);
+      });
+      sync();
+    }
     function saveReturnThinking(alias, on, input) {
       input.disabled = true;
       Console.api.put("/admin/model-profiles/return-thinking", { alias, returnThinking: on }).then(function() {
@@ -1190,6 +1254,7 @@
         pfEl("cnName").value = "";
         pfEl("cnBaseUrl").value = "";
         pfEl("cnApiKey").value = "";
+        setHint("cnFileHint", r && r.settingsFile);
         cnSay(true, r && r.message || "\u5DF2\u6DFB\u52A0\u300C" + name + "\u300D");
         return loadConnections(true);
       }).then(function() {

@@ -130,8 +130,7 @@ class KnowledgeStatsServiceTest {
         assertEquals(2L, stats.byBody().get("kb-other")[1]);
         // 未绑体的域不冒充任何知识体
         assertEquals(2, stats.byBody().size());
-        // 域视图仍在（删域预演用）
-        assertEquals(7L, stats.byDomain().get("default.sales")[1]);
+        // v2 只有"按体"一套口径：域是消费者，不再有"按域"的数字
         assertFalse(stats.stale());
     }
 
@@ -167,7 +166,7 @@ class KnowledgeStatsServiceTest {
         kb.failure.set(new RuntimeException("es down"));
         KnowledgeStatsService.Stats degraded = service.stats();
         assertTrue(degraded.stale(), "失败后的数字要标 stale");
-        assertEquals(1, degraded.byDomain().size(), "冷却期内复用旧快照");
+        assertEquals(1, degraded.byBody().size(), "冷却期内复用旧快照");
         assertEquals(1, kb.listCalls.get(), "枚举这一步就炸了，list 不该再被调用");
         assertEquals(2, kb.indexCalls.get(), "失败只重试一次即进入冷却");
 

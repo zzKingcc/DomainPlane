@@ -215,8 +215,10 @@ public class AdminDomainController {
      * 没有知识库。理由很实在：知识体决定"这个域的文档写进哪台机器"，跟着父域走会让
      * 新建的子域在用户不知情的情况下往父域的库里写，且查出来的东西还"看着对"。</p>
      *
-     * <p>只允许绑<b>能检索</b>的体（关键字 / 向量）。原文体不参与召回，绑了等于这个域
-     * 仍然没有可查的知识，属于"静默无效"的配置错误，保存时就拒绝比事后排查便宜。</p>
+     * <p>绑定<b>只落盘、不校验体的可用性</b>（与「保存只管保存」同一口径）：体此刻两路空着、
+     * 或它绑的连接还没填地址，都允许先绑上——绑错体是"暂时没有知识库"，不是坏配置，
+     * 域视图会标「知识体已失效 / 连接不可用」；检索工具由 {@code KnowledgeToolBinder} 按
+     * 体可用性动态上下线，体在「存储配置」补好后自动生效，不需要重新绑。</p>
      *
      * <p>不校验"同一台机器被多个域共用"：那是合法且常见的用法（同一个向量体服务多个域，
      * 索引名按域区分）。</p>
@@ -237,21 +239,9 @@ public class AdminDomainController {
         }
         String bodyId = body.getBody() == null || body.getBody().isBlank()
                 ? null : body.getBody().trim();
-        if (bodyId != null) {
-            InfraSettings.KnowledgeBody kb = infraHolder.current().body(bodyId);
-            if (kb == null) {
-                throw new BaseException(ErrorCode.INVALID_PARAMETER,
-                        "知识体不存在：" + bodyId + "（可能刚被删，请刷新存储配置）");
-            }
-            if (!kb.configured()) {
-                throw new BaseException(ErrorCode.INVALID_PARAMETER,
-                        "知识体 " + kb.effectiveName() + " 一路都没配（关键字 / 向量都是空的），"
-                                + "绑了它这个域仍然没有可查的知识");
-            }
-            if (infraHolder.current().usableBody(bodyId) == null) {
-                throw new BaseException(ErrorCode.INVALID_PARAMETER,
-                        "知识体 " + kb.effectiveName() + " 的连接都不可用，先在「存储配置」里补上");
-            }
+        if (bodyId != null && infraHolder.current().body(bodyId) == null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER,
+                    "知识体不存在：" + bodyId + "（可能刚被删，请刷新存储配置）");
         }
         String previous = domainStore.bodyOf(normalized);
         domainStore.setBody(normalized, bodyId);
@@ -307,7 +297,7 @@ public class AdminDomainController {
         // force 或宽限期=0：立即硬删。force=强杀（宽限期思维：不再无限等待）；
         // 宽限期=0 的旧语义=等待在飞会话停止，停不掉即拒删
         DomainPurgeService.PurgeResult result = purgeService.purge(normalized, !force);
-        return view("deleted", normalized, result.removed(), result.removedIndices());
+        return view("deleted", normalized, result.removed(), result.retainedBodies());
     }
 
     /**
@@ -534,15 +524,17 @@ public class AdminDomainController {
 
     /**
      * 统一返回体：动作 + 当前域全貌，便于管控台一次刷新。
+     *
+     * @param retainedBodies 这次操作保留下来、<b>一个字节都没删</b>的知识体（删域时非空）
      */
     private Map<String, Object> view(String action, String domainId, List<String> removed,
-                                     List<String> removedIndices) {
+                                     List<String> retainedBodies) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("code", 0);
         result.put("action", action);
         result.put("domain", domainId);
         result.put("removed", removed);
-        result.put("removedIndices", removedIndices);
+        result.put("retainedBodies", retainedBodies);
         result.put("manualDomains", domainRegistry.manualIds());
         result.put("callableDomains", domainRegistry.callableIds());
         result.put("settingsFile", domainStore.filePath());

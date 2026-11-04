@@ -1,14 +1,14 @@
 /* ==========================================================================
    存储配置页脚本
    —— 01 Redis：平台自身基础设施，单例
-   —— 02 连接：两张可编辑的表（关键字 / 向量），每行是一台具体实例；原文内置
-   —— 03 知识体：一个体 = 一套知识库，关键字 / 向量各占一路、各自可选
+   —— 02 连接：两张可编辑的表（关键字 / 向量），每行是一台具体实例
+   —— 03 知识体：只读回显（被哪些连接用着），管理在「知识库」页
+
    两段是「用途」不是「产品」：ES 既能做关键字也能做向量，所以它可以在两张表里
    各出现一次，各填各的地址；地址一致时由后端按协议+主机+端口判定为同一台实例。
-   知识体为什么两路装在一个体里：两路都配 = 混合召回，只配一路 = 单路，域绑一个体
-   就回答了"这个域走几路"；拆成两个体则会出现"绑了一个、忘了另一个"的静默退化。
-   原文不在知识体里：它一律写平台内置磁盘（换模型要能从原文重灌），没有"配到哪台
-   机器"这回事。
+
+   v2 起知识体有自己的地址 /admin/bodies：它是数据实体（唯一名 + 冻结索引 + 原文落点），
+   不该由连接池页来建。本页因此不再提交 bodies——提交就会把体的 slug / index 冲掉。
    ========================================================================== */
 (function () {
 
@@ -45,14 +45,31 @@
         ['vesSocketTimeout', 'socketTimeout', 'n']
     ];
 
-    var NAME_HELP = '同一段内不能重名；名称会出现在知识体的连接下拉里。';
+    var NAME_HELP = '连接名全局唯一（跨两张表也不能重名）；名称会出现在知识体的连接下拉里。';
     var FOOT_HINT_ES = '「测试连接」额外报版本、兼容性判读与 <b>IK 分词器</b>状态。';
 
     /* 服务端那一份：连接、知识体、Redis 已保存值 */
-    var STATE = { redis: {}, connections: [], bodies: [] };
+    var STATE = { redis: {}, connections: [], bodies: [], savedBodies: [] };
     var FLAGS = { es: false, redis: false, vector: false, esSource: '-', redisSource: '-', vectorSource: '-' };
 
     function el(id) { return document.getElementById(id); }
+
+    /* 写文案 / 切显隐一律走这三个：模板里缺这个节点时跳过，不要让 null 抛出去。
+       HTML 与 src 是两棵树，漏同步是常态（历史上就漏过 settingsFileHint / esFootHint
+       这一批）；裸 el(id).textContent 一抛，loadInfra 后面的 renderConns / renderProfiles
+       全不执行，页面上就永远停在"加载中…"，而且控制台之外看不出任何原因。 */
+    function setText(id, value) {
+        var node = el(id);
+        if (node) { node.textContent = value; }
+    }
+    function setHtml(id, value) {
+        var node = el(id);
+        if (node) { node.innerHTML = value; }
+    }
+    function setHidden(id, hidden) {
+        var node = el(id);
+        if (node) { node.hidden = hidden; }
+    }
 
     /* ===== 表单读写 ===== */
     /* 字段表驱动读写。模板里少一个输入框时不要整页挂掉：跳过缺失的那个，
@@ -88,18 +105,22 @@
     }
     function showResult(id, text, cls) {
         var box = el(id);
+        if (!box) { return; }
         box.textContent = text;
         box.className = 'result show ' + (cls || '');
     }
     function showHtmlResult(id, html, cls) {
         var box = el(id);
+        if (!box) { return; }
         box.innerHTML = html;
         box.className = 'result show ' + (cls || '');
     }
     function hideResult(id) {
         /* 别用 showResult('') —— 那会挂上 .show，弹窗里留一条空灰条 */
-        el(id).className = 'result';
-        el(id).textContent = '';
+        var box = el(id);
+        if (!box) { return; }
+        box.className = 'result';
+        box.textContent = '';
     }
     function setNameHelp(id, text, isErr) {
         var node = el(id);
@@ -281,31 +302,6 @@
     };
     var SLOT_ORDER = ['keyword', 'vector'];
 
-    /* 这一路能选哪些连接 */
-    function connsFor(slot) {
-        var types = SLOT_META[slot].types;
-        return STATE.connections.filter(function (c) {
-            return types.indexOf(c.type) >= 0;
-        });
-    }
-
-    function slotOptions(slot, selected) {
-        var meta = SLOT_META[slot];
-        var list = connsFor(slot);
-        if (!list.length) {
-            return '<option value="">（没有可用于' + meta.label + '的连接）</option>';
-        }
-        var html = '<option value="">' + meta.empty + '</option>';
-        list.forEach(function (c) {
-            html += '<option value="' + Console.escapeHtml(c.id) + '"'
-                + (c.id === selected ? ' selected' : '') + '>'
-                + Console.escapeHtml(c.name || c.id)
-                + '（' + (c.type === 'qdrant' ? 'Qdrant' : 'Elasticsearch') + '）'
-                + '</option>';
-        });
-        return html;
-    }
-
     /* 这个体走几路——卡片头上那枚徽章 */
     function modesOf(b) {
         var hasKw = !!b.keyword;
@@ -324,19 +320,21 @@
             + '</div>';
     }
 
+    /* 只读回显：体的增删改在「知识库」页（它是数据实体，不该由连接池页来建）。
+       这里保留只读列表，是为了回答"我这台连接被谁用着"——删连接前必须能看见影响面。 */
     function bodyCard(b) {
         var modes = modesOf(b);
-        var rows = SLOT_ORDER.map(function (slot) {
-            var selected = (slot === 'keyword' ? b.keyword : b.vector) || '';
-            var c = selected ? findConn(selected) : null;
-            /* 选好了就显示它连到哪：地址比连接名更能说明"这两路是不是同一台" */
-            var hint = selected
-                ? ((c && c.location) || selected) + (c && c.usable === false ? '（未填地址）' : '')
-                : SLOT_META[slot].hint;
-            var control = '<select class="form-control slot-v" data-body="'
-                + Console.escapeHtml(b.id) + '" data-field="' + slot + '">'
-                + slotOptions(slot, selected) + '</select>';
-            return slotLine(SLOT_META[slot].label, control, hint, !!selected);
+        var index = b.index || '';
+        var slots = ['keyword', 'vector'].map(function (slot) {
+            var id = slot === 'keyword' ? b.keyword : b.vector;
+            var c = id ? findConn(id) : null;
+            var text = id ? ((c && (c.name || c.location)) || id) : '未配';
+            return '<div class="slot' + (id ? '' : ' empty') + '">'
+                + '<span class="slot-k">' + SLOT_META[slot].label + '</span>'
+                + '<span class="slot-v-ro' + (id ? '' : ' muted-sm') + '">'
+                + Console.escapeHtml(text) + '</span>'
+                + '<span class="slot-h">' + (id && c && c.usable === false ? '连接未填地址' : SLOT_META[slot].hint) + '</span>'
+                + '</div>';
         }).join('');
         return '<article class="profile">'
             + '<header class="profile-head">'
@@ -344,10 +342,10 @@
             + '<h4>' + Console.escapeHtml(b.name || b.id) + '</h4>'
             + '<span class="mbadge ' + modes.cls + '">' + modes.text + '</span>'
             + '<span class="spacer"></span>'
-            + '<button class="linkbtn danger" data-delbody="' + Console.escapeHtml(b.id)
-            + '">删除</button>'
+            + '<a class="linkbtn" href="knowledge.html">管理</a>'
             + '</header>'
-            + rows
+            + (index ? '<div class="muted-sm" style="margin:2px 0 6px;">索引 <code>' + Console.escapeHtml(index) + '</code></div>' : '')
+            + slots
             + '</article>';
     }
 
@@ -362,11 +360,12 @@
     }
 
     /* ===== 提交 ===== */
+    /* 只提交连接与 Redis：知识体已经搬到 /admin/bodies，这里刻意不带 bodies——
+       带上就是从"只读回显"反推着写配置，会把体的 slug / index / 原文落点冲掉。 */
     function body() {
         return {
             redis: readFields(REDIS_FIELDS),
-            connections: STATE.connections,
-            bodies: STATE.bodies
+            connections: STATE.connections
         };
     }
 
@@ -382,10 +381,18 @@
         showResult(resultId, '保存中…', '');
         try {
             var data = await postJson(body());
-            await loadInfra(true);
+            /* 保存已成功，后面的"重新拉取"失败不能算保存失败——那会诱导用户再存一遍。
+               这一条曾经是真坑：配置落库了、回读挂了，用户看到的是"保存失败"。 */
+            try {
+                await loadInfra(true);
+            } catch (e) {
+                Console.toast('已保存，但刷新页面数据失败：' + Console.sanitizeError(e.message),
+                    { type: 'warning' });
+                return data;
+            }
             if (resultId) { showResult(resultId, '✅ ' + okText, 'ok'); }
-            /* 保存时的自检结论（知识库能力不匹配 / Redis 没持久化等）以前只在启动日志里，
-               现在跟着响应回来：有就明说，没有就照常只报成功 */
+            /* 自检结论跟着响应回来（保存路径只做落盘时，这个数组现在恒为空；
+               「测试连接」的 redis 分支会带持久化建议，属于另一个接口） */
             var warns = (data && data.warnings) || [];
             if (warns.length) {
                 Console.toast('已保存，但有 ' + warns.length + ' 条提醒：\n' + warns.join('\n'),
@@ -432,8 +439,8 @@
         badge.className = 'mbadge ' + (FLAGS.redis ? 'ok' : 'off');
         badge.textContent = FLAGS.redis ? '已生效' : '未配置';
 
-        el('settingsFileHint').textContent = '设置文件：' + (s.settingsFile || '-')
-            + '（知识库索引 ' + (s.indexPattern || '-') + '）';
+        setText('settingsFileHint', '设置文件：' + (s.settingsFile || '-')
+            + '（知识库索引 ' + (s.indexPattern || '-') + '）');
         renderConns();
         renderProfiles();
         return s;
@@ -502,7 +509,7 @@
         var conn = connById(esEditId);
         el('connModalEsTitle').textContent = mode === 'new' ? '新增关键字连接' : ('编辑连接 · ' + id);
         el('esPresetPick').hidden = mode !== 'new';
-        el('esPresetHint').hidden = mode !== 'new';
+        setHidden('esPresetHint', mode !== 'new');
         el('esNameRow').hidden = mode !== 'new';
         /* 新增必须先点预设才铺表单（"选择之后可以配置对应内容"）；编辑跳过这一步 */
         el('esFormWrap').hidden = mode === 'new';
@@ -518,7 +525,7 @@
             applyEsKeyHint(conn, 'esKeyHelp', 'esPassword');
         }
         el('saveEsBtn').textContent = mode === 'new' ? '加入连接' : '保存并生效';
-        el('esFootHint').innerHTML = FOOT_HINT_ES;
+        setHtml('esFootHint', FOOT_HINT_ES);
         showModal('connModalEs');
     }
 
@@ -577,7 +584,7 @@
 
         el('connModalVecTitle').textContent = mode === 'new' ? '新增向量连接' : ('编辑连接 · ' + id);
         el('vecPresetPick').hidden = mode !== 'new';
-        el('vecPresetHint').hidden = mode !== 'new';
+        setHidden('vecPresetHint', mode !== 'new');
         el('vecNameRow').hidden = mode !== 'new';
         resetPresetCards('vecPresetPick');
         hideResult('vectorResult');
@@ -606,7 +613,7 @@
         }
         el('saveVectorBtn').textContent = mode === 'new' ? '加入连接' : '保存并生效';
         el('saveVecEsBtn').textContent = mode === 'new' ? '加入连接' : '保存并生效';
-        el('vectorFootHint').innerHTML = '「测试连接」额外报版本、距离度量与已有集合数。';
+        setHtml('vectorFootHint', '「测试连接」额外报版本、距离度量与已有集合数。');
         showModal('connModalVec');
     }
 
@@ -801,50 +808,16 @@
         if (!el('connModalVec').hidden) { hideModal('connModalVec'); }
     });
 
-    /* ===== 知识体交互 ===== */
-    /* 改某一路的连接（行是动态渲染的，用委托）。两路互不影响：只改被点的那一路，
-       这样"只想把向量从 ES 换到 Qdrant"不用重填关键字 */
-    el('profileList').addEventListener('change', function (e) {
-        var t = e.target;
-        if (!t.getAttribute) { return; }
-        var bodyId = t.getAttribute('data-body');
-        var field = t.getAttribute('data-field');
-        if (!bodyId || !field) { return; }
-        var target = null;
-        STATE.bodies.forEach(function (b) { if (b.id === bodyId) { target = b; } });
-        if (!target) { return; }
-        target[field] = t.value || null;
-        renderProfiles();
-        /* 两路都空 = 这个体没意义（保存会被后端拒），当场说清楚，别等点保存 */
-        if (!target.keyword && !target.vector) {
-            setStatus('<span>知识体「' + Console.escapeHtml(target.name || target.id)
-                + '」两路都空着：至少选一个连接，否则保存会被拒</span>', 'warn');
-        }
-    });
 
-    el('profileList').addEventListener('click', function (e) {
-        var t = e.target;
-        if (!t.getAttribute) { return; }
-        var del = t.getAttribute('data-delbody');
-        if (!del) { return; }
-        STATE.bodies = STATE.bodies.filter(function (b) { return b.id !== del; });
-        renderProfiles();
-        /* 删体只改本页；域上若还绑着它，那台域会显示"知识体已失效"，保存后绑定不再解析 */
-        setStatus('<span>已移除知识体「' + Console.escapeHtml(del)
-            + '」（尚未保存）；保存后仍绑着它的域将没有知识库</span>', 'warn');
-    });
+    /* 知识体在本页只读：没有交互处理器。增删改在 knowledge.html（/admin/bodies），
+       所以这里也不再往 /admin/infra 提交 bodies。 */
 
-    el('addProfileBtn').addEventListener('click', function () {
-        var n = 1;
-        while (STATE.bodies.some(function (b) { return b.id === 'kb-' + n; })) { n++; }
-        STATE.bodies.push({ id: 'kb-' + n, name: '知识体 ' + n, keyword: null, vector: null });
-        renderProfiles();
-    });
 
-    el('saveProfileBtn').addEventListener('click', function () {
-        var backup = JSON.parse(JSON.stringify(STATE.bodies));
-        commit(function () { STATE.bodies = backup; }, null, '知识体已保存并立即生效', null);
-    });
+    function findBody(bodyId) {
+        var found = null;
+        STATE.bodies.forEach(function (b) { if (b.id === bodyId) { found = b; } });
+        return found;
+    }
 
     /* 页面首次加载失败（后端没起、未登录）也要给出可读的原因 */
     Console.ready(function () {

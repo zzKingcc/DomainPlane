@@ -62,9 +62,10 @@ class AdminDomainSoftDeleteTest {
         properties = new DomainProperties();
         // 软删路径不触发级联清理，DomainPurgeService 的协作者留空即可；
         // 真被调用时会以 NPE 抗议——那正说明软删不该走到硬删
+        // v2 的 purge 不再持有知识库：删域只解绑，存储调用连字段都没有
         DomainPurgeService purgeService = new DomainPurgeService(
-                registry, store, null, null, null, null,
-                new ToolRegistry(), null, null, null, null, null, null, null);
+                registry, store, null, null, null,
+                new ToolRegistry(), null, null, null, null, null, null);
         controller = new AdminDomainController(
                 registry,
                 store,

@@ -39,6 +39,17 @@ public class DomainSettings {
      */
     private Map<String, Boolean> planDisplay = new LinkedHashMap<>();
 
+    /**
+     * 域（完整路径） → 绑定的知识体 id（内置域与工具派生域专用）。
+     *
+     * <p>{@code domains.json} 只存管控台声明的域：内置根域由代码预置、派生域由工具声明决定，
+     * 都不落盘。这两类域的知识体绑定若只留在 {@code DomainStore} 的内存镜像里，
+     * 一次 {@code saveDeclarations} 的存活域收敛就会把它们抹掉，重启更是必丢。
+     * 所以走内置域配置的既有归宿——本文件，与提示词片段、回写开关同一套存储；
+     * 手动域的绑定仍落 {@code domains.json}（随域声明与可调用性一起回滚），两边不重复。</p>
+     */
+    private Map<String, String> bodyBindings = new LinkedHashMap<>();
+
     public Map<String, String> getPrompts() {
         return prompts;
     }
@@ -61,6 +72,14 @@ public class DomainSettings {
 
     public void setPlanDisplay(Map<String, Boolean> planDisplay) {
         this.planDisplay = planDisplay == null ? new LinkedHashMap<>() : new LinkedHashMap<>(planDisplay);
+    }
+
+    public Map<String, String> getBodyBindings() {
+        return bodyBindings;
+    }
+
+    public void setBodyBindings(Map<String, String> bodyBindings) {
+        this.bodyBindings = bodyBindings == null ? new LinkedHashMap<>() : new LinkedHashMap<>(bodyBindings);
     }
 
     /** 指定域的片段；未配置返回 {@code null} */

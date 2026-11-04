@@ -3,8 +3,10 @@ package com.zzkingcc.domainplane.server.settings;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.zzkingcc.domainplane.common.util.AtomicFiles;
+import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
 import com.zzkingcc.domainplane.server.env.StorageLocations;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -88,12 +90,16 @@ public class DomainStore {
     private final Map<String, Long> pendingDeletes = new LinkedHashMap<>();
 
     /**
-     * 域 → 知识体绑定（进程内镜像，随 {@link #save} 落盘）。
+     * 域 → 知识体绑定（进程内镜像）。
+     *
+     * <p>落盘分两路：手动域的绑定随 {@link #save} 进 {@code domains.json}（与域声明、
+     * 可调用性同一版本库，能一起回滚）；内置 / 派生域不进那份文件，由
+     * {@link #setBody} 落到 prompts.json 的 bodyBindings 段（见 {@code DomainSettings}）。</p>
      *
      * <p><b>不继承</b>：这是每个域自己的声明，不是从父域推出来的。没绑的域就是"没有
      * 知识库"——不去找父域借。域链只影响"查得到谁的数据"，不影响"用谁的知识体"。</p>
      *
-     * <p>放在这里而不是 {@code InfraSettings}：知识体是"有哪些存储单元"（基础设施配置），
+     * <p>绑定放这里而不是 {@code InfraSettings}：知识体是"有哪些存储单元"（基础设施配置），
      * 域绑定是"哪个域用哪一个"（域数据），跟着域的版本库一起回滚才自洽。</p>
      */
     private final Map<String, String> bodies = new LinkedHashMap<>();
@@ -123,6 +129,32 @@ public class DomainStore {
     public DomainStore(StorageLocations storage) {
         this.settingsFile = storage.settingsDir().resolve("domains.json");
         this.historyDir = storage.settingsDir().resolve("domains-history");
+    }
+
+    /**
+     * 域设置存储（prompts.json）：内置域 / 派生域的知识体绑定落在这里。
+     *
+     * <p>setter 注入而非构造器：单参构造器被多处测试直接使用，且它不依赖任何其他 bean，
+     * 加参就等于给所有测试立一道新门槛。生产环境由 Spring 注入；测试没注入时（null）
+     * 内置域绑定只更新内存、不落盘，既有测试行为不变。</p>
+     */
+    private DomainSettingsStore domainSettingsStore;
+
+    /**
+     * 域注册表：判定"哪些域还活着"（retainAll 收敛）与"这个域是不是内置/派生"
+     * （落盘去向）。由 {@code DomainConfiguration} 在建完注册表后显式接线——
+     * 注册表 bean 又依赖本类，构造器注入会成环；启动完成前不会有人调 {@link #save}。
+     */
+    private DomainRegistry domainRegistry;
+
+    @Autowired
+    public void setDomainSettingsStore(DomainSettingsStore domainSettingsStore) {
+        this.domainSettingsStore = domainSettingsStore;
+    }
+
+    /** 由 DomainConfiguration 装配期显式接线；未接线时（测试）按"只有 callables 里的域存活"收敛 */
+    public void setDomainRegistry(DomainRegistry domainRegistry) {
+        this.domainRegistry = domainRegistry;
     }
 
     // ==================== 读取 ====================
@@ -243,6 +275,19 @@ public class DomainStore {
                 }
             }
         }
+        // 内置域 / 派生域的绑定不进本文件（本文件只存管控台声明的域），落在 prompts.json
+        // 的 bodyBindings 段。这里一并灌入进程内镜像：少了这一步，重启后内置域的
+        // 知识库就"静默失联"——域还在、体还在，只是绑定没了。
+        if (domainSettingsStore != null) {
+            Map<String, String> builtin = domainSettingsStore.load().getBodyBindings();
+            if (builtin != null) {
+                builtin.forEach((id, body) -> {
+                    if (id != null && !id.isBlank() && body != null && !body.isBlank()) {
+                        this.bodies.put(id.trim(), body.trim());
+                    }
+                });
+            }
+        }
         this.callableMigrated = settings.isCallableMigrated();
         this.currentVersion = Math.max(0, settings.getVersion());
         this.pendingDeletes.clear();
@@ -291,8 +336,14 @@ public class DomainStore {
                 entries.add(entry);
             });
         }
-        // 域已被删掉，它的知识体绑定也一并清掉：留着会在下次"同名域重建"时复活旧绑定
-        this.bodies.keySet().retainAll(callables == null ? java.util.Set.of() : callables.keySet());
+        // 域已被删掉，它的知识体绑定也一并清掉：留着会在下次"同名域重建"时复活旧绑定。
+        // 保留集合必须覆盖**所有存活域**（内置 + 派生 + 手动）：callables 只有手动域，
+        // 拿它 retain 会把内置/派生域刚写入的绑定当场抹掉——绑定接口返回成功、
+        // 页面刷新又变回"未绑定"，根因就在这一行。
+        java.util.Set<String> aliveDomains = domainRegistry != null
+                ? domainRegistry.ids()
+                : (callables == null ? java.util.Set.of() : callables.keySet());
+        this.bodies.keySet().retainAll(aliveDomains);
         settings.setDomains(entries);
         settings.setPendingDeletes(new LinkedHashMap<>(this.pendingDeletes));
         persist(settings);
@@ -308,7 +359,13 @@ public class DomainStore {
         return this.bodies.get(domainId.trim());
     }
 
-    /** 设置（或清空，传 null/空串）某域的知识体绑定（进程内；随后调用方落盘） */
+    /**
+     * 设置（或清空，传 null/空串）某域的知识体绑定。
+     *
+     * <p>手动域的落盘仍由调用方走 {@link #saveDeclarations}（与可调用性、域结构同一份文件、
+     * 同一个版本号）；内置 / 派生域不进那份文件，这里顺手把它们落到 prompts.json——
+     * 调用方无需关心域的来源。</p>
+     */
     public void setBody(String domainId, String bodyId) {
         if (domainId == null || domainId.isBlank()) {
             return;
@@ -319,6 +376,32 @@ public class DomainStore {
         } else {
             this.bodies.put(id, bodyId.trim());
         }
+        persistBuiltinBodies();
+    }
+
+    /**
+     * 把内置 / 派生域的知识体绑定落到 prompts.json 的 bodyBindings 段。
+     *
+     * <p>只写非手动域：手动域的绑定随 {@code domains.json} 的版本库走（能一起回滚），
+     * 写到这里会出现两份权威、回滚只回得了一边。整段重建而不是单键增改：
+     * 内存镜像是唯一事实，读改写单键会在并发保存时留下已删域的幽灵绑定。</p>
+     *
+     * <p>存储或注册表缺席（测试 / 裁剪装配）时跳过：只更新内存，行为与旧版一致。</p>
+     */
+    private void persistBuiltinBodies() {
+        if (domainSettingsStore == null || domainRegistry == null) {
+            return;
+        }
+        Map<String, String> nonManual = new LinkedHashMap<>();
+        this.bodies.forEach((id, body) -> {
+            DomainRegistry.Source source = domainRegistry.sourceOf(id);
+            if (source != null && source != DomainRegistry.Source.MANUAL) {
+                nonManual.put(id, body);
+            }
+        });
+        DomainSettings settings = domainSettingsStore.load();
+        settings.setBodyBindings(nonManual);
+        domainSettingsStore.save(settings);
     }
 
     /** 绑定快照（域 → 知识体 id） */

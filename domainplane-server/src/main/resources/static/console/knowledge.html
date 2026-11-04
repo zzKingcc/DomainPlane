@@ -14,12 +14,21 @@
         <div class="page-header">
             <div class="page-head">
                 <h2>知识库</h2>
+                <span class="dp-kb-snapshot" id="snapshotNote"></span>
+            </div>
+            <div class="dp-kb-toolbar">
+                <button class="btn btn-primary" id="createBodyBtn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 5v14M5 12h14"/></svg>
+                    新建知识体
+                </button>
+                <button class="btn btn-outline-secondary" id="refreshBtn">刷新</button>
             </div>
         </div>
         <div class="page-body dp-knowledge">
 
-            <!-- 总览行：全平台汇总。知识体卡替代原「ES 索引」——索引数量只对具体某个体有意义，
-                 与"是不是 ES"无关，下沉到体视图每行。 -->
+            <!-- 总览：全平台口径。数字来自同一份 60s 统计快照，不逐卡现扫存储 -->
             <div class="row row-cards row-deck">
                 <div class="col-6 col-lg-3">
                     <div class="card card-sm dp-stat">
@@ -30,6 +39,7 @@
                             <div class="dp-stat-info">
                                 <div class="dp-stat-label">已入库文档</div>
                                 <div class="dp-stat-value" id="statDocs">—</div>
+                                <div class="dp-stat-note" id="statDocsNote"></div>
                             </div>
                         </div>
                     </div>
@@ -43,6 +53,7 @@
                             <div class="dp-stat-info">
                                 <div class="dp-stat-label">总切片数</div>
                                 <div class="dp-stat-value" id="statChunks">—</div>
+                                <div class="dp-stat-note" id="statChunksNote"></div>
                             </div>
                         </div>
                     </div>
@@ -77,155 +88,34 @@
                 </div>
             </div>
 
-            <!-- 三张操作卡：上传是日常动作，重建 / 重灌是低频高危，等宽并排、按钮沉底对齐 -->
-            <div class="dp-op-grid">
-                <div class="card dp-op-card">
-                    <div class="card-body">
-                        <div class="dp-op-head">
-                            <span class="dp-op-icon dp-op-icon-blue">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-                            </span>
-                            <h3>上传文档</h3>
-                        </div>
-                        <div class="dp-op-body">
-                            <input type="file" id="fileInput" accept=".txt,.md,.markdown,.docx,.doc,.pdf,.xls,.xlsx">
-                            <div class="dp-op-opts">
-                                <label class="dp-op-check">
-                                    <input type="checkbox" id="replaceChk"> 覆盖更新
-                                </label>
-                                <label class="dp-op-field">
-                                    归属域
-                                    <select class="form-select" id="domainSelect">
-                                        <option value="">default（根域，全域可见）</option>
-                                    </select>
-                                </label>
-                            </div>
-                            <div class="dp-target" id="uploadTarget"></div>
-                        </div>
-                        <div class="dp-op-foot">
-                            <button class="btn btn-primary" id="uploadBtn">上传</button>
-                        </div>
-                        <div id="uploadResult" class="result"></div>
-                    </div>
-                </div>
-
-                <div class="card dp-op-card">
-                    <div class="card-body">
-                        <div class="dp-op-head">
-                            <span class="dp-op-icon dp-op-icon-amber">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
-                            </span>
-                            <h3>索引重建</h3>
-                        </div>
-                        <div class="dp-op-foot">
-                            <button id="rebuildBtn" class="btn btn-outline-danger">触发重建</button>
-                        </div>
-                        <div id="rebuildResult" class="result"></div>
-                    </div>
-                </div>
-
-                <div class="card dp-op-card">
-                    <div class="card-body">
-                        <div class="dp-op-head">
-                            <span class="dp-op-icon dp-op-icon-purple">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="M16 21l4-4-4-4"/><path d="M20 17H4"/></svg>
-                            </span>
-                            <h3>重灌到新后端</h3>
-                        </div>
-                        <div class="dp-op-body">
-                            <label class="dp-op-field">
-                                目标后端
-                                <select class="form-select" id="reindexTarget"></select>
-                            </label>
-                        </div>
-                        <div class="dp-op-foot">
-                            <button id="reindexBtn" class="btn btn-outline-primary">重灌</button>
-                        </div>
-                        <div id="reindexResult" class="result"></div>
-                    </div>
-                </div>
+            <!-- 说明条：讲清"知识体是数据身份、域是消费者"，删域不删数据 —— 这是本页的角色定义 -->
+            <div class="dp-kb-note">
+                <b>一个知识体 = 一份数据 + 一个索引。</b>索引名在创建时按唯一名派生并冻结，之后改名不搬数据。
+                域只决定「哪些对话能查到它」：一个体可以被多个域共用，删域只解绑，不删原文、不删索引。
             </div>
 
-            <!-- 知识体视图：页面第一等对象。一域一体、体可被多域共用，落点与状态都在这一行里说清 -->
-            <div class="card dp-panel dp-doc-card">
-                <div class="card-body">
-                    <div class="dp-op-head">
-                        <span class="dp-op-icon dp-op-icon-teal">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
-                        </span>
-                        <h3>知识体</h3>
-                        <span class="spacer"></span>
-                        <span class="mbadge" id="bodyCount">—</span>
-                    </div>
-                    <div class="dp-doc-scroll dp-body-scroll" id="bodyTableWrap">
-                        <table class="table dp-doc-table dp-body-table">
-                            <thead>
-                            <tr>
-                                <th style="width:17%">知识体</th>
-                                <th style="width:14%">关键字落点</th>
-                                <th style="width:14%">向量落点</th>
-                                <th style="width:9%">召回</th>
-                                <th style="width:8%">绑定域</th>
-                                <th style="width:10%">文档 / 切片</th>
-                                <th style="width:11%">状态</th>
-                                <th style="width:17%" class="ta-r">操作</th>
-                            </tr>
-                            </thead>
-                            <tbody id="bodyBody"></tbody>
-                        </table>
-                    </div>
-                </div>
+            <!-- 知识体卡片：页面第一等对象，所有动作都从卡片发起 -->
+            <div class="dp-kb-grid" id="bodyGrid">
+                <div class="dp-kb-loading">读取知识体…</div>
             </div>
 
-            <!-- 文档清单：固定高度无限滚动表格，表头吸顶；空态/加载态都画在表体内，卡片尺寸恒定 -->
-            <div class="card dp-panel dp-doc-card">
+            <!-- 无主索引：后端上有、但没有对应知识体的集合。只说清事实与处理方式，不提供"一键删除" -->
+            <div class="card dp-panel dp-kb-orphans" id="orphanCard" style="display:none;">
                 <div class="card-body">
                     <div class="dp-op-head">
-                        <span class="dp-op-icon dp-op-icon-green">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>
+                        <span class="dp-op-icon dp-op-icon-amber">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
                         </span>
-                        <h3>已入库文档</h3>
+                        <h3>无主索引</h3>
                         <span class="spacer"></span>
-                        <span class="mbadge" id="docCount">—</span>
+                        <span class="mbadge warn" id="orphanCount">—</span>
                     </div>
-                    <div class="dp-filters">
-                        <label class="dp-filter">
-                            域
-                            <select class="form-select" id="filterDomain">
-                                <option value="">全部</option>
-                            </select>
-                        </label>
-                        <label class="dp-filter">
-                            知识体
-                            <select class="form-select" id="filterBody">
-                                <option value="">全部</option>
-                            </select>
-                        </label>
-                        <label class="dp-filter">
-                            落点
-                            <select class="form-select" id="filterBackend">
-                                <option value="">全部</option>
-                            </select>
-                        </label>
-                        <button class="btn btn-sm btn-ghost dp-filter-clear" id="filterClear">清除</button>
+                    <div class="dp-kb-orphan-note">
+                        这些集合在后端上存在，但没有知识体认领它们。常见来源：v1 时代按域建的索引、被手工改过的配置。
+                        平台<b>不会自动删除</b>它们——删掉就再也找不回来。要接管，按它的集合名新建一个知识体（引擎不会搬动已有数据）；
+                        确属废弃时，请在存储侧确认后再处理。
                     </div>
-                    <div class="dp-doc-scroll" id="docTableWrap">
-                        <table class="table dp-doc-table">
-                            <thead>
-                            <tr>
-                                <th style="width:15%">docId</th>
-                                <th style="width:16%">文件名</th>
-                                <th style="width:13%">归属域</th>
-                                <th style="width:10%">知识体</th>
-                                <th style="width:10%">落点</th>
-                                <th style="width:7%">切片数</th>
-                                <th style="width:18%">切片文件</th>
-                                <th style="width:11%" class="ta-r">操作</th>
-                            </tr>
-                            </thead>
-                            <tbody id="docBody"></tbody>
-                        </table>
-                    </div>
+                    <div class="dp-kb-orphan-list" id="orphanList"></div>
                 </div>
             </div>
         </div>

@@ -62,16 +62,17 @@ public class RetrievalPlan {
      * @param kind         {@code keyword} / {@code vector} / {@code text}
      * @param connectionId 连接 id，同时也是后端 id（注册表按它取后端）
      * @param topK         该路的每索引召回条数
+     * @param index        该知识体冻结的索引名（<b>不再由域派生</b>：多域共用一个体就共用一个索引）
      */
-    public record BodyBinding(String bodyId, String kind, String connectionId, int topK) {
+    public record BodyBinding(String bodyId, String kind, String connectionId, int topK, String index) {
     }
 
     /**
      * 域 → 知识体的解析入口。
      *
-     * <p>返回列表而不是单个：新模型下一个域只有一个体，列表长度恒为 0 或 1；
-     * 保留列表是为了让旧的两角色绑定（同一个域同时走关键字与向量）仍能表达，
-     * 历史测试与"yaml 直配两路"的部署不必改语义。</p>
+     * <p>返回列表而不是单个：一个体里两路各自可选，所以一个域可能开出两路；体本身是唯一的
+     * （v1 域只绑一个体）。{@link #bodyIdOf} 与 {@link #bodiesOfBody} 是给"以知识体为中心"的
+     * 管理链路用的——重建 / 上传 / 预览都不再问域，只问体。</p>
      */
     public interface BodyLookup {
 
@@ -80,6 +81,16 @@ public class RetrievalPlan {
 
         /** 没有域上下文时的平台默认（未绑域的通配检索 / 诊断）；该用途没配返回 {@code null} */
         BodyBinding platformBody(String kind);
+
+        /** 该域绑定的知识体 id；没绑返回 {@code null} */
+        default String bodyIdOf(String domain) {
+            return null;
+        }
+
+        /** 某个知识体开出的全部绑定（两路各自可选）；体不存在返回空列表 */
+        default List<BodyBinding> bodiesOfBody(String bodyId) {
+            return List.of();
+        }
     }
 
     /**
@@ -88,14 +99,20 @@ public class RetrievalPlan {
      * <p>顺序刻意是<b>向量在前、关键字在后</b>：与改造前 {@code channels} 的开通道顺序
      * 逐字一致（向量路先开）。顺序本身不影响召回结果，但它是可观测行为——通道列表是
      * 排障时第一眼看的东西，没必要因为一次重构让它换个样子。</p>
+     *
+     * <p><b>两个角色共用同一个合成体 id</b>{@value #FIXED_BODY_ID}：它们是"同一个体的两路"，
+     * 不是两个体。若各自拿连接 id 当体 id，{@code bodiesOfBody} 只会返回一路——读侧于是
+     * 静默漏掉另一台机器上的数据（这条曾把"两台 ES 要合并读"的用例打红过）。</p>
      */
     private static BodyLookup fixed(BodyBinding keyword, BodyBinding vector) {
         List<BodyBinding> both = new ArrayList<>(2);
         if (vector != null) {
-            both.add(vector);
+            both.add(new BodyBinding(FIXED_BODY_ID, vector.kind(), vector.connectionId(),
+                    vector.topK(), vector.index()));
         }
         if (keyword != null) {
-            both.add(keyword);
+            both.add(new BodyBinding(FIXED_BODY_ID, keyword.kind(), keyword.connectionId(),
+                    keyword.topK(), keyword.index()));
         }
         List<BodyBinding> fixedList = List.copyOf(both);
         return new BodyLookup() {
@@ -111,12 +128,25 @@ public class RetrievalPlan {
                 }
                 return "vector".equals(kind) ? vector : null;
             }
+
+            @Override
+            public List<BodyBinding> bodiesOfBody(String bodyId) {
+                return fixedList.stream().filter(b -> b.bodyId().equals(bodyId)).toList();
+            }
+
+            @Override
+            public String bodyIdOf(String domain) {
+                return fixedList.isEmpty() ? null : fixedList.get(0).bodyId();
+            }
         };
     }
 
     private final Strategy strategy;
     private final KnowledgeBackendRegistry registry;
     private final BodyLookup lookup;
+
+    /** 固定绑定版使用的合成体 id：两路是同一个体，读侧必须合起来看 */
+    public static final String FIXED_BODY_ID = "platform";
 
     /** 固定绑定版：两个角色 id 写死，所有域共用（与改造前的行为逐字一致） */
     public RetrievalPlan(Strategy strategy,
@@ -125,9 +155,11 @@ public class RetrievalPlan {
                          String vectorBackendId, int vectorTopK) {
         this(strategy, registry, fixed(
                 keywordBackendId == null ? null
-                        : new BodyBinding(keywordBackendId, "keyword", keywordBackendId, keywordTopK),
+                        : new BodyBinding(keywordBackendId, "keyword", keywordBackendId, keywordTopK,
+                                KbIndexes.WILDCARD),
                 vectorBackendId == null ? null
-                        : new BodyBinding(vectorBackendId, "vector", vectorBackendId, vectorTopK)));
+                        : new BodyBinding(vectorBackendId, "vector", vectorBackendId, vectorTopK,
+                                KbIndexes.WILDCARD)));
     }
 
     /**
@@ -144,6 +176,20 @@ public class RetrievalPlan {
 
     public Strategy strategy() {
         return strategy;
+    }
+
+    /** 该知识体开出的全部绑定（两路各自可选）；不存在返回空列表 */
+    public List<BodyBinding> bodiesOfBody(String bodyId) {
+        if (bodyId == null || bodyId.isBlank()) {
+            return List.of();
+        }
+        List<BodyBinding> bodies = lookup.bodiesOfBody(bodyId.trim());
+        return bodies == null ? List.of() : bodies;
+    }
+
+    /** 该域绑定的知识体 id；没绑返回 {@code null}（页面展示与排障用） */
+    public String bodyIdOf(String domain) {
+        return lookup.bodyIdOf(Domains.normalize(domain));
     }
 
     /** 关键词路的平台默认后端 id（校验与排障用；不等于"所有域都用它"） */
@@ -194,14 +240,34 @@ public class RetrievalPlan {
         List<ChannelSpec> specs = new ArrayList<>(chain.size() * 2);
         for (int i = 0; i < chain.size(); i++) {
             String sourceId = chain.get(i);
-            String collection = KbIndexes.nameOf(sourceId);
             int depth = last - i;
             // 这个域自己绑的体：没绑就什么都不开（不拿父域的体去查它的索引）
             for (BodyBinding binding : bodiesOf(sourceId)) {
+                String collection = binding.index();
+                if (collection == null || collection.isBlank()) {
+                    continue;
+                }
                 addChannel(specs, binding, sourceId, collection, depth);
             }
         }
-        return specs;
+        return dedupeByLocation(specs);
+    }
+
+    /**
+     * 同一条物理通道只留一条：<b>多域绑同一个体就查同一个索引</b>，不去重会把它查两遍。
+     *
+     * <p>保留 distance 最近的那条（depth 小者优先，相同时先到先得），这样融合层的
+     * depth 衰减算的是"离查询域最近的那次引用"，与共用前逐域查询的观感一致。</p>
+     */
+    private static List<ChannelSpec> dedupeByLocation(List<ChannelSpec> specs) {
+        java.util.LinkedHashMap<String, ChannelSpec> byLocation = new java.util.LinkedHashMap<>();
+        for (ChannelSpec spec : specs) {
+            ChannelSpec existing = byLocation.get(spec.locationId());
+            if (existing == null || spec.depth() < existing.depth()) {
+                byLocation.put(spec.locationId(), spec);
+            }
+        }
+        return List.copyOf(byLocation.values());
     }
 
     /**
@@ -300,16 +366,16 @@ public class RetrievalPlan {
                     ? backend.capabilities().vector()
                     : backend.capabilities().keyword();
             if (!has) {
-                // 能力缺失是装配期问题（KnowledgeBackendValidator 在保存存储配置时校验）；
-                // 走到这里说明运行期换了配置或漏了校验，降级该路并留痕，不抛：
+                // 能力缺失本该在保存存储配置时被 KnowledgeBackendValidator 拦下（那里只给
+                // warning、不拒保存），所以运行期仍可能走到这里：降级该路并留痕，不抛——
                 // 抛会把"配错了"演变成"整轮检索失败"，与 A2 的降级口径相反。
-                log.error("[检索计划] 后端 {} 缺 {} 能力，该路本次跳过（应被启动期校验拦截）",
+                log.error("[检索计划] 后端 {} 缺 {} 能力（保存存储配置时应已给过警告），该路本次跳过",
                         backendId, capability);
                 return null;
             }
             return backend;
         } catch (IllegalArgumentException e) {
-            log.error("[检索计划] 后端 {} 未注册，该路本次跳过（应被启动期校验拦截）: {}",
+            log.error("[检索计划] 后端 {} 未注册（连接可能刚被删或尚未装配完），该路本次跳过: {}",
                     backendId, e.getMessage());
             return null;
         }
@@ -322,7 +388,7 @@ public class RetrievalPlan {
     // ==================== 写入侧取值（B4：多后端下的取值源纪律） ====================
 
     /**
-     * 关键词路后端：文档登记视角的权威（"有哪些文档"是登记视角，不是检索视角）。
+     * 关键词路后端：写入侧的行为权威（ping / 诊断 / 建集合时的维度校验看它）。
      *
      * @throws KnowledgeBaseException 后端未注册或不提供存储能力（60007）
      */
@@ -334,8 +400,9 @@ public class RetrievalPlan {
      * 写入用的 store：<b>写当前域自己绑的知识体</b>。
      *
      * <p>新模型下一个域只有一个体，所以这里通常是"取那个体连的 store"就完事。
-     * 仍然保留扇出分支，是因为旧的两角色绑定（同一域关键字在 ES、向量在 Qdrant）
-     * 还可能是合法配置：那种情况下同一份切片必须两边都写，否则另一条路静默召回不到。</p>
+     * 扇出分支覆盖的正是"关键字槽与向量槽绑了不同实例"：可能是两台 ES，也可能是
+     * ES + 向量库。那种情况下同一份切片必须两边都写，否则另一条路静默召回不到
+     * （不报错，只是没结果）。</p>
      *
      * <p><b>判"是不是同一份"看物理地址，不看对象引用</b>：关键字体与向量体可以指向
      * 同一个地址（一台 ES 干两件事），那两个后端是不同对象、却是同一台机器上的同一个索引。
@@ -346,7 +413,26 @@ public class RetrievalPlan {
      *               那会把 A 域的知识写进 B 域的库里）
      */
     public KnowledgeStore writeStore(String domain) {
-        List<BodyBinding> bodies = bodiesOf(Domains.normalize(domain));
+        String bodyId = lookup.bodyIdOf(Domains.normalize(domain));
+        if (bodyId == null || bodyId.isBlank()) {
+            throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BACKEND_MISCONFIGURED,
+                    "域 " + domain + " 未绑定知识体：请先在管控台「知识库」页选一个知识体，"
+                            + "再到「域空间」把它绑到这个域");
+        }
+        return writeStoreOfBody(bodyId);
+    }
+
+    /**
+     * 写入用的 store：<b>写这个知识体</b>（不经过域——管理链路只认体）。
+     *
+     * <p>扇出分支覆盖"关键字槽与向量槽绑了不同实例"：同一份切片必须两边都写，
+     * 否则另一条路静默召回不到（不报错，只是没结果）。判同机看
+     * {@link KnowledgeBackend#location()}，不看对象引用。</p>
+     *
+     * @param bodyId 知识体 id；体不存在 / 两路都没配时抛错
+     */
+    public KnowledgeStore writeStoreOfBody(String bodyId) {
+        List<BodyBinding> bodies = bodiesOfBody(bodyId);
         BodyBinding keywordBinding = null;
         BodyBinding vectorBinding = null;
         for (BodyBinding binding : bodies) {
@@ -360,8 +446,7 @@ public class RetrievalPlan {
         boolean hasVector = vectorBinding != null;
         if (!hasKeyword && !hasVector) {
             throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BACKEND_MISCONFIGURED,
-                    "域 " + domain + " 未绑定知识体（或绑的知识体是原文体）：请先在管控台"
-                            + "「存储配置」建知识体，再到「域空间」把它绑到这个域");
+                    "知识体 " + bodyId + " 没有可用的一路：它未配置，或配置的连接都不可用");
         }
         if (!hasKeyword) {
             return storeOfBinding(vectorBinding);
@@ -380,30 +465,63 @@ public class RetrievalPlan {
     /**
      * 读该域自己那份存储（列表 / 计数 / 写入后回读）。
      *
-     * <p>关键字体优先：它与写入目标一致（写入扇出时关键字那路是登记权威），
-     * 只在域只挂了向量体时才读向量体——向量后端同样有 documents / count 这些登记能力，
-     * 只是没有 BM25 检索。</p>
+     * <p><b>两路在时返回扇出 store，不是只看关键字那台</b>：关键字体与向量体可以分别绑在
+     * 两台 ES、或 ES + 向量库上，同一份切片各写一份。只读其中一台的前提是"那台一定全有"，
+     * 而这个前提在扇出写入 + 域换过知识体之后不成立——另一台可能持有它没有的文档，
+     * 页面于是显示"没有这份"（看着空、其实有）。{@link FanOutStore} 的读路径按后端
+     * 合并：文档按 docId 并集、集合名取并集、计数取最大值（不求和，避免双写翻倍）。</p>
+     *
+     * <p>同实例（{@link #samePhysicalStore}）时仍直接给那一个 store：本来就是同一份数据，
+     * 包一层扇出只是多绕一次。</p>
      *
      * <p>域没绑知识体时回落平台默认：读是幂等操作，读错一台最多是"看到空列表"；
      * 写入侧不允许这样回落（见 {@link #writeStore(String)}）。</p>
      */
     public KnowledgeStore readStore(String domain) {
+        String bodyId = lookup.bodyIdOf(Domains.normalize(domain));
+        if (bodyId == null || bodyId.isBlank()) {
+            return writeStore();
+        }
+        List<BodyBinding> bodies = bodiesOfBody(bodyId);
+        if (bodies.isEmpty()) {
+            return writeStore();
+        }
+        return readStoreOfBody(bodyId);
+    }
+
+    /**
+     * 读某个知识体自己那份存储（列表 / 计数 / 写入后回读）。
+     *
+     * <p><b>两路在时返回扇出 store，不是只看关键字那台</b>：两路可以分别绑在两台 ES、
+     * 或 ES + 向量库上，同一份切片各写一份。只读其中一台的前提是"那台一定全有"，
+     * 而这个前提在扇出写入 + 换过落点之后不成立——另一台可能持有它没有的文档，
+     * 页面于是显示"没有这份"（看着空、其实有）。{@link FanOutStore} 的读路径按后端
+     * 合并：文档按 docId 并集、集合名取并集、计数取最大值（不求和，避免双写翻倍）。</p>
+     *
+     * <p>同实例（{@link #samePhysicalStore}）时仍直接给那一个 store：本来就是同一份数据。</p>
+     */
+    public KnowledgeStore readStoreOfBody(String bodyId) {
         BodyBinding keyword = null;
         BodyBinding vector = null;
-        for (BodyBinding binding : bodiesOf(Domains.normalize(domain))) {
+        for (BodyBinding binding : bodiesOfBody(bodyId)) {
             if ("keyword".equals(binding.kind()) && keyword == null) {
                 keyword = binding;
             } else if ("vector".equals(binding.kind()) && vector == null) {
                 vector = binding;
             }
         }
-        if (keyword != null) {
-            return storeOfBinding(keyword);
+        if (keyword == null) {
+            return vector == null ? writeStoreOfBody(bodyId) : storeOfBinding(vector);
         }
-        if (vector != null) {
-            return storeOfBinding(vector);
+        KnowledgeStore keywordStore = storeOfBinding(keyword);
+        if (vector == null) {
+            return keywordStore;
         }
-        return writeStore();
+        KnowledgeStore vectorStore = storeOfBinding(vector);
+        if (samePhysicalStore(keyword, vector, keywordStore == vectorStore)) {
+            return keywordStore;
+        }
+        return new FanOutStore(keywordStore, List.of(keywordStore, vectorStore));
     }
 
     /**

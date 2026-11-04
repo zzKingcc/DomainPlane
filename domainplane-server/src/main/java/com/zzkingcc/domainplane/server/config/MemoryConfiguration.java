@@ -58,10 +58,8 @@ public class MemoryConfiguration {
             MemoryProperties memoryProperties) {
         String ttlText = memoryProperties.getTtl() != null
                 ? memoryProperties.getTtl().toMinutes() + " 分钟" : "永久";
-        log.info("[会话记忆] RedisChatMemoryStore 初始化：maxMessages={} 条（≈{} 轮问答），"
-                        + "maxTokens={} tokens，TTL={}；上限只作内部自检，超限由装配层降级而非拒绝",
-                memoryProperties.getMaxMessages(), memoryProperties.getMaxMessages() / 2,
-                memoryProperties.getMaxTokens(), ttlText);
+        log.info("[会话记忆] RedisChatMemoryStore 初始化：键前缀 domainplane:chat:memory:，"
+                        + "TTL={}，只增不减（不做条数 / Token 封顶）", ttlText);
         return new RedisChatMemoryStore(stringRedisTemplate, memoryProperties.getTtl());
     }
 
@@ -104,11 +102,10 @@ public class MemoryConfiguration {
                 memoryProperties.getRecallUnigramWeight(),
                 new LinkedHashSet<>(memoryProperties.getRecallExtraStopWords()));
         boolean semantic = memoryProperties.isHistoryVectorEnabled();
-        log.info("[会话检索] RedisHistorySearch 初始化：键前缀 domainplane:conv:idx: / domainplane:conv:terms:，"
-                        + "一词根一 ZSET，member/score=turnId；分词权重 word={} bigram={} unigram={}，追加停用词 {} 个；"
-                        + "语义路（F04-b）={}",
+        log.info("[会话检索] 键前缀 domainplane:conv:idx: / :terms:，语义路={}，分词权重 word/bigram/unigram={}/{}/{}，停用词 {} 个",
+                semantic ? "开启（关键词 + 向量 RRF）" : "关闭（纯关键词）",
                 profile.wordWeight(), profile.bigramWeight(), profile.unigramWeight(),
-                profile.extraStopWords().size(), semantic ? "开启（关键词 + 向量 RRF 融合）" : "关闭（纯关键词）");
+                profile.extraStopWords().size());
         return new RedisHistorySearch(stringRedisTemplate, redisConversationArchive, profile,
                 redisHistoryVectorIndex, historyTextEmbedder, semantic);
     }
@@ -170,8 +167,7 @@ public class MemoryConfiguration {
             RedisConversationArchive redisConversationArchive,
             RedisAssemblyReportStore redisAssemblyReportStore,
             RedisHistoryVectorIndex redisHistoryVectorIndex) {
-        log.info("[会话体量] RedisSessionStorage 初始化：只读盘点（记忆条数 / 归档轮数 / 向量轮数 / 清单条数）"
-                + " + 会话副本导出，不含任何清理动作");
+        log.info("[会话体量] 只读盘点 + 会话副本导出，不含任何清理动作");
         return new RedisSessionStorage(stringRedisTemplate, redisConversationArchive,
                 redisAssemblyReportStore, redisHistoryVectorIndex);
     }
@@ -221,7 +217,7 @@ public class MemoryConfiguration {
                 .register(ToolExecutionRequest.class, new ToolExecutionRequestSerializer())
                 .register(ChatMessage.class, new ChatMesssageSerializer())
                 .register(Content.class, new JsonContentSerializer());
-        log.info("[检查点] ObjectStreamStateSerializer 初始化，已注册 ChatMessage/ToolExecutionRequest/Content 序列化器");
+        log.debug("[检查点] ObjectStreamStateSerializer 已注册 ChatMessage / ToolExecutionRequest / Content 序列化器");
         return serializer;
     }
 

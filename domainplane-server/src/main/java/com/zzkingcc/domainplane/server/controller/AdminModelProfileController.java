@@ -202,7 +202,7 @@ public class AdminModelProfileController {
             }
         }
 
-        /* 建档案时若声明了向量维度，同样先探测模型是否接纳该维度，拒绝「填了但不被支持」的值 */
+        /* 建档案时若填了向量维度，校验它是否等于模型原生维度（维度是索引契约，不随请求下发） */
         String dimError = validateDimension(null, profile);
         if (dimError != null) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, dimError);
@@ -661,21 +661,23 @@ public class AdminModelProfileController {
     }
 
     /**
-     * 探测「改后的向量维度」是否被模型真接受：存之前的最后一道把关。
+     * 校验「向量维度」：只能是该模型的<b>原生维度</b>。
      *
-     * 只在维度被显式声明、且相对原档案有变化时才探测：避免对"沿用模型默认（null）"或
-     * 未变动的值反复发请求。探测用「读取」同款短请求（{@link LlmModelHolder#testEmbeddingConnection}），
-     * 以模型实际返回的向量长度为唯一可信判据：声明 10 却返回 1024，说明上游忽略了
-     * {@code dimensions} 参数，该维度不被支持，必须拒绝，否则存进一个 ES 索引无法匹配的长度，
-     * 灌库时静默作废全部旧向量、检索直接失效。
+     * <p>维度是<b>本机索引契约</b>，不会作为 {@code dimensions} 请求参数下发
+     * （固定维度模型如 bge-m3 直接拒绝该参数，下发等于"填对维度反而灌库失败"）。
+     * 既然不下发，声明值就只能等于模型实际产出的长度——填别的值，索引会按填的值建，
+     * 而写入的向量是另一个长度，整个域的灌库与检索都会失败。所以这里用实测的原生维度
+     * 做唯一判据：不一致直接拒绝，把"该填多少"写进报错。</p>
      *
-     * 探测没跑完一律不算"确认支持"：服务商不认 dimensions、鉴权失败、地址写错、网络不通，
-     * 全都拒绝保存并把原因回给用户。理由是拿不到实测维度就存下去，等于把一个没人验证过的
-     * 长度写进 ES 索引契约 —— 灌库时静默作废全部旧向量，而页面上看不出任何异常。
+     * <p>只在维度被显式声明、且相对原档案有变化时才探测：避免对"沿用模型默认（null）"或
+     * 未变动的值反复发请求。</p>
+     *
+     * <p>探测没跑完一律不算通过：服务商不可达、鉴权失败、地址写错时拿不到原生维度，
+     * 存下去等于把一个没人验证过的长度写进索引契约。</p>
      *
      * @param existing  改之前的档案（未变动则跳过探测）；新建档案传 {@code null}
      * @param candidate 改之后的档案
-     * @return 不支持 / 探测失败的原因；{@code null} 表示通过
+     * @return 不通过的原因；{@code null} 表示通过
      */
     private String validateDimension(ModelProfile existing, ModelProfile candidate) {
         if (candidate.dimensions() == null) {
@@ -689,45 +691,42 @@ public class AdminModelProfileController {
             return null; // 维度没变，跳过探测
         }
         Integer want = candidate.dimensions();
-        /* 先测模型原生维度（不带 dimensions 参数）：固定维度模型（如 bge-m3）会直接拒绝
-           dimensions 参数，哪怕给的就是它自己的 1024。所以"声明值 == 原生维度"就视为支持，
-           绝不再发一次带参数的探测去自找 4xx，否则"用默认维度、检测后回填 1024"这种正常流程
-           反而会被当成"不支持"拒掉。 */
-        Integer nativeDim = measureNativeDimension(candidate);
-        if (nativeDim != null && nativeDim.equals(want)) {
-            return null;
+        Integer nativeDim;
+        try {
+            nativeDim = measureNativeDimensionOrThrow(candidate);
+        } catch (Exception e) {
+            String detail = LlmFailureDescriber.describe(e);
+            log.warn("[模型档案] 向量维度 {} 无法确认（探测失败），拒绝保存: {}", want, detail);
+            return "向量维度 " + want + " 无法确认：" + detail
+                    + "。请先确认该向量模型可连通（地址 / Key / 模型名），再保存维度。";
         }
-        /* 声明值 ≠ 原生维度 —— 试探模型是否支持自定义维度 */
+        if (!nativeDim.equals(want)) {
+            return "向量维度 " + want + " 不被支持：维度只用于本机建索引、不随请求下发，"
+                    + "只能是该模型的原生维度 " + nativeDim + " 维（留空则由服务端按原生维度回填）。";
+        }
+        return null;
+    }
+
+    /**
+     * 实测模型原生维度，失败时抛异常（由调用方转成提示文案）。
+     *
+     * <p>与 {@link #measureNativeDimension} 的区别：那个是"尽力而为"的回填，
+     * 失败就返回 {@code null}；这里是"校验必须拿到值"，失败必须让用户知道原因。</p>
+     */
+    private Integer measureNativeDimensionOrThrow(ModelProfile candidate) {
         LlmSettings probe = new LlmSettings();
         probe.setEmbeddingBaseUrl(candidate.baseUrl());
         probe.setEmbeddingApiKey(candidate.apiKey());
         probe.setEmbeddingModelName(candidate.modelName());
-        probe.setEmbeddingDimensions(want);
-        try {
-            LlmModelHolder.EmbeddingProbe result = holder.testEmbeddingConnection(probe);
-            if (!result.success()) {
-                return "向量维度 " + want + " 不被模型支持：该模型固定输出 "
-                        + result.actualDimension() + " 维。";
-            }
-            return null;
-        } catch (Exception e) {
-            /* 探测没跑完就不能算"确认支持"：拿不到实测维度就把值存下去，
-               等于把一个没人验证过的长度写进 ES 索引契约，灌库时会静默作废全部旧向量。
-               所以这里一律拒绝，并把真实原因回给用户：地址写错、Key 失效、服务商不认
-               dimensions 参数都表现为探测失败，光看异常文案无法区分"只是没探成"和"确实不支持"，
-               与其猜，不如让用户先把连通性确认掉。 */
-            String detail = LlmFailureDescriber.describe(e);
-            log.warn("[模型档案] 向量维度 {} 探测失败，拒绝保存: {}", want, detail);
-            return "向量维度 " + want + " 设置失败：" + detail;
-        }
+        return holder.testEmbeddingConnection(probe).actualDimension();
     }
 
     /**
      * 不带 {@code dimensions} 参数发一次极短请求，取模型原生向量维度。
      *
-     * 固定维度模型（bge-m3 等）压根不认 {@code dimensions} 参数，发带参数的请求会被 4xx 拒绝；
-     * 这里刻意不带参数，拿到模型「出厂」维度，供 {@link #validateDimension} 判断"声明值是否等于原生维度"。
-     * 探测失败返回 {@code null}（不抛）：上层据此跳过与原生维度的比对，改由带参探测决定放行与否。
+     * <p>这是<b>尽力而为</b>的回填（维度留空时用），失败返回 {@code null} 而不抛：
+     * 探测不成就保留 null、语义回落到"按模型默认"，不因为一次可选回填失败就拒绝整次保存。
+     * 需要"必须拿到值"的场景用 {@link #measureNativeDimensionOrThrow}。</p>
      */
     private Integer measureNativeDimension(ModelProfile candidate) {
         LlmSettings probe = new LlmSettings();

@@ -433,4 +433,7 @@
   --tblr-tabler-lt-rgb: 230, 241, 250;
 }
 
-/*# sourceMappingURL=tabler-props.css.map */
+/* 注意：本文件与 tabler.min.css 都刻意去掉了 `sourceMappingURL` 注释。
+   这里只 vendor 了 CSS 本体、没有 .map，留着那行会让 DevTools 每次打开控制台
+   都去拉一个必然 404 的 map 请求，把服务端日志刷成 WARN。若要加回，请连 .map 一起 vendor。 */
+

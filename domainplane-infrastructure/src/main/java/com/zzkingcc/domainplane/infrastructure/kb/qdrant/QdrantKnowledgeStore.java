@@ -175,23 +175,24 @@ public class QdrantKnowledgeStore implements KnowledgeStore, DedupLookup {
             // 扫描量受 DEDUP_FETCH_CAP 限制：触顶时告警，宁可少判一次重复，
             // 也别悄悄写重（与 ES 适配器同纪律）。
             int scanned = 0;
-            Object scrollId = null;
+            Object offset = null;
             while (scanned < DEDUP_FETCH_CAP) {
-                List<QdrantScored> page = client.scroll(collection, SCROLL_PAGE, scrollId);
-                if (page.isEmpty()) {
+                QdrantHttpClient.ScrollPage page = client.scrollPage(collection, SCROLL_PAGE, offset, false);
+                List<QdrantScored> points = page.points();
+                if (points.isEmpty()) {
                     break;
                 }
-                for (QdrantScored s : page) {
+                for (QdrantScored s : points) {
                     String hash = s.metadata().get(ChunkMetadataKeys.CONTENT_HASH);
                     if (hash != null && contentHashes.contains(hash)) {
                         existing.add(new DedupKey(hash, s.metadata().get(ChunkMetadataKeys.FILE_NAME)));
                     }
                 }
-                scanned += page.size();
-                scrollId = client.nextScrollId(collection, scrollId);
-                if (scrollId == null) {
+                scanned += points.size();
+                if (!page.hasMore()) {
                     break;
                 }
+                offset = page.nextOffset();
             }
             if (scanned >= DEDUP_FETCH_CAP) {
                 log.warn("[Qdrant] 去重查询扫描达到上限 {} 条，剩余点位未参与判定，"
@@ -221,13 +222,14 @@ public class QdrantKnowledgeStore implements KnowledgeStore, DedupLookup {
     public List<KbChunk> readByDocId(String collection, String docId) {
         try {
             List<KbChunk> out = new ArrayList<>();
-            Object scrollId = null;
+            Object offset = null;
             while (out.size() < READ_BY_DOC_MAX) {
-                List<QdrantScored> page = client.scroll(collection, SCROLL_PAGE, scrollId);
-                if (page.isEmpty()) {
+                QdrantHttpClient.ScrollPage page = client.scrollPage(collection, SCROLL_PAGE, offset, true);
+                List<QdrantScored> points = page.points();
+                if (points.isEmpty()) {
                     break;
                 }
-                for (QdrantScored s : page) {
+                for (QdrantScored s : points) {
                     if (docId != null && !docId.equals(s.metadata().get(ChunkMetadataKeys.DOC_ID))) {
                         continue;
                     }
@@ -236,10 +238,10 @@ public class QdrantKnowledgeStore implements KnowledgeStore, DedupLookup {
                         out.add(chunk);
                     }
                 }
-                scrollId = client.nextScrollId(collection, scrollId);
-                if (scrollId == null) {
+                if (!page.hasMore()) {
                     break;
                 }
+                offset = page.nextOffset();
             }
             return out;
         } catch (Exception e) {
@@ -258,14 +260,16 @@ public class QdrantKnowledgeStore implements KnowledgeStore, DedupLookup {
             Map<String, String> idToName = new LinkedHashMap<>();
             Map<String, Integer> idToChunks = new LinkedHashMap<>();
             Map<String, String> idToDomain = new LinkedHashMap<>();
-            Object scrollId = null;
+            Object offset = null;
             int scanned = 0;
             while (scanned < Math.max(1, limit)) {
-                List<QdrantScored> page = client.scroll(collection, SCROLL_PAGE, scrollId);
-                if (page.isEmpty()) {
+                /* 只要 payload：列文档不需要向量，一页 256 个 1024 维浮点数是纯浪费带宽 */
+                QdrantHttpClient.ScrollPage page = client.scrollPage(collection, SCROLL_PAGE, offset, false);
+                List<QdrantScored> points = page.points();
+                if (points.isEmpty()) {
                     break;
                 }
-                for (QdrantScored s : page) {
+                for (QdrantScored s : points) {
                     Map<String, String> md = s.metadata();
                     String docId = md.get(ChunkMetadataKeys.DOC_ID);
                     if (docId == null) {
@@ -273,17 +277,17 @@ public class QdrantKnowledgeStore implements KnowledgeStore, DedupLookup {
                     }
                     idToName.putIfAbsent(docId, md.get(ChunkMetadataKeys.FILE_NAME));
                     idToChunks.merge(docId, 1, Integer::sum);
-                    idToDomain.putIfAbsent(docId, domainOf(md));
+                    idToDomain.putIfAbsent(docId, bodyOf(md));
                 }
-                scanned += page.size();
-                scrollId = client.nextScrollId(collection, scrollId);
-                if (scrollId == null) {
+                scanned += points.size();
+                if (!page.hasMore()) {
                     break;
                 }
+                offset = page.nextOffset();
             }
             List<DocumentAgg> items = new ArrayList<>();
             idToName.forEach((id, fileName) ->
-                    items.add(new DocumentAgg(id, fileName, idToDomain.getOrDefault(id, Domains.DEFAULT),
+                    items.add(new DocumentAgg(id, fileName, idToDomain.get(id),
                             idToChunks.getOrDefault(id, 0))));
             return items;
         } catch (Exception e) {
@@ -339,21 +343,20 @@ public class QdrantKnowledgeStore implements KnowledgeStore, DedupLookup {
 
         private void fetchPage() {
             try {
-                List<QdrantScored> page = client.scroll(collection, batch, scrollId);
-                List<KbChunk> chunks = new ArrayList<>(page.size());
-                for (QdrantScored s : page) {
+                QdrantHttpClient.ScrollPage page = client.scrollPage(collection, batch, scrollId, true);
+                List<KbChunk> chunks = new ArrayList<>(page.points().size());
+                for (QdrantScored s : page.points()) {
                     KbChunk c = toChunk(s);
                     if (c != null) {
                         chunks.add(c);
                     }
                 }
                 pending = chunks;
-                Object next = client.nextScrollId(collection, scrollId);
-                if (page.isEmpty() || next == null) {
+                if (page.points().isEmpty() || !page.hasMore()) {
                     done = true;
                     return;
                 }
-                scrollId = next;
+                scrollId = page.nextOffset();
             } catch (Exception e) {
                 throw new StoreAccessException("扫描集合[" + collection + "]失败："
                         + e.getMessage(), e);
@@ -371,12 +374,12 @@ public class QdrantKnowledgeStore implements KnowledgeStore, DedupLookup {
         return new KbChunk(s.id(), s.text(), s.metadata(), s.vector());
     }
 
-    /** 读取切片元数据里的归属域；缺失或为空时按根域算（与 ES 适配器同口径）。 */
-    private static String domainOf(Map<String, String> md) {
+    /** 读取切片元数据里的知识体 id；缺失（早期文档）返回 null（与 ES 适配器同口径）。 */
+    private static String bodyOf(Map<String, String> md) {
         String raw = md.get(ChunkMetadataKeys.DOMAIN);
         if (raw != null && !raw.isBlank()) {
             return raw;
         }
-        return Domains.DEFAULT;
+        return null;
     }
 }

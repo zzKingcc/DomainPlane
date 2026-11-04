@@ -19,6 +19,10 @@ import java.util.Set;
  * | {@link #existingDedupKeys} | fail-open + **error 级日志** | 后果是重复写入而不是错数据；warn 会被淹没 |
  * | {@link #scan} | 迭代中失败抛 | 对账补写与重灌都不能半途而废：读到一半停住会把"缺档"误判成"文档只有这些切片" |
  *
+ * <p><b>多后端拼装时，读路径要逐后端合并</b>（见 {@link FanOutStore}）：一域的关键字体
+ * 与向量体可以分别落在两台 ES、或 ES + 向量库上，同一份切片各写一份。所以
+ * "有哪些文档 / 有几片"必须问<b>全部</b>后端再合并，只看其中一台会得出"看着空、其实有"。</p>
+ *
  * @author zzkingcc
  */
 public interface KnowledgeStore {

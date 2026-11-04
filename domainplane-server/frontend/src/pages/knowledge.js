@@ -1,25 +1,28 @@
 /* ==========================================================================
-   知识库页
-   ---------------------------------------------------------------------------
-   页面的一等对象是「知识体」：域只是它的使用者，索引名只由域派生、可以被写在多台上。
-   所以本页所有判断都围绕三件事：哪个体装了什么、这批域挂在哪台机器、我要动的到底是哪一份。
+   知识库页（v2）
 
-   数据来源只有两个只读接口：
-   - /admin/kb/overview  汇总 + 每个体的两槽落点 / 绑定域 / 文档数 + 孤儿索引（与域空间页
-                          共用同一份 60s 统计快照，页面不各自现扫存储）
-   - /admin/kb/documents 文档清单（落点与知识体列由 overview 的绑定关系推算）
-   上传前再问 /admin/kb/target 拿落点预检（纯读配置，不碰存储）。
+   页面的一等对象是「知识体」：一个体 = 一份数据 + 一个索引（名字创建时冻结）。
+   域只是消费者，可以多个域共用一个体；删域不解绑之外不碰任何存储。
+
+   所有动作都从知识体卡片发起：上传 / 看文档 / 重建 / 设置 / 绑定域 / 删除。
+   数据只来自两个接口：
+   - GET  /admin/bodies                 快照（体 + 槽位 + 绑定域 + 计数 + 无主索引）
+   - GET  /admin/bodies/{id}/documents  某个体的文档清单
+
+   上传前问 GET /admin/bodies/target?body= 做落点预检（纯读配置，不碰存储）。
+   体本身的增删改走 /admin/bodies；连接池与 Redis 仍在「存储配置」页。
    ========================================================================== */
 (function () {
     var esc = Console.escapeHtml;
 
-    /* 概览快照与文档清单各自到达，两处渲染都读这些状态，谁后到谁触发重绘 */
     var state = {
-        overview: null,
-        docs: [],
-        target: null,
-        bodyOfDomain: {},   /* 域 → 知识体 id（前端只为文档表补两列，判定以后端为准） */
-        limits: null
+        snap: null,
+        limits: null,
+        rawOptions: [],
+        embeddingReady: false,
+        embeddingNote: '',
+        connections: [],
+        domains: []
     };
 
     function fmt(n) {
@@ -37,675 +40,1055 @@
         if (el) { el.textContent = v || ''; }
     }
 
-    function domainLabel(domain) {
-        var d = domain || 'default';
-        return '<span class="pill">' + esc(d) + (d === 'default' ? '（全域）' : '') + '</span>';
+    /* ==================== 通用弹层（外观借 Tabler 的 .modal，行为自己写） ==================== */
+
+    var opened = null;   /* { root, backdrop, prevOverflow, onClose } */
+
+    function closeModal() {
+        if (!opened) { return; }
+        var m = opened;
+        opened = null;
+        document.removeEventListener('keydown', onModalKey);
+        if (m.root.parentNode) { m.root.parentNode.removeChild(m.root); }
+        if (m.backdrop.parentNode) { m.backdrop.parentNode.removeChild(m.backdrop); }
+        document.body.style.overflow = m.prevOverflow;
+        if (m.onClose) { m.onClose(); }
     }
 
-    /* ==================== 落点 / 状态 / 召回模式 ==================== */
-
-    /* 槽位六态必须分开表达：未配 / 连接已删 / 连接未填地址 / 连接未注册 / 能力不匹配 / 可用。
-       合并成"不可用"会让用户无从知道该去存储配置补什么。 */
-    function slotChip(slot) {
-        if (!slot || slot.state === 'absent') {
-            return '<span class="dp-chip mute">未配</span>';
+    function onModalKey(e) {
+        if (e.key === 'Escape' || e.key === 'Esc') {
+            e.preventDefault();
+            closeModal();
         }
-        var name = esc(slot.name || slot.connectionId || '');
-        if (slot.state === 'ok') {
-            return '<span class="dp-chip mono ok" title="' + esc((slot.type || '') + ' · ' + slot.connectionId) + '">' + name + '</span>';
-        }
-        var why = slot.state === 'missing' ? '连接已删除'
-            : slot.state === 'blank' ? '连接未填地址'
-            : slot.state === 'incapable' ? '该连接类型提供不了这一路（如关键字槽指到向量库）'
-            : '连接未注册（存储配置保存后生效）';
-        return '<span class="dp-chip mono warn" title="' + esc(why) + '">' + name + '</span>';
     }
 
-    function modesText(modes) {
-        if (!modes || !modes.length) { return '空壳'; }
-        if (modes.length > 1) { return '混合'; }
-        return modes[0] === 'keyword' ? '仅关键字' : '仅向量';
+    /**
+     * 打开一个弹层。
+     * @param {{title:string, body:string, footer:string, size:string, onOpen:Function, onClose:Function}} opts
+     */
+    function openModal(opts) {
+        closeModal();
+        var prevOverflow = document.body.style.overflow;
+
+        var root = document.createElement('div');
+        root.className = 'modal dp-preview';
+        root.setAttribute('tabindex', '-1');
+        root.setAttribute('role', 'dialog');
+        root.setAttribute('aria-modal', 'true');
+        root.innerHTML = '<div class="modal-dialog ' + (opts.size || 'modal-lg') + ' modal-dialog-scrollable" role="document">'
+            + '<div class="modal-content">'
+            + '<div class="modal-header">'
+            + '<h5 class="modal-title">' + esc(opts.title || '') + '</h5>'
+            + '<button type="button" class="btn-close" data-dp-close="1" aria-label="关闭"></button>'
+            + '</div>'
+            + '<div class="modal-body">' + (opts.body || '') + '</div>'
+            + '<div class="modal-footer">' + (opts.footer || '')
+            + '<button type="button" class="btn btn-outline-secondary" data-dp-close="1">关闭</button>'
+            + '</div>'
+            + '</div></div>';
+
+        var backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop show';
+
+        opened = { root: root, backdrop: backdrop, prevOverflow: prevOverflow, onClose: opts.onClose };
+        document.body.appendChild(root);
+        document.body.appendChild(backdrop);
+        root.classList.add('show');
+        document.body.style.overflow = 'hidden';
+        document.addEventListener('keydown', onModalKey);
+
+        root.addEventListener('click', function (e) {
+            var t = e.target;
+            if (t === root || (t && t.getAttribute && t.getAttribute('data-dp-close'))) {
+                closeModal();
+            }
+        });
+        backdrop.addEventListener('click', closeModal);
+
+        if (opts.onOpen) { opts.onOpen(root); }
+        var first = root.querySelector('input, select, textarea, button.btn-primary');
+        if (first) { first.focus(); }
+        return root;
     }
 
-    /* 生效模式 = 体两槽 × 全局策略。策略关掉的那一路照样显示出来（划掉），
-       否则"配了两路、页面显示混合、实际只走一路"这个坑会重演。 */
-    function modeCell(row) {
-        var modes = row.modes || [];
-        var effective = row.effectiveModes || [];
-        if (!modes.length) {
-            return '<span class="dp-chip mute">空壳</span>';
+    function copyText(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text);
+        } else {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
         }
-        var text = effective.length ? modesText(effective) : '无生效路';
-        var html = '<span class="dp-chip' + (effective.length ? '' : ' warn') + '">' + esc(text) + '</span>';
-        if (effective.length < modes.length) {
-            var closed = modes.filter(function (m) { return effective.indexOf(m) < 0; })
-                .map(function (m) { return m === 'keyword' ? '关键字' : '向量'; }).join('/');
-            html += '<span class="dp-chip warn" title="' + esc('全局策略关闭了 ' + closed + ' 路') + '">关' + closed + '</span>';
-        }
-        return html;
     }
+
+    /* ==================== 状态 / 槽位 / 召回 ==================== */
 
     var STATUS_TEXT = {
         ok: ['正常', 'ok'],
-        empty: ['空壳', 'warn'],
-        dead: ['连接不可用', 'err'],
+        empty: ['未配落点', 'warn'],
+        dead: ['落点不可用', 'err'],
         missing: ['体已删除', 'err'],
         no_index: ['有绑定无索引', 'warn']
     };
 
-    function statusCell(status) {
+    function statusChip(status) {
         var pair = STATUS_TEXT[status] || [status || '—', ''];
         return '<span class="dp-chip ' + pair[1] + '">' + esc(pair[0]) + '</span>';
     }
 
-    /* ==================== 知识体视图 ==================== */
+    var SLOT_WHY = {
+        missing: '连接已从存储配置里删除',
+        blank: '连接还没填地址',
+        unregistered: '连接没注册上（保存存储配置后生效）',
+        incapable: '这个连接类型提供不了这一路（例如关键字槽指到了 Qdrant）'
+    };
 
-    function bodyEmptyRow(text) {
-        return '<tr class="dp-doc-empty"><td colspan="8"><div>' + text + '</div></td></tr>';
+    function slotChip(slot, kindLabel) {
+        if (!slot || slot.state === 'absent') {
+            return '<span class="dp-chip mute">未配</span>';
+        }
+        var name = esc(slot.name || slot.connectionId || '');
+        var label = '<span class="dp-slot-kind">' + esc(kindLabel) + '</span>';
+        if (slot.state === 'ok') {
+            return label + '<span class="dp-chip mono ok" title="' + esc((slot.type || '') + ' · ' + slot.connectionId) + '">' + name + '</span>';
+        }
+        return label + '<span class="dp-chip mono warn" title="' + esc(SLOT_WHY[slot.state] || slot.state) + '">' + name + '</span>';
     }
 
-    function renderBodies() {
-        var ov = state.overview;
-        var tbody = document.getElementById('bodyBody');
-        if (!tbody) { return; }
-        if (!ov) { return; }
-
-        var bodies = ov.bodies || [];
-        var inUse = (ov.platform || {}).bodiesInUse || 0;
-        var badge = document.getElementById('bodyCount');
-        if (badge) {
-            badge.textContent = bodies.length + ' 个';
-            badge.className = 'mbadge' + (inUse > 0 ? ' ok' : '');
-        }
-
-        if (!bodies.length) {
-            tbody.innerHTML = bodyEmptyRow('还没有知识体，先去<a class="dp-target-link" href="infra.html">存储配置</a>建一个');
-            return;
-        }
-
-        tbody.innerHTML = bodies.map(function (b) {
-            var slots = b.slots || [];
-            var keyword = slots[0];
-            var vector = slots[1];
-            var domainList = (b.domains || []).map(function (d) {
-                return d.domain + ' → ' + d.index + (d.exists ? '' : '（无索引）');
-            }).join('\n');
-            var domainsCell = b.domainCount
-                ? '<span class="dp-chip mono" title="' + esc(domainList) + '">' + b.domainCount + ' 个</span>'
-                : '<span class="dp-chip mute">未绑定</span>';
-            return '<tr>'
-                + '<td><b>' + esc(b.name || b.id) + '</b>'
-                + (b.name && b.name !== b.id ? '<span class="dp-body-domain">' + esc(b.id) + '</span>' : '')
-                + '</td>'
-                + '<td>' + slotChip(keyword) + '</td>'
-                + '<td>' + slotChip(vector) + '</td>'
-                + '<td>' + modeCell(b) + '</td>'
-                + '<td>' + domainsCell + '</td>'
-                + '<td>' + fmt(b.documents) + ' / ' + fmt(b.chunks) + '</td>'
-                + '<td>' + statusCell(b.status) + '</td>'
-                + '<td class="ta-r"><button class="btn btn-sm btn-outline-secondary" data-body="'
-                + esc(b.id) + '">看文档</button></td>'
-                + '</tr>';
+    function modeChips(b) {
+        var modes = b.modes || [];
+        var effective = b.effectiveModes || [];
+        if (!modes.length) { return '<span class="dp-chip mute">空壳</span>'; }
+        var out = modes.map(function (m) {
+            var open = effective.indexOf(m) >= 0;
+            var text = m === 'keyword' ? '关键字' : '向量';
+            return '<span class="dp-chip ' + (open ? '' : 'warn') + '"'
+                + (open ? '' : ' title="全局检索策略关闭了这一路"') + '>' + text + (open ? '' : '（策略关闭）') + '</span>';
         }).join('');
-
-        tbody.querySelectorAll('button[data-body]').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                var select = document.getElementById('filterBody');
-                if (select) { select.value = btn.getAttribute('data-body'); }
-                renderDocs();
-            });
-        });
+        if (b.fanOut) {
+            out += '<span class="dp-chip warn" title="两路落在两台机器上，同一份切片要写两次">写两份</span>';
+        }
+        return out;
     }
 
-    function renderStats() {
-        var ov = state.overview;
-        if (!ov) { return; }
-        var p = ov.platform || {};
-        var stale = ov.stale ? '（旧数据）' : '';
-        setValue('statDocs', fmt(p.documents));
-        setValue('statChunks', fmt(p.chunks));
-        setValue('statBodies', fmt(p.bodies) + ' 个', p.bodiesInUse ? '' : 'warn');
-        setNote('statBodiesNote', (p.bodiesInUse || 0) + ' 个在用' + stale);
-        /* 总览只剩「归属」口径：体视图各行之和会小于总数（解绑/悬空域的文档没有体可归），
-           这是口径事实，不是算错——所以这里不做任何"校准"。 */
+    function rawChip(b) {
+        var raw = b.raw || {};
+        var label = raw.label || raw.location || '本地磁盘';
+        var detail = raw.detail || '';
+        return '<span class="dp-chip" title="' + esc(detail) + '">' + esc(label) + '</span>';
     }
 
-    function loadOverview() {
-        return Console.api.get('/admin/kb/overview').then(function (ov) {
-            state.overview = ov;
-            state.limits = ov.limits || null;
-            state.bodyOfDomain = {};
-            (ov.bodies || []).forEach(function (b) {
-                (b.domains || []).forEach(function (d) {
-                    state.bodyOfDomain[d.domain] = b.id;
-                });
-            });
-            renderStats();
-            renderBodies();
-            fillBodyFilter();
-            fillBackendFilter();
-            fillDomainFilter();
-            renderDocs();
+    function domainChips(b) {
+        var domains = b.domains || [];
+        if (!domains.length) {
+            return '<span class="dp-chip mute">未绑定任何域（没有对话能查到它）</span>';
+        }
+        var shown = domains.slice(0, 3).map(function (d) {
+            return '<span class="dp-chip mono">' + esc(d) + '</span>';
+        }).join('');
+        if (domains.length > 3) {
+            shown += '<span class="dp-chip" title="' + esc(domains.join('\n')) + '">+' + (domains.length - 3) + '</span>';
+        }
+        return shown;
+    }
+
+    /* ==================== 知识体卡片 ==================== */
+
+    function bodyCards(bodies) {
+        if (!bodies.length) {
+            return '<div class="dp-kb-empty">'
+                + '<div class="dp-kb-empty-icon"><svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg></div>'
+                + '<h4>还没有知识体</h4>'
+                + '<p>知识体是"一份可被多个域共用的资料"。先建一个，选好关键字 / 向量的落点，再往里传文档。</p>'
+                + '<button class="btn btn-primary" data-act="create">新建知识体</button>'
+                + '</div>';
+        }
+        return bodies.map(function (b) {
+            var id = esc(b.id);
+            var ghost = b.status === 'missing';
+            return '<article class="dp-kb-card s-' + esc(b.status) + '" data-body="' + id + '">'
+                + '<header class="dp-kb-card-head">'
+                + '  <div class="dp-kb-title">'
+                + '    <b>' + esc(b.name || b.id) + '</b>'
+                + '    <code class="dp-kb-slug" title="唯一名（创建后不可改）">' + esc(b.slug || b.id) + '</code>'
+                + '  </div>'
+                + '  <div class="dp-kb-head-right">' + statusChip(b.status) + '</div>'
+                + '</header>'
+                + '<div class="dp-kb-index">'
+                + '  <span class="dp-kb-label">索引</span>'
+                + '  <code>' + esc(b.index || '（未分配）') + '</code>'
+                + (b.index ? '<button class="dp-kb-copy" data-act="copy" data-text="' + esc(b.index) + '" title="复制索引名">复制</button>' : '')
+                + '  ' + (b.existsIndex ? '<span class="dp-chip ok" title="后端上确实有这个索引">已就绪</span>'
+                    : '<span class="dp-chip warn" title="后端上没有这个集合（还没上传过文档，或集合被删了）">无集合</span>')
+                + '</div>'
+                + '<div class="dp-kb-meta">'
+                + '  <div class="dp-kb-row"><span class="dp-kb-label">召回</span><span class="dp-kb-vals">' + modeChips(b) + '</span></div>'
+                + '  <div class="dp-kb-row">' + slotChip((b.slots || [])[0], '关键字') + '</div>'
+                + '  <div class="dp-kb-row">' + slotChip((b.slots || [])[1], '向量') + '</div>'
+                + '  <div class="dp-kb-row"><span class="dp-kb-label">原文</span><span class="dp-kb-vals">' + rawChip(b) + '</span></div>'
+                + '</div>'
+                + '<div class="dp-kb-stats">'
+                + '  <span><b>' + fmt(b.documents) + '</b> 文档</span>'
+                + '  <span><b>' + fmt(b.chunks) + '</b> 切片</span>'
+                + '  <span><b>' + fmt((b.domains || []).length) + '</b> 域</span>'
+                + '</div>'
+                + '<div class="dp-kb-domains">' + domainChips(b) + '</div>'
+                + '<footer class="dp-kb-actions">'
+                + (ghost
+                    ? '<span class="dp-kb-ghost-note">这个体的配置已被删除，仍有域绑在它上面。删掉绑定即可恢复。</span>'
+                    : '<button class="btn btn-sm btn-primary" data-act="upload">上传</button>'
+                      + '<button class="btn btn-sm btn-outline-secondary" data-act="docs">文档</button>'
+                      + '<button class="btn btn-sm btn-outline-secondary" data-act="health">健康</button>'
+                      + '<button class="btn btn-sm btn-outline-secondary" data-act="rebuild">重建</button>'
+                      + '<button class="btn btn-sm btn-outline-secondary" data-act="settings">设置</button>')
+                + '<button class="btn btn-sm btn-outline-secondary" data-act="bind">绑定域</button>'
+                + '<button class="btn btn-sm btn-outline-danger" data-act="delete">删除</button>'
+                + '</footer>'
+                + '</article>';
+        }).join('');
+    }
+
+    function renderSnapshot() {
+        var snap = state.snap;
+        var grid = document.getElementById('bodyGrid');
+        if (!snap) { return; }
+        var p = snap.platform || {};
+        setValue('statDocs', fmt(p.documents), p.documents ? '' : 'mute');
+        setNote('statDocsNote', (p.bodies || 0) + ' 个知识体共同累计');
+        setValue('statChunks', fmt(p.chunks), p.chunks ? '' : 'mute');
+        setNote('statChunksNote', snap.strategy === 'HYBRID' ? '混合召回（关键字 + 向量）'
+            : snap.strategy === 'KEYWORD' ? '仅关键字召回' : '仅向量召回');
+        setValue('statBodies', fmt(p.bodies) + ' 个', (p.bodiesInUse || 0) ? '' : 'warn');
+        setNote('statBodiesNote', (p.bodiesInUse || 0) + ' 个在用 · ' + (p.bodiesUnbound || 0) + ' 个没绑定域');
+
+        var noteEl = document.getElementById('snapshotNote');
+        if (noteEl) {
+            var bits = [];
+            if (snap.stale) { bits.push('存储读取失败，显示的是旧数据'); }
+            if (snap.generatedAt) {
+                bits.push('快照 ' + new Date(snap.generatedAt).toLocaleTimeString('zh-CN'));
+            }
+            noteEl.textContent = bits.join(' · ');
+            noteEl.className = 'dp-kb-snapshot' + (snap.stale ? ' warn' : '');
+        }
+
+        if (grid) { grid.innerHTML = bodyCards(snap.bodies || []); }
+
+        var orphans = snap.orphans || [];
+        var card = document.getElementById('orphanCard');
+        if (card) { card.style.display = orphans.length ? '' : 'none'; }
+        var badge = document.getElementById('orphanCount');
+        if (badge) { badge.textContent = orphans.length + ' 个'; }
+        var list = document.getElementById('orphanList');
+        if (list) {
+            list.innerHTML = orphans.map(function (o) {
+                return '<div class="dp-kb-orphan-row">'
+                    + '<code>' + esc(o.name) + '</code>'
+                    + '<span class="dp-kb-orphan-owners">' + ((o.backends || []).map(function (x) {
+                        return '<span class="dp-chip mono">' + esc(x) + '</span>';
+                    }).join('') || '<span class="dp-chip mute">未知</span>') + '</span>'
+                    + '</div>';
+            }).join('');
+        }
+    }
+
+    function loadSnapshot() {
+        return Console.api.get('/admin/bodies').then(function (snap) {
+            state.snap = snap;
+            state.limits = snap.limits || state.limits;
+            state.rawOptions = snap.rawOptions || [];
+            renderSnapshot();
         }).catch(function (e) {
             setValue('statDocs', '—', 'err');
             setValue('statChunks', '—', 'err');
             setValue('statBodies', '—', 'err');
             setNote('statBodiesNote', '读取失败：' + e.message);
-            var tbody = document.getElementById('bodyBody');
-            if (tbody) { tbody.innerHTML = bodyEmptyRow('读取知识体失败：' + esc(e.message)); }
+            var grid = document.getElementById('bodyGrid');
+            if (grid) {
+                grid.innerHTML = '<div class="dp-kb-empty"><h4>读取知识体失败</h4><p>' + esc(e.message) + '</p>'
+                    + '<button class="btn btn-outline-secondary" data-act="reload">重试</button></div>';
+            }
         });
     }
 
-    /* ==================== 文档表 ==================== */
-
-    var DOC_EMPTY_ROW = '<tr class="dp-doc-empty"><td colspan="8"><div>'
-        + '<div class="dp-doc-empty-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg></div>'
-        + '暂无文档，在上方上传后展示在这里</div></td></tr>';
-
-    function bodyOfBodyId(bodyId) {
-        var ov = state.overview;
-        if (!ov) { return null; }
+    function bodyById(id) {
+        var snap = state.snap;
+        if (!snap) { return null; }
         var found = null;
-        (ov.bodies || []).forEach(function (b) { if (b.id === bodyId) { found = b; } });
+        (snap.bodies || []).forEach(function (b) { if (b.id === id) { found = b; } });
         return found;
     }
 
-    /* 落点是<b>推算口径</b>：按归属域当前绑定体的两槽显示，不逐台查物理位置
-       （换过体的域，老文档实际还在旧机器上，那是孤儿清理的事，文档表不冒充物理事实）。 */
-    function backendCell(domain) {
-        var bodyId = state.bodyOfDomain[domain];
-        if (!bodyId) { return '<span class="dp-chip mute" title="该域未绑定知识体">—</span>'; }
-        var row = bodyOfBodyId(bodyId);
-        if (!row) { return '<span class="dp-chip mute">—</span>'; }
-        var ids = [];
-        (row.slots || []).forEach(function (s) {
-            if (s.state === 'ok' && ids.indexOf(s.connectionId) < 0) { ids.push(s.connectionId); }
-        });
-        if (!ids.length) { return '<span class="dp-chip mute">—</span>'; }
-        return ids.map(function (id) {
-            return '<span class="dp-chip mono" title="落点（当前绑定）">' + esc(id) + '</span>';
+    /* ==================== 落点预检 ==================== */
+
+    var REASON_TEXT = {
+        NO_BODY: '没有给知识体',
+        BODY_MISSING: '知识体不存在（可能刚被删）',
+        BODY_EMPTY: '这个体一路都没配',
+        BODY_UNUSABLE: '这个体的连接都不可用',
+        EMBEDDING_NOT_CONFIGURED: '未启用向量模型'
+    };
+
+    function reasonFix(reason) {
+        if (reason === 'EMBEDDING_NOT_CONFIGURED') {
+            return { href: 'models.html', text: '去模型设置' };
+        }
+        if (reason === 'BODY_EMPTY' || reason === 'BODY_UNUSABLE' || reason === 'BODY_MISSING') {
+            return { href: 'infra.html', text: '去存储配置' };
+        }
+        return null;
+    }
+
+    function targetHtml(t) {
+        if (!t) { return ''; }
+        if (!t.writable) {
+            var fix = reasonFix(t.reason);
+            return '<span class="dp-chip err">' + esc(t.reasonText || REASON_TEXT[t.reason] || '不可写入') + '</span>'
+                + (fix ? '<a class="dp-target-link" href="' + fix.href + '">' + fix.text + '</a>' : '');
+        }
+        var html = (t.writeBackends || []).map(function (id) {
+            return '<span class="dp-chip mono ok">' + esc(id) + '</span>';
         }).join('');
-    }
-
-    function bodyNameCell(domain) {
-        var bodyId = state.bodyOfDomain[domain];
-        if (!bodyId) { return '<span class="dp-chip mute">未绑定</span>'; }
-        var row = bodyOfBodyId(bodyId);
-        return '<span class="dp-chip">' + esc(row ? (row.name || row.id) : bodyId) + '</span>';
-    }
-
-    function currentFilters() {
-        var pick = function (id) {
-            var el = document.getElementById(id);
-            return el ? el.value : '';
-        };
-        return { domain: pick('filterDomain'), body: pick('filterBody'), backend: pick('filterBackend') };
-    }
-
-    function matches(doc, f) {
-        if (f.domain && (doc.domain || 'default') !== f.domain) { return false; }
-        if (f.body) {
-            var bodyId = state.bodyOfDomain[doc.domain || 'default'];
-            if (bodyId !== f.body) { return false; }
+        if (t.fanOut) {
+            html += '<span class="dp-chip warn" title="关键字与向量在两台机器上，同一份切片要写两次">写两份</span>';
         }
-        if (f.backend) {
-            var bodyId2 = state.bodyOfDomain[doc.domain || 'default'];
-            var row = bodyId2 ? bodyOfBodyId(bodyId2) : null;
-            var hit = row && (row.slots || []).some(function (s) {
-                return s.state === 'ok' && s.connectionId === f.backend;
+        return html;
+    }
+
+    /* ==================== 文档弹层 ==================== */
+
+    function docsBodyHtml(b) {
+        return '<div class="dp-docs-head">'
+            + '<div><b>' + esc(b.name || b.id) + '</b> <code class="dp-kb-slug">' + esc(b.slug || b.id) + '</code></div>'
+            + '<div><span class="dp-kb-label">索引</span> <code>' + esc(b.index || '—') + '</code></div>'
+            + '</div>'
+            + '<div class="dp-upload-row">'
+            + '<input type="file" id="fileInput" accept=".txt,.md,.markdown,.docx,.doc,.pdf,.xls,.xlsx">'
+            + '<label class="dp-op-check"><input type="checkbox" id="replaceChk"> 覆盖更新</label>'
+            + '<button class="btn btn-primary btn-sm" id="uploadBtn">上传</button>'
+            + '</div>'
+            + '<div class="dp-target" id="uploadTarget"></div>'
+            + '<div id="uploadResult" class="result"></div>'
+            + '<div class="dp-doc-scroll dp-docs-scroll">'
+            + '<table class="table dp-doc-table"><thead><tr>'
+            + '<th style="width:30%">docId</th><th style="width:34%">文件名</th>'
+            + '<th style="width:12%">切片</th><th style="width:24%" class="ta-r">操作</th>'
+            + '</tr></thead><tbody id="docBody"><tr class="dp-doc-empty"><td colspan="4"><div>加载中…</div></td></tr></tbody></table>'
+            + '</div>';
+    }
+
+    function openDocs(bodyId) {
+        var b = bodyById(bodyId);
+        if (!b) { return; }
+        var root = openModal({
+            title: '文档 · ' + (b.name || b.id),
+            size: 'modal-xl',
+            body: docsBodyHtml(b),
+            footer: '<button class="btn btn-outline-secondary" id="docsRebuildBtn">从原文重建</button>',
+            onOpen: function (r) {
+                bindDocEvents(r, bodyId);
+                loadDocs(bodyId);
+            }
+        });
+        state.docsBodyId = bodyId;
+        return root;
+    }
+
+    var docsCache = [];
+
+    function loadDocs(bodyId) {
+        var tbody = document.getElementById('docBody');
+        if (!tbody) { return; }
+        return Console.api.get('/admin/bodies/' + encodeURIComponent(bodyId) + '/documents')
+            .then(function (data) {
+                docsCache = data.documents || [];
+                renderDocs();
+            }).catch(function (e) {
+                tbody.innerHTML = '<tr class="dp-doc-empty"><td colspan="4"><div>读取文档失败：' + esc(e.message) + '</div></td></tr>';
             });
-            if (!hit) { return false; }
-        }
-        return true;
-    }
-
-    function setDocCount(n) {
-        var el = document.getElementById('docCount');
-        if (el) {
-            el.textContent = n + ' 篇';
-            el.className = 'mbadge' + (n > 0 ? ' ok' : '');
-        }
     }
 
     function renderDocs() {
-        var body = document.getElementById('docBody');
-        if (!body) { return; }
-        var f = currentFilters();
-        var docs = state.docs.filter(function (d) { return matches(d, f); });
-        setDocCount(docs.length);
-        if (!docs.length) {
-            body.innerHTML = state.docs.length
-                ? '<tr class="dp-doc-empty"><td colspan="8"><div>当前筛选没有匹配的文档</div></td></tr>'
-                : DOC_EMPTY_ROW;
+        var tbody = document.getElementById('docBody');
+        if (!tbody) { return; }
+        if (!docsCache.length) {
+            tbody.innerHTML = '<tr class="dp-doc-empty"><td colspan="4"><div>这个知识体还没有文档，先在上方上传</div></td></tr>';
             return;
         }
-        body.innerHTML = docs.map(function (d) {
+        tbody.innerHTML = docsCache.map(function (d) {
             return '<tr>'
                 + '<td><code>' + esc(d.docId || '') + '</code></td>'
                 + '<td>' + esc(d.fileName || '') + '</td>'
-                + '<td>' + domainLabel(d.domain) + '</td>'
-                + '<td>' + bodyNameCell(d.domain || 'default') + '</td>'
-                + '<td>' + backendCell(d.domain || 'default') + '</td>'
-                + '<td>' + (d.chunks || 0) + '</td>'
-                + '<td>' + (d.exportPath
-                    ? '<code class="path" title="点击复制">' + esc(d.exportPath) + '</code>'
-                    : '<span class="hint">—</span>') + '</td>'
-                + '<td class="ta-r"><button class="btn btn-sm btn-outline-danger" data-doc="'
-                + esc(d.docId || '') + '">删除</button></td>'
-                + '</tr>';
+                + '<td>' + fmt(d.chunks) + '</td>'
+                + '<td class="ta-r">'
+                + '<button class="btn btn-sm btn-outline-primary" data-view="' + esc(d.docId) + '">切片</button>'
+                + '<button class="btn btn-sm btn-outline-danger" data-del="' + esc(d.docId) + '">删除</button>'
+                + '</td></tr>';
         }).join('');
-        body.querySelectorAll('button[data-doc]').forEach(function (btn) {
-            btn.addEventListener('click', function () { removeDoc(btn.getAttribute('data-doc')); });
+        tbody.querySelectorAll('button[data-view]').forEach(function (btn) {
+            btn.addEventListener('click', function () { previewDoc(btn.getAttribute('data-view')); });
         });
-        body.querySelectorAll('code.path').forEach(function (code) {
-            code.addEventListener('click', function () {
-                if (navigator.clipboard) { navigator.clipboard.writeText(code.textContent); }
-            });
+        tbody.querySelectorAll('button[data-del]').forEach(function (btn) {
+            btn.addEventListener('click', function () { removeDoc(btn.getAttribute('data-del')); });
         });
     }
 
-    function loadDocuments() {
-        var body = document.getElementById('docBody');
-        if (body && !state.docs.length) {
-            body.innerHTML = '<tr class="dp-doc-empty"><td colspan="8"><div>加载中…</div></td></tr>';
+    function bindDocEvents(root, bodyId) {
+        var file = root.querySelector('#fileInput');
+        var btn = root.querySelector('#uploadBtn');
+        var replace = root.querySelector('#replaceChk');
+        var result = root.querySelector('#uploadResult');
+
+        function preflight() {
+            var box = root.querySelector('#uploadTarget');
+            Console.api.get('/admin/bodies/target?body=' + encodeURIComponent(bodyId)).then(function (t) {
+                if (!opened) { return; }
+                if (box) { box.innerHTML = targetHtml(t); }
+                if (btn) { btn.disabled = !t.writable; }
+                if (!t.writable && result) {
+                    result.className = 'result show err';
+                    result.textContent = (t.reasonText || REASON_TEXT[t.reason] || '不可写入')
+                        + '：先处理落点，再上传。不会写入半个文档。';
+                }
+            }).catch(function (e) {
+                if (box) { box.innerHTML = '<span class="dp-chip err">预检失败：' + esc(e.message) + '</span>'; }
+                if (btn) { btn.disabled = true; }
+            });
         }
-        return Console.api.get('/admin/kb/documents').then(function (data) {
-            state.docs = data.documents || [];
-            renderDocs();
-            applyFileChecks();
-        }).catch(function (e) {
-            setDocCount(0);
-            if (body) {
-                body.innerHTML = '<tr class="dp-doc-empty"><td colspan="8"><div>读取文档列表失败：'
-                    + esc(e.message) + '</div></td></tr>';
+        preflight();
+
+        if (file) {
+            file.addEventListener('change', function () {
+                if (btn) { btn.disabled = false; }
+                var limits = state.limits;
+                var f = file.files && file.files[0];
+                if (!f || !limits) { return; }
+                var ext = (f.name.split('.').pop() || '').toLowerCase();
+                var allowed = (limits.allowedExtensions || []).map(function (e) { return String(e).toLowerCase(); });
+                if (allowed.length && allowed.indexOf(ext) < 0) {
+                    if (result) {
+                        result.className = 'result show err';
+                        result.textContent = '不支持的文件类型（白名单：' + allowed.join(' / ') + '）';
+                    }
+                    if (btn) { btn.disabled = true; }
+                } else if (limits.maxFileSize && f.size > limits.maxFileSize) {
+                    if (result) {
+                        result.className = 'result show err';
+                        result.textContent = '文件超过上限 ' + Math.round(limits.maxFileSize / 1048576 * 10) / 10 + ' MB';
+                    }
+                    if (btn) { btn.disabled = true; }
+                }
+            });
+        }
+
+        if (btn) {
+            btn.addEventListener('click', function () {
+                if (!file || !file.files || !file.files.length) {
+                    Console.toast('请先选择文件', { type: 'warning' });
+                    return;
+                }
+                var form = new FormData();
+                form.append('file', file.files[0]);
+                var query = '/admin/bodies/' + encodeURIComponent(bodyId) + '/documents?replace='
+                    + (replace && replace.checked ? 'true' : 'false');
+                btn.disabled = true;
+                btn.classList.add('btn-loading');
+                if (result) {
+                    result.className = 'result show';
+                    result.textContent = '上传中…（切片 + 向量化，耗时随文件体积增长）';
+                }
+                fetch(query, { method: 'POST', body: form, credentials: 'same-origin' })
+                    .then(function (resp) {
+                        return resp.json().then(function (data) { return { status: resp.status, data: data }; })
+                            .catch(function () { return { status: resp.status, data: null }; });
+                    })
+                    .then(function (w) {
+                        var d = w.data || {};
+                        var ok = w.status >= 200 && w.status < 300 && (d.code === 0 || d.code === undefined);
+                        if (result) {
+                            result.className = 'result show ' + (ok ? 'ok' : 'err');
+                            result.textContent = ok
+                                ? '导入成功：' + (d.fileName || '（未命名）') + '，' + fmt(d.chunks) + ' 个切片'
+                                : '导入失败：' + (d.detail || d.message || d.error || ('HTTP ' + w.status));
+                        }
+                        if (ok) {
+                            file.value = '';
+                            loadDocs(bodyId);
+                            loadSnapshot();
+                        }
+                    })
+                    .catch(function (e) {
+                        if (result) {
+                            result.className = 'result show err';
+                            result.textContent = '请求失败：' + e.message;
+                        }
+                    })
+                    .then(function () {
+                        btn.classList.remove('btn-loading');
+                        preflight();
+                    });
+            });
+        }
+
+        var rebuild = root.querySelector('#docsRebuildBtn');
+        if (rebuild) {
+            rebuild.addEventListener('click', function () {
+                closeModal();
+                openRebuild(bodyId);
+            });
+        }
+    }
+
+    function previewDoc(docId) {
+        var doc = null;
+        docsCache.forEach(function (d) { if (d.docId === docId) { doc = d; } });
+        if (!doc) { return; }
+        var bodyId = state.docsBodyId;
+        openModal({
+            title: (doc.fileName || doc.docId) + ' · 切片预览',
+            size: 'modal-lg',
+            body: '<div class="dp-preview-body" id="previewBody"><div class="dp-preview-loading">读取切片…</div></div>',
+            footer: '<span class="dp-preview-meta" id="previewMeta"></span>',
+            onOpen: function (root) {
+                Console.api.get('/admin/bodies/' + encodeURIComponent(bodyId) + '/documents/'
+                    + encodeURIComponent(docId) + '/chunks?limit=100').then(function (data) {
+                    var bodyEl = root.querySelector('#previewBody');
+                    var metaEl = root.querySelector('#previewMeta');
+                    if (!bodyEl) { return; }
+                    var chunks = data.chunks || [];
+                    var total = data.total || 0;
+                    if (metaEl) {
+                        var bits = ['共 ' + fmt(total) + ' 片'];
+                        if (chunks.length < total) { bits.push('显示前 ' + chunks.length + ' 片'); }
+                        bits.push(data.fromArchive ? '来源：原文档案' : '来源：索引现读（档案缺失）');
+                        metaEl.textContent = bits.join(' · ');
+                        metaEl.className = 'dp-preview-meta' + (data.fromArchive ? '' : ' warn');
+                    }
+                    if (!chunks.length) {
+                        bodyEl.innerHTML = '<div class="dp-preview-empty">没有读到切片：原文档案与索引里都没有这个 docId 的内容。</div>';
+                        return;
+                    }
+                    bodyEl.innerHTML = chunks.map(function (c) {
+                        return '<div class="dp-chunk">'
+                            + '<div class="dp-chunk-head"><span class="dp-chunk-seq">#' + esc(String(c.seq)) + '</span>'
+                            + '<span class="dp-chunk-len">' + fmt(c.chars) + ' 字</span></div>'
+                            + '<pre class="dp-chunk-text">' + esc(c.text || '') + '</pre>'
+                            + '</div>';
+                    }).join('');
+                }).catch(function (e) {
+                    var bodyEl = root.querySelector('#previewBody');
+                    if (bodyEl) {
+                        bodyEl.innerHTML = '<div class="dp-preview-empty">读取切片失败：' + esc(e.message) + '</div>';
+                    }
+                });
             }
         });
     }
 
     function removeDoc(docId) {
-        var bodyId = null;
-        var backends = [];
-        state.docs.forEach(function (d) {
-            if (d.docId !== docId) { return; }
-            bodyId = state.bodyOfDomain[d.domain || 'default'] || null;
-            var row = bodyId ? bodyOfBodyId(bodyId) : null;
-            (row && row.slots ? row.slots : []).forEach(function (s) {
-                if (s.state === 'ok' && backends.indexOf(s.connectionId) < 0) { backends.push(s.connectionId); }
-            });
-        });
-        var scope = backends.length
-            ? '\n该 docId 的切片会在所有后端上一次删净（当前落点：' + backends.join('、') + '）。'
-            : '';
-        Console.confirm('确认删除该文档？删除后其文件名会被释放，可重新上传同名文档。' + scope,
+        var bodyId = state.docsBodyId;
+        Console.confirm('删除这个文档？它会从索引里移除、原文档案一并删除，文件名随即释放（可再上传同名文件）。',
             { title: '删除文档', okText: '删除', danger: true }).then(function (ok) {
             if (!ok) { return; }
-            Console.api.del('/admin/kb/documents/' + encodeURIComponent(docId)).then(function () {
-                loadDocuments();
-                loadOverview();
-            }).catch(function (e) {
-                Console.toast('删除失败：' + e.message, { type: 'error' });
-            });
-        });
-    }
-
-    /* ==================== 筛选 ==================== */
-
-    function resetSelect(select, placeholder) {
-        if (!select) { return; }
-        select.innerHTML = '<option value="">' + placeholder + '</option>';
-    }
-
-    function addOption(select, value, text) {
-        if (!select) { return; }
-        var opt = document.createElement('option');
-        opt.value = value;
-        opt.textContent = text;
-        select.appendChild(opt);
-    }
-
-    /* 重建下拉会丢用户正在用的筛选值（上传/删除成功都会刷新 overview），
-       所以每次重建前记住当前值、重建后恢复。 */
-    function refillSelect(select, placeholder, fill) {
-        if (!select) { return; }
-        var keep = select.value;
-        resetSelect(select, placeholder);
-        fill(select);
-        if (keep) {
-            for (var i = 0; i < select.options.length; i++) {
-                if (select.options[i].value === keep) {
-                    select.value = keep;
-                    break;
-                }
-            }
-        }
-    }
-
-    function fillBodyFilter() {
-        refillSelect(document.getElementById('filterBody'), '全部', function (select) {
-            (state.overview && state.overview.bodies || []).forEach(function (b) {
-                addOption(select, b.id, b.name || b.id);
-            });
-        });
-    }
-
-    function fillBackendFilter() {
-        refillSelect(document.getElementById('filterBackend'), '全部', function (select) {
-            var ov = state.overview;
-            if (!ov) { return; }
-            var ids = ((ov.platform || {}).backends || []).slice();
-            (ov.bodies || []).forEach(function (b) {
-                (b.slots || []).forEach(function (s) {
-                    if (s.state === 'ok' && ids.indexOf(s.connectionId) < 0) { ids.push(s.connectionId); }
+            Console.api.del('/admin/bodies/' + encodeURIComponent(bodyId) + '/documents/' + encodeURIComponent(docId))
+                .then(function () {
+                    loadDocs(bodyId);
+                    loadSnapshot();
+                }).catch(function (e) {
+                    Console.toast('删除失败：' + e.message, { type: 'error' });
                 });
-            });
-            ids.forEach(function (id) { addOption(select, id, id); });
         });
     }
 
-    function fillDomainFilter() {
-        refillSelect(document.getElementById('filterDomain'), '全部', function (select) {
-            addOption(select, 'default', 'default');
-        });
-        Console.api.get('/admin/domains').then(function (data) {
-            var select = document.getElementById('filterDomain');
-            var keep = select ? select.value : '';
-            (data.domains || []).forEach(function (d) {
-                var name = typeof d === 'string' ? d : d.name;
-                if (!name || name === 'default') { return; }
-                addOption(select, name, name);
-            });
-            if (keep) {
-                for (var i = 0; i < select.options.length; i++) {
-                    if (select.options[i].value === keep) {
-                        select.value = keep;
-                        break;
-                    }
-                }
+    function openUpload(bodyId) {
+        var b = bodyById(bodyId);
+        openModal({
+            title: '上传文档 · ' + (b ? (b.name || b.id) : bodyId),
+            body: '<div class="dp-upload-row">'
+                + '<input type="file" id="fileInput" accept=".txt,.md,.markdown,.docx,.doc,.pdf,.xls,.xlsx">'
+                + '<label class="dp-op-check"><input type="checkbox" id="replaceChk"> 覆盖更新</label>'
+                + '<button class="btn btn-primary btn-sm" id="uploadBtn">上传</button>'
+                + '</div><div class="dp-target" id="uploadTarget"></div>'
+                + '<div id="uploadResult" class="result"></div>',
+            onOpen: function (root) {
+                bindDocEvents(root, bodyId);
+                if (root.querySelector('#docsRebuildBtn')) { /* 上传弹层没这个按钮 */ }
             }
-        }).catch(function () { });
+        });
     }
 
-    /* 域清单：上传下拉排除根域（留空即根域）；筛选下拉由 fillDomainFilter 单独铺 */
-    function loadDomainOptions() {
-        var select = document.getElementById('domainSelect');
-        Console.api.get('/admin/domains').then(function (data) {
-            (data.domains || []).forEach(function (d) {
-                var name = typeof d === 'string' ? d : d.name;
-                if (!name || name === 'default') { return; }
-                addOption(select, name, name);
-            });
-        }).catch(function () { });
+    /* ==================== 新建 / 设置 ==================== */
+
+    function connectionOptions(kind, selected) {
+        var out = '<option value="">（这一路不配）</option>';
+        (state.connections || []).forEach(function (c) {
+            var capable = kind === 'keyword'
+                ? c.type === 'elasticsearch'
+                : (c.type === 'elasticsearch' || c.type === 'qdrant');
+            if (!capable) { return; }
+            out += '<option value="' + esc(c.id) + '"' + (c.id === selected ? ' selected' : '')
+                + '>' + esc(c.name || c.id) + '（' + esc(c.type) + (c.usable ? '' : '，未填地址') + '）</option>';
+        });
+        return out;
     }
 
-    /* ==================== 上传落点预检 ==================== */
-
-    function targetChips(t) {
-        var chips = (t.slots || []).map(function (s) {
-            if (s.state === 'absent') { return ''; }
-            var label = (s.kind === 'keyword' ? '关键字 ' : '向量 ') + (s.name || s.connectionId);
-            var tone = s.state === 'ok' ? 'ok' : 'warn';
-            return '<span class="dp-chip mono ' + tone + '">' + esc(label) + '</span>';
+    function rawOptions(selected) {
+        var opts = state.rawOptions || [];
+        return opts.map(function (o) {
+            return '<option value="' + esc(o.id) + '"' + (o.id === selected ? ' selected' : '') + '>'
+                + esc(o.label || o.id) + '</option>';
         }).join('');
-        return chips || '<span class="dp-chip mute">无落点</span>';
     }
 
-    function renderTarget() {
-        var box = document.getElementById('uploadTarget');
-        if (!box) { return; }
-        var t = state.target;
-        if (!t) { box.innerHTML = ''; return; }
-        if (!t.domainExists) {
-            box.innerHTML = '<span class="dp-chip err">' + esc(t.reasonText || '域不存在') + '</span>'
-                + '<a class="dp-target-link" href="domains.html">去域空间</a>';
-            return;
-        }
-        if (!t.writable) {
-            var jump = (t.reason === 'BODY_EMPTY' || t.reason === 'BODY_UNUSABLE') ? 'infra.html' : 'domains.html';
-            var jumpText = jump === 'infra.html' ? '去存储配置' : '去域空间';
-            box.innerHTML = '<span class="dp-chip err">' + esc(t.reasonText || '不可写入') + '</span>'
-                + '<a class="dp-target-link" href="' + jump + '">' + jumpText + '</a>';
-            return;
-        }
-        var html = targetChips(t);
-        if (t.fanOut) {
-            html += '<span class="dp-chip warn" title="关键字与向量在两台机器上，同一份切片要写两次">写两份</span>';
-        }
-        box.innerHTML = html;
+    function formHtml(b, creating) {
+        var rawId = (b && b.raw && b.raw.location) || 'local';
+        return '<div class="dp-body-form">'
+            + '<label class="dp-form-field"><span>唯一名（slug）<em>必填</em></span>'
+            + '<input class="form-control" id="bodySlug" value="' + esc(b ? (b.slug || b.id) : '')
+            + '"' + (creating ? '' : ' readonly') + ' placeholder="sales-kb" maxlength="40">'
+            + '<small>' + (creating
+                ? '小写字母 / 数字 / 连字符，2~40 位，首尾必须是字母或数字。索引名由它派生，创建后不可修改。'
+                : '唯一名决定索引名，创建后不可修改（改名会等于换一份数据）。') + '</small></label>'
+            + '<label class="dp-form-field"><span>展示名</span>'
+            + '<input class="form-control" id="bodyName" value="' + esc(b ? (b.name || '') : '') + '" placeholder="销售知识库"></label>'
+            + '<label class="dp-form-field"><span>说明</span>'
+            + '<textarea class="form-control" id="bodyDesc" rows="2" placeholder="这份资料是给谁用的、多久更新一次">'
+            + esc(b && b.description ? b.description : '') + '</textarea></label>'
+            + '<div class="dp-form-grid">'
+            + '<label class="dp-form-field"><span>关键字落点 <em>全文检索</em></span>'
+            + '<select class="form-select" id="bodyKeyword">' + connectionOptions('keyword', b ? b.keyword : null) + '</select></label>'
+            + '<label class="dp-form-field"><span>向量落点 <em>语义检索</em></span>'
+            + '<select class="form-select" id="bodyVector">' + connectionOptions('vector', b ? b.vector : null) + '</select></label>'
+            + '</div>'
+            + (creating ? '' : '<div class="dp-form-hint">改这两栏不会直接生效：保存时先预演，'
+                + '确认后把文档从原文重建到新连接、校验条数，写完才切换。</div>')
+            + '<label class="dp-form-field"><span>原文落点</span>'
+            + '<select class="form-select" id="bodyRaw">' + rawOptions(rawId) + '</select>'
+            + '<small>原文是权威副本：删了索引能从这里重建；换文档服务器后这一栏会多出新的落点。</small></label>'
+            + '<div class="dp-form-hint">至少选一路。两路指向同一台机器时只写一份；分属两台时同一份切片写两份。</div>'
+            + '</div>';
     }
 
-    function loadTarget() {
-        var domain = document.getElementById('domainSelect').value || '';
-        return Console.api.get('/admin/kb/target?domain=' + encodeURIComponent(domain))
-            .then(function (t) {
-                state.target = t;
-                if (t.limits) { state.limits = t.limits; }
-                renderTarget();
-                applyFileChecks();
-            }).catch(function (e) {
-                state.target = null;
-                var box = document.getElementById('uploadTarget');
-                if (box) { box.innerHTML = '<span class="dp-chip err">预检失败：' + esc(e.message) + '</span>'; }
-            });
+    function readForm(root) {
+        return {
+            slug: root.querySelector('#bodySlug').value.trim(),
+            name: root.querySelector('#bodyName').value.trim(),
+            description: root.querySelector('#bodyDesc').value.trim(),
+            keyword: root.querySelector('#bodyKeyword').value || null,
+            vector: root.querySelector('#bodyVector').value || null,
+            raw: root.querySelector('#bodyRaw').value || null
+        };
     }
 
-    function selectedFile() {
-        var input = document.getElementById('fileInput');
-        return input && input.files && input.files.length ? input.files[0] : null;
-    }
-
-    /* 文件级检查（大小 / 白名单 / 同名冲突）都在前端做：这三件事不需要再问一次后端，
-       而且同名冲突今天要到"拿到导入锁之后"才炸——那是用户等了几十秒才被告知失败。 */
-    function applyFileChecks() {
-        var btn = document.getElementById('uploadBtn');
-        var box = document.getElementById('uploadTarget');
-        var reason = null;
-        var file = selectedFile();
-        var limits = state.limits;
-
-        if (state.target && !state.target.writable) {
-            reason = '域不可写';
-        }
-        if (!reason && file && limits) {
-            var ext = (file.name.split('.').pop() || '').toLowerCase();
-            var allowed = (limits.allowedExtensions || []).map(function (e) { return String(e).toLowerCase(); });
-            if (allowed.length && allowed.indexOf(ext) < 0) {
-                reason = '不支持的文件类型（白名单：' + allowed.join(' / ') + '）';
-            } else if (limits.maxFileSize && file.size > limits.maxFileSize) {
-                reason = '文件超过上限 ' + Math.round(limits.maxFileSize / 1048576 * 10) / 10 + ' MB';
+    function openCreate() {
+        openModal({
+            title: '新建知识体',
+            body: formHtml(null, true),
+            footer: '<button class="btn btn-primary" id="bodySave">创建</button>',
+            onOpen: function (root) {
+                root.querySelector('#bodySave').addEventListener('click', function () {
+                    var f = readForm(root);
+                    var btn = root.querySelector('#bodySave');
+                    btn.disabled = true;
+                    Console.api.post('/admin/bodies', f).then(function (res) {
+                        closeModal();
+                        Console.toast('已创建「' + (res.body && res.body.name || f.name || f.slug) + '」', { type: 'success' });
+                        loadSnapshot();
+                    }).catch(function (e) {
+                        btn.disabled = false;
+                        Console.toast('创建失败：' + e.message, { type: 'error', wide: true });
+                    });
+                });
             }
-        }
-        if (btn) { btn.disabled = !!reason; }
+        });
+    }
 
-        if (reason && box && state.target) {
-            renderTarget();
-            box.innerHTML += '<span class="dp-chip err">' + esc(reason) + '</span>';
-            return;
-        }
+    /**
+     * 设置：名字 / 说明 / 原文落点直接保存；两路落点走「迁移」。
+     *
+     * 落点不能直接改（后端也会拒）：迁移要把数据从原文写满到新连接再切指针，
+     * 直接改指针的唯一结果是检索立刻查空、旧机器上的数据再也看不见。
+     */
+    function openSettings(bodyId) {
+        var b = bodyById(bodyId);
+        if (!b) { return; }
+        openModal({
+            title: '设置 · ' + (b.name || b.id),
+            body: formHtml(b, false),
+            footer: '<button class="btn btn-primary" id="bodySave">保存</button>',
+            onOpen: function (root) {
+                root.querySelector('#bodySave').addEventListener('click', function () {
+                    var f = readForm(root);
+                    var btn = root.querySelector('#bodySave');
+                    var from = { keyword: b.keyword || null, vector: b.vector || null };
+                    var to = { keyword: f.keyword || null, vector: f.vector || null };
+                    var changed = [];
+                    ['keyword', 'vector'].forEach(function (k) {
+                        if (from[k] !== to[k]) { changed.push(k); }
+                    });
+                    if (changed.length > 1) {
+                        Console.toast('一次只能迁一路落点：先迁其中一路，保存后再迁另一路',
+                            { type: 'warning', wide: true });
+                        return;
+                    }
+                    if (changed.length === 1 && !to[changed[0]]) {
+                        Console.toast('不能把这一路清空：知识体至少要留一路。真要换掉就迁到另一台连接',
+                            { type: 'warning', wide: true });
+                        return;
+                    }
+                    btn.disabled = true;
+                    saveMeta(bodyId, f).then(function () {
+                        if (!changed.length) { return false; }
+                        return migrateRoute(bodyId, changed[0], to[changed[0]], from[changed[0]]);
+                    }).then(function (moved) {
+                        closeModal();
+                        if (moved) {
+                            Console.toast('落点已切换：索引名不变，旧连接上的同名集合保留未删',
+                                { type: 'success', wide: true });
+                        } else if (changed.length) {
+                            Console.toast('已保存（落点没有迁移）', { type: 'info' });
+                        } else {
+                            Console.toast('已保存', { type: 'success' });
+                        }
+                        loadSnapshot();
+                    }).catch(function (e) {
+                        btn.disabled = false;
+                        Console.toast('保存失败：' + e.message, { type: 'error', wide: true });
+                    });
+                });
+            }
+        });
+    }
 
-        /* 同名文档：同名判定不区分大小写，且作用域是"该域索引内" */
-        if (file && state.target && state.target.writable) {
-            var domain = state.target.domain || 'default';
-            var lower = file.name.toLowerCase();
-            var dup = state.docs.some(function (d) {
-                return (d.domain || 'default') === domain
-                    && (d.fileNameLower || (d.fileName || '').toLowerCase()) === lower;
-            });
-            var chk = document.getElementById('replaceChk');
-            if (dup) {
-                if (chk && !chk.checked) {
-                    chk.checked = true;
-                    Console.toast('该域下已存在同名文档，已勾选「覆盖更新」', { type: 'warning' });
+    /** 只提交名字 / 说明 / 原文落点：两路落点由 migrateRoute 走 /routes */
+    function saveMeta(bodyId, f) {
+        return Console.api.put('/admin/bodies/' + encodeURIComponent(bodyId), {
+            name: f.name,
+            description: f.description,
+            raw: f.raw
+        });
+    }
+
+    /**
+     * 换一路落点：先预演（后端只读），用户确认后正式迁移。
+     *
+     * 预演与执行用的是后端同一套判据（都在 /routes 上），所以"预演说能迁"
+     * 就等于"执行不会被配置拒"——这是本页所有动作的统一口径。
+     *
+     * @return Promise&lt;boolean&gt; true = 已迁移，false = 用户取消
+     */
+    function migrateRoute(bodyId, kind, target, fromId) {
+        var label = kind === 'keyword' ? '关键字' : '向量';
+        var url = '/admin/bodies/' + encodeURIComponent(bodyId) + '/routes';
+        return Console.api.put(url + '?dryRun=true', { kind: kind, connection: target })
+            .then(function (plan) {
+                if (!plan.ready) {
+                    throw new Error(plan.reason || '这个落点换不上去');
                 }
-                if (box) {
-                    box.innerHTML = (box.innerHTML || '') + '<span class="dp-chip warn">同名已存在，将覆盖</span>';
+                var lines = [
+                    '把' + label + '落点从「' + (fromId || '未配') + '」换到「' + target + '」？',
+                    '',
+                    '· ' + fmt(plan.documents) + ' 个文档从原文重建到新连接'
+                        + (plan.recomputeVectors ? '（需要重新向量化）' : ''),
+                    '· 索引名 ' + (plan.index || '') + ' 不变',
+                    '· 写完并校验条数之后才切指针，迁移期间检索仍走旧连接',
+                    '· 旧连接上的同名集合不会删除'
+                ];
+                if (plan.missingArchive) {
+                    lines.push('· 有 ' + fmt(plan.missingArchive) + ' 个文档没有原文档案，迁不过去（会跳过）');
                 }
-            }
-        }
+                return Console.confirm(lines.join('\n'), { title: '迁移落点', okText: '开始迁移' })
+                    .then(function (ok) {
+                        if (!ok) { return false; }
+                        Console.toast('正在迁移，文档多时会比较久…', { type: 'info' });
+                        return Console.api.put(url, { kind: kind, connection: target })
+                            .then(function () { return true; });
+                    });
+            });
     }
 
-    function upload() {
-        var input = document.getElementById('fileInput');
-        var btn = document.getElementById('uploadBtn');
-        var box = document.getElementById('uploadResult');
-        if (!input.files || !input.files.length) {
-            Console.toast('请先选择文件', { type: 'warning' });
-            return;
+    /* ==================== 健康 ==================== */
+
+    var HEALTH_STATE = {
+        absent: ['未配', 'mute'],
+        missing: ['连接已删', 'err'],
+        blank: ['地址没填', 'warn'],
+        unregistered: ['连接未就绪', 'warn'],
+        unreachable: ['不可达', 'err'],
+        error: ['读取失败', 'err'],
+        no_index: ['集合不存在', 'warn'],
+        ok: ['正常', 'ok']
+    };
+
+    function healthHtml(h) {
+        function row(label, route) {
+            var pair = HEALTH_STATE[route.state] || [route.state || '—', ''];
+            return '<tr><td>' + esc(label) + '</td>'
+                + '<td>' + esc(route.name || route.connectionId || '—') + '</td>'
+                + '<td><span class="dp-chip ' + pair[1] + '">' + esc(pair[0]) + '</span></td>'
+                + '<td>' + (route.exists ? '有' : '无') + '</td>'
+                + '<td>' + (route.dimension == null ? '—' : route.dimension) + '</td></tr>';
         }
-        var form = new FormData();
-        form.append('file', input.files[0]);
-        var replace = document.getElementById('replaceChk').checked;
-        var domain = document.getElementById('domainSelect').value || '';
-        var query = '/admin/kb/documents?replace=' + (replace ? 'true' : 'false');
-        if (domain) { query += '&domain=' + encodeURIComponent(domain); }
+        var model = h.model || {};
+        var pair = h.consistency === 'ok' ? ['ok', 'ok']
+            : h.consistency === 'no_index' ? ['warn', 'warn']
+            : h.consistency === 'unknown' ? ['mute', 'mute'] : ['err', 'err'];
+        return '<div class="dp-kb-health-head">'
+            + '<span class="dp-chip ' + pair[1] + '">' + esc(pair[0]) + '</span>'
+            + '<span>' + esc(h.consistencyText || '') + '</span></div>'
+            + '<table class="table dp-kb-health"><thead><tr>'
+            + '<th>落点</th><th>连接</th><th>状态</th><th>集合</th><th>维度</th>'
+            + '</tr></thead><tbody>'
+            + row('关键字', h.keyword || {})
+            + row('向量', h.vector || {})
+            + '</tbody></table>'
+            + '<div class="dp-form-hint">当前向量模型：'
+            + (model.configured ? '维度 ' + (model.dimension == null ? '未知' : model.dimension) : '未启用')
+            + ' · 索引 ' + esc(h.index || '—') + '</div>';
+    }
 
-        btn.disabled = true;
-        btn.classList.add('btn-loading');
-        box.className = 'result show';
-        box.textContent = '上传中…（切片 + 向量化，耗时随文件体积增长）';
-
-        fetch(query, {
-            method: 'POST',
-            body: form,
-            credentials: 'same-origin'
-        }).then(function (resp) {
-            return resp.json().then(function (data) { return { data: data }; })
-                .catch(function () { return { data: { success: false, error: '响应解析失败' } }; });
-        }).then(function (wrapped) {
-            var data = wrapped.data;
-            box.textContent = JSON.stringify(data, null, 2);
-            box.className = 'result show ' + (data.success ? 'ok' : 'err');
-            if (data.success) {
-                input.value = '';
-                loadDocuments();
-                loadOverview();
+    /**
+     * 健康：两路落点 + 向量模型的三方维度对照。
+     *
+     * 单独一次请求：每一格都要连远程（问集合在不在、读 mapping 维度），
+     * 塞进首屏会把知识库页拖成秒级。
+     */
+    function openHealth(bodyId) {
+        var b = bodyById(bodyId);
+        if (!b) { return; }
+        openModal({
+            title: '健康 · ' + (b.name || b.id),
+            body: '<div class="dp-kb-loading">正在检查两路落点…</div>',
+            onOpen: function (root) {
+                Console.api.get('/admin/bodies/' + encodeURIComponent(bodyId) + '/health')
+                    .then(function (h) {
+                        root.querySelector('.modal-body').innerHTML = healthHtml(h);
+                    }).catch(function (e) {
+                        root.querySelector('.modal-body').innerHTML =
+                            '<div class="dp-kb-empty"><h4>检查失败</h4><p>' + esc(e.message) + '</p></div>';
+                    });
             }
-        }).catch(function (e) {
-            box.textContent = '请求失败: ' + e.message;
-            box.className = 'result show err';
-        }).then(function () {
-            btn.disabled = false;
-            btn.classList.remove('btn-loading');
-            applyFileChecks();
         });
     }
 
-    /* ==================== 维护动作（P0 保持既有语义，作用域分级在 P1） ==================== */
+    /* ==================== 绑定域 ==================== */
 
-    function rebuild() {
-        Console.confirm('确认重建索引？重建会清空现有索引，已有文档需重新上传。',
-            { title: '索引重建', okText: '重建', danger: true }).then(function (ok) {
+    function openBind(bodyId) {
+        var b = bodyById(bodyId);
+        if (!b) { return; }
+        var bound = {};
+        (b.domains || []).forEach(function (d) { bound[d] = true; });
+        var names = (state.domains || []).slice();
+        if (!names.length) {
+            names = (b.domains || []).slice();
+        }
+        var rows = names.map(function (d) {
+            return '<label class="dp-bind-row"><input type="checkbox" value="' + esc(d) + '"'
+                + (bound[d] ? ' checked' : '') + '> <code>' + esc(d) + '</code></label>';
+        }).join('');
+        if (!rows) {
+            rows = '<div class="dp-kb-note">还没有可绑定的域。先到「域空间」建域。</div>';
+        }
+        openModal({
+            title: '绑定域 · ' + (b.name || b.id),
+            body: '<div class="dp-kb-note">勾上的域可以检索到这份资料；一个体可以同时给多个域用。'
+                + '没勾的域查不到它（不继承父域的知识体）。</div><div class="dp-bind-list">' + rows + '</div>',
+            footer: '<button class="btn btn-primary" id="bindSave">保存绑定</button>',
+            onOpen: function (root) {
+                root.querySelector('#bindSave').addEventListener('click', function () {
+                    var want = {};
+                    root.querySelectorAll('.dp-bind-row input:checked').forEach(function (i) {
+                        want[i.value] = true;
+                    });
+                    var toBind = Object.keys(want).filter(function (d) { return !bound[d]; });
+                    var toUnbind = Object.keys(bound).filter(function (d) { return !want[d]; });
+                    if (!toBind.length && !toUnbind.length) { closeModal(); return; }
+                    var btn = root.querySelector('#bindSave');
+                    btn.disabled = true;
+                    var chain = Promise.resolve();
+                    toBind.forEach(function (d) {
+                        chain = chain.then(function () {
+                            return Console.api.post('/admin/bodies/' + encodeURIComponent(bodyId) + '/bind', { domain: d });
+                        });
+                    });
+                    toUnbind.forEach(function (d) {
+                        chain = chain.then(function () {
+                            return Console.api.post('/admin/bodies/' + encodeURIComponent(bodyId) + '/unbind', { domain: d });
+                        });
+                    });
+                    chain.then(function () {
+                        closeModal();
+                        Console.toast('已更新绑定：+' + toBind.length + ' / -' + toUnbind.length, { type: 'success' });
+                        loadSnapshot();
+                    }).catch(function (e) {
+                        btn.disabled = false;
+                        Console.toast('绑定失败：' + e.message, { type: 'error', wide: true });
+                        loadSnapshot();
+                    });
+                });
+            }
+        });
+    }
+
+    /* ==================== 重建 / 删除 ==================== */
+
+    function openRebuild(bodyId) {
+        var b = bodyById(bodyId);
+        if (!b) { return; }
+        openModal({
+            title: '重建 · ' + (b.name || b.id),
+            body: '<div class="dp-kb-note">重建只影响这个知识体的索引（<code>' + esc(b.index || '') + '</code>），'
+                + '不动原文、不动其他体、也不改任何域的绑定。</div>'
+                + '<div class="dp-rebuild-opt">'
+                + '<label><input type="radio" name="rebuildFrom" value="archive" checked>'
+                + ' <b>从原文重建</b><span>清空索引 → 从原文档案逐片重新向量化写回。文档不会丢，耗时随文档数增长。</span></label>'
+                + '<label><input type="radio" name="rebuildFrom" value="reset">'
+                + ' <b>重建成空索引</b><span>只清空。适合"这批资料全部作废、要重新上传"的场景；原文档案同样保留。</span></label>'
+                + '</div>',
+            footer: '<button class="btn btn-outline-danger" id="rebuildGo">开始重建</button>',
+            onOpen: function (root) {
+                root.querySelector('#rebuildGo').addEventListener('click', function () {
+                    var from = root.querySelector('input[name="rebuildFrom"]:checked').value;
+                    closeModal();
+                    rebuildNow(bodyId, from);
+                });
+            }
+        });
+    }
+
+    function rebuildNow(bodyId, from) {
+        var b = bodyById(bodyId);
+        Console.confirm('确认' + (from === 'archive' ? '从原文重建' : '清空') + '「'
+            + (b ? (b.name || b.id) : bodyId) + '」的索引？'
+            + (from === 'archive' ? '\n重建期间这个体暂时不可检索。' : '\n清空后需要重新上传文档。'),
+            { title: '重建知识体', okText: '开始', danger: true }).then(function (ok) {
             if (!ok) { return; }
-            var btn = document.getElementById('rebuildBtn');
-            var box = document.getElementById('rebuildResult');
-            btn.disabled = true;
-            btn.classList.add('btn-loading');
-            box.className = 'result show';
-            box.textContent = '重建中…（会建立真实连接并调用 embedding，耗时较长）';
-            Console.api.post('/admin/kb/rebuild').then(function (data) {
-                box.textContent = JSON.stringify(data, null, 2);
-                box.className = 'result show ok';
-                loadDocuments();
-                loadOverview();
-            }).catch(function (e) {
-                box.textContent = '请求失败: ' + e.message;
-                box.className = 'result show err';
-            }).then(function () {
-                btn.disabled = false;
-                btn.classList.remove('btn-loading');
-            });
+            Console.toast('已开始重建，可能需要几分钟…', { type: 'info' });
+            Console.api.post('/admin/bodies/' + encodeURIComponent(bodyId) + '/rebuild', { from: from })
+                .then(function (res) {
+                    Console.toast(res.message || '重建完成', { type: 'success', wide: true });
+                    loadSnapshot();
+                }).catch(function (e) {
+                    Console.toast('重建失败：' + e.message, { type: 'error', wide: true });
+                });
         });
     }
 
-    function loadBackends() {
-        var select = document.getElementById('reindexTarget');
-        Console.api.get('/admin/kb/backends').then(function (data) {
-            var backends = data.backends || [];
-            if (!backends.length) {
-                addOption(select, '', '（无可用后端）');
-                return;
+    function openDelete(bodyId) {
+        var b = bodyById(bodyId);
+        if (!b) { return; }
+        var bound = b.domains || [];
+        openModal({
+            title: '删除知识体 · ' + (b.name || b.id),
+            body: '<div class="dp-kb-note">删除会移除<b>索引里的数据</b>，并从配置里去掉这个体。'
+                + (bound.length
+                    ? '<br><b class="dp-danger-text">还有 ' + bound.length + ' 个域绑着它（' + esc(bound.join('、')) + '）。</b>'
+                      + '删除会同时解绑这些域，它们随即失去知识库。'
+                    : '<br>当前没有域绑着它。')
+                + '</div>'
+                + '<label class="dp-op-check"><input type="checkbox" id="keepRaw" checked> 保留原文档案（推荐）</label>'
+                + '<div class="dp-form-hint">保留原文后，以后可以再建一个同名体、把档案按原文重建回来；不保留则原文一并删除，不可恢复。</div>'
+                + '<label class="dp-form-field"><span>输入 <code>' + esc(b.name || b.id) + '</code> 确认</span>'
+                + '<input class="form-control" id="deleteConfirm" placeholder="' + esc(b.name || b.id) + '"></label>',
+            footer: '<button class="btn btn-outline-danger" id="deleteGo">删除</button>',
+            onOpen: function (root) {
+                root.querySelector('#deleteGo').addEventListener('click', function () {
+                    var typed = root.querySelector('#deleteConfirm').value.trim();
+                    if (!typed) {
+                        Console.toast('请输入知识体名称确认', { type: 'warning' });
+                        return;
+                    }
+                    var keepRaw = root.querySelector('#keepRaw').checked;
+                    var btn = root.querySelector('#deleteGo');
+                    btn.disabled = true;
+                    var url = '/admin/bodies/' + encodeURIComponent(bodyId)
+                        + '?keepRaw=' + (keepRaw ? 'true' : 'false')
+                        + '&confirm=' + encodeURIComponent(typed) + '&force=true';
+                    Console.api.del(url).then(function (res) {
+                        closeModal();
+                        Console.toast('已删除「' + (b.name || b.id) + '」'
+                            + (res.rawKept ? '（原文已保留）' : ''), { type: 'success', wide: true });
+                        loadSnapshot();
+                    }).catch(function (e) {
+                        btn.disabled = false;
+                        Console.toast('删除失败：' + e.message, { type: 'error', wide: true });
+                        loadSnapshot();
+                    });
+                });
             }
-            backends.forEach(function (b) {
-                var caps = b.capabilities || {};
-                var tags = [];
-                if (caps.vector) { tags.push('向量'); }
-                if (caps.keyword) { tags.push('关键字'); }
-                if (caps.storesText) { tags.push('存原文'); }
-                addOption(select, b.id, b.id + (tags.length ? '（' + tags.join('/') + '）' : ''));
-                var opt = select.lastChild;
-                if (!caps.vector) { opt.disabled = true; }
-            });
-        }).catch(function (e) {
-            addOption(select, '', '读取后端失败：' + e.message);
-        });
-    }
-
-    function reindex() {
-        var select = document.getElementById('reindexTarget');
-        var target = select.value;
-        if (!target) {
-            Console.toast('请先选择目标后端', { type: 'warning' });
-            return;
-        }
-        Console.confirm('确认把当前全部知识库内容重灌到后端「' + target + '」？'
-            + '该操作会清空目标后端对应的 collection 并据原文重建，但不会改变任何域的检索落点。',
-            { title: '跨后端重灌', okText: '重灌', danger: true }).then(function (ok) {
-            if (!ok) { return; }
-            var btn = document.getElementById('reindexBtn');
-            var box = document.getElementById('reindexResult');
-            btn.disabled = true;
-            btn.classList.add('btn-loading');
-            box.className = 'result show';
-            box.textContent = '重灌中…（从 ChunkArchive 读原文 → 向量化 → 写入目标后端，耗时较长）';
-            Console.api.post('/admin/kb/reindex', { targetBackendId: target }).then(function (data) {
-                box.textContent = JSON.stringify(data, null, 2);
-                box.className = 'result show ok';
-                loadDocuments();
-                loadOverview();
-            }).catch(function (e) {
-                box.textContent = '请求失败: ' + e.message;
-                box.className = 'result show err';
-            }).then(function () {
-                btn.disabled = false;
-                btn.classList.remove('btn-loading');
-            });
         });
     }
 
     /* ==================== 接线 ==================== */
 
-    Console.renderSidebar('knowledge');
-    document.getElementById('uploadBtn').addEventListener('click', upload);
-    document.getElementById('rebuildBtn').addEventListener('click', rebuild);
-    document.getElementById('reindexBtn').addEventListener('click', reindex);
-    document.getElementById('domainSelect').addEventListener('change', loadTarget);
-    document.getElementById('fileInput').addEventListener('change', applyFileChecks);
-    document.getElementById('filterDomain').addEventListener('change', renderDocs);
-    document.getElementById('filterBody').addEventListener('change', renderDocs);
-    document.getElementById('filterBackend').addEventListener('change', renderDocs);
-    document.getElementById('filterClear').addEventListener('click', function () {
-        ['filterDomain', 'filterBody', 'filterBackend'].forEach(function (id) {
-            document.getElementById(id).value = '';
-        });
-        renderDocs();
-    });
+    function onGridClick(e) {
+        var t = e.target;
+        var btn = t && t.closest ? t.closest('[data-act]') : null;
+        if (!btn) { return; }
+        var act = btn.getAttribute('data-act');
+        if (act === 'create') { openCreate(); return; }
+        if (act === 'reload') { loadSnapshot(); return; }
+        if (act === 'copy') {
+            copyText(btn.getAttribute('data-text') || '');
+            Console.toast('已复制索引名', { type: 'success' });
+            return;
+        }
+        var card = btn.closest('.dp-kb-card');
+        if (!card) { return; }
+        var bodyId = card.getAttribute('data-body');
+        if (act === 'upload') { openUpload(bodyId); }
+        else if (act === 'docs') { openDocs(bodyId); }
+        else if (act === 'health') { openHealth(bodyId); }
+        else if (act === 'rebuild') { openRebuild(bodyId); }
+        else if (act === 'settings') { openSettings(bodyId); }
+        else if (act === 'bind') { openBind(bodyId); }
+        else if (act === 'delete') { openDelete(bodyId); }
+    }
 
-    Console.ready(function () {
-        loadDomainOptions();
-        loadBackends();
-        loadOverview();
-        loadDocuments();
-        loadTarget();
-        /* 向量模型卡仍走 /admin/settings（全局唯一，不属于任何知识体） */
-        Console.api.get('/admin/settings').then(function (s) {
-            var ok = !!s.embeddingConfigured;
-            var registered = s.embeddingProfileCount || 0;
-            setValue('statEmb', ok ? '已就绪' : (registered ? '未启用' : '未配置'), ok ? '' : 'warn');
-            setNote('statEmbNote', ok ? (s.embeddingModelName || '') : (registered
-                ? '已登记 ' + registered + ' 个档案，请到「模型设置」启用'
-                : '检索与灌库不可用，请先配置向量模型'));
+    function loadConnections() {
+        return Console.api.get('/admin/infra').then(function (data) {
+            state.connections = data.connections || [];
+        }).catch(function () { state.connections = []; });
+    }
+
+    function loadDomains() {
+        return Console.api.get('/admin/domains').then(function (data) {
+            state.domains = (data.domains || []).map(function (d) {
+                return typeof d === 'string' ? d : (d.name || d.domain);
+            }).filter(Boolean);
+        }).catch(function () { state.domains = []; });
+    }
+
+    function loadEmbedding() {
+        return Console.api.get('/admin/settings').then(function (s) {
+            state.embeddingReady = !!s.embeddingConfigured;
+            state.embeddingNote = s.embeddingModelName || '';
+            setValue('statEmb', state.embeddingReady ? '已就绪'
+                : (s.embeddingProfileCount ? '未启用' : '未配置'), state.embeddingReady ? '' : 'warn');
+            setNote('statEmbNote', state.embeddingReady ? state.embeddingNote
+                : (s.embeddingProfileCount ? '已登记档案，请到「模型设置」启用'
+                    : '检索与灌库不可用，请先配置向量模型'));
             Console.setModelsWarn(!s.chatConfigured);
         }).catch(function () {
             setValue('statEmb', '读取失败', 'err');
         });
+    }
+
+    Console.renderSidebar('knowledge');
+    var grid = document.getElementById('bodyGrid');
+    grid.addEventListener('click', onGridClick);
+    document.getElementById('createBodyBtn').addEventListener('click', openCreate);
+    document.getElementById('refreshBtn').addEventListener('click', function () {
+        loadSnapshot();
+    });
+
+    Console.ready(function () {
+        loadEmbedding();
+        loadConnections();
+        loadDomains();
+        loadSnapshot();
     });
 })();

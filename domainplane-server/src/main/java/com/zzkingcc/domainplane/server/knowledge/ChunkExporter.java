@@ -72,7 +72,7 @@ public class ChunkExporter {
      *
      * @return 落盘路径；该文档在索引里没有任何切片时返回 {@code null}
      */
-    public Path export(String index, String docId, String fileName, String domain) {
+    public Path export(String index, String docId, String fileName, String bodyId) {
         List<Chunk> chunks = loadChunks(index, docId);
         if (chunks.isEmpty()) {
             log.warn("[切片导出] docId={} 在索引 {} 中没有任何切片，跳过导出", docId, index);
@@ -82,7 +82,7 @@ public class ChunkExporter {
         StringBuilder sb = new StringBuilder();
         sb.append("文件名: ").append(fileName == null ? "" : fileName).append('\n');
         sb.append("docId: ").append(docId).append('\n');
-        sb.append("域: ").append(domain == null ? "" : domain).append('\n');
+        sb.append("知识体: ").append(bodyId == null ? "" : bodyId).append('\n');
         sb.append("切片数: ").append(chunks.size()).append('\n');
         sb.append("导出时间: ").append(LocalDateTime.now().format(TIMESTAMP)).append('\n');
 

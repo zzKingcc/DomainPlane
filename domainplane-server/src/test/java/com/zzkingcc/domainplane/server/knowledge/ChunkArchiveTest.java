@@ -42,9 +42,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("原文档案：剥离向量 / 读不全即抛 / 键布局 / 写失败不背摔上传")
 class ChunkArchiveTest {
 
-    /** 与生产同源的索引名（一域一索引，域路径确定性派生） */
+    /** 与生产同源的索引名（v2：索引由知识体唯一名派生，创建时冻结） */
     private static final String INDEX =
-            com.zzkingcc.domainplane.api.support.KbIndexes.nameOf("default.sales");
+            com.zzkingcc.domainplane.api.support.KbIndexes.nameOfBody("sales", "kb-sales");
 
     @TempDir
     Path tmp;

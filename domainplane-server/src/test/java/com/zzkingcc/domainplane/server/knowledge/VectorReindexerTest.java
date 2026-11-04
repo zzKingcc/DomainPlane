@@ -255,7 +255,22 @@ class VectorReindexerTest {
         final List<Duration> guards = new ArrayList<>();
 
         CountingReconciler(ChunkArchive archive, RetrievalPlan plan) {
-            super(archive, plan, 0L);
+            super(archive, plan, noBodies(), 0L);
+        }
+
+        /** 对账桩不关心知识体：任何集合都按"没有对应体"处理，走平台默认关键字存储 */
+        private static KnowledgeBodyResolver noBodies() {
+            return new KnowledgeBodyResolver(null, null, null, null) {
+                @Override
+                public String bodyIdOfIndex(String index) {
+                    return null;
+                }
+
+                @Override
+                public java.util.Set<String> allIndices() {
+                    return java.util.Set.of();
+                }
+            };
         }
 
         @Override

@@ -42,6 +42,14 @@ Console.renderSidebar('models');
         });
     }
 
+    /* HTML 与 src 是两棵树，提示元素可能还没同步到页面（历史上就漏过
+       settingsFileHint / esFootHint 这类 hint）。这里必须空判：
+       直接 pfEl(...).textContent 在元素缺失时抛 TypeError，会把整页打成"加载失败"。 */
+    function setHint(id, value) {
+        var el = pfEl(id);
+        if (el) { el.textContent = value || '—'; }
+    }
+
     function loadProfiles() {
         return Console.api.get('/admin/model-profiles').then(function (r) {
             PROFILES = (r && r.profiles) || [];
@@ -50,7 +58,7 @@ Console.renderSidebar('models');
             /* 「配置文件」提示指向档案真正落盘的文件（models.json）：
                /admin/settings 回的 llm-settings.json 是 yaml 兜底设置，不是档案，
                照它显示会让人去编辑一个本页根本不写的文件。 */
-            pfEl('settingsFileHint').textContent = (r && r.settingsFile) || '—';
+            setHint('settingsFileHint', r && r.settingsFile);
             renderProfiles();
         }).catch(function (e) {
             pfEl('modelList').innerHTML = '<div class="dp-card" style="color:var(--red);">'
@@ -374,6 +382,13 @@ Console.renderSidebar('models');
                 /* 「是否回写思考内容」开关：只出现在对话档案上（思考是对话流的概念），
                    放在「更新」左边。拨动即存，不与调优参数共用同一个保存动作，见 saveReturnThinking。 */
                 var thinkCtl = chat ? thinkSwitch(p) : '';
+                /* 自定义参数文本框：只给**未命中适配**的档案（服务端 customParams.schemaDriven
+                   判的，前端不自己再判一遍 —— 这个判据两侧各存一份就会漂移）。
+                   命中适配的档案走绿框，两条入口改的是同一个 params 字段，
+                   同时出现等于用户不知道哪个生效。
+                   未声明类型的档案也给：那恰恰是最可能"随便填个 OpenAI 兼容地址"的一类。 */
+                var paramsBox = (!p.customParams || p.customParams.schemaDriven) ? ''
+                    : (chat || !(p.endpoints || []).length ? customParamsBox(p) : '');
                 return '<section class="dp-card model-card">'
                     + '<header class="card-head">'
                     +   '<span class="model-dot"></span>'
@@ -401,6 +416,7 @@ Console.renderSidebar('models');
                     +   (chat ? '<div class="ctx-row"><span class="k">上下文长度</span>' + ctxCell(p) + '</div>' : '')
                     + '</div>'
                     +   tuneBox
+                    +   paramsBox
                     + '</div>'
                     + '</section>';
             }).join('');
@@ -435,6 +451,10 @@ Console.renderSidebar('models');
            绑在**卡片**上而不是调优框上，「更新」按钮已提到卡片头部，与参数控件不在同一棵子树里。
            绑定放在重建 innerHTML 之后，旧监听随旧节点一起丢掉，不会泄漏。 */
         box.querySelectorAll('.dp-card.model-card').forEach(bindTuneBox);
+        /* 自定义参数文本框（未命中适配的档案）：改动才让「保存参数」变可点，
+           保存走 PUT /admin/model-profiles/custom-params（收 JSON 文本，解析错误带行列号）。
+           绑定放在重建 innerHTML 之后，旧监听随旧节点一起丢掉，不会泄漏。 */
+        box.querySelectorAll('.dp-params').forEach(bindParamsBox);
 
         /* 各段计数 = 该段实际列出的卡片数。两段之和不再等于"档案总数"：
            双类型档案两边各出现一次，它本来就有两个角色，计数各归各段。 */
@@ -1208,6 +1228,86 @@ Console.renderSidebar('models');
             .catch(function (e) { if (onDone) { onDone(false, Console.sanitizeError(e.message)); } });
     }
 
+    /* ---------- 卡片：自定义参数（JSON）文本框 ----------
+       未命中内置适配的档案走这条：适配 schema 编不出控件，只能让用户自己写键值对。
+       字段与上限由服务端下发（customParams），前端不另存一份常量：
+       闸门改一个数，卡片上的提示必须跟着变，两处各写一份必然漂移
+       （漂移的样子是"提示说 32 个键，后端在 30 个键就拒了"）。
+       收 JSON 文本而不是键值行，是因为服务端接口收的就是文本 —— 一个逗号写错时
+       解析错误能带上行列号，比"参数不合法"这种话有用得多。 */
+    function customParamsBox(p) {
+        var cp = p.customParams || {};
+        var lim = cp.limits || {};
+        var stdList = cp.stdKeys || [];
+        var hint = '没命中内置适配，参数只能自己填：JSON 对象，键值原样透传到请求体。'
+            + '留空 = 一个都不发送。';
+        if (lim.maxKeys) {
+            hint += '上限 ' + lim.maxKeys + ' 个键、' + (lim.maxBytes || 0) + ' 字节。';
+        }
+        if (stdList.length) {
+            /* 标准键有一串（10 个），全列出来会把提示挤成三行还看不清重点：
+                按"用户最可能想填的那几个"挑前 4 个，其余用数量收口。
+                按字母序截前 4 个会得到 dimensions / frequency_penalty / … — 那是实现顺序，
+                不是用户关心的顺序。 */
+            var prefer = ['temperature', 'max_tokens', 'top_p', 'stop', 'response_format', 'seed'];
+            var shownList = prefer.filter(function (k) { return stdList.indexOf(k) >= 0; });
+            if (!shownList.length) { shownList = stdList; }
+            var shown = shownList.slice(0, 4).join(' / ');
+            hint += '标准参数（' + shown + (stdList.length > shownList.slice(0, 4).length
+                ? ' 等 ' + stdList.length + ' 个' : '') + '）另有控件，别写在这里。';
+        }
+        return '<div class="dp-params" data-params-alias="' + Console.escapeHtml(p.alias) + '">'
+            + '<div class="dp-params-head">'
+            +   '<span class="k">自定义参数</span>'
+            +   '<span class="dp-params-hint">' + Console.escapeHtml(hint) + '</span>'
+            + '</div>'
+            + '<textarea class="mono form-control dp-params-json" rows="3" spellcheck="false"'
+            +   ' placeholder=\'{"enable_thinking": false}\'>'
+            +   Console.escapeHtml(cp.paramsJson || '')
+            + '</textarea>'
+            + '<div class="dp-params-foot">'
+            +   '<span class="dp-params-status"></span>'
+            +   '<button type="button" class="btn btn-sm btn-outline-primary dp-params-save" disabled>保存参数</button>'
+            + '</div>'
+            + '</div>';
+    }
+
+    /* 绑定一框：基准 = 渲染时框里的文本（服务端回填的已保存值）；有改动才可点。
+       保存成功就地更新基准并留下「已保存 N 个键」，不重拉整张列表 ——
+       重拉会把刚写上的提示一起冲掉，而卡片上没有别处显示这份 JSON。
+       失败**不清空输入框**：用户的错误文本正是他要改的东西，清掉等于让他重打一遍。 */
+    function bindParamsBox(boxEl) {
+        var alias = boxEl.getAttribute('data-params-alias');
+        var ta = boxEl.querySelector('.dp-params-json');
+        var btn = boxEl.querySelector('.dp-params-save');
+        var status = boxEl.querySelector('.dp-params-status');
+        if (!alias || !ta || !btn) { return; }
+        var base = (ta.value || '').trim();
+        var sync = function () { btn.disabled = (ta.value || '').trim() === base; };
+        ta.addEventListener('input', sync);
+        btn.addEventListener('click', function () {
+            if (status) { status.textContent = ''; status.className = 'dp-params-status'; }
+            btn.disabled = true;
+            Console.api.put('/admin/model-profiles/custom-params', { alias: alias, paramsJson: ta.value })
+                .then(function (r) {
+                    base = (ta.value || '').trim();
+                    if (status) {
+                        status.textContent = (r && r.message) || '已保存';
+                        status.className = 'dp-params-status ok';
+                    }
+                })
+                .catch(function (e) {
+                    if (status) {
+                        status.textContent = Console.sanitizeError(e.message);
+                        status.className = 'dp-params-status err';
+                    }
+                })
+                .then(sync);
+        });
+        sync();
+    }
+
+
     /* 卡片头部「是否回写思考内容」开关的保存口：只改 returnThinking 一个字段，
        其余（连接信息 / 调优值 / 端点族）由服务端复制时原样带走（ModelProfile#withReturnThinking）。
        拨动即存：一个开关一个语义，不值得为它攒一批改动再点保存；也因此它不与
@@ -1478,7 +1578,7 @@ Console.renderSidebar('models');
                 pfEl('cnName').value = '';
                 pfEl('cnBaseUrl').value = '';
                 pfEl('cnApiKey').value = '';
-                pfEl('cnFileHint').textContent = (r && r.settingsFile) || '—';
+                setHint('cnFileHint', r && r.settingsFile);
                 cnSay(true, (r && r.message) || ('已添加「' + name + '」'));
                 return loadConnections(true);
             })

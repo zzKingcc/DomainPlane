@@ -36,8 +36,8 @@ public class KnowledgeSearchService {
      * @return 检索到的知识库内容片段(拼接为纯文本),无结果时返回提示
      */
     public String searchKnowledgeBase(String keyword) {
-        // keyword 就是用户提问原文：DESIGN §13 的敏感红线禁止用户消息全文入日志，只记长度
-        log.info("[知识库检索] 收到检索请求，关键词 {}", LogSanitizer.describeUserText(keyword));
+        // keyword 就是用户提问原文：DESIGN §13 的敏感红线禁止用户消息全文入日志，只记长度。
+        // 入口与结果合成一条日志：分开打两句时，"收到"那句除了证明方法被调过没有任何信息量
         try {
             List<Content> contents = contentRetriever.retrieve(new Query(keyword));
             if (contents == null || contents.isEmpty()) {
@@ -79,8 +79,8 @@ public class KnowledgeSearchService {
                 sb.append(body).append("\n\n");
             }
             String result = sb.toString();
-            log.info("[知识库检索] 检索到 {} 条相关内容，注入 {} 条（约 {} 字，预算 {}）",
-                    contents.size(), injected, used, budget);
+            log.info("[知识库检索] 关键词 {} → 命中 {} 条，注入 {} 条（约 {} 字，预算 {}）",
+                    LogSanitizer.describeUserText(keyword), contents.size(), injected, used, budget);
             return result;
         } catch (Exception e) {
             // 走到这里说明检索链路本身有问题（上面返回空列表那条分支才是"没命中"）。

@@ -6,8 +6,10 @@ import com.zzkingcc.domainplane.api.support.KbIndexes;
 import com.zzkingcc.domainplane.common.constant.ChunkMetadataKeys;
 import com.zzkingcc.domainplane.common.exception.KnowledgeBaseException;
 import com.zzkingcc.domainplane.common.exception.NotConfiguredException;
+import com.zzkingcc.domainplane.common.metrics.MetricsRegistry;
 import com.zzkingcc.domainplane.domain.rag.store.DocumentAgg;
 import com.zzkingcc.domainplane.domain.rag.store.IngestTarget;
+import com.zzkingcc.domainplane.domain.rag.store.KbChunk;
 import com.zzkingcc.domainplane.domain.rag.store.KnowledgeBackend;
 import com.zzkingcc.domainplane.domain.rag.store.KnowledgeStore;
 import com.zzkingcc.domainplane.domain.rag.store.StoreAccessException;
@@ -20,6 +22,7 @@ import com.zzkingcc.domainplane.infrastructure.ingestion.processor.IngestReport;
 import com.zzkingcc.domainplane.infrastructure.ingestion.txt.TxtNormalizer;
 import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
 import com.zzkingcc.domainplane.server.config.RagProperties;
+import com.zzkingcc.domainplane.server.settings.InfraSettings;
 import com.zzkingcc.domainplane.server.settings.LlmModelHolder;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -49,20 +52,20 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 知识库服务：文档上传 / 列表 / 删除 / 状态，并承担一域一索引的生命周期。
+ * 知识库服务：文档上传 / 列表 / 删除 / 状态，并承担<b>知识体</b>索引的生命周期。
  *
- * 结构性事实（与域树、工具、提示词同构）：一个域 = 一个知识库索引。
- * 索引名由域路径确定性派生（{@link KbIndexes#nameOf}），在首次上传时按需创建，
- * 域是运行期由用户创建的，索引跟着域走，没有统一的"启动期全局索引"。
+ * <p>结构性事实（v2）：<b>一个知识体 = 一个索引</b>，索引名由知识体唯一名派生、创建时冻结
+ * （{@link com.zzkingcc.domainplane.server.settings.InfraSettings.KnowledgeBody#effectiveIndex()}）。
+ * 域只是消费者：多个域可以绑同一个体、查同一份数据；删域只解绑，不动这里的任何东西。
+ * 于是本类的所有写/读/重建动作都以 <b>bodyId</b> 为参数，没有一个方法再问"域"。</p>
  *
- * 检索侧的域边界由「查哪些索引」保证：检索域 D 时只查 D 自身与祖先链上的索引，
- * 因此文档自带域的含义变成「它被上传到哪个域的索引」。{@code metadata.domain} 只用于
- * 管控台展示与排查，不参与过滤。
+ * <p>检索侧的边界由「查哪些索引」保证：检索域 D 时查 D 自身与祖先链上各域<b>绑定的体</b>的索引，
+ * 因此"文档属于谁"变成"它被上传到哪个体"。{@code metadata.domain} 记的是体 id，
+ * 只用于管控台展示与排查，不参与过滤。</p>
  *
- * 存储全部经 SPI（{@link KnowledgeStore}，P0 唯一实现是 ES 适配器）：本类不认识
- * {@code ElasticsearchClient}。原文同步进 {@link ChunkArchive}（BlobStore 权威源），
- * 换模型重灌走 {@link VectorReindexer} 的三阶段（archive 读原文 → 重建 → 重灌），
- * 索引是可重建的派生数据。
+ * <p>存储全部经 SPI（{@link KnowledgeStore}）：本类不认识 {@code ElasticsearchClient}。
+ * 原文同步进 {@link ChunkArchive}（BlobStore 权威源），换模型重灌走 {@link VectorReindexer}
+ * 的三阶段（archive 读原文 → 重建 → 重灌），索引是可重建的派生数据。</p>
  *
  * @author zzkingcc
  */
@@ -76,6 +79,15 @@ public class KnowledgeBaseService {
     private static final int LIST_MAX_SIZE = 1000;
 
     /**
+     * 慢操作日志阈值（毫秒）：只读统计链路（枚举索引 / 读文档列表）超过它就打 WARN。
+     * 管控台"知识库页加载慢"的定位入口。
+     */
+    private static final long SLOW_OP_MS = 1_500L;
+
+    /** 「看文档」一次最多回多少片：切片数动辄上千，弹层里一次全塞给浏览器既慢也没人看得完 */
+    private static final int PREVIEW_MAX_CHUNKS = 200;
+
+    /**
      * 删索引前拉取该索引全部文档 docId 的上限（与旧实现的 search size 一致）。
      */
     private static final int EXPORT_CLEANUP_MAX_SIZE = 10_000;
@@ -84,14 +96,13 @@ public class KnowledgeBaseService {
     private final RagProperties ragProperties;
     private final LlmModelHolder modelHolder;
     private final ChunkExporter chunkExporter;
-    /** 域注册表：归属域必须是登记过的域（写入前校验，避免凭空造索引） */
-    private final DomainRegistry domainRegistry;
     /**
-     * 检索计划：写入与生命周期的 store 经它取（{@link RetrievalPlan#keywordStore()}，
-     * keyword 后端为文档登记视角的权威——一审修订 B4）。本类不认识任何后端类型，
-     * 也不认识 {@code ElasticsearchClient}。
+     * 检索计划：写入与生命周期的 store 经它按<b>知识体</b>取
+     * （{@link RetrievalPlan#writeStoreOfBody(String)}）。本类不认识任何后端类型。
      */
     private final RetrievalPlan retrievalPlan;
+    /** 知识体解析：bodyId → 体定义 / 冻结索引名；管理链路只认它，不再问域 */
+    private final KnowledgeBodyResolver bodyResolver;
     /** 切片原文档案：ingest 成功后归档，重灌时读回 */
     private final ChunkArchive chunkArchive;
     /** 档案对账：重灌前的清理（补缺档、删孤儿）复用同一套双向逻辑 */
@@ -103,16 +114,16 @@ public class KnowledgeBaseService {
                                 RagProperties ragProperties,
                                 LlmModelHolder modelHolder,
                                 ChunkExporter chunkExporter,
-                                DomainRegistry domainRegistry,
                                 RetrievalPlan retrievalPlan,
+                                KnowledgeBodyResolver bodyResolver,
                                 ChunkArchive chunkArchive,
                                 ChunkArchiveReconciler archiveReconciler) {
         this.embeddingModel = embeddingModel;
         this.ragProperties = ragProperties;
         this.modelHolder = modelHolder;
         this.chunkExporter = chunkExporter;
-        this.domainRegistry = domainRegistry;
         this.retrievalPlan = retrievalPlan;
+        this.bodyResolver = bodyResolver;
         this.chunkArchive = chunkArchive;
         this.archiveReconciler = archiveReconciler;
         AtomicLong seq = new AtomicLong();
@@ -141,53 +152,68 @@ public class KnowledgeBaseService {
     /**
      * 上传结果。
      *
+     * @param body         落到的知识体 id
      * @param encoding     实际识别到的源文件编码（全链路统一 UTF-8 后，这个值只作诊断）
      * @param sections     识别到的标题数
      * @param droppedLines 清洗阶段删掉的行数
      * @param exportPath   切片预览 txt 的落盘路径（导出失败时为 null）
      */
-    public record UploadResult(String docId, String fileName, long size, int chunks, String domain,
+    public record UploadResult(String docId, String fileName, long size, int chunks, String body,
                                int sections, int droppedLines, String encoding, String exportPath) {
     }
 
-    /** 索引内已入库的文档条目 */
+    /**
+     * 索引内已入库的文档条目。
+     *
+     * @param body 文档落的知识体 id（来自切片 metadata；早期文档可能是空）
+     */
     public record DocumentItem(String docId, String fileName, String fileNameLower,
-                               int chunks, String domain, String exportPath) {
+                               int chunks, String body, String exportPath) {
     }
-
-    // ==================== 域 → 索引 ====================
 
     /**
-     * 规范化并校验文档归属域，与 {@code @Tool(domains = {...})} 同构：
-     * 必须是从根域出发的完整路径，留空 = 挂在根域 {@code default}。
+     * 「看文档」里的一片。
      *
-     * 路径非法直接抛异常而不是静默丢弃，静默会把文档写到一个树里不存在的域上，
-     * 结果是永远检索不到且不报错。
+     * @param seq   切片序号（metadata 的 {@code chunk_seq}，缺失按 0）
+     * @param text  切片正文（未入库前切出来的样子，去重跳过的不在此列）
+     * @param chars 正文字数——弹层里给"这片多长"一个直观数字，不用自己去数
      */
-    public static String normalizeDomain(String domain) {
-        if (domain == null || domain.isBlank()) {
-            return Domains.DEFAULT;
-        }
-        String path = domain.trim();
-        String reason = Domains.validatePath(path);
-        if (reason != null) {
-            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER,
-                    "知识库文档的域不合法（" + reason + "）；须为从 " + Domains.DEFAULT
-                            + " 出发的完整路径，如 default.sales");
-        }
-        return path;
+    public record PreviewChunk(int seq, String text, int chars) {
     }
 
-    /** 域 → 该域的知识库索引名 */
-    public static String indexOf(String domain) {
-        return KbIndexes.nameOf(normalizeDomain(domain));
+    /**
+     * 一个文档的切片预览（管控台「看文档」）。
+     *
+     * @param total       该文档在档案/索引里的切片总数
+     * @param fromArchive true = 读的原文档案（权威源）；false = 档案缺失，回落到索引读
+     * @param chunks      最多 {@link #PREVIEW_MAX_CHUNKS} 片
+     */
+    public record Preview(String docId, String index, long total, boolean fromArchive,
+                          List<PreviewChunk> chunks) {
+    }
+
+    // ==================== 知识体 → 索引 ====================
+
+    /**
+     * 知识体 → 它的冻结索引名；体不存在直接抛（写入侧不能猜）。
+     *
+     * <p>这是全平台唯一的换算点（{@link KnowledgeBodyResolver#indexOf}）：新体按唯一名派生，
+     * 迁移体带着旧名。索引名不随改名 / 换落点变化。</p>
+     */
+    public String indexOf(String bodyId) {
+        String index = bodyResolver.indexOf(bodyId);
+        if (index == null) {
+            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER,
+                    "知识体不存在：" + bodyId + "（可能刚被删除，请刷新知识库页）");
+        }
+        return index;
     }
 
     /**
      * 当前已存在的全部知识库索引（按名排序）。
      *
-     * <p>取全部后端的并集：索引属于域，域的东西可能落在不同机器上（一个域一个知识体），
-     * 只看平台默认那一台会漏掉挂在别的连接上的域。</p>
+     * <p>取全部后端的并集：体的数据可能落在不同机器上（关键字与向量分两台、或体换过落点），
+     * 只看平台默认那一台会漏掉挂别的连接上的体。</p>
      */
     public List<String> existingIndices() {
         Set<String> names = new LinkedHashSet<>();
@@ -217,6 +243,7 @@ public class KnowledgeBaseService {
         Map<String, List<String>> owners = new LinkedHashMap<>();
         for (KnowledgeBackend backend : retrievalPlan.backends()) {
             backend.store().ifPresent(store -> {
+                long start = System.nanoTime();
                 try {
                     for (String collection : store.listCollections()) {
                         owners.computeIfAbsent(collection, name -> new ArrayList<>()).add(backend.id());
@@ -224,6 +251,7 @@ public class KnowledgeBaseService {
                 } catch (RuntimeException e) {
                     log.warn("[知识库] 枚举后端 {} 的索引失败（按空处理）: {}", backend.id(), e.getMessage());
                 }
+                logSlow("枚举后端 " + backend.id() + " 的索引清单", start);
             });
         }
         return owners;
@@ -245,19 +273,19 @@ public class KnowledgeBaseService {
     }
 
     /**
-     * 建该域自己的索引（<b>带域</b>）：落在它绑的知识体上，而不是平台默认那台。
+     * 建/确认这个知识体的索引（<b>带体</b>）：落在它自己的两路连接上，而不是平台默认那台。
      *
-     * <p>上传走这条。用平台默认会在"这个域挂在 Qdrant"时，把索引建到 ES 上，
+     * <p>上传走这条。用平台默认会在"这个体只配了 Qdrant"时把索引建到 ES 上，
      * 紧接着的写入又写到 Qdrant——那边没有集合，写入报错；或者更糟，集合自动建出来
      * 但维度与 mapping 不对，检索时静默召回不到。</p>
      */
-    public void ensureIndex(String domain, String indexName) {
+    public void ensureBodyIndex(String bodyId, String indexName) {
         try {
-            writeStore(domain).ensureCollection(indexName,
+            writeStore(bodyId).ensureCollection(indexName,
                     modelHolder.effectiveEmbeddingDimension());
         } catch (StoreAccessException e) {
             throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
-                    "确保域 " + domain + " 的知识库索引[" + indexName + "]存在失败："
+                    "确保知识体 " + bodyId + " 的索引[" + indexName + "]存在失败："
                             + e.getMessage(), e);
         }
     }
@@ -305,56 +333,62 @@ public class KnowledgeBaseService {
     }
 
     /**
-     * 删除若干域各自的知识库索引（供删域时清理，先清索引再删域）。
+     * 删除一个知识体的索引（唯一会毁数据的入口，管理员显式触发、需输名确认）。
      *
-     * fail-closed：任何一个域的索引删不掉（存储不可达 / 删除失败），立即抛异常中止，
-     * 绝不"跳过它继续删下一个"。删域的语义是"这个域的一切都清干净"，
-     * 留一个孤儿索引的后果不是"多了点垃圾"：
-     * 索引名是域路径的哈希，同一路径域将来重建时索引名相同，
-     * 这份本该删掉的知识内容会原样复活，且没有任何报错。
+     * <p><b>删域不走这里</b>：删域只解绑，体的索引与原文都留着（见 {@code DomainPurgeService}）。
+     * 这条路径只服务于"我真的不要这批知识了"或"换落点前先腾空"。</p>
      *
-     * @return 实际存在并被删除的域标识
-     * @throws KnowledgeBaseException 存储不可达或索引删除失败，域未被删除
+     * <p>fail-closed：集合删不掉（存储不可达 / 权限）立即抛，绝不"跳过继续"。留一个删不掉的
+     * 集合，界面显示已删除、数据还在，是最难排查的一种不一致。</p>
+     *
+     * <p>执行顺序硬要求：先清旁挂产物（切片预览 txt、原文档案），再删集合。反过来的话集合一删，
+     * docId 清单就没了着落，档案会留下带着完整知识内容的孤儿（以后重灌还会把已删文档复活）。</p>
+     *
+     * @param bodyId  知识体 id
+     * @param keepRaw {@code true} = 只删索引、保留原文档案与预览 txt（以后可从原文重建）；
+     *                {@code false} = 连原文与预览一起删
+     * @return 删除结果（被删的索引名、是否真的删掉了集合、清理了多少文档的旁挂产物）
+     * @throws KnowledgeBaseException 知识体不存在 / 存储不可达 / 集合删除失败
      */
-    public List<String> deleteIndices(Collection<String> domains) {
-        if (domains == null || domains.isEmpty()) {
-            return List.of();
-        }
-        List<String> removed = new ArrayList<>();
-        for (String domain : domains) {
-            if (domain == null || domain.isBlank()) {
-                continue;
+    public BodyDeleteResult deleteBody(String bodyId, boolean keepRaw) {
+        String index = indexOf(bodyId);
+        int docs = 0;
+        try {
+            docs = mergeDocuments(index, EXPORT_CLEANUP_MAX_SIZE).size();
+            if (keepRaw) {
+                log.info("[知识库] 删知识体 {} 时保留原文档案（{} 个文档），只删索引 {}", bodyId, docs, index);
+            } else {
+                // 原文档案是"权威源"，删它要留一条可追溯的日志：这是本类唯一销毁原文的地方
+                deleteExportFiles(index);
+                log.info("[知识库] 删知识体 {} 时一并删除原文档案与切片预览（{} 个文档）", bodyId, docs);
             }
-            String normalized = domain.trim();
-            String index = KbIndexes.nameOf(normalized);
-            // 先删切片预览文件（含文档全文）再删索引：否则索引一删，docId 清单就没了着落，
-            // 预览目录里会留下带着完整知识内容的孤儿 txt
-            deleteExportFiles(index);
-            boolean deleted;
-            try {
-                // 逐台后端删同名 collection：索引名按域唯一，所以"在每台上都删一次"是幂等的；
-                // 而且必须逐台删——域换过知识体时，旧数据还在上一台的机器上，
-                // 只删当前那台会留下一个永远不会被查到的孤儿索引（同名域重建就复活了）
-                deleted = false;
-                for (KnowledgeStore store : stores()) {
-                    deleted |= store.deleteCollection(index);
-                }
-            } catch (StoreAccessException e) {
-                // 明确区分「索引可能还在」与「查都没问到」：前者绝不能继续删域
-                throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
-                        "索引[" + index + "]（域 " + normalized + "）未能删除，已中止、域未删除："
-                                + e.getMessage() + "。"
-                                + "若存储只是临时不可达，恢复后重新执行删除即可；"
-                                + "若确实删不掉，需先在存储侧处理该索引再重试", e);
+            boolean deleted = false;
+            for (KnowledgeStore store : stores()) {
+                deleted |= store.deleteCollection(index);
             }
-            if (deleted) {
-                removed.add(normalized);
+            if (!deleted) {
+                log.info("[知识库] 知识体 {} 的索引 {} 在任何后端上都不存在（可能从未上传过文档）",
+                        bodyId, index);
             }
+            return new BodyDeleteResult(bodyId, index, deleted, keepRaw, docs);
+        } catch (StoreAccessException e) {
+            throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
+                    "知识体 " + bodyId + " 的索引[" + index + "]未能删除，已中止（知识体仍在）："
+                            + e.getMessage() + "。若存储只是临时不可达，恢复后重试即可；"
+                            + "若确实删不掉，需先在存储侧处理该索引再重试", e);
         }
-        if (!removed.isEmpty()) {
-            log.info("[知识库] 已删除 {} 个域的索引：{}", removed.size(), removed);
-        }
-        return List.copyOf(removed);
+    }
+
+    /**
+     * 删知识体的结果。
+     *
+     * @param index         该体冻结的索引名
+     * @param deleted       是否真的删掉了集合（false = 本来就没有）
+     * @param rawKept       是否保留了原文档案
+     * @param documents     涉及的文档数（删档前从索引读到的）
+     */
+    public record BodyDeleteResult(String bodyId, String index, boolean deleted,
+                                   boolean rawKept, int documents) {
     }
 
     /**
@@ -386,49 +420,361 @@ public class KnowledgeBaseService {
     }
 
     /**
-     * 重建全部知识库索引（诊断 → 删旧 → 按新维度建 mapping → 校验）。
+     * 按知识体重建索引：<b>默认从原文重建</b>，不动原文、不需要重新上传。
      *
-     * 语义是「删掉重建」，因此索引会被清空，文档需重新上传。什么时候需要它：
-     * 换了向量模型导致维度变化（ES 的向量维度是 mapping 参数，建好后无法修改，不重建就永远修不好），
-     * 或者想一把清空知识库。一个索引都没有时，重建会建出根域的索引。
+     * <p>这是知识体卡片上的「重建索引」唯一实现（关键字 / 向量 / 两者）。语义分两种：</p>
+     * <ul>
+     *   <li>{@code fromArchive=true}（默认）：对账 → 从 {@link ChunkArchive} 捞出该体的全部切片 →
+     *       删集合 → 按当前维度重建 → 用当前向量模型重灌。换向量模型导致的维度不符靠它修，
+     *       用户不需要重传任何文档；</li>
+     *   <li>{@code fromArchive=false}：只删了重建（空集合），数据需重新上传。仅在原文也丢了、
+     *       或用户明确要"清空这个体"时选它——它不是"修复"手段，是"丢弃"手段。</li>
+     * </ul>
      *
-     * @param dimensions 新索引的向量维度（取"三处同源"的公共取值点）
-     * @return 被重建的索引名
+     * <p>只动这一个体的索引：同一个后台上可能有几十个体，全量重建的代价是分钟级停机。</p>
+     *
+     * @param bodyId      知识体 id
+     * @param dimensions  重建用的向量维度（来自当前向量模型）
+     * @param fromArchive 是否从原文重灌
+     * @return 重建结果（索引名、文档数、写回切片数、是否从原文）
      */
-    public List<String> rebuildAll(int dimensions) {
+    public BodyRebuildResult rebuildBody(String bodyId, int dimensions, boolean fromArchive) {
+        String index = indexOf(bodyId);
+        // 先确认存储可达：重建是破坏性操作，黑洞地址上"删了建不出来"等于把索引弄丢
         assertStoreReachable();
-        List<String> existing = existingIndices();
-        List<String> targets = existing.isEmpty()
-                ? List.of(KbIndexes.nameOf(Domains.DEFAULT))
-                : existing;
-        Map<String, List<KnowledgeStore>> owners = ownersByIndex();
-        log.info("[知识库] 开始重建 {} 个索引（维度 {}）：{}", targets.size(), dimensions, targets);
-        for (String index : targets) {
-            // 只重建"这个索引真实存在的那几台"：盲目在每台上都 ensureCollection 会
-            // 给每台机器都建出一排空索引，知识库页于是显示一堆零文档的域
-            List<KnowledgeStore> holders = owners.get(index);
-            if (holders == null || holders.isEmpty()) {
-                holders = List.of(writeStore());
-            }
-            for (KnowledgeStore store : holders) {
-                store.diagnose(index);
-                // 删不掉就必须停在这里：继续往下 ensureCollection 只会撞上
-                // "索引已存在且维度一致 → 跳过创建"，于是用户点了"重建"却什么都没重建，
-                // 界面显示成功、维度仍是旧的，又是一个"不报错但没生效"
-                try {
-                    store.deleteCollection(index);
-                } catch (StoreAccessException e) {
-                    throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
-                            "重建时删除索引[" + index + "]失败，已中止：" + e.getMessage(), e);
-                }
-                store.ensureCollection(index, dimensions);
-            }
-            /* 旧实现在这里还有一次 writeAfterVerify（refresh + count + mapping 日志）。
-               重建后的索引为空，count 恒 0，mapping 信息 diagnose 已经打过一遍，
-               刷新与否对空索引无意义；真正写入时的刷新由 SPI 的 write() 负责。 */
+        KnowledgeStore writer = writeStore(bodyId);
+        List<KnowledgeStore> holders = holdersOf(index, writer);
+        int documents = mergeDocuments(index, LIST_MAX_SIZE).size();
+        int[] written = {0};
+        if (fromArchive) {
+            // 捞完再删：顺序与全量重灌一致，中途失败不留"部分新维度"的混合索引
+            List<KbChunk> chunks = VectorReindexer.loadCollection(
+                    chunkArchive, archiveReconciler, writer, index);
+            log.info("[知识库] 重建知识体 {}（索引 {}）：从原文取回 {} 条切片、{} 个文档，开始删旧重建",
+                    bodyId, index, chunks.size(), documents);
+            recreate(holders, index, dimensions);
+            written[0] = VectorReindexer.reindexCollection(writer, embeddingModel, index, chunks);
+        } else {
+            log.warn("[知识库] 重建知识体 {}（索引 {}）：用户选择\"只删了重建\"，索引将被清空，"
+                    + "原有 {} 个文档需重新上传", bodyId, index, documents);
+            recreate(holders, index, dimensions);
         }
-        log.info("[知识库] 索引重建完成：{}", targets);
-        return targets;
+        log.info("[知识库] 知识体 {} 重建完成：索引 {}，写回 {} 条切片，documents={}",
+                bodyId, index, written[0], documents);
+        return new BodyRebuildResult(bodyId, index, documents, written[0], fromArchive);
+    }
+
+    /** 重建结果 */
+    public record BodyRebuildResult(String bodyId, String index, int documents,
+                                    int chunksWritten, boolean fromArchive) {
+    }
+
+    // ==================== 换落点（P3） ====================
+
+    /** 不分批 embed 时一次 write 的条数（ES bulk / Qdrant upsert 都远吃得下这个量级） */
+    private static final int PLAIN_WRITE_BATCH = 200;
+
+    /**
+     * 换落点预演：这份数据迁到 {@code target} 会发生什么。<b>只读</b>。
+     *
+     * <p>刻意不逐片读档案：几万片的读取要几十秒，而用户此刻只需要判断三件事——
+     * 有多少文档、目标能不能写、缺不缺档。切片数在页面统计里已经有。</p>
+     *
+     * @param bodyId             知识体 id
+     * @param kind               {@code keyword} / {@code vector}
+     * @param targetConnectionId 这一路要换到的连接
+     * @return 预演结果；{@code ready=false} 时 {@code reason} 说明为什么不能迁
+     */
+    public BodyRoutePlan planRoute(String bodyId, String kind, String targetConnectionId) {
+        String index = indexOf(bodyId);
+        String routeKind = requireRouteKind(kind);
+        InfraSettings.KnowledgeBody body = bodyResolver.body(bodyId);
+        String current = connectionOf(body, routeKind);
+        String target = trimToNull(targetConnectionId);
+        int documents = mergeDocuments(index, LIST_MAX_SIZE).size();
+        int archived = chunkArchive.docIdsOf(index).size();
+        Integer modelDims = modelHolder.isEmbeddingConfigured()
+                ? modelHolder.effectiveEmbeddingDimension() : null;
+
+        if (target == null) {
+            return BodyRoutePlan.blocked(bodyId, index, routeKind, current, null,
+                    documents, archived, modelDims, "没选目标连接");
+        }
+        if (target.equals(current)) {
+            return BodyRoutePlan.blocked(bodyId, index, routeKind, current, target, documents, archived,
+                    modelDims, "这一路已经在连接「" + target + "」上，没有要迁的东西");
+        }
+        KnowledgeStore targetStore;
+        try {
+            targetStore = retrievalPlan.storeOf(target);
+        } catch (RuntimeException e) {
+            return BodyRoutePlan.blocked(bodyId, index, routeKind, current, target, documents, archived,
+                    modelDims, "目标连接不可用：" + e.getMessage());
+        }
+        if (!targetStore.ping()) {
+            return BodyRoutePlan.blocked(bodyId, index, routeKind, current, target, documents, archived,
+                    modelDims, "目标连接不可达：先在「存储配置」页点「测试连接」");
+        }
+        boolean withVectors = needsVectors(body, routeKind, target);
+        if (withVectors && modelDims == null) {
+            return BodyRoutePlan.blocked(bodyId, index, routeKind, current, target, documents, archived,
+                    null, "这一路迁过去要重算向量，但没配向量模型：先在「模型设置」启用 Embedding 模型");
+        }
+        return new BodyRoutePlan(bodyId, index, routeKind, current, target, true, null,
+                documents, archived, Math.max(0, documents - archived), withVectors,
+                modelDims, dimsOf(targetStore, index), null);
+    }
+
+    /**
+     * 把体的某一路迁到另一台连接：<b>先在新连接上写满，再切指针</b>。
+     *
+     * <p>顺序是这条链路的关键。新集合写完之前，体的指针仍指旧连接，检索照常可用——
+     * 索引名固定，所以新旧两台可以短暂并存同名集合，不需要计划稿里写的"期间检索不可用"。
+     * 写完校验条数 → 调用方落盘切指针 → 旧集合留作遗留。</p>
+     *
+     * <p><b>旧连接上的同名集合不删</b>：那是运维动作（旧机器上可能还有别的东西在用它），
+     * 而且删错了就没有回退依据。结果里的 {@code legacyConnectionId} 让页面提示"旧连接上
+     * 还留着一份"。</p>
+     *
+     * @param bodyId             知识体 id
+     * @param kind               {@code keyword} / {@code vector}
+     * @param targetConnectionId 目标连接 id
+     * @param dimensions         目标集合的向量维度（由调用方按"三处同源"取值）
+     * @return 迁移结果
+     * @throws NotConfiguredException 需要重算向量但向量模型未配置
+     */
+    public BodyRouteMigration migrateRoute(String bodyId, String kind, String targetConnectionId,
+                                           int dimensions) {
+        String index = indexOf(bodyId);
+        String routeKind = requireRouteKind(kind);
+        InfraSettings.KnowledgeBody body = bodyResolver.body(bodyId);
+        String current = connectionOf(body, routeKind);
+        String target = trimToNull(targetConnectionId);
+        if (target == null) {
+            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER, "没选目标连接");
+        }
+        if (target.equals(current)) {
+            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER,
+                    "这一路已经在连接「" + target + "」上，不需要迁移");
+        }
+        boolean withVectors = needsVectors(body, routeKind, target);
+        if (withVectors && !modelHolder.isEmbeddingConfigured()) {
+            throw new NotConfiguredException("迁这一路要重算向量，但没配向量模型；"
+                    + "请先在「模型设置」页启用 Embedding 模型");
+        }
+        try {
+            // 与上传 / 重灌共用串行锁：迁移在写目标连接，不能和导入并发把同一批切片写两遍
+            if (!ingestPermit.tryAcquire(ragProperties.getIngestLockWaitSeconds(), TimeUnit.SECONDS)) {
+                throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_UPLOAD_REJECTED,
+                        "知识库正忙（导入或重灌进行中）：等待超过 "
+                                + ragProperties.getIngestLockWaitSeconds() + " 秒仍未拿到导入锁");
+            }
+            try {
+                KnowledgeStore writer = writeStore(bodyId);
+                List<KbChunk> chunks = VectorReindexer.loadCollection(
+                        chunkArchive, archiveReconciler, writer, index);
+                if (chunks.isEmpty()) {
+                    throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
+                            "知识体 " + bodyId + " 没有可用原文：换落点靠原文重建，"
+                                    + "没档案就只能重新上传文档（原落点未改动）");
+                }
+                KnowledgeStore targetStore = retrievalPlan.storeOf(target);
+                if (!targetStore.ping()) {
+                    throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
+                            "目标连接「" + target + "」不可达，已中止（原落点未改动）");
+                }
+                /* 目标上可能留着上一次迁移中断的半成品：同名集合必须删了重建，
+                   否则 ensureCollection 见"已存在"直接跳过，接着 write 会往旧 mapping 里灌数据 */
+                if (exists(targetStore, index)) {
+                    targetStore.deleteCollection(index);
+                    log.warn("[知识库] 目标连接 {} 上已有同名集合 {}（多半是上次迁移中断的残留），已删除重建",
+                            target, index);
+                }
+                targetStore.ensureCollection(index, dimensions);
+                int written = withVectors
+                        ? VectorReindexer.reindexCollection(targetStore, embeddingModel, index, chunks)
+                        : writeChunks(targetStore, index, chunks);
+                if (written != chunks.size()) {
+                    throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
+                            "迁到 " + target + " 时写入不完整：原文 " + chunks.size()
+                                    + " 条、写入 " + written + " 条，已中止（原落点未改动）");
+                }
+                log.info("[知识库] 知识体 {} 的 {} 路已从 {} 迁到 {}：{} 条切片、{} 个文档{}",
+                        bodyId, routeKind, current, target, written, documentCount(chunks),
+                        withVectors ? "（已重算向量）" : "（沿用原文，未重算向量）");
+                return new BodyRouteMigration(bodyId, index, routeKind, current, target,
+                        written, documentCount(chunks), withVectors, current);
+            } finally {
+                ingestPermit.release();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_INGEST_ERROR, "迁移落点被中断", e);
+        }
+    }
+
+    /**
+     * 换落点的预演结果。
+     *
+     * @param ready             能不能迁；false 时看 {@code reason}
+     * @param missingArchive    索引里有、原文档案里没有的文档数——这些迁不过去
+     * @param recomputeVectors  迁过去要不要重算向量（keyword 路通常不用）
+     * @param targetDimension   目标上已存在的同名集合的维度（没有该集合时为 null）
+     */
+    public record BodyRoutePlan(String bodyId, String index, String kind, String from, String to,
+                                boolean ready, String reason, int documents, int archivedDocuments,
+                                int missingArchive, boolean recomputeVectors,
+                                Integer modelDimension, Integer targetDimension, String note) {
+
+        static BodyRoutePlan blocked(String bodyId, String index, String kind, String from, String to,
+                                     int documents, int archived, Integer modelDimension, String reason) {
+            return new BodyRoutePlan(bodyId, index, kind, from, to, false, reason,
+                    documents, archived, Math.max(0, documents - archived),
+                    false, modelDimension, null, null);
+        }
+    }
+
+    /**
+     * 换落点的执行结果。
+     *
+     * @param legacyConnectionId 旧连接 id：它上面还留着同名的集合，需要时由运维侧手工清理
+     */
+    public record BodyRouteMigration(String bodyId, String index, String kind, String from, String to,
+                                     int chunksWritten, int documents, boolean vectorsRecomputed,
+                                     String legacyConnectionId) {
+    }
+
+    /**
+     * 迁这一路要不要重算向量。
+     *
+     * <p>向量路必算（档案里没有向量）。keyword 路通常不用——但有一种例外：目标连接与
+     * <b>另一路</b>是同一份物理数据（同一台 ES 上的同一个索引），此时两条路共用一个集合，
+     * 写成无向量会把另一路已有的向量抹掉。判据用 {@code location()}，不看连接 id。</p>
+     */
+    private boolean needsVectors(InfraSettings.KnowledgeBody body, String routeKind, String targetId) {
+        if (InfraSettings.KIND_VECTOR.equals(routeKind)) {
+            return true;
+        }
+        String other = InfraSettings.KIND_KEYWORD.equals(routeKind) ? body.vectorId() : body.keywordId();
+        if (other == null) {
+            return false;
+        }
+        String left = locationOf(targetId);
+        String right = locationOf(other);
+        return left != null && left.equals(right);
+    }
+
+    private String locationOf(String connectionId) {
+        for (KnowledgeBackend backend : retrievalPlan.backends()) {
+            if (backend.id().equals(connectionId)) {
+                return backend.location();
+            }
+        }
+        return null;
+    }
+
+    /** 不带向量的写入（keyword 路迁移用）：分批 write，失败即抛，绝不留半份 */
+    private static int writeChunks(KnowledgeStore store, String collection, List<KbChunk> chunks) {
+        int written = 0;
+        for (int start = 0; start < chunks.size(); start += PLAIN_WRITE_BATCH) {
+            int end = Math.min(start + PLAIN_WRITE_BATCH, chunks.size());
+            List<KbChunk> batch = chunks.subList(start, end);
+            try {
+                store.write(collection, batch);
+                MetricsRegistry.kbStoreWrite();
+            } catch (StoreAccessException e) {
+                MetricsRegistry.kbStoreWriteFailure();
+                throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
+                        "写入 collection[" + collection + "]失败（已写 " + written + "/"
+                                + chunks.size() + " 条）：" + e.getMessage(), e);
+            }
+            written += batch.size();
+        }
+        return written;
+    }
+
+    private static int documentCount(List<KbChunk> chunks) {
+        Set<String> docIds = new LinkedHashSet<>();
+        for (KbChunk chunk : chunks) {
+            String docId = chunk.metadata() == null ? null
+                    : chunk.metadata().get(ChunkMetadataKeys.DOC_ID);
+            if (docId != null) {
+                docIds.add(docId);
+            }
+        }
+        return docIds.size();
+    }
+
+    private static String requireRouteKind(String kind) {
+        String k = kind == null ? "" : kind.trim().toLowerCase(Locale.ROOT);
+        if (!InfraSettings.KIND_KEYWORD.equals(k) && !InfraSettings.KIND_VECTOR.equals(k)) {
+            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER,
+                    "落点类型只能是 keyword 或 vector（原文落点要等对象存储接入后才有可选项）");
+        }
+        return k;
+    }
+
+    private static String connectionOf(InfraSettings.KnowledgeBody body, String routeKind) {
+        if (body == null) {
+            return null;
+        }
+        return InfraSettings.KIND_KEYWORD.equals(routeKind) ? body.keywordId() : body.vectorId();
+    }
+
+    private static String trimToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    /** 目标上有没有同名集合；查询失败按"有"处理（随后会走删除，失败会如实抛） */
+    private static boolean exists(KnowledgeStore store, String collection) {
+        try {
+            return store.exists(collection);
+        } catch (StoreAccessException e) {
+            throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
+                    "查询目标上的集合[" + collection + "]是否存在失败：" + e.getMessage(), e);
+        }
+    }
+
+    private static Integer dimsOf(KnowledgeStore store, String collection) {
+        try {
+            return store.currentVectorDims(collection);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** 该索引真实落在哪几台后端上（历史遗留可能多台同名）；一台都没有时退回给定的 writer */
+    private List<KnowledgeStore> holdersOf(String index, KnowledgeStore fallback) {
+        List<KnowledgeStore> holders = new ArrayList<>();
+        for (KnowledgeStore store : stores()) {
+            try {
+                if (store.listCollections().contains(index)) {
+                    holders.add(store);
+                }
+            } catch (RuntimeException e) {
+                log.debug("[知识库] 枚举后端索引失败（按无此索引处理）: {}", e.getMessage());
+            }
+        }
+        return holders.isEmpty() ? List.of(fallback) : holders;
+    }
+
+    /**
+     * 删了重建这一组后端上的同名集合。
+     *
+     * <p>删不掉必须停：继续 ensureCollection 会撞上"索引已存在且维度一致 → 跳过创建"，
+     * 用户点了重建却什么都没重建，界面显示成功、维度仍是旧的。</p>
+     */
+    private void recreate(List<KnowledgeStore> holders, String index, int dimensions) {
+        for (KnowledgeStore store : holders) {
+            store.diagnose(index);
+            try {
+                store.deleteCollection(index);
+            } catch (StoreAccessException e) {
+                throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
+                        "重建时删除索引[" + index + "]失败，已中止：" + e.getMessage(), e);
+            }
+            store.ensureCollection(index, dimensions);
+        }
     }
     /**
      * 换向量模型时保留原文地重建全部知识库索引。
@@ -612,22 +958,22 @@ public class KnowledgeBaseService {
     }
 
     /**
-     * 写入 / 删除用的 store（<b>带域</b>）：写这个域自己绑的知识体。
+     * 写入 / 删除用的 store（<b>带体</b>）：写这个知识体自己的两路落点。
      *
-     * <p>知识体是一个域一个，所以正常只落一台机器；万一是旧的两角色绑定（关键字在 ES、
-     * 向量在 Qdrant），{@link RetrievalPlan#writeStore(String)} 会扇出成两份，两边都拿到
-     * 这份切片——否则另一条召回路静默查不到。</p>
+     * <p>一个体正常只落一台机器；关键字在 ES、向量在 Qdrant 时
+     * {@link RetrievalPlan#writeStoreOfBody(String)} 会扇出成两份，两边都拿到这份切片——
+     * 否则另一条召回路静默查不到。</p>
      *
-     * <p>域没绑知识体时<b>直接抛</b>（不回落平台默认）：回落会把 A 域的知识写进"第一个
-     * 知识体那台机器"，看起来成功、实际检索不到，而且没有任何报错。</p>
+     * <p>体不存在 / 两路都没配时<b>直接抛</b>（不回落平台默认）：回落会把 A 体的知识写进
+     * "第一个体那台机器"，看起来成功、实际检索不到，而且没有任何报错。</p>
      */
-    private KnowledgeStore writeStore(String domain) {
-        return retrievalPlan.writeStore(domain);
+    private KnowledgeStore writeStore(String bodyId) {
+        return retrievalPlan.writeStoreOfBody(bodyId);
     }
 
-    /** 读路径用的 store（带域）：该域自己那份存储；没绑时回落平台默认（只读场景可容忍） */
-    private KnowledgeStore readStore(String domain) {
-        return retrievalPlan.readStore(domain);
+    /** 读路径用的 store（带体）：该体自己那份存储；体没配时抛（与写入侧同口径） */
+    private KnowledgeStore readStore(String bodyId) {
+        return retrievalPlan.readStoreOfBody(bodyId);
     }
 
     /** 平台默认写入 store：没有域上下文的对账 / 诊断 / 内部维护用 */
@@ -635,7 +981,7 @@ public class KnowledgeBaseService {
         return retrievalPlan.writeStore();
     }
 
-    /** 平台默认读 store：keyword 后端（文档登记视角的权威，B4） */
+    /** 平台默认读 store：keyword 后端（两路不同实例时的写入行为权威） */
     private KnowledgeStore store() {
         return retrievalPlan.keywordStore();
     }
@@ -682,25 +1028,20 @@ public class KnowledgeBaseService {
     // ==================== 上传 ====================
 
     /**
-     * 同步上传一个文档到根域 {@code default} 的索引（按累加语义对全树可见）。
-     */
-    public UploadResult upload(byte[] content, String fileName, boolean replace) {
-        return upload(content, fileName, replace, Domains.DEFAULT);
-    }
-
-    /**
-     * 同步上传一个文档，并指定它归属的域（即落到该域的索引里）。
+     * 同步上传一个文档到指定<b>知识体</b>。
      *
-     * 域决定哪些对话能检索到这份文档：检索域 D 时只查 D 及其祖先链上的索引，
-     * 所以挂在某域 = 该域及其全部后代域都能检索到。检索工具本身仍由部署方用
-     * {@code @Tool} 暴露到哪些域，两层是叠加的。
+     * <p>谁能不能查到这份文档，不再由"归属域"决定，而由"哪些域绑了这个体"决定：
+     * 域 D 绑了体 B，D 及其祖先链上的域查 B 的索引；B 被多个域绑 = 那些域共用同一批文档。
+     * 这正是 v2 与 v1 最大的行为差别（v1 里一个域一份索引，共用体并不共用文档）。</p>
+     *
+     * <p>上传<b>不校验域</b>（体不需要域就能存在）：体是数据，域是消费者，互不依赖。</p>
      *
      * @param content  文件字节
      * @param fileName 原始文件名（含扩展名）
-     * @param replace  {@code true} = 该域索引内已存在同名文档时先删旧再写入；{@code false} = 直接拒绝
-     * @param domain   归属域（完整路径；留空 → 根域）
+     * @param replace  {@code true} = 该体索引内已存在同名文档时先删旧再写入；{@code false} = 直接拒绝
+     * @param bodyId   落到哪个知识体（必须存在，且至少一路落点可用）
      */
-    public UploadResult upload(byte[] content, String fileName, boolean replace, String domain) {
+    public UploadResult upload(byte[] content, String fileName, boolean replace, String bodyId) {
         String name = requireSupported(fileName);
         if (content == null || content.length == 0) {
             throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_UPLOAD_REJECTED, "文件内容为空");
@@ -710,13 +1051,25 @@ public class KnowledgeBaseService {
             throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_UPLOAD_REJECTED,
                     "文件 " + name + " 超过大小上限：" + content.length + " 字节，上限 " + max + " 字节");
         }
-        String effective = normalizeDomain(domain);
-        // 归属域必须是被登记过的域：否则会给一个树里不存在的域凭空建出索引、写进文档，
-        // 而那个索引既检索不到（没有域的祖先链包含它）又要靠手工清（删域接口只认注册表）
-        if (!domainRegistry.contains(effective)) {
+        if (bodyId == null || bodyId.isBlank()) {
             throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER,
-                    "域不存在：" + effective + "（已登记的域: " + domainRegistry.ids() + "）；"
-                            + "请先在管控台「域空间」创建该域，或把文档传到已存在的域");
+                    "必须指定知识体（文档落在知识体里，域只是消费者）");
+        }
+        String body = bodyId.trim();
+        InfraSettings.KnowledgeBody definition = bodyResolver.body(body);
+        if (definition == null) {
+            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER,
+                    "知识体不存在：" + body + "（可能刚被删除，请刷新知识库页）");
+        }
+
+        // 向量模型必须先配好：上传链路无论走哪条策略都要 embedAll，模型没配时
+        // 解析、切片全都白跑，最后在向量化一步炸成 60002——那是 5xx，detail 被隐藏，
+        // 用户只看得到一句"文档没能导入"，把排查方向带到沟里。
+        // 前置拒掉并单开 60009：对外文案直接点名缺的是向量模型，4xx 让 detail 可达。
+        if (!modelHolder.isEmbeddingConfigured()) {
+            throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_EMBEDDING_NOT_CONFIGURED,
+                    "向量模型未配置，文档无法向量化：请先到管控台「模型设置」页的「向量模型」段"
+                            + "启用一个 Embedding 模型（服务商地址 / API Key / 模型名 / 维度），保存后立即生效");
         }
 
         // ===== 类型分叉 =====
@@ -735,17 +1088,18 @@ public class KnowledgeBaseService {
             encoding = decoded.encoding();
             text = decoded.text();
         }
-        log.info("[知识库] 收到上传请求：文件={}，大小={} 字节，类型={}，编码={}，replace={}，域={}",
-                name, content.length, route.strategyName(), encoding, replace, effective);
+        log.info("[知识库] 收到上传请求：文件={}，大小={} 字节，类型={}，编码={}，replace={}，知识体={}",
+                name, content.length, route.strategyName(), encoding, replace, body);
 
         Metadata metadata = Metadata.from(ChunkMetadataKeys.FILE_NAME, name);
         metadata.put("file_name_lower", lower(name));
-        metadata.put(ChunkMetadataKeys.DOMAIN, effective);
+        // metadata.domain 记体 id：它是文档的真实归属，检索隔离仍由"查哪个索引"保证
+        metadata.put(ChunkMetadataKeys.DOMAIN, body);
         IngestSource source = route.binary()
                 ? IngestSource.ofBinary(content, name, metadata)
                 : IngestSource.ofText(text, content, name, metadata, encoding);
 
-        Future<UploadResult> future = submit(source, content.length, name, replace, effective);
+        Future<UploadResult> future = submit(source, content.length, name, replace, body);
         try {
             return future.get();
         } catch (InterruptedException e) {
@@ -763,9 +1117,9 @@ public class KnowledgeBaseService {
 
     /** 提交导入任务；队列满时明确拒绝，而不是无界堆积 */
     private Future<UploadResult> submit(IngestSource source, long size,
-                                        String fileName, boolean replace, String domain) {
+                                        String fileName, boolean replace, String bodyId) {
         try {
-            return ingestExecutor.submit(() -> ingest(source, size, fileName, replace, domain));
+            return ingestExecutor.submit(() -> ingest(source, size, fileName, replace, bodyId));
         } catch (RejectedExecutionException e) {
             log.warn("[知识库] 导入队列已满（容量 {}），拒绝本次上传：{}",
                     ragProperties.getIngestQueueCapacity(), fileName);
@@ -795,35 +1149,116 @@ public class KnowledgeBaseService {
         }
         List<DocumentItem> all = new ArrayList<>();
         for (String index : indices) {
+            long start = System.nanoTime();
             all.addAll(listIndex(index));
+            logSlow("读取索引[" + index + "]的文档条目", start);
         }
         return all;
     }
 
     /**
-     * 删除一个文档的全部切片，并释放其文件名（删除后同名可以再次上传）。
+     * 单文档切片预览：管控台「看文档」的数据源。
      *
-     * docId 里看不出它在哪个域，因此逐个索引找；命中即删并返回。
+     * <p>只读展示路径，fail-open：读不到就给空列表并记日志——"看不到切片"不该让整页报错。
+     * 优先读原文档案（{@link ChunkArchive}：写入时按"索引里真正入库的切片"归档，去重跳过
+     * 哪片档案里就少哪片），缺档（早期文档 / 对账尚未补写）再回落到索引读。档案在本地
+     * BlobStore 里，比走一趟远程存储快得多。</p>
      *
-     * @return 是否命中并删除
+     * @param limit 最多回多少片（收敛到 1..{@link #PREVIEW_MAX_CHUNKS}）
      */
-    public boolean delete(String docId) {
-        if (docId == null || docId.isBlank()) {
-            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER, "docId 不能为空");
-        }
-        for (String index : existingIndices()) {
-            if (countByDocId(index, docId) > 0) {
-                deleteByDocId(index, docId);
-                chunkExporter.deleteByDocId(docId);
-                log.info("[知识库] 已删除文档 docId={}（索引 {}，文件名随之释放，切片预览文件一并清除）", docId, index);
-                return true;
+    public Preview previewChunks(String docId, String bodyId, int limit) {
+        String index = indexOf(bodyId);
+        int cap = Math.max(1, Math.min(limit, PREVIEW_MAX_CHUNKS));
+
+        List<KbChunk> chunks = List.of();
+        boolean fromArchive = false;
+        if (docId != null && !docId.isBlank()) {
+            try {
+                java.util.Optional<List<KbChunk>> archived = chunkArchive.read(index, docId);
+                if (archived.isPresent()) {
+                    chunks = archived.get();
+                    fromArchive = true;
+                }
+            } catch (RuntimeException e) {
+                log.warn("[知识库] 读原文档案失败（docId={}，index={}），回落到索引读取: {}",
+                        docId, index, e.getMessage());
+            }
+            if (!fromArchive) {
+                try {
+                    chunks = readStore(bodyId).readByDocId(index, docId);
+                } catch (RuntimeException e) {
+                    log.warn("[知识库] 读索引切片失败（docId={}，index={}），按空预览处理: {}",
+                            docId, index, e.getMessage());
+                    chunks = List.of();
+                }
             }
         }
-        return false;
+
+        List<KbChunk> ordered = new ArrayList<>(chunks);
+        return previewOf(docId, index, ordered, fromArchive, cap);
     }
 
     /**
-     * 知识库状态：索引数、文档数、切片总数，以及每个索引的明细（域 → 索引 → 文档/切片）。
+     * 把切片整理成预览：按 {@code chunk_seq} 排序、截到 cap、丢掉向量。
+     *
+     * <p>抽成纯函数是为了可测：排序口径（序号缺失按 0、稳定）与截断是「看文档」唯一的
+     * 逻辑，不需要为了测它去搭一整套存储替身。</p>
+     */
+    static Preview previewOf(String docId, String index, List<KbChunk> chunks, boolean fromArchive, int cap) {
+        List<KbChunk> ordered = new ArrayList<>(chunks);
+        // 档案与索引都不保证顺序：按 chunk_seq 排，缺序号的按 0 稳定排在最前
+        ordered.sort(java.util.Comparator.comparingInt(KnowledgeBaseService::seqOf));
+        List<PreviewChunk> items = new ArrayList<>(Math.min(cap, ordered.size()));
+        for (KbChunk chunk : ordered) {
+            if (items.size() >= cap) {
+                break;
+            }
+            String text = chunk.text() == null ? "" : chunk.text();
+            items.add(new PreviewChunk(seqOf(chunk), text, text.length()));
+        }
+        return new Preview(docId, index, ordered.size(), fromArchive, items);
+    }
+
+    /** 切片序号：metadata 里是字符串，缺失/非数字按 0 */
+    private static int seqOf(KbChunk chunk) {
+        String raw = chunk.metadata() == null ? null : chunk.metadata().get(ChunkMetadataKeys.CHUNK_SEQ);
+        if (raw == null || raw.isBlank()) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /**
+     * 删除一个知识体里的某个文档（全部切片 + 原文档案 + 预览 txt），并释放其文件名。
+     *
+     * <p>与 v1 的 {@code delete(docId)} 不同：这里<b>必须带体 id</b>。docId 全局唯一，
+     * 但"在哪个索引里删"决定了会不会误删别人的文档——扫描全部索引虽然能命中，
+     * 却让一次点击变成 O(全部索引) 的远程枚举，且两个体里出现同 docId（迁移粘贴）时会删错。</p>
+     *
+     * @return 是否命中并删除
+     */
+    public boolean delete(String bodyId, String docId) {
+        if (docId == null || docId.isBlank()) {
+            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER, "docId 不能为空");
+        }
+        String index = indexOf(bodyId);
+        if (countByDocId(index, docId) <= 0) {
+            return false;
+        }
+        deleteByDocId(index, docId);
+        chunkArchive.delete(index, docId);
+        chunkExporter.deleteByDocId(docId);
+        log.info("[知识库] 已删除文档 docId={}（知识体 {}，索引 {}；原文档案与预览文件一并清除）",
+                docId, bodyId, index);
+        return true;
+    }
+
+    /**
+     * 知识库状态：索引数、文档数、切片总数，以及每个索引的明细（体 → 索引 → 文档/切片）。
      */
     public Map<String, Object> status() {
         List<Map<String, Object>> indices = new ArrayList<>();
@@ -836,7 +1271,7 @@ public class KnowledgeBaseService {
             chunks += chunkCount;
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("index", index);
-            row.put("domain", items.isEmpty() ? null : items.get(0).domain());
+            row.put("body", bodyResolver.bodyIdOfIndex(index));
             row.put("documents", items.size());
             row.put("chunks", chunkCount);
             indices.add(row);
@@ -852,7 +1287,7 @@ public class KnowledgeBaseService {
     // ==================== 内部实现 ====================
 
     private UploadResult ingest(IngestSource source, long size, String fileName,
-                                boolean replace, String domain) throws InterruptedException {
+                                boolean replace, String bodyId) throws InterruptedException {
         // 串行锁在任务内部获取：排队等待不占用额外池线程，池大小可保持很小
         if (!ingestPermit.tryAcquire(ragProperties.getIngestLockWaitSeconds(), TimeUnit.SECONDS)) {
             throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_UPLOAD_REJECTED,
@@ -860,16 +1295,16 @@ public class KnowledgeBaseService {
                             + " 秒仍未拿到导入锁，请稍后重试");
         }
         String docId = null;
-        String index = indexOf(domain);
+        String index = indexOf(bodyId);
         try {
-            ensureIndex(domain, index);
+            ensureBodyIndex(bodyId, index);
             String lowerName = lower(fileName);
             List<DocumentItem> existing = listIndex(index).stream()
                     .filter(d -> lowerName.equals(d.fileNameLower()))
                     .toList();
             if (!existing.isEmpty() && !replace) {
                 throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_DOCUMENT_DUPLICATE,
-                        "域 " + domain + " 下已存在同名文档：" + fileName
+                        "知识体 " + bodyId + " 下已存在同名文档：" + fileName
                                 + "（同名判定不区分大小写）。"
                                 + "如需替换请带 replace=true，或先删除原文档");
             }
@@ -879,13 +1314,13 @@ public class KnowledgeBaseService {
             docId = UUID.randomUUID().toString();
             source.metadata().put(ChunkMetadataKeys.DOC_ID, docId);
             source.metadata().put("upload_time", Instant.now().toString());
-            /* 写入目标 = 这个域自己绑的知识体（扇出到该域的全部写入后端：keyword 与 vector
+            /* 写入目标 = 这个知识体自己的两路落点（扇出到全部写入后端：keyword 与 vector
                两份都要拿到这份切片，否则对应的那条召回路静默查不到）。去重问登记权威，
                扇出 store 内部就是这么委派的——ingest 侧只认 SPI，不认识任何后端类型。
 
-               注意这里必须是<b>带域</b>的那份：用平台默认会把 A 域的知识写进 B 域那台机器，
+               注意这里必须是<b>带体</b>的那份：用平台默认会把 A 体的知识写进 B 体那台机器，
                上传成功、检索为空，且没有任何报错。 */
-            KnowledgeStore target = writeStore(domain);
+            KnowledgeStore target = writeStore(bodyId);
             IngestTarget ingestTarget = new IngestTarget(index, target, target::existingDedupKeys);
             IngestReport report = DocumentIngestor.ingest(List.of(source), ingestTarget, embeddingModel);
             if (report.documents() <= 0) {
@@ -903,7 +1338,7 @@ public class KnowledgeBaseService {
                的 segments——归档的必须是"索引里真正入库的切片"（去重跳过了哪片，
                档案里就如实反映），与 ChunkExporter 同一条"所见即所存"口径。
                写失败只告警（ChunkArchive 内部处理），缺档由对账补写。 */
-            chunkArchive.write(index, docId, readStore(domain).readByDocId(index, docId));
+            chunkArchive.write(index, docId, readStore(bodyId).readByDocId(index, docId));
 
             /* 新文档已确认落库，此刻才清理同名旧文档。顺序不能换：反过来的话，新文档任一
                环节失败都会让这次"覆盖更新"变成"只删不写"，旧文档永久消失。
@@ -914,6 +1349,7 @@ public class KnowledgeBaseService {
             for (DocumentItem old : existing) {
                 try {
                     deleteByDocId(index, old.docId());
+                    chunkArchive.delete(index, old.docId());
                     chunkExporter.deleteByDocId(old.docId());
                 } catch (Exception e) {
                     log.error("[知识库] 覆盖更新时清除旧文档失败（旧 docId={}），新旧两份均保留: {}",
@@ -921,18 +1357,18 @@ public class KnowledgeBaseService {
                 }
             }
             if (!existing.isEmpty()) {
-                log.info("[知识库] 覆盖更新：已清除域 {} 下同名旧文档 {} 个", domain, existing.size());
+                log.info("[知识库] 覆盖更新：已清除知识体 {} 下同名旧文档 {} 个", bodyId, existing.size());
             }
 
             // 切片预览：读回索引里真正入库的切片写成 txt，管控台只展示这个路径。
             // 导出失败不算上传失败，它只是给人核对用的辅助产物。
-            java.nio.file.Path exported = chunkExporter.export(index, docId, fileName, domain);
+            java.nio.file.Path exported = chunkExporter.export(index, docId, fileName, bodyId);
             String exportPath = exported == null ? null : exported.toAbsolutePath().toString();
 
-            log.info("[知识库] 上传完成：文件={}，域={}，索引={}，docId={}，切片={}，标题={}，删噪={} 行，编码={}",
-                    fileName, domain, index, docId, chunks, report.sections(), report.droppedLines(),
+            log.info("[知识库] 上传完成：文件={}，知识体={}，索引={}，docId={}，切片={}，标题={}，删噪={} 行，编码={}",
+                    fileName, bodyId, index, docId, chunks, report.sections(), report.droppedLines(),
                     source.encoding());
-            return new UploadResult(docId, fileName, size, chunks, domain,
+            return new UploadResult(docId, fileName, size, chunks, bodyId,
                     report.sections(), report.droppedLines(), source.encoding(), exportPath);
         } catch (KnowledgeBaseException e) {
             rollback(index, docId);
@@ -959,7 +1395,7 @@ public class KnowledgeBaseService {
         for (DocumentAgg doc : docs) {
             String fileName = doc.fileName();
             items.add(new DocumentItem(doc.docId(), fileName, lower(fileName),
-                    doc.chunks(), doc.domain(), exportPathOf(fileName, doc.docId())));
+                    doc.chunks(), doc.body(), exportPathOf(fileName, doc.docId())));
         }
         return items;
     }
@@ -974,13 +1410,29 @@ public class KnowledgeBaseService {
     private List<DocumentAgg> mergeDocuments(String index, int limit) {
         Map<String, DocumentAgg> byDocId = new LinkedHashMap<>();
         for (KnowledgeStore store : stores()) {
-            for (DocumentAgg doc : store.documents(index, limit)) {
+            long start = System.nanoTime();
+            List<DocumentAgg> found = store.documents(index, limit);
+            logSlow("读取索引[" + index + "]的文档列表（后端 " + store.getClass().getSimpleName() + "）", start);
+            for (DocumentAgg doc : found) {
                 if (doc.docId() != null) {
                     byDocId.putIfAbsent(doc.docId(), doc);
                 }
             }
         }
         return List.copyOf(byDocId.values());
+    }
+
+    /**
+     * 慢操作日志：只在超过阈值时打，避免把 INFO 刷满。
+     *
+     * <p>管控台"知识库页加载慢"的排查第一步就是看这几条——它直接给出
+     * "哪台后端、哪个索引、花了多久"，而不是让人对着整页猜。</p>
+     */
+    private static void logSlow(String what, long startNanos) {
+        long ms = (System.nanoTime() - startNanos) / 1_000_000;
+        if (ms >= SLOW_OP_MS) {
+            log.warn("[知识库] 慢操作：{} 耗时 {} ms（管控台加载慢先看这条）", what, ms);
+        }
     }
 
     /**

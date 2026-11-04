@@ -29,6 +29,7 @@ import java.util.function.Supplier;
  *
  * <p>协议口径（Qdrant v1.x REST）：</p>
  * <ul>
+ *   <li>根探活：{@code GET /} → <b>顶层</b> {@code {title, version, commit}}（此端点无 {@code result} 包装）</li>
  *   <li>集合：{@code PUT /collections/{name}}（创建，已存在返回 409 → 视为已存在）</li>
  *   <li>集合列表：{@code GET /collections} → {@code result.collections[].name}</li>
  *   <li>集合信息：{@code GET /collections/{name}} → {@code result.config.params.vectors.size}</li>
@@ -143,6 +144,26 @@ public class QdrantHttpClient {
         return target.effectiveCollectionPrefix() + collection;
     }
 
+    /**
+     * 配置词表（小写）→ Qdrant REST 的 {@code distance} 枚举（PascalCase）。
+     *
+     * <p>这两个词表<b>不一样</b>：配置与页面用 {@code cosine / dot / euclid}（小写），
+     * 而 Qdrant 的 {@code CreateCollection.vectors.distance} 是 Rust 枚举，
+     * 只认 {@code Cosine / Dot / Euclid / Manhattan}。透传小写会让服务端 serde
+     * 匹配不上 {@code VectorsConfig}，回 HTTP 400：
+     * {@code data did not match any variant of untagged enum VectorsConfig}——
+     * 上传阶段就表现为"知识库暂时不可用"（60000），而日志里只有这句反直觉的 serde 报错。</p>
+     */
+    static String distanceOf(String metric) {
+        String m = metric == null ? "" : metric.trim().toLowerCase();
+        return switch (m) {
+            case "dot" -> "Dot";
+            case "euclid", "l2" -> "Euclid";
+            case "manhattan", "l1" -> "Manhattan";
+            default -> "Cosine";
+        };
+    }
+
     // ==================== 集合生命周期 ====================
 
     /**
@@ -168,7 +189,7 @@ public class QdrantHttpClient {
         ObjectNode body = mapper.createObjectNode();
         ObjectNode vectors = body.putObject("vectors");
         vectors.put("size", dims);
-        vectors.put("distance", metric);
+        vectors.put("distance", distanceOf(metric));
         try {
             HttpResponse<String> resp = send(t, "PUT", "/collections/" + enc(physical(collection, t)), body.toString());
             if (resp.statusCode() == 409) {
@@ -177,7 +198,7 @@ public class QdrantHttpClient {
                 return;
             }
             requireSuccess(resp, "创建集合[" + collection + "]");
-            log.info("[Qdrant] 集合[{}]创建成功（distance={}, size={}）", collection, metric, dims);
+            log.info("[Qdrant] 集合[{}]创建成功（distance={}, size={}）", collection, distanceOf(metric), dims);
         } catch (StoreAccessException e) {
             throw e;
         } catch (Exception e) {
@@ -354,11 +375,25 @@ public class QdrantHttpClient {
                 return null;
             }
             JsonNode root = mapper.readTree(resp.body());
-            String v = root.path("result").path("version").asText(null);
+            // Qdrant 根端点直接返回 {"title","version","commit"}，没有 result 包装；
+            // 仅在前置网关/代理改写过响应时可能出现 result 层，故做回退兼容。
+            String v = text(root, "version");
+            if (v == null) {
+                v = text(root.path("result"), "version");
+            }
             return v;
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static String text(JsonNode node, String field) {
+        JsonNode v = node.path(field);
+        if (v.isMissingNode() || v.isNull()) {
+            return null;
+        }
+        String s = v.asText(null);
+        return s == null || s.isBlank() ? null : s;
     }
 
     // ==================== 点位读写 ====================
@@ -497,75 +532,61 @@ public class QdrantHttpClient {
     }
 
     /**
-     * 滚动扫描：按 offset 翻页取全部点位。
+     * 一页滚动结果：点位 + <b>同一次响应</b>里的下一页游标。
      *
-     * <p>与 ES 适配器的 {@code search_after} 同职责（对账补写 / 重灌兜底），
-     * 但 Qdrant 的 scroll 协议更简单——它自带下一次 offset。</p>
+     * <p>为什么不分开取：Qdrant scroll 的 {@code result.next_page_offset} 就在响应里，
+     * 为读它再发一次 {@code limit:1} 的请求，等于把每页的往返次数翻倍；更糟的是
+     * 那个"探针"请求传的是旧 offset，语义上并不等于"本页之后还有没有下一页"，
+     * 一旦服务端据此回了个非空游标，翻页就会原地打转、扫满上限才停——
+     * 管控台"知识库页加载慢"就是这么来的（8 个切片扫了 125 页、250 次请求、约 29 秒）。</p>
      */
-    public List<QdrantScored> scroll(String collection, int limit, Object scrollId) {
+    public record ScrollPage(List<QdrantScored> points, Object nextOffset) {
+
+        public boolean hasMore() {
+            return nextOffset != null;
+        }
+    }
+
+    /**
+     * 滚动扫描：按 offset 翻页取点位，游标取自同一次响应。
+     *
+     * <p>与 ES 适配器的 {@code search_after} 同职责（对账补写 / 重灌 / 文档清单）。</p>
+     *
+     * @param offset      上一页返回的 {@code nextOffset}；首页传 {@code null}
+     * @param withVectors 是否要回向量：只列文档/查去重时关掉，省掉整页 1024 维浮点数的传输
+     */
+    public ScrollPage scrollPage(String collection, int limit, Object offset, boolean withVectors) {
         VectorTarget t;
         try {
             t = requireTarget();
         } catch (NotConfiguredException e) {
-            return List.of();
+            return new ScrollPage(List.of(), null);
         }
         try {
             ObjectNode body = mapper.createObjectNode();
             body.put("limit", Math.max(1, limit));
             body.put("with_payload", true);
-            body.put("with_vector", true);
-            if (scrollId != null) {
-                body.set("scroll_id", mapper.valueToTree(scrollId));
+            body.put("with_vector", withVectors);
+            if (offset != null) {
+                body.set("offset", mapper.valueToTree(offset));
             }
             HttpResponse<String> resp = send(t, "POST",
                     "/collections/" + enc(physical(collection, t)) + "/points/scroll", body.toString());
             requireSuccess(resp, "扫描集合[" + collection + "]");
-            JsonNode root = mapper.readTree(resp.body());
-            JsonNode result = root.path("result");
+            JsonNode result = mapper.readTree(resp.body()).path("result");
             List<QdrantScored> out = new java.util.ArrayList<>();
-            JsonNode points = result.path("points");
-            if (points.isArray()) {
-                for (JsonNode p : points) {
-                    QdrantScored scored = toScored(p);
-                    if (scored != null) {
-                        out.add(scored);
-                    }
+            for (JsonNode p : result.path("points")) {
+                QdrantScored scored = toScored(p);
+                if (scored != null) {
+                    out.add(scored);
                 }
             }
-            return out;
+            JsonNode next = result.path("next_page_offset");
+            Object nextOffset = next.isMissingNode() || next.isNull() ? null : next.asText();
+            return new ScrollPage(out, nextOffset);
         } catch (Exception e) {
             log.warn("[Qdrant] 扫描集合[{}]失败: {}", collection, e.getMessage());
-            return List.of();
-        }
-    }
-
-    /** scroll 翻页游标（null = 没有更多）。 */
-    public Object nextScrollId(String collection, Object scrollId) {
-        VectorTarget t;
-        try {
-            t = requireTarget();
-        } catch (NotConfiguredException e) {
-            return null;
-        }
-        try {
-            ObjectNode body = mapper.createObjectNode();
-            body.put("limit", 1);
-            body.put("with_payload", false);
-            body.put("with_vector", false);
-            if (scrollId != null) {
-                body.set("scroll_id", mapper.valueToTree(scrollId));
-            }
-            HttpResponse<String> resp = send(t, "POST",
-                    "/collections/" + enc(physical(collection, t)) + "/points/scroll", body.toString());
-            requireSuccess(resp, "扫描集合[" + collection + "]");
-            JsonNode root = mapper.readTree(resp.body());
-            JsonNode next = root.path("result").path("next_page_offset");
-            if (next.isMissingNode() || next.isNull()) {
-                return null;
-            }
-            return next.asLong();
-        } catch (Exception e) {
-            return null;
+            return new ScrollPage(List.of(), null);
         }
     }
 

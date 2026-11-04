@@ -1,11 +1,9 @@
 package com.zzkingcc.domainplane.server.settings;
 
 import com.zzkingcc.domainplane.api.code.ErrorCode;
-import com.zzkingcc.domainplane.api.support.KbIndexes;
 import com.zzkingcc.domainplane.api.support.SessionKeys;
 import com.zzkingcc.domainplane.common.exception.BaseException;
 import com.zzkingcc.domainplane.common.exception.ChatMemoryException;
-import com.zzkingcc.domainplane.common.exception.KnowledgeBaseException;
 import com.zzkingcc.domainplane.infrastructure.redis.checkpoint.RedisCheckpointSaver;
 import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisConversationArchive;
 import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisConversationSummary;
@@ -14,8 +12,6 @@ import com.zzkingcc.domainplane.infrastructure.redis.memory.RedisChatMemoryStore
 import com.zzkingcc.domainplane.runtime.cancellation.CancellationRegistry;
 import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
 import com.zzkingcc.domainplane.runtime.tool.ToolRegistry;
-import com.zzkingcc.domainplane.server.knowledge.DomainChannelProvider;
-import com.zzkingcc.domainplane.server.knowledge.KnowledgeBaseService;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
 import com.zzkingcc.domainplane.server.mcp.McpConnectionStore;
 import lombok.extern.slf4j.Slf4j;
@@ -34,8 +30,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * 与宽限期到点的定时删（{@code DomainPurgeScheduler}）。两条路径必须走同一套顺序——
  * 删域的失败方式是不报错的半完成状态，各写一份必然漂移。
  *
- * 顺序是硬要求，且调整过一次：Redis 记忆与检查点 → 知识库索引 → 域属性 → 删域。
- * 原因：每一步失败都是"抛异常中止、域未删除"，所以中止点必须落在还没有任何东西被删的位置。
+ * 顺序是硬要求，且调整过两次：Redis 记忆与检查点 → <b>知识体只解绑、不删任何数据</b> →
+ * 域属性 → 删域。原因：每一步失败都是"抛异常中止、域未删除"，所以中止点必须落在还没有
+ * 任何东西被删的位置。
+ *
+ * <p>v2 起删域<b>不再触碰知识库存储</b>：知识体是数据实体（原文 + 索引），域只是消费者。
+ * 删索引既会销毁可能被别的域共用、或准备再绑给新域的数据，又让删域依赖后端可达性——
+ * 后端一时抽风就删不掉域，这不合理。要真的销毁知识，走知识库页知识体卡片上的
+ * 「删除知识体」（唯一会毁数据的入口，需输名确认）。</p>
  * 原先 Redis 清理排在索引之后，一旦它失败，索引已经删掉、域却还在：留下一个比直接失败
  * 更难收拾的半完成状态。
  *
@@ -56,12 +58,10 @@ public class DomainPurgeService {
 
     private final DomainRegistry domainRegistry;
     private final DomainStore domainStore;
-    private final KnowledgeBaseService knowledgeBase;
     private final DomainSettingsStore domainSettingsStore;
     private final ModelProfileRegistry modelProfileRegistry;
     private final McpConnectionStore mcpConnectionStore;
     private final ToolRegistry toolRegistry;
-    private final DomainChannelProvider domainChannelProvider;
     private final RedisChatMemoryStore chatMemoryStore;
     private final RedisCheckpointSaver checkpointSaver;
     private final RedisConversationArchive conversationArchive;
@@ -74,12 +74,10 @@ public class DomainPurgeService {
 
     public DomainPurgeService(DomainRegistry domainRegistry,
                               DomainStore domainStore,
-                              KnowledgeBaseService knowledgeBase,
                               DomainSettingsStore domainSettingsStore,
                               ModelProfileRegistry modelProfileRegistry,
                               McpConnectionStore mcpConnectionStore,
                               ToolRegistry toolRegistry,
-                              DomainChannelProvider domainChannelProvider,
                               RedisChatMemoryStore chatMemoryStore,
                               RedisCheckpointSaver checkpointSaver,
                               RedisConversationArchive conversationArchive,
@@ -88,12 +86,10 @@ public class DomainPurgeService {
                               CancellationRegistry cancellationRegistry) {
         this.domainRegistry = domainRegistry;
         this.domainStore = domainStore;
-        this.knowledgeBase = knowledgeBase;
         this.domainSettingsStore = domainSettingsStore;
         this.modelProfileRegistry = modelProfileRegistry;
         this.mcpConnectionStore = mcpConnectionStore;
         this.toolRegistry = toolRegistry;
-        this.domainChannelProvider = domainChannelProvider;
         this.chatMemoryStore = chatMemoryStore;
         this.checkpointSaver = checkpointSaver;
         this.conversationArchive = conversationArchive;
@@ -104,8 +100,11 @@ public class DomainPurgeService {
 
     /**
      * 硬删结果（供调用方组装管控台返回体 / 记日志）。
+     *
+     * @param retainedBodies 这些域绑定过、<b>但一个字节都没删</b>的知识体 id
+     *                       （删域只解绑：原文与索引都留着，可以再绑给新域）
      */
-    public record PurgeResult(List<String> removed, List<String> removedIndices,
+    public record PurgeResult(List<String> removed, List<String> retainedBodies,
                               int purgedMemories, int purgedCheckpoints, int purgedArchives,
                               int purgedIndexes, int purgedSummaries) {
     }
@@ -192,18 +191,19 @@ public class DomainPurgeService {
                             + e.getMessage());
         }
 
-        // 4) 知识库索引（含切片预览文件）
-        List<String> removedIndices;
-        try {
-            // 删索引前会先把这些域的切片预览文件（含文档全文）一并清掉
-            removedIndices = knowledgeBase.deleteIndices(affected);
-        } catch (KnowledgeBaseException e) {
-            throw new BaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
-                    "删除域 " + normalized + " 前清理知识库失败，已中止、域未删除：" + e.getMessage());
+        /* 4) 知识库：<b>只解绑，不动数据</b>。
+           知识体是数据实体，域只是消费者。删域时删索引 = 顺手销毁一份可能被别的域共用、
+           或者用户准备再绑给新域的原文与向量；而且删索引要连后端，后端一时不可达就会
+           让整个删域失败——删域本身不该被知识库的可达性绑住。
+           绑定本身随第 6 步的 registry 删除 + saveDeclarations 一起消失，这里只需要
+           先把"保留了哪些体"记下来给管控台回话。 */
+        List<String> retainedBodies = new ArrayList<>();
+        for (String domain : affected) {
+            String bodyId = domainStore.bodyOf(domain);
+            if (bodyId != null && !bodyId.isBlank() && !retainedBodies.contains(bodyId)) {
+                retainedBodies.add(bodyId);
+            }
         }
-        // 索引检索器缓存一并失效：删除的 collection 还在缓存里会被旧检索器继续命中
-        List<String> affectedIndices = affected.stream().map(KbIndexes::nameOf).toList();
-        domainChannelProvider.evict(affectedIndices);
 
         // 5) 域属性一并清理：提示词 / 工具执行信息回写开关 / 模型绑定 / 工具声明派生记录。
         //    不清理的话，同路径域将来重建时会"静默复活"旧配置。
@@ -223,11 +223,11 @@ public class DomainPurgeService {
         //（标记在 domains.json 里，重启照样恢复进注册表）
         deleted.removed().forEach(domainStore::clearDeleted);
         domainStore.saveDeclarations(domainRegistry.manualConfig());
-        log.info("[域管理] 已删除域 {} 及其子孙 {}；连带删除知识库索引 {} 个（域 {}），"
+        log.info("[域管理] 已删除域 {} 及其子孙 {}；知识体 {} 保留未动（删域只解绑），"
                         + "会话记忆 {} 条、会话归档 {} 个、检索索引 {} 个、滚动摘要 {} 个、断点 {} 条",
-                normalized, deleted.removed(), removedIndices.size(), removedIndices,
+                normalized, deleted.removed(), retainedBodies,
                 purgedMemories, purgedArchives, purgedIndexes, purgedSummaries, purgedCheckpoints);
-        return new PurgeResult(deleted.removed(), removedIndices, purgedMemories, purgedCheckpoints,
+        return new PurgeResult(deleted.removed(), retainedBodies, purgedMemories, purgedCheckpoints,
                 purgedArchives, purgedIndexes, purgedSummaries);
     }
 }

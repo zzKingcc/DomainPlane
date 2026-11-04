@@ -52,11 +52,30 @@
       ["vesConnectTimeout", "connectTimeout", "n"],
       ["vesSocketTimeout", "socketTimeout", "n"]
     ];
-    var NAME_HELP = "\u540C\u7C7B\u578B\u5185\u4E0D\u80FD\u91CD\u540D\u3002";
-    var STATE = { redis: {}, connections: [], bodies: [] };
+    var NAME_HELP = "\u8FDE\u63A5\u540D\u5168\u5C40\u552F\u4E00\uFF08\u8DE8\u4E24\u5F20\u8868\u4E5F\u4E0D\u80FD\u91CD\u540D\uFF09\uFF1B\u540D\u79F0\u4F1A\u51FA\u73B0\u5728\u77E5\u8BC6\u4F53\u7684\u8FDE\u63A5\u4E0B\u62C9\u91CC\u3002";
+    var FOOT_HINT_ES = "\u300C\u6D4B\u8BD5\u8FDE\u63A5\u300D\u989D\u5916\u62A5\u7248\u672C\u3001\u517C\u5BB9\u6027\u5224\u8BFB\u4E0E <b>IK \u5206\u8BCD\u5668</b>\u72B6\u6001\u3002";
+    var STATE = { redis: {}, connections: [], bodies: [], savedBodies: [] };
     var FLAGS = { es: false, redis: false, vector: false, esSource: "-", redisSource: "-", vectorSource: "-" };
     function el(id) {
       return document.getElementById(id);
+    }
+    function setText(id, value) {
+      var node = el(id);
+      if (node) {
+        node.textContent = value;
+      }
+    }
+    function setHtml(id, value) {
+      var node = el(id);
+      if (node) {
+        node.innerHTML = value;
+      }
+    }
+    function setHidden(id, hidden) {
+      var node = el(id);
+      if (node) {
+        node.hidden = hidden;
+      }
     }
     function readFields(fields) {
       var out = {};
@@ -91,17 +110,27 @@
     }
     function showResult(id, text, cls) {
       var box = el(id);
+      if (!box) {
+        return;
+      }
       box.textContent = text;
       box.className = "result show " + (cls || "");
     }
     function showHtmlResult(id, html, cls) {
       var box = el(id);
+      if (!box) {
+        return;
+      }
       box.innerHTML = html;
       box.className = "result show " + (cls || "");
     }
     function hideResult(id) {
-      el(id).className = "result";
-      el(id).textContent = "";
+      var box = el(id);
+      if (!box) {
+        return;
+      }
+      box.className = "result";
+      box.textContent = "";
     }
     function setNameHelp(id, text, isErr) {
       var node = el(id);
@@ -251,24 +280,6 @@
       }
     };
     var SLOT_ORDER = ["keyword", "vector"];
-    function connsFor(slot) {
-      var types = SLOT_META[slot].types;
-      return STATE.connections.filter(function(c) {
-        return types.indexOf(c.type) >= 0;
-      });
-    }
-    function slotOptions(slot, selected) {
-      var meta = SLOT_META[slot];
-      var list = connsFor(slot);
-      if (!list.length) {
-        return '<option value="">\uFF08\u6CA1\u6709\u53EF\u7528\u4E8E' + meta.label + "\u7684\u8FDE\u63A5\uFF09</option>";
-      }
-      var html = '<option value="">' + meta.empty + "</option>";
-      list.forEach(function(c) {
-        html += '<option value="' + Console.escapeHtml(c.id) + '"' + (c.id === selected ? " selected" : "") + ">" + Console.escapeHtml(c.name || c.id) + "\uFF08" + (c.type === "qdrant" ? "Qdrant" : "Elasticsearch") + "\uFF09</option>";
-      });
-      return html;
-    }
     function modesOf(b) {
       var hasKw = !!b.keyword;
       var hasVec = !!b.vector;
@@ -288,14 +299,14 @@
     }
     function bodyCard(b) {
       var modes = modesOf(b);
-      var rows = SLOT_ORDER.map(function(slot) {
-        var selected = (slot === "keyword" ? b.keyword : b.vector) || "";
-        var c = selected ? findConn(selected) : null;
-        var hint = selected ? (c && c.location || selected) + (c && c.usable === false ? "\uFF08\u672A\u586B\u5730\u5740\uFF09" : "") : SLOT_META[slot].hint;
-        var control = '<select class="form-control slot-v" data-body="' + Console.escapeHtml(b.id) + '" data-field="' + slot + '">' + slotOptions(slot, selected) + "</select>";
-        return slotLine(SLOT_META[slot].label, control, hint, !!selected);
+      var index = b.index || "";
+      var slots = ["keyword", "vector"].map(function(slot) {
+        var id = slot === "keyword" ? b.keyword : b.vector;
+        var c = id ? findConn(id) : null;
+        var text = id ? c && (c.name || c.location) || id : "\u672A\u914D";
+        return '<div class="slot' + (id ? "" : " empty") + '"><span class="slot-k">' + SLOT_META[slot].label + '</span><span class="slot-v-ro' + (id ? "" : " muted-sm") + '">' + Console.escapeHtml(text) + '</span><span class="slot-h">' + (id && c && c.usable === false ? "\u8FDE\u63A5\u672A\u586B\u5730\u5740" : SLOT_META[slot].hint) + "</span></div>";
       }).join("");
-      return '<article class="profile"><header class="profile-head"><span class="p-dot"></span><h4>' + Console.escapeHtml(b.name || b.id) + '</h4><span class="mbadge ' + modes.cls + '">' + modes.text + '</span><span class="spacer"></span><button class="linkbtn danger" data-delbody="' + Console.escapeHtml(b.id) + '">\u5220\u9664</button></header>' + rows + "</article>";
+      return '<article class="profile"><header class="profile-head"><span class="p-dot"></span><h4>' + Console.escapeHtml(b.name || b.id) + '</h4><span class="mbadge ' + modes.cls + '">' + modes.text + '</span><span class="spacer"></span><a class="linkbtn" href="knowledge.html">\u7BA1\u7406</a></header>' + (index ? '<div class="muted-sm" style="margin:2px 0 6px;">\u7D22\u5F15 <code>' + Console.escapeHtml(index) + "</code></div>" : "") + slots + "</article>";
     }
     function renderProfiles() {
       var box = el("profileList");
@@ -309,8 +320,7 @@
     function body() {
       return {
         redis: readFields(REDIS_FIELDS),
-        connections: STATE.connections,
-        bodies: STATE.bodies
+        connections: STATE.connections
       };
     }
     function postJson(payload) {
@@ -327,15 +337,24 @@
         showResult(resultId, "\u4FDD\u5B58\u4E2D\u2026", "");
         try {
           var data = yield postJson(body());
-          yield loadInfra(true);
+          try {
+            yield loadInfra(true);
+          } catch (e) {
+            Console.toast(
+              "\u5DF2\u4FDD\u5B58\uFF0C\u4F46\u5237\u65B0\u9875\u9762\u6570\u636E\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message),
+              { type: "warning" }
+            );
+            return data;
+          }
           if (resultId) {
             showResult(resultId, "\u2705 " + okText, "ok");
           }
-          /* \u4FDD\u5B58\u65F6\u7684\u81EA\u68C0\u7ED3\u8BBA\uFF08\u77E5\u8BC6\u5E93\u80FD\u529B\u4E0D\u5339\u914D / Redis \u6CA1\u6301\u4E45\u5316\u7B49\uFF09\u4EE5\u524D\u53EA\u5728\u542F\u52A8\u65E5\u5FD7\u91CC\uFF0C
-             \u73B0\u5728\u8DDF\u7740\u54CD\u5E94\u56DE\u6765\uFF1A\u6709\u5C31\u660E\u8BF4\uFF0C\u6CA1\u6709\u5C31\u7167\u5E38\u53EA\u62A5\u6210\u529F */
           var warns = data && data.warnings || [];
           if (warns.length) {
-            Console.toast("\u5DF2\u4FDD\u5B58\uFF0C\u4F46\u6709 " + warns.length + " \u6761\u63D0\u9192\uFF1A\n" + warns.join("\n"), { type: "warning", wide: true });
+            Console.toast(
+              "\u5DF2\u4FDD\u5B58\uFF0C\u4F46\u6709 " + warns.length + " \u6761\u63D0\u9192\uFF1A\n" + warns.join("\n"),
+              { type: "warning", wide: true }
+            );
           } else {
             Console.toast(okText, { type: "success" });
           }
@@ -382,6 +401,7 @@
         var badge = el("redisBadge");
         badge.className = "mbadge " + (FLAGS.redis ? "ok" : "off");
         badge.textContent = FLAGS.redis ? "\u5DF2\u751F\u6548" : "\u672A\u914D\u7F6E";
+        setText("settingsFileHint", "\u8BBE\u7F6E\u6587\u4EF6\uFF1A" + (s.settingsFile || "-") + "\uFF08\u77E5\u8BC6\u5E93\u7D22\u5F15 " + (s.indexPattern || "-") + "\uFF09");
         renderConns();
         renderProfiles();
         return s;
@@ -441,6 +461,7 @@
       var conn = connById(esEditId);
       el("connModalEsTitle").textContent = mode === "new" ? "\u65B0\u589E\u5173\u952E\u5B57\u8FDE\u63A5" : "\u7F16\u8F91\u8FDE\u63A5 \xB7 " + id;
       el("esPresetPick").hidden = mode !== "new";
+      setHidden("esPresetHint", mode !== "new");
       el("esNameRow").hidden = mode !== "new";
       el("esFormWrap").hidden = mode === "new";
       resetPresetCards("esPresetPick");
@@ -455,6 +476,7 @@
         applyEsKeyHint(conn, "esKeyHelp", "esPassword");
       }
       el("saveEsBtn").textContent = mode === "new" ? "\u52A0\u5165\u8FDE\u63A5" : "\u4FDD\u5B58\u5E76\u751F\u6548";
+      setHtml("esFootHint", FOOT_HINT_ES);
       showModal("connModalEs");
     }
     Array.prototype.forEach.call(
@@ -531,6 +553,7 @@
       vecPreset = conn ? conn.type === "qdrant" ? "qdrant" : "es" : null;
       el("connModalVecTitle").textContent = mode === "new" ? "\u65B0\u589E\u5411\u91CF\u8FDE\u63A5" : "\u7F16\u8F91\u8FDE\u63A5 \xB7 " + id;
       el("vecPresetPick").hidden = mode !== "new";
+      setHidden("vecPresetHint", mode !== "new");
       el("vecNameRow").hidden = mode !== "new";
       resetPresetCards("vecPresetPick");
       hideResult("vectorResult");
@@ -558,6 +581,7 @@
       }
       el("saveVectorBtn").textContent = mode === "new" ? "\u52A0\u5165\u8FDE\u63A5" : "\u4FDD\u5B58\u5E76\u751F\u6548";
       el("saveVecEsBtn").textContent = mode === "new" ? "\u52A0\u5165\u8FDE\u63A5" : "\u4FDD\u5B58\u5E76\u751F\u6548";
+      setHtml("vectorFootHint", "\u300C\u6D4B\u8BD5\u8FDE\u63A5\u300D\u989D\u5916\u62A5\u7248\u672C\u3001\u8DDD\u79BB\u5EA6\u91CF\u4E0E\u5DF2\u6709\u96C6\u5408\u6570\u3002");
       showModal("connModalVec");
     }
     Array.prototype.forEach.call(
@@ -812,62 +836,15 @@
         hideModal("connModalVec");
       }
     });
-    el("profileList").addEventListener("change", function(e) {
-      var t = e.target;
-      if (!t.getAttribute) {
-        return;
-      }
-      var bodyId = t.getAttribute("data-body");
-      var field = t.getAttribute("data-field");
-      if (!bodyId || !field) {
-        return;
-      }
-      var target = null;
+    function findBody(bodyId) {
+      var found = null;
       STATE.bodies.forEach(function(b) {
         if (b.id === bodyId) {
-          target = b;
+          found = b;
         }
       });
-      if (!target) {
-        return;
-      }
-      target[field] = t.value || null;
-      renderProfiles();
-      if (!target.keyword && !target.vector) {
-        setStatus("<span>\u77E5\u8BC6\u4F53\u300C" + Console.escapeHtml(target.name || target.id) + "\u300D\u4E24\u8DEF\u90FD\u7A7A\u7740\uFF1A\u81F3\u5C11\u9009\u4E00\u4E2A\u8FDE\u63A5\uFF0C\u5426\u5219\u4FDD\u5B58\u4F1A\u88AB\u62D2</span>", "warn");
-      }
-    });
-    el("profileList").addEventListener("click", function(e) {
-      var t = e.target;
-      if (!t.getAttribute) {
-        return;
-      }
-      var del = t.getAttribute("data-delbody");
-      if (!del) {
-        return;
-      }
-      STATE.bodies = STATE.bodies.filter(function(b) {
-        return b.id !== del;
-      });
-      renderProfiles();
-      setStatus("<span>\u5DF2\u79FB\u9664\u77E5\u8BC6\u4F53\u300C" + Console.escapeHtml(del) + "\u300D\uFF08\u5C1A\u672A\u4FDD\u5B58\uFF09\uFF1B\u4FDD\u5B58\u540E\u4ECD\u7ED1\u7740\u5B83\u7684\u57DF\u5C06\u6CA1\u6709\u77E5\u8BC6\u5E93</span>", "warn");
-    });
-    el("addProfileBtn").addEventListener("click", function() {
-      var n = 1;
-      while (STATE.bodies.some(function(b) {
-        return b.id === "kb-" + n;
-      })) {
-        n++;
-      }
-      STATE.bodies.push({ id: "kb-" + n, name: "\u77E5\u8BC6\u4F53 " + n, keyword: null, vector: null });
-      renderProfiles();
-    });
-    el("saveProfileBtn").addEventListener("click", function() {
-      var backup = JSON.parse(JSON.stringify(STATE.bodies));
-      commit(function() {
-        STATE.bodies = backup;
-      }, null, "\u77E5\u8BC6\u4F53\u5DF2\u4FDD\u5B58\u5E76\u7ACB\u5373\u751F\u6548", null);
-    });
+      return found;
+    }
     Console.ready(function() {
       loadInfra(false).catch(function(e) {
         setStatus("<span>\u8BFB\u53D6\u5B58\u50A8\u914D\u7F6E\u5931\u8D25\uFF1A" + Console.escapeHtml(e.message) + "</span>", "warn");

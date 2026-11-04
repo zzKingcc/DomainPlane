@@ -64,6 +64,20 @@ class ErrorCodeUserMessageTest {
     }
 
     @Test
+    void 向量模型未配置的码直接点名缺什么() {
+        // 现场反馈：没配向量模型时上传只拿到 60002「文档没能导入，请换一种格式或稍后重试」，
+        // 乍一看不知道在说什么。上传前置检查现在单开 60009，对外文案就点名"向量模型"。
+        ErrorCode code = ErrorCode.KNOWLEDGE_EMBEDDING_NOT_CONFIGURED;
+        assertTrue(code.getUserMessage().contains("向量模型"), "第一眼就要看出缺的是向量模型");
+        assertTrue(code.getUserMessage().contains("模型设置"), "给出补齐配置的落点");
+        assertFalse(code.isRetryable(), "缺配置重试无用");
+        assertFalse(code.getUserMessage().equals(ErrorCode.KNOWLEDGE_UPLOAD_REJECTED.getUserMessage()),
+                "60006 的对外文案是'上传被拒绝'，看不出原因，不能复用");
+        assertFalse(ErrorCode.KNOWLEDGE_INGEST_ERROR.getUserMessage().contains("换一种格式"),
+                "文档格式不是导入失败的主因（60004 / 60006 已拦）；写'换格式'只会把人带偏");
+    }
+
+    @Test
     void 依赖未配置错误不把去哪一页填带给用户() {
         // 同型回归：handleNotConfigured 曾用 4 参工厂把
         // 「请先在管控台××页填写」原样发进 SSE 事件体。

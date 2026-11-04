@@ -40,8 +40,9 @@
 MCP server 的 tools/list
   → 目录（McpToolCatalog）
   → 命名规范化：mcp__<连接名>__<原始工具名>
-       · 非法字符（非 [A-Za-z0-9_-]）换成 _
+       · 非法字符（既不是字母、数字，也不是 _ - .）换成 _
        · 超 64 字符截断 + 追加哈希
+       · 连接内撞名再追加 _2 / _3
   → McpToolBridge.publish
   → 注册为平台工具（instanceId = mcp:<连接名>）
   → 按域绑定授权可见

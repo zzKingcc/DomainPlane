@@ -61,7 +61,26 @@ class ChunkArchiveReconcilerTest {
         archive = new ChunkArchive(blob, mapper);
         store = new StubStore();
         plan = planOver(store);
-        reconciler = new ChunkArchiveReconciler(archive, plan, 5L);
+        reconciler = new ChunkArchiveReconciler(archive, plan, noBodies(), 5L);
+    }
+
+    /**
+     * 对账桩里"没有知识体"：所有集合都按平台默认关键字存储解析。
+     *
+     * <p>v2 的解析顺序是"索引 → 体 → 落点"，桩里把体这一层留空，走的就是平台默认那条路。</p>
+     */
+    private static KnowledgeBodyResolver noBodies() {
+        return new KnowledgeBodyResolver(null, null, null, null) {
+            @Override
+            public String bodyIdOfIndex(String index) {
+                return null;
+            }
+
+            @Override
+            public Set<String> allIndices() {
+                return Set.of();
+            }
+        };
     }
 
     private static KbChunk chunk(String id, String text, String docId) {
@@ -163,20 +182,22 @@ class ChunkArchiveReconcilerTest {
     // ==================== 整轮：collection 已消失的残留按孤儿回收 ====================
 
     @Test
-    @DisplayName("reconcileAll：collection 已不在登记表的档案按孤儿回收")
-    void reconcileAll_reapsStaleCollections() {
+    @DisplayName("reconcileAll：collection 已消失的档案只告警、不删除（原文是权威副本，索引才是派生）")
+    void reconcileAll_keepsArchivesOfVanishedCollections() {
         store.collections = List.of(KB);
         store.docs.put(KB, List.of(new DocumentAgg("d1", "a.pdf", "default.sales", 1)));
         archiveDoc("d1", "在册文档");
         archive.write("kb-gone", "d9", List.of(chunk("c9", "删域残留", "d9")));
-        // 关护栏的对账器：残留档也可能是老的，但本测试要的是"按孤儿处理"的路径
-        ChunkArchiveReconciler noGuard = new ChunkArchiveReconciler(archive, plan, 0L);
+        // 关护栏的对账器：残留档也可能是老的，但本测试要的是"不删"的路径
+        ChunkArchiveReconciler noGuard = new ChunkArchiveReconciler(archive, plan, noBodies(), 0L);
 
         ChunkArchiveReconciler.Report r = noGuard.reconcileAll();
 
-        assertEquals(1, r.orphans());
-        assertEquals(Set.of(KB), archive.inventory().keySet(), "kb-gone 的残留必须被回收");
-        assertTrue(archive.docIdsOf("kb-gone").isEmpty());
+        assertEquals(0, r.orphans(), "整轮对账不做删除");
+        assertEquals(Set.of(KB, "kb-gone"), archive.inventory().keySet(),
+                "后端上没有对应集合，不代表原文没用：知识体可能只是暂时换了落点");
+        assertEquals(Set.of("d9"), archive.docIdsOf("kb-gone"),
+                "留着才能在落点恢复后按原文重灌；删了就是不可恢复的数据丢失");
     }
 
     // ==================== 桩 ====================

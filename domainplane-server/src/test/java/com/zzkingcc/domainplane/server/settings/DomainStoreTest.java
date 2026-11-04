@@ -6,6 +6,8 @@ import org.springframework.core.env.Environment;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
 
+import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -353,5 +355,56 @@ class DomainStoreTest {
         assertEquals("tool,stats,", seen.toString(),
                 "多个消费者必须都收到通知：单监听位会让后注册的把先注册的顶掉，"
                         + "现象是某块派生视图再也不刷新；单个监听器抛异常也不能影响其余");
+    }
+
+    // ==================== 内置域的知识体绑定 ====================
+
+    /**
+     * 内置域（根域 default）绑知识体必须当场可读、且跨"重启"存活。
+     *
+     * <p>历史缺陷：{@code save} 的存活域收敛只认 callables（手动域），内置域刚写入的
+     * 绑定在紧接着的 {@code saveDeclarations} 里就被 retainAll 抹掉——绑定接口返回成功、
+     * 页面刷新又变回"未绑定"；且内置域不落 domains.json，重启更是必丢。</p>
+     */
+    @Test
+    void builtinDomainBodyBindingSurvivesSaveAndRestart() {
+        DomainStore store = new DomainStore(storageLocations());
+        store.setDomainSettingsStore(new DomainSettingsStore(storageLocations()));
+        DomainRegistry registry = new DomainRegistry();   // 构造期自带内置根域 default
+        store.setDomainRegistry(registry);
+
+        store.setBody("default", "kb-1");
+        store.saveDeclarations(registry.manualConfig());  // 与控制器相同的落盘路径
+
+        assertEquals("kb-1", store.bodyOf("default"),
+                "绑定不许被存活域收敛当场抹掉——接口成功、页面刷新又变回未绑定就是这个病");
+
+        // 模拟重启：全新实例 + 全新注册表，从磁盘读回
+        DomainStore reborn = new DomainStore(storageLocations());
+        reborn.setDomainSettingsStore(new DomainSettingsStore(storageLocations()));
+        reborn.load();
+
+        assertEquals("kb-1", reborn.bodyOf("default"),
+                "内置域不落 domains.json，绑定必须走 prompts.json 才能跨重启存活");
+    }
+
+    /** 解绑内置域同样要落盘：重启后不得复活旧绑定 */
+    @Test
+    void builtinDomainBodyUnbindSurvivesRestart() {
+        DomainStore store = new DomainStore(storageLocations());
+        store.setDomainSettingsStore(new DomainSettingsStore(storageLocations()));
+        DomainRegistry registry = new DomainRegistry();
+        store.setDomainRegistry(registry);
+
+        store.setBody("default", "kb-1");
+        store.saveDeclarations(registry.manualConfig());
+        store.setBody("default", null);
+        store.saveDeclarations(registry.manualConfig());
+
+        DomainStore reborn = new DomainStore(storageLocations());
+        reborn.setDomainSettingsStore(new DomainSettingsStore(storageLocations()));
+        reborn.load();
+
+        assertEquals(null, reborn.bodyOf("default"), "解绑必须落盘，重启后不得复活旧绑定");
     }
 }

@@ -212,7 +212,9 @@ public class AdminController {
     @PostMapping("/settings")
     public ResponseEntity<Map<String, Object>> saveSettings(@RequestBody LlmSettings settings,
                                             @RequestParam(defaultValue = "false") boolean rebuildIndex) {
-        log.info("[管控] 收到模型设置保存请求: chatBaseUrl={}, chatModel={}, embeddingModel={}, rebuildIndex={}",
+        // 入口回显只留 debug：成功路径由 LlmModelHolder 的"已生效"承接，
+        // 失败路径有自己的 warn/error，INFO 再打一遍只是噪音
+        log.debug("[管控] 收到模型设置保存请求: chatBaseUrl={}, chatModel={}, embeddingModel={}, rebuildIndex={}",
                 settings.getChatBaseUrl(), settings.getChatModelName(),
                 settings.getEmbeddingModelName(), rebuildIndex);
         // Key 留空表示"不修改"，用已保存的值补齐：避免管控台不发明文导致 Key 被清空
@@ -242,23 +244,24 @@ public class AdminController {
             return status(HttpStatus.INTERNAL_SERVER_ERROR, failBody(e.getMessage()));
         }
 
-        // 维度变化且用户已确认 → 紧接着重建索引（embeddingModel 是持有者委派代理，apply 后已指向新模型）。
+        // 维度变化且用户已确认 → 紧接着按新维度重灌（原文保留，不需要重新上传）
         boolean rebuilt = false;
         if (dim.verdict() == DimVerdict.NEEDS_REBUILD) {
-            log.warn("[管控] 维度 {} → {}，开始重建全部知识库索引", dim.indexDims(), dim.newDims());
+            log.warn("[管控] 维度 {} → {}，开始从原文按新维度重建知识体索引", dim.indexDims(), dim.newDims());
             try {
                 // 维度必须显式传入：索引维度是 mapping 不可变参数，取 apply 后生效的新模型维度。
-                // 重建即删旧建新：维度变了旧索引无用，留着会导致灌库失败。
-                List<String> rebuiltIndices =
-                        knowledgeBaseService.rebuildAll(modelHolder.effectiveEmbeddingDimension());
+                // 走"保留原文"的那条：archives 里存着全部切片，只需用新模型重算向量，
+                // 用户不用把每个文档重新上传一遍（旧实现在这里直接清空，是一次静默的数据事故）。
+                Map<String, Integer> reindexed =
+                        knowledgeBaseService.rebuildPreservingText(modelHolder.effectiveEmbeddingDimension());
                 rebuilt = true;
-                log.info("[管控] 知识库索引重建完成（dims={}，索引 {}）", dim.newDims(), rebuiltIndices);
+                log.info("[管控] 知识体索引重灌完成（dims={}，索引 {}）", dim.newDims(), reindexed.keySet());
             } catch (Exception e) {
                 // 配置已落盘并生效，只是索引重建失败：必须如实告知，不能报成功
-                log.error("[管控] 知识库索引重建失败（配置已生效）: {}", e.getMessage(), e);
+                log.error("[管控] 知识体索引重灌失败（配置已生效）: {}", e.getMessage(), e);
                 Map<String, Object> fail = failBody(
-                        "配置已保存并生效，但知识库索引重建失败：" + e.getMessage()
-                                + "。请到「知识库」页重试「触发重建」，重建成功前灌库与检索不可用。");
+                        "配置已保存并生效，但知识体索引重建失败：" + e.getMessage()
+                                + "。请到「知识库」页对受影响的体逐个「重建索引」，重建成功前灌库与检索不可用。");
                 fail.put("saved", true);
                 fail.put("rebuilt", false);
                 fillKeyState(fail);
@@ -274,7 +277,7 @@ public class AdminController {
         result.put("rebuilt", rebuilt);
         // message 不带主语，由管控台拼成「<模型名>：<message>」
         result.put("message", rebuilt
-                ? "已保存并立即生效，知识库索引已按新维度 " + dim.newDims() + " 重建"
+                ? "已保存并立即生效，知识库索引已从原文按新维度 " + dim.newDims() + " 重灌（不需要重传文档）"
                 : (dim.note() != null ? "已保存并立即生效（" + dim.note() + "）" : "已保存并立即生效"));
         return ResponseEntity.ok(result);
     }
@@ -416,9 +419,10 @@ public class AdminController {
         int newDims = probe.actualDimension();
         if (probe.mismatched()) {
             return new DimCheck(DimVerdict.DECLARED_MISMATCH, indexDims, newDims, probe.declaredDimension(),
-                    "向量维度声明与实测不符：声明 " + probe.declaredDimension() + " 维，实际返回 " + newDims
-                            + " 维。上游对不支持的维度是静默忽略（不报错），所以这个声明不会被兑现，"
-                            + "按它建索引会导致灌库被 ES 拒绝。请改填该模型真正支持的维度。");
+                    "向量维度与模型不符：声明 " + probe.declaredDimension() + " 维，该模型实际返回 " + newDims
+                            + " 维。维度只用于本机建索引、不会作为请求参数下发（各家服务商对自定义维度的"
+                            + "支持也不一致），所以声明值不会被兑现，按它建索引会让灌库被存储拒绝。"
+                            + "请把维度改填该模型的原生维度 " + newDims + "。");
         }
         if (indexDims == null) {
             return new DimCheck(DimVerdict.OK, null, newDims, probe.declaredDimension(), null);
@@ -498,11 +502,11 @@ public class AdminController {
         result.put("indexDimension", indexDims);
 
         if (probe.mismatched()) {
-            String detail = "该模型不支持自定义维度：声明 " + declared + " 维，实际返回 " + actual + " 维";
+            String detail = "该模型的原生维度是 " + actual + " 维，与声明的 " + declared + " 维不符";
             log.warn("[管控] 向量维度校验未通过：{}", detail);
             result.put("success", false);
-            result.put("message", "已连通，但" + detail + "。请填写该模型真正支持的维度，"
-                    + "或改用支持自定义维度的模型（具体支持范围请查服务商文档）。");
+            result.put("message", "已连通，但" + detail + "。维度只用于本机建索引、不随请求下发，"
+                    + "所以请把「向量维度」填成 " + actual + "（模型原生维度）。");
             result.put("error", detail);
             return HttpStatus.BAD_REQUEST;
         }
@@ -782,20 +786,26 @@ public class AdminController {
         body.put("stats", stats);
         body.put("domains", domains);
         body.put("globalTools", globalList);
-        /* 可绑的知识体清单：域卡片上那个下拉的选项。
-           原文不在这里——它不属于知识体。每个体带上它配了哪几路（modes），
-           前端据此把选项标成「关键字+向量」。 */
+        /* 可绑的知识体清单：域卡片上那个下拉的选项。列出全部知识体——绑定时只落盘不做
+           校验（与「保存只管保存」同口径），没配好的体也允许先绑，选项文案带
+           「未配连接 / 连接不可用」标注，检索工具按体可用性动态上下线。
+           带上 slug / index 是为了让前端能显示"你绑的是哪份数据"，而不是只给一个名字；
+           raw 也带出来，域详情里可以直接说清原文落在哪（体是权威，域只是引用方）。 */
         List<Map<String, Object>> bodyOptions = new ArrayList<>();
         InfraSettings infra = infraHolder.current();
         infra.bodiesOrEmpty().forEach((id, b) -> {
-            if (b == null || !b.configured()) {
+            if (b == null) {
                 return;
             }
             Map<String, Object> opt = new LinkedHashMap<>();
             opt.put("id", id);
             opt.put("name", b.effectiveName());
+            opt.put("slug", b.effectiveSlug());
+            opt.put("index", b.effectiveIndex());
             opt.put("modes", b.modes());
             opt.put("hybrid", b.hybrid());
+            opt.put("raw", b.rawLocation());
+            opt.put("rawLabel", InfraSettings.rawLabel(b.rawLocation()));
             opt.put("usable", infra.usableBody(id) != null);
             bodyOptions.add(opt);
         });
@@ -861,17 +871,6 @@ public class AdminController {
         });
         body.put("domains", domains);
         return body;
-    }
-
-    /**
-     * 域 → 该域知识库的 [文档数, 切片数]（一次全量聚合）。
-     *
-     * 数字来自 {@link KnowledgeStatsService} 的缓存快照：存储不可达时它返回空 map 或旧快照，
-     * 调用方按 0 展示——与 /kb/documents 读路径同口径。域空间页的核心是树与配置，
-     * 不该被一次存储故障把整页打红，也不该让它把整页拖慢。
-     */
-    private Map<String, long[]> knowledgeByDomain() {
-        return knowledgeStatsService.stats().byDomain();
     }
 
     /**
@@ -952,29 +951,41 @@ public class AdminController {
 
         body.put("removable", true);
         body.put("descendants", descendants);
-        // 知识库：连带删的索引 / 文档 / 切片（走统计缓存，存储不可达时 fail-open 按 0 报）
-        Map<String, long[]> kbByDomain = knowledgeByDomain();
+        /* 知识库：删域<b>只解绑，不删任何存储</b>（v2）。所以这里报"会被保留的知识体"，
+           而不是"会删掉几个索引"——确认框要能明确说"知识不会丢"。
+           数字走统计缓存，存储不可达时 fail-open 按 0 报。 */
+        Map<String, long[]> byBody = knowledgeStatsService.stats().byBody();
+        List<String> retainedBodyIds = new ArrayList<>();
+        for (String domain : affected) {
+            String bodyId = domainStore.bodyOf(domain);
+            if (bodyId != null && !bodyId.isBlank() && !retainedBodyIds.contains(bodyId)) {
+                retainedBodyIds.add(bodyId);
+            }
+        }
         long docs = 0;
         long chunks = 0;
-        for (String domain : affected) {
-            long[] acc = kbByDomain.get(domain);
-            if (acc != null) {
-                docs += acc[0];
-                chunks += acc[1];
-            }
-        }
-        Set<String> existingIndices = knowledgeStatsService.stats().indices();
-        // 不用 stream：existingIndices 在 try/catch 两处赋值、不是 effectively final，lambda 捕获不了
-        long indices = 0;
-        for (String domain : affected) {
-            if (existingIndices.contains(KbIndexes.nameOf(domain))) {
-                indices++;
-            }
+        List<Map<String, Object>> retained = new ArrayList<>(retainedBodyIds.size());
+        for (String bodyId : retainedBodyIds) {
+            long[] acc = byBody.get(bodyId);
+            long d = acc == null ? 0L : acc[0];
+            long c = acc == null ? 0L : acc[1];
+            docs += d;
+            chunks += c;
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", bodyId);
+            row.put("name", knowledgeStatsService.bodyName(bodyId));
+            row.put("documents", d);
+            row.put("chunks", c);
+            retained.add(row);
         }
         Map<String, Object> knowledge = new LinkedHashMap<>();
-        knowledge.put("indices", indices);
+        knowledge.put("retainedBodies", retainedBodyIds);
+        knowledge.put("retained", retained);
         knowledge.put("documents", docs);
         knowledge.put("chunks", chunks);
+        // 明确写死 0：前端据此渲染"0 个索引会被删除"，不必猜后端语义
+        knowledge.put("indicesDeleted", 0);
+        knowledge.put("note", "删域只解绑：知识体（原文 + 索引）完整保留，可随时再绑给新域");
         body.put("knowledge", knowledge);
         // 会被级联清理的模型绑定 / MCP 绑定（删域只摘绑定，不删连接与档案本身）
         List<String> modelBound = modelProfileRegistry.domainBindings().keySet().stream()
@@ -1199,182 +1210,13 @@ public class AdminController {
         return hit;
     }
 
-    // ===== 知识库文档（列表 / 上传 / 删除 / 状态） =====
-
-    /**
-     * 已入库文档列表
-     */
-    @GetMapping("/kb/documents")
-    public Map<String, Object> kbDocuments() {
-        List<KnowledgeBaseService.DocumentItem> items = knowledgeBaseService.list();
-        List<Map<String, Object>> documents = new ArrayList<>(items.size());
-        for (KnowledgeBaseService.DocumentItem item : items) {
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("docId", item.docId());
-            row.put("fileName", item.fileName());
-            row.put("chunks", item.chunks());
-            row.put("domain", item.domain());
-            // 切片预览文件的落盘路径（导出目录固定，管控台只负责显示与复制）
-            row.put("exportPath", item.exportPath());
-            documents.add(row);
-        }
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("code", 0);
-        body.put("count", documents.size());
-        body.put("exportDir", chunkExporter.exportDir().toAbsolutePath().toString());
-        body.put("documents", documents);
-        return body;
-    }
-
-    /**
-     * 上传一个知识库文档（multipart，字段名 {@code file}）
-     *
-     * @param replace {@code true} = 该域索引内已存在同名文档时先删旧再写入；{@code false} = 同名直接拒绝（60005）
-     * @param domain  该文档归属的域（完整路径，落到该域的索引里；挂某域则其全部后代可检索；留空 → 根域）
-     */
-    @PostMapping(value = "/kb/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Map<String, Object> kbUpload(@RequestParam("file") MultipartFile file,
-                                        @RequestParam(value = "replace", defaultValue = "false") boolean replace,
-                                        @RequestParam(value = "domain", required = false) String domain)
-            throws IOException {
-        KnowledgeBaseService.UploadResult result =
-                knowledgeBaseService.upload(file.getBytes(), file.getOriginalFilename(), replace, domain);
-        // 新文档入库：统计快照当场作废，否则域空间页 60s 内还是旧数字
-        knowledgeStatsService.invalidate();
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("code", 0);
-        body.put("success", true);
-        body.put("docId", result.docId());
-        body.put("fileName", result.fileName());
-        body.put("size", result.size());
-        body.put("chunks", result.chunks());
-        body.put("domain", result.domain());
-        // 切片质量诊断：批量上传时靠这几个数就能发现"这批文件切坏了"
-        body.put("sections", result.sections());
-        body.put("droppedLines", result.droppedLines());
-        body.put("encoding", result.encoding());
-        body.put("exportPath", result.exportPath());
-        return body;
-    }
-
-    /**
-     * 删除一个文档的全部切片，并释放其文件名（删除后同名可以再次上传）
-     */
-    @DeleteMapping("/kb/documents/{docId}")
-    public Map<String, Object> kbDelete(@PathVariable String docId) {
-        boolean deleted = knowledgeBaseService.delete(docId);
-        if (deleted) {
-            // 删了一个文档：统计快照当场作废（删域 / 上传之外，这是第三个会改文档数的入口）
-            knowledgeStatsService.invalidate();
-        }
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("code", 0);
-        body.put("success", true);
-        body.put("docId", docId);
-        body.put("deleted", deleted);
-        return body;
-    }
-
-    /**
-     * 知识库状态：索引数、文档数、切片总数，以及每个索引（域）的明细。
-     */
-    @GetMapping("/kb/status")
-    public Map<String, Object> kbStatus() {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("code", 0);
-        body.putAll(knowledgeBaseService.status());
-        return body;
-    }
-
-    /**
-     * 手动重建全部知识库索引（诊断 + 删旧 + 建 IK mapping + 校验）。
-     *
-     * 语义是「删掉重建」，因此索引会被清空，文档需重新上传。
-     */
-    @PostMapping("/kb/rebuild")
-    public Map<String, Object> rebuildKnowledgeIndex() {
-        try {
-            int dimensions = modelHolder.effectiveEmbeddingDimension();
-            log.info("[管控] 收到知识库重建请求，向量维度 = {}", dimensions);
-            List<String> indices = knowledgeBaseService.rebuildAll(dimensions);
-            // 索引被清空重建：旧的统计快照（还带着重建前的文档 / 切片数）必须作废
-            knowledgeStatsService.invalidate();
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("code", 0);
-            result.put("success", true);
-            result.put("indices", indices);
-            result.put("dimensions", dimensions);
-            result.put("message", "已按维度 " + dimensions + " 重建 " + indices.size()
-                    + " 个索引；索引已清空，请重新上传知识库文档");
-            return result;
-        } catch (Exception e) {
-            log.error("[管控] 知识库重建失败: {}", e.getMessage(), e);
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("success", false);
-            result.put("error", e.getMessage());
-            return result;
-        }
-    }
-
-    /**
-     * 已注册的知识库后端清单（含能力声明），供「重灌到新后端」下拉。
-     */
-    @GetMapping("/kb/backends")
-    public Map<String, Object> kbBackends() {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("code", 0);
-        body.put("backends", knowledgeBaseService.listBackends());
-        return body;
-    }
-
-    /**
-     * 把当前全部知识库内容跨后端重灌到指定目标后端（换后端 = 从 archive 重灌到新后端，设计第 11 节）。
-     *
-     * 源是 keyword 后端（文档登记权威），目标是界面指定的后端；目标可以是当前 vector 后端
-     * （等价于「换向量模型保留原文重建」），也可以是另一个已注册、具备向量存储能力的后端。
-     *
-     * @param body 请求体：{@code targetBackendId} 目标后端 id（必须已注册且具备向量存储能力）
-     */
-    @PostMapping(value = "/kb/reindex", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public Map<String, Object> reindexKnowledge(@RequestBody Map<String, Object> body) {
-        Object idObj = body == null ? null : body.get("targetBackendId");
-        String targetBackendId = idObj == null ? null : String.valueOf(idObj).trim();
-        try {
-            if (targetBackendId == null || targetBackendId.isBlank()) {
-                throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER,
-                        "targetBackendId 不能为空（应为已注册的知识库后端 id）");
-            }
-            log.info("[管控] 收到知识库重灌到后端请求：targetBackendId={}", targetBackendId);
-            Map<String, Integer> reindexed = knowledgeBaseService.reindexToBackend(targetBackendId);
-            // 重灌会改写目标后端上的索引：统计快照作废，别让页面显示重灌前的数
-            knowledgeStatsService.invalidate();
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("code", 0);
-            result.put("success", true);
-            result.put("targetBackendId", targetBackendId);
-            result.put("collections", reindexed.keySet());
-            result.put("reindexed", reindexed);
-            int total = reindexed.values().stream().mapToInt(Integer::intValue).sum();
-            result.put("totalChunks", total);
-            result.put("message", "已重灌到后端 " + targetBackendId + "：" + reindexed.size()
-                    + " 个 collection、共 " + total + " 条切片");
-            return result;
-        } catch (Exception e) {
-            log.error("[管控] 知识库重灌到后端失败（targetBackendId={}）: {}", targetBackendId, e.getMessage(), e);
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("success", false);
-            result.put("error", e.getMessage());
-            return result;
-        }
-    }
-
-    // ===== 存储配置（连接 / 知识体 / Redis） =====
+    // ===== 存储配置（连接 / Redis） =====
     //
-    // 三块各管一件事：**连接**管"连哪里"（一台具体 ES 或 Qdrant），**知识体**管
-    // "拿哪台连接干哪种活"（关键字 / 向量 / 原文，一个体只取一种），Redis 是平台
-    // 自己的基础设施。保存后立即生效。
+    // 这里只剩"连哪里"（具体 ES / Qdrant 实例 + Redis）。知识体的增删改已搬到知识库页
+    // （`/admin/bodies`）：体是数据实体（唯一名 / 冻结索引 / 两路落点 / 原文落点 / 文档），
+    // 与"连接池"不是同一层的东西，放在存储页只会让两个页各管一半。
     //
-    // 域用哪个知识体<b>不在这里</b>：那是域自己的声明，见 AdminDomainController。
+    // 域用哪个知识体不在这里：那是域自己的声明，见 AdminDomainController。
 
     /**
      * 读取存储配置（口令脱敏）
@@ -1393,6 +1235,8 @@ public class AdminController {
         });
         body.put("connections", connections);
 
+        /* 知识体只在这里<b>只读回显</b>：增删改在知识库页（/admin/bodies）。
+           存储页只管"连接池 + Redis"，体是数据实体，不该由连接页来建。 */
         List<Map<String, Object>> bodies = new ArrayList<>();
         cur.bodiesOrEmpty().forEach((id, b) -> {
             if (b != null) {
@@ -1400,6 +1244,7 @@ public class AdminController {
             }
         });
         body.put("bodies", bodies);
+        body.put("bodiesManagedAt", "/admin/bodies");
         body.put("configured", cur.isConfigured());
 
         body.put("esConfigured", infraHolder.isEsConfigured());
@@ -1444,6 +1289,10 @@ public class AdminController {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", b.getId());
         m.put("name", b.effectiveName());
+        // 唯一名与冻结索引跟着体走：存储页只读展示，知识库页才是管理入口
+        m.put("slug", b.effectiveSlug());
+        m.put("index", b.effectiveIndex());
+        m.put("raw", b.rawLocation());
         m.put("keyword", b.keywordId());
         m.put("vector", b.vectorId());
         m.put("modes", b.modes());
@@ -1503,15 +1352,15 @@ public class AdminController {
     /**
      * 保存存储配置并立即生效（无需重启）。
      *
-     * <p>整份覆盖：前端把当前页面上<b>全部</b>连接、知识体、Redis 一起提交。不做增量
-     * 补丁是有意的——"少传一条就当没动过"会让界面上删掉的行在重启后复活。</p>
+     * <p>整份覆盖：前端把当前页面上的<b>全部连接</b>、Redis 一起提交。不做增量补丁是有意的——
+     * "少传一条就当没动过"会让界面上删掉的行在重启后复活。</p>
      *
-     * <p>请求体里连接与知识体是<b>数组</b>（页面上就是一张表、一组卡片），落盘时才转成
-     * 以 id 为键的对象——人读配置文件时按 id 找比按数组下标找方便。</p>
+     * <p><b>知识体不在这份请求里</b>（v2）：它们的增删改走知识库页的 {@code /admin/bodies}。
+     * 旧版请求若仍带 {@code bodies}，按"带了就整份替换"处理以兼容；不带则沿用当前配置——
+     * 否则存储页保存一次连接，就会把所有知识体清空。</p>
      *
-     * <p>删掉某个知识体<b>不会</b>连带清掉域上的绑定：绑定在 {@code DomainStore} 里，
-     * 与存储配置不是一次事务。留着绑定而不是偷改域，好处是"先删体再建同名体"能恢复，
-     * 坏处是中间这段时间那个域没有知识库——域列表会把它标成"知识体已失效"。</p>
+     * <p>请求体里连接是<b>数组</b>（页面上就是一张表），落盘时才转成以 id 为键的对象——
+     * 人读配置文件时按 id 找比按数组下标找方便。</p>
      */
     @PostMapping("/infra")
     public Map<String, Object> saveInfra(@RequestBody InfraSaveRequest request) {
@@ -1519,8 +1368,14 @@ public class AdminController {
         incoming.setConfigured(true);
         incoming.setRedis(request.redis());
         incoming.setConnections(asConnectionMap(request.connections()));
-        incoming.setBodies(asBodyMap(request.bodies()));
-        log.info("[管控] 收到存储配置保存请求：连接 {} 个，知识体 {} 个，Redis={}",
+        if (request.bodies() == null) {
+            // 存储页不再管理知识体：不传 = 保留现状（否则保存连接会把体全部清空）
+            incoming.setBodies(infraHolder.current().bodiesOrEmpty());
+        } else {
+            incoming.setBodies(asBodyMap(request.bodies()));
+        }
+        // 同上：入口回显降 debug，结果由 InfraSettingsHolder 的"生效配置"与下方的"被拒绝"承担
+        log.debug("[管控] 收到存储配置保存请求：连接 {} 个，知识体 {} 个，Redis={}",
                 incoming.connectionsOrEmpty().size(),
                 incoming.bodiesOrEmpty().size(),
                 incoming.getRedis() == null ? "-" : incoming.getRedis().describe());
@@ -1539,28 +1394,35 @@ public class AdminController {
         result.put("esSource", infraHolder.esSource());
         result.put("redisSource", infraHolder.redisSource());
         result.put("vectorSlotSource", infraHolder.vectorSlotSource());
-        /* 检测移到连接/配置时：启动不再做知识库能力校验，也不做 Redis 自检。保存配置时
-           在这里一次性反馈——不拒绝保存（配置已生效），只把"能力不匹配 / Redis 没持久化"
-           作为 warning 带回去，运维看得见、服务不被拖死。 */
-        List<String> warnings = new ArrayList<>(infraWarnings());
-        warnings.addAll(redisPersistenceAudit.audit());
-        result.put("warnings", warnings);
+        /* 保存只做"落盘 + 热替换"，不在这里发任何远程请求。
+           以前这里会顺带跑 Redis 持久化自检（一条 CONFIG GET，Redis 慢时能拖十几秒，
+           前端表现为"一直保存不上"）和知识库能力自检（把一条配置错误放大成保存失败）。
+           检测一律挪到真正要用的地方：
+             · 连通性 → 用户点「测试连接」走 /admin/infra/test；
+             · 能力是否够用 → 检索/灌库那一轮，RetrievalPlan.backendFor 会跳过不合格的那一路并留错误日志。
+           能力自检仍跑一次，但只写日志、不回传给前端，避免"已保存，但有 N 条提醒"把人吓退。 */
+        logBackendCapability();
+        result.put("warnings", List.of());
         result.put("message", "存储配置已保存并立即生效");
         fillSecretState(result);
         return result;
     }
 
-    /** 保存存储配置后的知识库能力自检：注册表为空（没配知识库）时不唠叨 */
-    private List<String> infraWarnings() {
+    /**
+     * 保存后顺手记一条能力结论，<b>只进日志</b>。
+     *
+     * <p>纯内存判断（不连任何后端），所以放在保存路径上不会有性能代价；但它回答的是
+     * "这份配置真跑起来够不够用"，属于调用期才该拦的事，因此不阻断保存、也不回传前端。</p>
+     */
+    private void logBackendCapability() {
         if (knowledgeBackendRegistry.isEmpty()) {
-            return List.of();
+            return;
         }
         try {
             knowledgeBackendValidator.validate();
-            return List.of();
         } catch (Exception e) {
-            log.warn("[管控] 存储配置已保存，但知识库能力自检未通过: {}", e.getMessage());
-            return List.of(e.getMessage());
+            log.warn("[管控] 存储配置已保存，但知识库能力自检未通过（不影响保存，检索时会跳过该路）: {}",
+                    e.getMessage());
         }
     }
 
@@ -1665,6 +1527,13 @@ public class AdminController {
             if ("redis".equals(kind)) {
                 InfraSettingsHolder.RedisProbe probeResult =
                         infraHolder.testRedis(probe.getRedis(), redisProperties);
+                /* 持久化 / 淘汰策略自检跟着「测试连接」走：它本来就要连 Redis，顺带的边际成本
+                   几乎为零；放在保存路径上则是每次保存都多一次 CONFIG GET（Redis 慢时能拖十几秒，
+                   前端表现为"一直保存不上"）。只在"被测的正是当前生效那台"时给结论——
+                   否则拿到的是旧连接的自检结果，比不给更误导。 */
+                List<String> audit = sameRedisTarget(probe.getRedis(),
+                        infraHolder.current().getRedis())
+                        ? redisPersistenceAudit.audit() : List.of();
                 result.put("success", true);
                 result.put("version", probeResult.version());
                 result.put("mode", probeResult.mode());
@@ -1672,9 +1541,14 @@ public class AdminController {
                 result.put("databases", probeResult.databases());
                 result.put("dbSize", probeResult.dbSize());
                 result.put("note", probeResult.note());
-                result.put("message", "Redis 连接正常：版本 " + text(probeResult.version())
+                result.put("warnings", audit);
+                String msg = "Redis 连接正常：版本 " + text(probeResult.version())
                         + "（" + modeLabel(probeResult.mode()) + "），库 " + probeResult.database()
-                        + " 当前有 " + text(probeResult.dbSize()) + " 个 key");
+                        + " 当前有 " + text(probeResult.dbSize()) + " 个 key";
+                if (!audit.isEmpty()) {
+                    msg = msg + "；注意：" + String.join("；", audit);
+                }
+                result.put("message", msg);
             } else if ("vector".equals(kind) || "qdrant".equals(kind)) {
                 InfraSettingsHolder.VectorStoreProbe probeResult =
                         infraHolder.testVectorStore(conn == null ? null : conn.getVector());
@@ -1728,6 +1602,22 @@ public class AdminController {
         m.put("note", verdict.note());
         m.put("hint", verdict.hint());
         return m;
+    }
+
+    /**
+     * 两份 Redis 配置是不是同一台机器上的同一个库。
+     *
+     * <p>持久化自检查的是<b>当前生效</b>那条连接（它拿的是全局 template）；用户改完地址后
+     * 点「测试连接」，测的是新地址，此时拿旧连接的自检结论回来比不给更误导。</p>
+     */
+    private static boolean sameRedisTarget(InfraSettings.Redis a, InfraSettings.Redis b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        return String.valueOf(a.getHost()).trim()
+                .equalsIgnoreCase(String.valueOf(b.getHost()).trim())
+                && a.effectivePort() == b.effectivePort()
+                && a.effectiveDatabase() == b.effectiveDatabase();
     }
 
     /** Redis 拓扑翻成中文；读不到就如实说读不到 */
@@ -1821,6 +1711,9 @@ public class AdminController {
         // 不合并的话，在提示词页点一次保存就会把各域的工具执行信息回写开关冲回默认（关）。
         toSave.setToolCallEcho(domainSettingsStore.load().getToolCallEcho());
         toSave.setPlanDisplay(domainSettingsStore.load().getPlanDisplay());
+        // bodyBindings 同理不归提示词页管：整份覆盖写会把内置/派生域的知识体绑定冲掉，
+        // 表现为"在提示词页点一次保存，域空间的知识体绑定就没了"
+        toSave.setBodyBindings(domainSettingsStore.load().getBodyBindings());
         // 域必须已登记：提示词是域的属性，给树里不存在的域存片段只会变成永远不生效的孤儿
         List<String> unknown = toSave.getPrompts().keySet().stream()
                 .filter(domain -> !domainRegistry.contains(domain))
@@ -1831,7 +1724,8 @@ public class AdminController {
                     "域不存在：" + unknown + "（已登记的域: " + domainRegistry.ids() + "）；"
                             + "请先在「域空间」把这些域创建出来");
         }
-        log.info("[管控] 收到域提示词保存请求: {} 个域片段", toSave.getPrompts().size());
+        // 入口回显降 debug：DomainSettingsStore 保存成功时会打"已保存到 …：域片段 N 个"
+        log.debug("[管控] 收到域提示词保存请求: {} 个域片段", toSave.getPrompts().size());
         Map<String, Object> result = new LinkedHashMap<>();
         try {
             domainSettingsStore.save(toSave);

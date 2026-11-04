@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -66,31 +67,77 @@ public class ChunkArchiveReconciler {
 
     private final ChunkArchive archive;
     /**
-     * 检索计划：登记表经 {@link RetrievalPlan#keywordStore()} 取——以 keyword 后端为权威
-     * （一审修订 B4——"有哪些文档"是登记视角，不是检索视角），
-     * 与 {@link KnowledgeBaseService} 同一取值口径。
+     * 检索计划：按 collection 找到它所属知识体的读 store。
+     *
+     * <p>v2 起"有哪些文档"的权威是<b>索引本身</b>，而索引属于知识体；一个体可能挂在
+     * 非平台默认那台后端上，所以对账必须逐 collection 问"这个索引属于哪个体、那个体在哪台"，
+     * 不能一律用平台默认 store——那会在别的机器上的索引上读到空登记表，
+     * 于是把整份原文档案当孤儿删掉。</p>
      */
     private final RetrievalPlan retrievalPlan;
+    /** 体的索引清单：判断"档案对应的集合还有没有主人" */
+    private final KnowledgeBodyResolver bodies;
     private final Duration minAge;
 
     public ChunkArchiveReconciler(ChunkArchive archive,
                                   RetrievalPlan retrievalPlan,
+                                  KnowledgeBodyResolver bodies,
                                   @Value("${domainplane.knowledge.archive-reconcile-min-age-minutes:5}") long minAgeMinutes) {
         this.archive = archive;
         this.retrievalPlan = retrievalPlan;
+        this.bodies = bodies;
         this.minAge = Duration.ofMinutes(Math.max(0, minAgeMinutes));
     }
 
-    /** 登记表 store：keyword 后端（文档登记视角的权威，B4） */
+    /** 平台默认登记表 store：找不到归属体时的兜底（关键词连接，历史上就是登记视角） */
     private KnowledgeStore store() {
         return retrievalPlan.keywordStore();
     }
 
+    /** 某个 collection 的登记表 store：优先按"索引 → 体 → 该体的读 store"解析 */
+    private KnowledgeStore storeFor(String collection) {
+        String bodyId = bodies.bodyIdOfIndex(collection);
+        if (bodyId != null) {
+            try {
+                return retrievalPlan.readStoreOfBody(bodyId);
+            } catch (RuntimeException e) {
+                log.debug("[档案对账] 知识体 {} 的读 store 不可用（回落到平台默认）: {}",
+                        bodyId, e.getMessage());
+            }
+        }
+        return store();
+    }
+
+    /** 全部已注册后端上的 store（按对象身份去重） */
+    private List<KnowledgeStore> stores() {
+        List<KnowledgeStore> out = new ArrayList<>();
+        try {
+            for (var backend : retrievalPlan.backends()) {
+                try {
+                    KnowledgeStore s = retrievalPlan.storeOf(backend.id());
+                    if (s != null && out.stream().noneMatch(existing -> existing == s)) {
+                        out.add(s);
+                    }
+                } catch (RuntimeException e) {
+                    log.debug("[档案对账] 后端 {} 取 store 失败（跳过）: {}", backend.id(), e.getMessage());
+                }
+            }
+        } catch (RuntimeException e) {
+            log.debug("[档案对账] 枚举后端失败（回落到平台默认）: {}", e.getMessage());
+        }
+        if (out.isEmpty()) {
+            out.add(store());
+        }
+        return out;
+    }
+
     @Scheduled(fixedDelayString = "${domainplane.knowledge.archive-reconcile-ms:300000}")
     public Report reconcileAll() {
-        List<String> collections;
+        Set<String> collections = new LinkedHashSet<>();
         try {
-            collections = store().listCollections();
+            for (KnowledgeStore s : stores()) {
+                collections.addAll(s.listCollections());
+            }
         } catch (Exception e) {
             // 失败降噪：存储不可达时每轮 WARN 会变成固定噪音（对账周期 5min、
             // ES connectTimeout 5s——黑洞地址每轮白烧一次超时）。首轮 WARN 一条，
@@ -113,36 +160,34 @@ public class ChunkArchiveReconciler {
         int failed = 0;
         int skippedYoung = 0;
         for (String collection : collections) {
-            Report r = reconcileCollection(collection);
+            Report r = reconcileCollection(collection, minAge);
             scanned += r.scanned();
             orphans += r.orphans();
             missing += r.missing();
             failed += r.failed();
             skippedYoung += r.skippedYoung();
         }
-        // 档案里可能还有"collection 已不存在"的整域残留（purgeAll 前的旧数据 /
-        // 删域时 archive 列举失败的漏网）：那些键的 collection 不在列表里，
-        // 按孤儿处理——它们永远等不到登记表
+        /* 档案里可能有"没有活集合"的残留：要么索引刚被删（用户在知识体卡片上删了索引），
+           要么体换了落点、旧集合还在别的机器上。v2 的纪律是<b>这里绝不删原文</b>：
+           原文是权威源，索引才是可重建的派生数据——索引没了正好可以从原文重建。
+           删原文只有一条路：知识体卡片上的「删除知识体」且 keepRaw=false。
+           所以这里只统计 + 给一条可排查的 WARN，不做任何删除。 */
+        Set<String> managed = bodies.allIndices();
         for (Map.Entry<String, Set<String>> e : archive.inventory().entrySet()) {
-            if (collections.contains(e.getKey())) {
+            String collection = e.getKey();
+            scanned += e.getValue().size();
+            if (collections.contains(collection)) {
                 continue;
             }
-            for (String docId : e.getValue()) {
-                String key = keyOf(e.getKey(), docId);
-                if (archive.isYoung(key, minAge)) {
-                    skippedYoung++;
-                    continue;
-                }
-                try {
-                    archive.delete(e.getKey(), docId);
-                    orphans++;
-                    MetricsRegistry.kbArchiveOrphan();
-                } catch (Exception ex) {
-                    failed++;
-                    log.warn("[档案对账] 删除残留档案 {} 失败（下轮重试）: {}", key, ex.getMessage());
-                }
+            if (!managed.contains(collection)) {
+                log.warn("[档案对账] 档案里有 {} 个文档属于未知集合 {}（没有对应知识体）："
+                                + "保留不动，请确认它是迁移前的旧索引还是手工建的集合",
+                        e.getValue().size(), collection);
+            } else {
+                log.warn("[档案对账] 知识体索引 {} 在后端上不存在，但原文档案还有 {} 个文档："
+                                + "索引可随时从原文重建（知识体卡片 →「重建索引」）",
+                        collection, e.getValue().size());
             }
-            scanned += e.getValue().size();
         }
         if (orphans > 0 || missing > 0 || failed > 0) {
             log.info("[档案对账] 本轮：检查 {} 键，回收孤儿 {}，补写缺档 {}，失败 {}，跳过在写 {}",
@@ -161,10 +206,11 @@ public class ChunkArchiveReconciler {
      *               （用户点了"重建"，不该被"文件太新"挡下）
      */
     public Report reconcileCollection(String collection, Duration minAge) {
+        KnowledgeStore store = storeFor(collection);
         Set<String> registered;
         try {
             registered = new LinkedHashSet<>();
-            for (DocumentAgg doc : store().documents(collection, DOC_LIMIT)) {
+            for (DocumentAgg doc : store.documents(collection, DOC_LIMIT)) {
                 if (doc.docId() != null) {
                     registered.add(doc.docId());
                 }
@@ -219,7 +265,7 @@ public class ChunkArchiveReconciler {
                 continue;
             }
             try {
-                int backfilled = backfill(collection, docId);
+                int backfilled = backfill(store, collection, docId);
                 missing++;
                 MetricsRegistry.kbArchiveMissing();
                 log.info("[档案对账] 缺档已补写（collection={}，docId={}，{} 条切片）",
@@ -249,8 +295,8 @@ public class ChunkArchiveReconciler {
      * @return 补写的切片条数；一条都没读到返回 0（登记表说有、索引实际没有：
      *   删除与刷新的竞态，补写空档案没有意义，让下轮再说）
      */
-    private int backfill(String collection, String docId) {
-        List<KbChunk> chunks = store().readByDocId(collection, docId);
+    private int backfill(KnowledgeStore store, String collection, String docId) {
+        List<KbChunk> chunks = store.readByDocId(collection, docId);
         if (chunks.isEmpty()) {
             return 0;
         }

@@ -44,7 +44,7 @@ domainplane:
 
 三项基础配置都有默认值，**零配置也能启动**；连不上不会启动失败，第一次调用才报错。
 
-自动装配靠 4 个 `AutoConfiguration.imports`（`client-core` / `chat-client` / `kb-client` / `tool-provider` 各一份），没有 `spring.factories`。
+自动装配靠 4 个 `AutoConfiguration.imports`（`client-core` / `chat-client` / `kb-client` / `tool-provider` 各一份）。`sdk-core` 只有配置类、没有 `resources/META-INF/spring` 目录，不单独装配；项目里没有 `spring.factories`。
 
 ---
 
@@ -186,7 +186,7 @@ public class OrderTools {
 | 以上全部（首次） | `POST /api/agent/login` `{username,password}` → `{credential}` | 无 |
 | 服务端 → 工具实例 | `POST {endpoint}` | 无 |
 
-凭证头名两端一致：`X-DomainPlane-Credential`。SDK 进程内缓存凭证，收到 401/403 清缓存并**重登一次**——只重登，不重发原请求。
+凭证头名两端一致：`X-DomainPlane-Credential`。SDK 进程内缓存凭证；收到 401 时 `ClientCredential.invalidate()` 清缓存，**下一次**业务调用才会重新登录——重登发生在"取凭证"这一步，**同一次调用不会自动重发**。当前 main 里除 `invalidate()` 自身的定义外没有其它调用点，所以对外表现是"401 抛 `CREDENTIAL_REJECTED`，调用方重试时才会用新凭证"。
 
 裸 `curl` 与 SDK 完全等价，排障时优先用 `curl` 复现。
 
@@ -197,7 +197,8 @@ public class OrderTools {
 | 情形 | SDK 行为 |
 | --- | --- |
 | 响应体 `code != 0` | 抛 `ServerRejectedException`，原样带服务端码、文案、`retryable` |
-| HTTP 401/403 | 清凭证，重登一次；再失败抛 `CREDENTIAL_REJECTED` |
+| HTTP 401/403 | 抛 `CREDENTIAL_REJECTED`，由调用方决定是否重试（SDK 不自动重发原请求） |
+| HTTP 409（登录时） | `SERVER_NOT_INITIALIZED`——服务端还没初始化账号 |
 | 连接失败 / UnknownHost | `CONNECTION_REFUSED` |
 | 读超时 | `TIMEOUT` |
 | 流无终止事件 | `STREAM_TRUNCATED` |

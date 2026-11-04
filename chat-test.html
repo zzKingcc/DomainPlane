@@ -10,13 +10,14 @@
     --muted: #8a9099; --primary: #3b6cf6; --primary-d: #2f57c9;
     --user: #e8f0ff; --assistant: #f3f5f9; --think: #fff7e6;
     --tool: #eef9f0; --err: #fdecec; --err-t: #c0392b; --ok: #1a9c5b;
+    --warn: #fff7e6; --warn-t: #9a6b00; --doc: #f2f0ff; --doc-t: #4b3fbf;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
     background: var(--bg); color: var(--text); font-size: 14px;
   }
-  .wrap { max-width: 920px; margin: 0 auto; padding: 18px; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 18px; }
   .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
   .panel h2 { margin: 0 0 12px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
   .grid { display: grid; grid-template-columns: 110px 1fr; gap: 10px 12px; align-items: center; }
@@ -25,17 +26,18 @@
     font: inherit; color: var(--text); border: 1px solid var(--border);
     border-radius: 7px; padding: 8px 10px; background: #fff; width: 100%;
   }
-  textarea { resize: vertical; min-height: 60px; }
+  textarea { resize: vertical; min-height: 68px; }
   button { cursor: pointer; background: var(--primary); color: #fff; border: none; width: auto; padding: 8px 16px; }
   button:hover { background: var(--primary-d); }
   button:disabled { background: #c5ccd6; cursor: not-allowed; }
   button.ghost { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
   button.ghost:hover { background: #f0f4ff; }
+  button.ghost:disabled { background: #fff; color: #c5ccd6; border-color: #dfe4ec; }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .status { font-size: 12px; padding: 3px 9px; border-radius: 12px; background: #eee; color: var(--muted); }
   .status.ok { background: #e6f7ee; color: var(--ok); }
   .status.bad { background: var(--err); color: var(--err-t); }
-  #chat { min-height: 260px; max-height: 520px; overflow-y: auto; padding: 6px; }
+  #chat { min-height: 260px; max-height: 560px; overflow-y: auto; padding: 6px; }
   .msg { margin: 10px 0; display: flex; }
   .msg.user { justify-content: flex-end; }
   .bubble { max-width: 82%; padding: 10px 13px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
@@ -45,37 +47,100 @@
   .think .tag { font-weight: 600; color: #9a6b00; }
   .tool { background: var(--tool); border-left: 3px solid #2e9e54; padding: 8px 10px; margin: 6px 0; border-radius: 6px; font-size: 13px; }
   .tool .tag { font-weight: 600; color: #1c7a3e; }
-  .tool .body { color: #444; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; margin-top: 4px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
-  .tool .row { margin-top: 8px; }
-  .err { background: var(--err); border-left: 3px solid var(--err-t); color: var(--err-t); padding: 8px 10px; margin: 6px 0; border-radius: 6px; font-size: 13px; }
+  .body-pre { color: #444; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; margin-top: 4px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  .err { background: var(--err); border-left: 3px solid var(--err-t); color: var(--err-t); padding: 8px 10px; margin: 6px 0; border-radius: 6px; font-size: 13px; white-space: pre-wrap; }
   .done { text-align: center; color: var(--muted); font-size: 12px; margin: 8px 0; }
   details { margin-top: 8px; }
   summary { cursor: pointer; color: var(--muted); font-size: 12px; }
-  #rawlog { background: #0f1115; color: #d6e2ff; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; padding: 10px; border-radius: 6px; max-height: 240px; overflow: auto; white-space: pre-wrap; }
+  #rawlog { background: #0f1115; color: #d6e2ff; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; padding: 10px; border-radius: 6px; max-height: 260px; overflow: auto; white-space: pre-wrap; }
   .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
   .pill { font-size: 11px; color: var(--muted); }
-  /* ============ 附件（图片 / 视频 / 音频） ============ */
-  .attach-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
-  .attach-bar input[type=file] { display: none; }
+
+  /* ==================== 输入区：上传 / 拖拽 / 粘贴 ==================== */
+  .input-box {
+    border: 1px solid var(--border); border-radius: 10px; background: #fff;
+    padding: 2px 2px 0; transition: border-color .15s, background .15s;
+  }
+  .input-box.dragover { border-color: var(--primary); background: #f7f9ff; }
+  .input-box textarea { border: none; border-radius: 10px 10px 0 0; min-height: 76px; }
+  .input-box textarea:focus { outline: none; }
+  .attach-bar {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    padding: 8px 10px; border-top: 1px solid var(--border); background: #fafbfd;
+    border-radius: 0 0 10px 10px;
+  }
+  input[type=file] { display: none; }
+  .attach-bar button { padding: 5px 11px; font-size: 13px; }
+  .attach-bar .pill { margin-left: auto; }
+  .drop-tip { display: none; }
+  .input-box.dragover .drop-tip {
+    display: block; padding: 8px 12px; color: var(--primary);
+    font-size: 12px; background: #eef3ff;
+  }
+
+  /* 配额条 */
+  .quota { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--muted); padding: 0 2px 6px; margin-top: 8px; }
+  .quota b { color: var(--text); font-weight: 600; }
+  .quota .over { color: var(--err-t); }
+
+  /* 附件列表 */
   .attach-list { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   .attach-list:empty { display: none; }
-  .chip {
-    display: inline-flex; align-items: center; gap: 6px; max-width: 260px;
-    border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px;
-    background: #fff; font-size: 12px; color: var(--text);
+  .att {
+    display: flex; align-items: center; gap: 9px; max-width: 300px;
+    border: 1px solid var(--border); border-radius: 9px; padding: 6px 8px;
+    background: #fff; font-size: 12px;
   }
-  .chip .k { flex: 0 0 auto; }
-  .chip .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .chip .s { color: var(--muted); flex: 0 0 auto; }
-  .chip .x {
+  .att .thumb {
+    width: 38px; height: 38px; flex: 0 0 38px; border-radius: 6px; overflow: hidden;
+    background: #eef1f6; display: flex; align-items: center; justify-content: center;
+    font-size: 17px;
+  }
+  .att .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .att .thumb.doc {
+    background: var(--doc); color: var(--doc-t); font-weight: 700;
+    font-size: 10px; letter-spacing: .02em;
+  }
+  .att .meta { min-width: 0; flex: 1 1 auto; }
+  .att .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .att .sub { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .att .x {
     flex: 0 0 auto; cursor: pointer; color: var(--muted); border: none; background: none;
-    padding: 0 2px; font-size: 14px; line-height: 1; width: auto;
+    padding: 0 2px; font-size: 15px; line-height: 1; width: auto;
   }
-  .chip .x:hover { color: var(--err-t); }
-  .chip.bad { border-color: var(--err-t); color: var(--err-t); }
-  .att-img { max-width: 240px; max-height: 160px; border-radius: 8px; display: block; margin-top: 6px; }
-  .att-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-  .att-row .pill { background: #eef2f8; border-radius: 6px; padding: 2px 8px; }
+  .att .x:hover { color: var(--err-t); }
+  .att.bad { border-color: #f0b9b3; background: #fff6f5; }
+  .att.bad .sub { color: var(--err-t); }
+  .att.busy { opacity: .65; }
+  .att .bar { height: 2px; background: #e6eaf2; border-radius: 2px; margin-top: 3px; overflow: hidden; }
+  .att .bar i { display: block; height: 100%; width: 0; background: var(--primary); transition: width .2s; }
+
+  /* 气泡内的附件展示 */
+  .bubble .att-img { max-width: 260px; max-height: 200px; border-radius: 8px; display: block; margin-top: 6px; }
+  .bubble .att-media { max-width: 260px; display: block; margin-top: 6px; border-radius: 8px; }
+  .bubble .att-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .bubble .att-row .pill { background: #eef2f8; border-radius: 6px; padding: 2px 8px; }
+  .bubble .doc-card {
+    margin-top: 6px; border: 1px solid #ddd8f7; background: var(--doc);
+    border-radius: 7px; padding: 6px 9px; font-size: 12px; color: var(--doc-t);
+  }
+  .bubble .doc-card .dn { font-weight: 600; }
+  .bubble .doc-card .dc { color: #6f66a8; font-size: 11px; margin-top: 2px; }
+  .bubble .doc-card pre {
+    margin: 6px 0 0; max-height: 160px; overflow: auto; white-space: pre-wrap;
+    word-break: break-word; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px; color: #3f3a66; background: #fff; border-radius: 5px; padding: 6px;
+  }
+
+  /* 轻提示 */
+  #toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(12px);
+    background: #1f2329; color: #fff; font-size: 12px; padding: 8px 15px;
+    border-radius: 20px; opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s; z-index: 99; max-width: 80vw;
+    text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
 </head>
 <body>
@@ -105,21 +170,31 @@
 
   <div class="panel">
     <h2>② 对话测试</h2>
-    <textarea id="message" placeholder="输入消息，回车发送（Shift+Enter 换行）">你好，请用一句话介绍你自己。</textarea>
-    <div class="attach-bar">
-      <button id="pickBtn" class="ghost" type="button">📎 添加文件（图 / 视频 / 音频）</button>
-      <input id="filePicker" type="file" accept="image/*,video/*,audio/*" multiple>
-      <span id="attachHint" class="pill">文件随本轮消息一起上行，同一会话可多轮混合发送</span>
+
+    <div class="input-box" id="inputBox">
+      <textarea id="message" placeholder="输入消息，回车发送（Shift+Enter 换行）；可直接拖拽文件进来，或 Ctrl+V 粘贴截图"></textarea>
+      <div class="drop-tip">松开即添加附件</div>
+      <div class="attach-bar">
+        <button id="pickImgBtn" class="ghost" type="button" title="图片">🖼️ 图片</button>
+        <button id="pickMediaBtn" class="ghost" type="button" title="音频 / 视频">🎵 音视频</button>
+        <button id="pickDocBtn" class="ghost" type="button" title="PDF / Word / Excel / PPT / 文本 / 代码">📄 文档</button>
+        <button id="pickAnyBtn" class="ghost" type="button" title="不限制类型">📎 任意文件</button>
+        <span id="attachHint" class="pill">支持拖拽与粘贴</span>
+      </div>
+      <input id="filePicker" type="file" multiple>
     </div>
+
     <div id="attachList" class="attach-list"></div>
-    <div class="row" style="margin-top:10px;">
+    <div class="quota" id="quotaBar"></div>
+
+    <div class="row" style="margin-top:12px;">
       <button id="sendBtn">发送</button>
       <button id="stopBtn" class="ghost" disabled>停止</button>
       <button id="newBtn" class="ghost">新建会话</button>
       <span id="convStatus" class="pill"></span>
     </div>
-    <div class="hint">sessionId：<span id="sidLabel" class="pill">—</span>（多轮对话沿用同一会话，点"新建会话"重置）</div>
-    <div class="hint">图片走能力路由（主模型可看图则直进上下文，否则 seeImage 委派）；视频 / 音频按原样进主模型消息，需域所绑模型自身支持。</div>
+    <div class="hint">sessionId：<span id="sidLabel" class="pill">—</span></div>
+    <div class="hint" id="routeHint"></div>
   </div>
 
   <div class="panel">
@@ -132,6 +207,7 @@
   </div>
 
 </div>
+<div id="toast"></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -145,6 +221,14 @@ $('sidLabel').textContent = sessionId;
 let streaming = false;
 /** 本轮流是否见过终止事件（DONE/STOPPED/ERROR/INTERRUPT）——没有它就是被掐断的半截答案 */
 let sawTerminal = false;
+
+function toast(text) {
+  const t = $('toast');
+  t.textContent = text;
+  t.className = 'show';
+  clearTimeout(t._h);
+  t._h = setTimeout(() => { t.className = ''; }, 2600);
+}
 
 // ==================== 对话区只呈现治理后的内容 ====================
 // 约定：界面上的错误只呈现服务端治理后的字段（error / codeName / action / traceId）。
@@ -203,7 +287,6 @@ async function login() {
       $('credStatus').textContent = '已获取凭证 ✓';
       $('credStatus').className = 'status ok';
     } else {
-      // 只呈现治理后的 error / codeName / action / traceId；detail 与原始报文不进界面
       let text = '登录失败';
       if (j && j.error) {
         text += '：' + j.error + (j.codeName ? '（' + j.codeName + '）' : '');
@@ -223,32 +306,97 @@ async function login() {
   }
 }
 
-function headers(extra = {}) {
-  const h = { 'Content-Type': 'application/json', ...extra };
+function headers(extra) {
+  const h = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
   const c = getCred();
   if (c) h['X-DomainPlane-Credential'] = c;
   return h;
 }
 
-/* ==================== 附件：图片 / 视频 / 音频 ==================== */
-/* 与后端契约（api/model/ContentType）对齐：image/* → IMAGE_BASE64，
-   video/* → VIDEO_BASE64，audio/* → AUDIO_BASE64；base64 不带 data: 前缀
-   （契约的 base64 字段明确"不含 data: 前缀"，带上会被当成数据本身发出去）。 */
+/* ==================================================================
+ * 附件：图片 / 音频 / 视频 / 文档
+ *
+ * 与后端契约（api/model/ContentType）对齐——后端只认四种上行内容块：
+ *   TEXT / IMAGE_BASE64 / AUDIO_BASE64 / VIDEO_BASE64（URL 变体在测试台不用）
+ * 所以：
+ *   · 图 / 音 / 视 → 原样转 base64，走对应内容块（base64 不带 data: 前缀）
+ *   · 各类文档     → 前端就地抽取纯文本，塞进同一个 TEXT 块（带文件头标注），
+ *                    后端没有 DOCUMENT 类型，硬塞别的 type 会被契约拒掉
+ * ================================================================== */
+
+/** 单文件原始大小上限（字节）。超过就不读，直接在 chip 上标红 */
+const MAX_FILE_BYTES = 40 * 1024 * 1024;
+/** 单个文档抽出的文本上限（字符）。超了截断并告知，否则一轮请求体会被撑爆 */
+const MAX_DOC_CHARS = 200000;
+/** 所有附件拼出来的上行 payload 软上限（字符），仅用于提示，不阻断 */
+const SOFT_PAYLOAD_CHARS = 600000;
+
 let attached = [];
-/* 文件读取中（readAsDataURL 是异步的）：没读完不发放 ——
-   否则大文件（几十 MB 的视频）读一半时按发送，附件还没进列，
-   本轮会只带着文本发出去， chips 却随后才出现，用户以为带上了。 */
+/** 文件读取/解析中（异步）：没读完不发放 */
 let reading = false;
 
-const KIND_OF = (mime) => mime.startsWith('image/') ? 'image'
-  : mime.startsWith('video/') ? 'video'
-  : mime.startsWith('audio/') ? 'audio' : null;
-const KIND_ICON = { image: '🖼️', video: '🎬', audio: '🎵' };
+const KIND_ICON = { image: '🖼️', video: '🎬', audio: '🎵', doc: '📄' };
+
+const EXT_OF = (name) => {
+  const i = (name || '').lastIndexOf('.');
+  return i >= 0 ? name.slice(i + 1).toLowerCase() : '';
+};
+
+/** 按 mime + 扩展名双判：浏览器给部分文档的 type 是空的，不能只信 mime */
+function kindOf(file) {
+  const mime = file.type || '';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  const ext = EXT_OF(file.name);
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif'].indexOf(ext) >= 0) return 'image';
+  if (['mp4', 'webm', 'mov', 'm4v', 'avi', 'mkv', 'ogv'].indexOf(ext) >= 0) return 'video';
+  if (['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'opus', 'weba'].indexOf(ext) >= 0) return 'audio';
+  return 'doc';
+}
+
+/** 文档子类：决定抽取方式和展示标签 */
+function docFlavorOf(name, mime) {
+  const ext = EXT_OF(name);
+  if (ext === 'pdf' || mime === 'application/pdf') return 'pdf';
+  if (ext === 'docx') return 'docx';
+  if (ext === 'doc') return 'doc';
+  if (ext === 'xlsx' || ext === 'xlsm') return 'xlsx';
+  if (ext === 'xls') return 'xls';
+  if (ext === 'pptx') return 'pptx';
+  if (ext === 'ppt') return 'ppt';
+  if (ext === 'csv' || mime === 'text/csv') return 'csv';
+  if (ext === 'json' || mime === 'application/json') return 'json';
+  if (['md', 'markdown'].indexOf(ext) >= 0) return 'md';
+  if (mime.startsWith('text/') || ['txt', 'log', 'yaml', 'yml', 'xml', 'html', 'htm'].indexOf(ext) >= 0) return 'text';
+  if (['js', 'mjs', 'ts', 'jsx', 'tsx', 'java', 'py', 'go', 'rs', 'c', 'h', 'cpp', 'hpp',
+       'cs', 'kt', 'rb', 'php', 'sh', 'bash', 'sql', 'css', 'scss', 'vue', 'lua', 'toml',
+       'ini', 'conf', 'properties', 'gradle'].indexOf(ext) >= 0) return 'code';
+  return 'unknown';
+}
+
+const DOC_LABEL = {
+  pdf: 'PDF', docx: 'Word', doc: 'Word', xlsx: 'Excel', xls: 'Excel',
+  pptx: 'PPT', ppt: 'PPT', csv: 'CSV', json: 'JSON', md: 'Markdown',
+  text: '文本', code: '代码', unknown: '文件'
+};
+
+/** 附件缩略图位置上的短格式角标 */
+const DOC_TAG = {
+  pdf: 'PDF', docx: 'DOC', doc: 'DOC', xlsx: 'XLS', xls: 'XLS',
+  pptx: 'PPT', ppt: 'PPT', csv: 'CSV', json: 'JSON', md: 'MD',
+  text: 'TXT', code: '</>', unknown: 'FILE'
+};
+
+/** 支持"抽成纯文本"的文档子类 */
+const EXTRACTABLE = {
+  csv: 1, json: 1, md: 1, text: 1, code: 1
+};
 
 function fmtSize(n) {
   if (n < 1024) return n + ' B';
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-  return (n / 1024 / 1024).toFixed(1) + ' MB';
+  return (n / 1024 / 1024).toFixed(2) + ' MB';
 }
 
 /** data URL → { mime, base64 }：前缀里取 mime，逗号后是纯 base64 */
@@ -267,63 +415,548 @@ function readAsDataUrl(file) {
   });
 }
 
+function readAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error || new Error('读取失败'));
+    r.readAsArrayBuffer(file);
+  });
+}
+
+function readAsText(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error || new Error('读取失败'));
+    r.readAsText(file, 'utf-8');
+  });
+}
+
+/* ---------------- 文档文本抽取 ---------------- */
+
+/** 二进制里挑出可见文本：PDF / docx / xlsx 兜底用。
+ *  只保留可打印 ASCII + CJK，过滤掉解压后的大量乱码噪声。 */
+function salvageText(buf) {
+  const bytes = new Uint8Array(buf);
+  const out = [];
+  let run = [];
+  const push = () => {
+    if (run.length >= 4) out.push(decodeUtf8(run));
+    run = [];
+  };
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    if (b === 9 || b === 10 || b === 13 || (b >= 32 && b < 127)) { run.push(b); continue; }
+    // UTF-8 多字节（中文等）：交给 TextDecoder 判合法性
+    if (b >= 0xc2) {
+      const chunk = bytes.subarray(i, Math.min(i + 4, bytes.length));
+      const s = decodeUtf8(chunk);
+      if (s && s !== '\ufffd') { run.push.apply(run, chunk); i += chunk.length - 1; continue; }
+    }
+    push();
+  }
+  push();
+  return out.join(' ').replace(/\s{2,}/g, ' ').trim();
+}
+
+function decodeUtf8(arr) {
+  try { return new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(arr)); }
+  catch (_) { return ''; }
+}
+
+/** docx / xlsx / pptx 都是 zip：手工解出 word/document.xml 等，抽 <w:t> / <t> 文本。
+ *  不引第三方库（测试页是单文件、离线可用），zip 只读 store/deflate 两种压缩方式。 */
+async function unzipEntries(buf) {
+  const u8 = new Uint8Array(buf);
+  const dv = new DataView(buf);
+  // 找 End of Central Directory（0x06054b50），从尾部往前扫
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 66000); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('不是有效的 zip');
+  const count = dv.getUint16(eocd + 10, true);
+  let off = dv.getUint32(eocd + 16, true);
+  const entries = {};
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(off, true) !== 0x02014b50) break;
+    const method = dv.getUint16(off + 10, true);
+    const compSize = dv.getUint32(off + 20, true);
+    const nameLen = dv.getUint16(off + 28, true);
+    const extraLen = dv.getUint16(off + 30, true);
+    const cmtLen = dv.getUint16(off + 32, true);
+    const localOff = dv.getUint32(off + 42, true);
+    const name = decodeUtf8(u8.subarray(off + 46, off + 46 + nameLen));
+    entries[name] = { method: method, compSize: compSize, localOff: localOff };
+    off += 46 + nameLen + extraLen + cmtLen;
+  }
+  return {
+    names: Object.keys(entries),
+    async read(name) {
+      const e = entries[name];
+      if (!e) return null;
+      const lo = e.localOff;
+      if (dv.getUint32(lo, true) !== 0x04034b50) return null;
+      const nameLen = dv.getUint16(lo + 26, true);
+      const extraLen = dv.getUint16(lo + 28, true);
+      const start = lo + 30 + nameLen + extraLen;
+      const data = u8.subarray(start, start + e.compSize);
+      if (e.method === 0) return data;
+      if (e.method === 8) {
+        if (typeof DecompressionStream === 'undefined') return null;
+        const ds = new DecompressionStream('deflate-raw');
+        const blob = new Blob([data]);
+        const stream = blob.stream().pipeThrough(ds);
+        const ab = await new Response(stream).arrayBuffer();
+        return new Uint8Array(ab);
+      }
+      return null;
+    }
+  };
+}
+
+function xmlToText(xml) {
+  return xml
+    .replace(/<w:tab\/>/g, '\t')
+    .replace(/<\/w:p>/g, '\n')
+    .replace(/<\/a:p>/g, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+async function extractDocx(buf) {
+  const zip = await unzipEntries(buf);
+  const main = zip.names.filter(n => /^word\/document\d*\.xml$/.test(n))[0] || 'word/document.xml';
+  const d = await zip.read(main);
+  if (!d) return null;
+  return xmlToText(decodeUtf8(d));
+}
+
+async function extractPptx(buf) {
+  const zip = await unzipEntries(buf);
+  const slides = zip.names
+    .filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+    .sort((a, b) => {
+      const na = parseInt(a.replace(/\D/g, ''), 10);
+      const nb = parseInt(b.replace(/\D/g, ''), 10);
+      return na - nb;
+    });
+  const parts = [];
+  for (let i = 0; i < slides.length; i++) {
+    const d = await zip.read(slides[i]);
+    if (d) parts.push('[第 ' + (i + 1) + ' 页]\n' + xmlToText(decodeUtf8(d)));
+  }
+  return parts.join('\n\n') || null;
+}
+
+async function extractXlsx(buf) {
+  const zip = await unzipEntries(buf);
+  // 共享字符串表 + 每张工作表
+  const ssRaw = await zip.read('xl/sharedStrings.xml');
+  const shared = [];
+  if (ssRaw) {
+    const s = decodeUtf8(ssRaw);
+    const items = s.split(/<si>/).slice(1);
+    for (let i = 0; i < items.length; i++) {
+      const texts = items[i].match(/<t[^>]*>([\s\S]*?)<\/t>/g) || [];
+      shared.push(texts.map(t => xmlToText(t)).join(''));
+    }
+  }
+  const sheets = zip.names
+    .filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))
+    .sort((a, b) => parseInt(a.replace(/\D/g, ''), 10) - parseInt(b.replace(/\D/g, ''), 10));
+  const out = [];
+  for (let i = 0; i < sheets.length; i++) {
+    const d = await zip.read(sheets[i]);
+    if (!d) continue;
+    const xml = decodeUtf8(d);
+    const lines = [];
+    // 按 <c ...>...</c> 整段匹配：type 属性在开标签里，只按开标签切会把 t="s" 丢掉
+    const cellRe = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+    const rowRe = /<row\b[^>]*>([\s\S]*?)<\/row>/g;
+    const rowSelfRe = /<row\b[^>]*\/>/g;
+    let rm;
+    while ((rm = rowRe.exec(xml)) !== null) {
+      const body = rm[1];
+      const vals = [];
+      let cm;
+      cellRe.lastIndex = 0;
+      while ((cm = cellRe.exec(body)) !== null) {
+        const attrs = cm[1] || '';
+        const inner = cm[2] || '';
+        const typeM = attrs.match(/\bt="([^"]+)"/);
+        const type = typeM ? typeM[1] : '';
+        const vm = inner.match(/<v>([\s\S]*?)<\/v>/);
+        const isM = inner.match(/<is>([\s\S]*?)<\/is>/);
+        if (type === 's' && vm) {
+          const idx = parseInt(vm[1], 10);
+          vals.push(shared[idx] != null ? shared[idx] : '');
+        } else if (type === 'inlineStr' && isM) {
+          vals.push(xmlToText(isM[1]));
+        } else if (type === 'str' && vm) {
+          vals.push(xmlToText(vm[1]));
+        } else if (vm) {
+          vals.push(xmlToText(vm[1]));
+        } else {
+          vals.push('');
+        }
+      }
+      const joined = vals.join('\t').replace(/[\t\s]+$/, '');
+      if (joined.trim()) lines.push(joined);
+    }
+    if (lines.length) out.push('[工作表 ' + (i + 1) + ']\n' + lines.join('\n'));
+  }
+  return out.join('\n\n') || null;
+}
+
+/** PDF：浏览器没有可编程 PDF 解析 API，这里走"解 Flate 流 + 抽文本操作符"的轻量路径。
+ *  结果是纯文本，够用于测试台上行链路；扫描件（无文本层）抽不出东西，会明确告知。 */
+async function extractPdf(buf) {
+  const u8 = new Uint8Array(buf);
+  const raw = decodeLatin1(u8);
+  const chunks = [];
+  // 逐个 stream 解压。流的真实长度看对象头里的 /Length：
+  // 直接按 endstream 前的位置切片会把尾部的 \n 也带进去，
+  // DecompressionStream 遇到尾部垃圾数据会直接抛错（不是软失败）。
+  const re = /stream\r?\n/g;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    const start = m.index + m[0].length;
+    const endIdx = raw.indexOf('endstream', start);
+    if (endIdx < 0) break;
+    // 往前找本对象头，取 /Length N（间接引用形如 /Length 12 0 R 的取不到，退回 endstream）
+    const headStart = Math.max(0, raw.lastIndexOf(' obj', m.index) - 400);
+    const head = raw.slice(headStart, m.index);
+    const lm = head.match(/\/Length\s+(\d+)(?!\s+\d+\s+R)/);
+    let segEnd = endIdx;
+    if (lm) {
+      const declared = parseInt(lm[1], 10);
+      if (declared > 0 && start + declared <= raw.length) segEnd = start + declared;
+    } else {
+      // 没有可信长度就退一步去掉尾部空白（\r\n 不属于压缩数据）
+      while (segEnd > start && (raw.charCodeAt(segEnd - 1) === 10 || raw.charCodeAt(segEnd - 1) === 13)) segEnd--;
+    }
+    const seg = u8.subarray(start, segEnd);
+    let text = null;
+    try {
+      const ds = new DecompressionStream('deflate');
+      const ab = await new Response(new Blob([seg]).stream().pipeThrough(ds)).arrayBuffer();
+      text = decodeLatin1(new Uint8Array(ab));
+    } catch (_) { text = null; }
+    if (text && (text.indexOf('Tj') >= 0 || text.indexOf('TJ') >= 0)) chunks.push(pdfOpsToText(text));
+    re.lastIndex = endIdx + 9;
+  }
+  if (!chunks.length) chunks.push(pdfOpsToText(raw));
+  const text = chunks.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return text || null;
+}
+
+function decodeLatin1(u8) {
+  let s = '';
+  const CH = 0x8000;
+  for (let i = 0; i < u8.length; i += CH) {
+    s += String.fromCharCode.apply(null, u8.subarray(i, Math.min(i + CH, u8.length)));
+  }
+  return s;
+}
+
+/** 从 PDF 内容流里抽文本绘制操作符：Tj / TJ / ' / " 前的字符串操作数。
+ *  不按行切——一行里常有多组 BT..ET，按行处理会把合法文本漏掉。 */
+function pdfOpsToText(stream) {
+  const out = [];
+  // 三种操作数形态：字面量串 (...) 、十六进制串 <...> 、数组 [...]
+  const tok = /\((?:\\.|[^\\)])*\)|<[0-9A-Fa-f\s]+>|\[\s*[-+0-9.]*\s*(?:\((?:\\.|[^\\)])*\)|<[0-9A-Fa-f\s]+>|[-+0-9.]+\s*)*\]|\bT[jJ]\b|\bTd\b|\bTD\b|\bT\*\b|'|"/g;
+  let m;
+  while ((m = tok.exec(stream)) !== null) {
+    const t = m[0];
+    if (t === 'Tj' || t === 'TJ' || t === "'" || t === '"' || t === 'Td' || t === 'TD' || t === 'T*') {
+      // 遇到文本定位/绘制操作：这是本段的收尾
+      if (t === 'Td' || t === 'TD' || t === 'T*') out.push('\n');
+      continue;
+    }
+    if (t.charAt(0) === '(') {
+      out.push(pdfLiteralToString(t.slice(1, -1)));
+    } else if (t.charAt(0) === '<') {
+      out.push(pdfHexToString(t.slice(1, -1)));
+    } else if (t.charAt(0) === '[') {
+      // TJ 数组：内部每个串 + 可能的偏移数字（负数 = 字间距，按空格处理）
+      const inner = t.slice(1, -1);
+      const sub = inner.match(/\((?:\\.|[^\\)])*\)|<[0-9A-Fa-f\s]+>|[-+][0-9.]+|[0-9.]+/g) || [];
+      for (let i = 0; i < sub.length; i++) {
+        const s = sub[i];
+        if (s.charAt(0) === '(') out.push(pdfLiteralToString(s.slice(1, -1)));
+        else if (s.charAt(0) === '<') out.push(pdfHexToString(s.slice(1, -1)));
+        else if (parseFloat(s) < -100) out.push(' ');
+      }
+    }
+  }
+  return out.join('')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function pdfLiteralToString(s) {
+  return s.replace(/\\([nrtbf()\\])/g, (all, c) => {
+    if (c === 'n') return '\n';
+    if (c === 'r') return '\r';
+    if (c === 't') return '\t';
+    if (c === 'b' || c === 'f') return '';
+    return c;
+  }).replace(/\\([0-7]{1,3})/g, (all, oct) => String.fromCharCode(parseInt(oct, 8)));
+}
+
+function pdfHexToString(hex) {
+  const clean = hex.replace(/\s+/g, '');
+  // UTF-16BE（常见于含中文的 PDF）：以 FEFF 开头或偶数长度按 UTF-16 解
+  if (clean.length % 4 === 0) {
+    let out = '';
+    for (let i = 0; i < clean.length; i += 4) {
+      const cp = parseInt(clean.slice(i, i + 4), 16);
+      if (!isNaN(cp)) out += String.fromCharCode(cp);
+    }
+    return out.replace(/\ufffd/g, '');
+  }
+  let out2 = '';
+  for (let i = 0; i < clean.length; i += 2) {
+    const cp = parseInt(clean.slice(i, i + 2), 16);
+    if (!isNaN(cp)) out2 += String.fromCharCode(cp);
+  }
+  return out2;
+}
+
+/** 统一入口：文件 → { text, note } */
+async function extractTextFromFile(file, flavor) {
+  const name = file.name;
+  if (EXTRACTABLE[flavor]) {
+    let t = await readAsText(file);
+    // UTF-8 解出大量替换符 = 大概率不是 UTF-8（GBK 等），退到 ArrayBuffer 抢救
+    if ((t.match(/\ufffd/g) || []).length > t.length * 0.05) {
+      t = salvageText(await readAsArrayBuffer(file));
+    }
+    return { text: t, note: '' };
+  }
+  if (flavor === 'docx') {
+    const t = await extractDocx(await readAsArrayBuffer(file));
+    if (t) return { text: t, note: '' };
+    return { text: salvageText(await readAsArrayBuffer(file)), note: '按纯文本兜底抽取，格式可能丢失' };
+  }
+  if (flavor === 'pptx') {
+    const t = await extractPptx(await readAsArrayBuffer(file));
+    if (t) return { text: t, note: '' };
+    return { text: salvageText(await readAsArrayBuffer(file)), note: '按纯文本兜底抽取，格式可能丢失' };
+  }
+  if (flavor === 'xlsx') {
+    const t = await extractXlsx(await readAsArrayBuffer(file));
+    if (t) return { text: t, note: '' };
+    return { text: salvageText(await readAsArrayBuffer(file)), note: '按纯文本兜底抽取，格式可能丢失' };
+  }
+  if (flavor === 'pdf') {
+    const t = await extractPdf(await readAsArrayBuffer(file));
+    if (t) return { text: t, note: '' };
+    return {
+      text: '',
+      note: 'PDF 文本层抽取失败（可能是扫描件或加密文档）'
+    };
+  }
+  if (flavor === 'doc' || flavor === 'xls' || flavor === 'ppt') {
+    const t = salvageText(await readAsArrayBuffer(file));
+    return {
+      text: t,
+      note: '旧版二进制格式（.' + EXT_OF(name) + '）只能抢救性抽取，建议另存为新格式后重传'
+    };
+  }
+  // unknown
+  const t = salvageText(await readAsArrayBuffer(file));
+  return { text: t, note: t ? '未知类型，按可见文本抢救性提取' : '' };
+}
+
+/* ---------------- 附件状态与渲染 ---------------- */
+
 function renderAttachments() {
   const box = $('attachList');
   box.innerHTML = '';
   attached.forEach((a, i) => {
-    const chip = document.createElement('span');
-    chip.className = 'chip' + (a.kind ? '' : ' bad');
-    chip.title = a.kind ? a.mime + ' · ' + fmtSize(a.size) : '不支持的类型：' + (a.mime || '未知');
-    const k = document.createElement('span');
-    k.className = 'k'; k.textContent = a.kind ? (KIND_ICON[a.kind] || '📄') : '⚠️';
-    const n = document.createElement('span');
-    n.className = 'n'; n.textContent = a.name;
-    const s = document.createElement('span');
-    s.className = 's'; s.textContent = fmtSize(a.size);
+    const el = document.createElement('div');
+    el.className = 'att'
+      + (a.problem ? ' bad' : '')
+      + (a.busy ? ' busy' : '');
+    el.title = (a.mime || '未知类型') + ' · ' + fmtSize(a.size) + (a.problem ? '\n' + a.problem : '');
+
+    const th = document.createElement('div');
+    th.className = 'thumb';
+    if (a.kind === 'image' && a.dataUrl) {
+      const img = document.createElement('img');
+      img.src = a.dataUrl; img.alt = a.name;
+      th.appendChild(img);
+    } else if (a.kind === 'doc') {
+      th.className = 'thumb doc';
+      th.textContent = (DOC_TAG[a.flavor] || 'FILE');
+    } else {
+      th.textContent = a.busy ? '⏳' : (a.problem ? '⚠️' : (KIND_ICON[a.kind] || '📄'));
+    }
+    el.appendChild(th);
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const nm = document.createElement('div');
+    nm.className = 'nm'; nm.textContent = a.name;
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    let label;
+    if (a.problem) label = a.problem;
+    else if (a.busy) label = a.busy;
+    else if (a.kind === 'doc') {
+      label = (DOC_LABEL[a.flavor] || '文件') + ' · ' + fmtSize(a.size)
+        + (a.text ? ' · 抽出 ' + a.text.length + ' 字' : ' · 未抽出文本');
+    } else {
+      label = a.kind + ' · ' + fmtSize(a.size);
+    }
+    sub.textContent = label;
+    meta.appendChild(nm); meta.appendChild(sub);
+    if (a.busy && a.progress != null) {
+      const bar = document.createElement('div');
+      bar.className = 'bar';
+      const iv = document.createElement('i');
+      iv.style.width = a.progress + '%';
+      bar.appendChild(iv);
+      meta.appendChild(bar);
+    }
+    el.appendChild(meta);
+
     const x = document.createElement('button');
     x.className = 'x'; x.type = 'button'; x.textContent = '×'; x.title = '移除';
-    x.onclick = () => { attached.splice(i, 1); renderAttachments(); };
-    chip.appendChild(k); chip.appendChild(n); chip.appendChild(s); chip.appendChild(x);
-    box.appendChild(chip);
+    x.onclick = () => { attached.splice(i, 1); renderAttachments(); renderQuota(); };
+    el.appendChild(x);
+
+    box.appendChild(el);
+  });
+  renderQuota();
+}
+
+/** 配额条：让"为什么发不出去"在发送前就可见 */
+function renderQuota() {
+  const bar = $('quotaBar');
+  const rows = [];
+  const total = attached.reduce((s, a) => s + (a.size || 0), 0);
+  const txt = attached.reduce((s, a) => s + ((a.text || '').length), 0);
+  const enc = attached.reduce((s, a) => s + ((a.base64 || '').length), 0);
+  if (attached.length) {
+    rows.push('附件 <b>' + attached.length + '</b> 个 · 原始合计 <b>' + fmtSize(total) + '</b>');
+    if (enc) rows.push('媒体编码后 <b>' + fmtSize(enc) + '</b>');
+    if (txt) rows.push('文档文本 <b>' + txt.toLocaleString() + '</b> 字');
+    if (enc + txt > SOFT_PAYLOAD_CHARS) {
+      rows.push('<span class="over">payload 偏大（>' + Math.round(SOFT_PAYLOAD_CHARS / 1000) + 'k），可能被模型侧拒收</span>');
+    }
+  }
+  bar.innerHTML = rows.length ? rows.join('') : '';
+}
+
+function addFiles(fileList) {
+  const files = Array.prototype.slice.call(fileList || []);
+  if (!files.length) return;
+  const accepted = [];
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    if (attached.some(a => a.name === f.name && a.size === f.size)) continue;
+    const kind = kindOf(f);
+    const flavor = kind === 'doc' ? docFlavorOf(f.name, f.type || '') : null;
+    const item = {
+      name: f.name, size: f.size, mime: f.type || '',
+      kind: kind, flavor: flavor,
+      dataUrl: null, base64: null, text: null,
+      problem: null, busy: null, progress: 0
+    };
+    if (f.size > MAX_FILE_BYTES) {
+      item.problem = '超过 ' + fmtSize(MAX_FILE_BYTES) + ' 上限，已跳过';
+    }
+    attached.push(item);
+    if (!item.problem) accepted.push({ file: f, item: item });
+  }
+  renderAttachments();
+  if (!accepted.length) {
+    if (files.length) toast('文件已在列表中或超过大小上限');
+    return;
+  }
+  reading = true;
+  if (!streaming) $('convStatus').textContent = '解析中…';
+  // 串行处理：浏览器同时在读多个大文件会明显卡顿，且顺序稳定便于观察
+  const next = (idx) => {
+    if (idx >= accepted.length) {
+      reading = false;
+      if (!streaming) $('convStatus').textContent = '空闲';
+      renderAttachments();
+      return;
+    }
+    const job = accepted[idx];
+    job.item.busy = '读取中…';
+    renderAttachments();
+    parseOne(job.file, job.item).then(() => {
+      job.item.busy = null;
+      renderAttachments();
+      next(idx + 1);
+    });
+  };
+  next(0);
+}
+
+function parseOne(file, item) {
+  if (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio') {
+    return readAsDataUrl(file).then(dataUrl => {
+      const parts = splitDataUrl(dataUrl);
+      item.dataUrl = item.kind === 'image' ? dataUrl : null;
+      item.base64 = parts.base64;
+      if (!item.mime) item.mime = parts.mime; // file.type 为空时以 data URL 头为准
+      if (!parts.base64) item.problem = '文件内容为空';
+    }).catch(() => {
+      item.problem = '读取失败';
+    });
+  }
+  item.busy = '抽取文本…';
+  return extractTextFromFile(file, item.flavor).then(r => {
+    let text = r.text || '';
+    if (r.note) item.problem = null; // note 只是提示，不算失败
+    item.note = r.note || '';
+    if (text.length > MAX_DOC_CHARS) {
+      text = text.slice(0, MAX_DOC_CHARS)
+        + '\n\n…（已截断，原文共 ' + r.text.length + ' 字，仅上传前 ' + MAX_DOC_CHARS + ' 字）';
+      item.note = (item.note ? item.note + '；' : '') + '超长已截断';
+    }
+    item.text = text;
+    if (!text) item.problem = '未能抽出文本，该文件无法作为上行内容';
+  }).catch(() => {
+    item.problem = '解析失败';
   });
 }
 
-async function addFiles(fileList) {
-  const files = Array.from(fileList || [])
-    .filter(f => !attached.some(a => a.name === f.name && a.size === f.size));
-  if (!files.length) { renderAttachments(); return; }
-  reading = true;
-  $('convStatus').textContent = '文件读取中…';
-  try {
-    for (const f of files) {
-      const kind = KIND_OF(f.type || '');
-      const item = { name: f.name, size: f.size, mime: f.type || '', kind, dataUrl: null, base64: null };
-      if (kind) {
-        try {
-          item.dataUrl = await readAsDataUrl(f);
-          const parts = splitDataUrl(item.dataUrl);
-          item.base64 = parts.base64;
-          item.mime = parts.mime; // 以 data URL 头为准（file.type 个别浏览器为空）
-        } catch (e) {
-          item.kind = null; // 读失败：标记为坏签，不进 contents
-        }
-      }
-      attached.push(item);
-    }
-  } finally {
-    reading = false;
-    if (!streaming) $('convStatus').textContent = '空闲';
-    renderAttachments();
-  }
+/* ---------------- 上行组装 ---------------- */
+
+/** 文档 → 一段带文件头的纯文本，并入 TEXT 块 */
+function docToPromptText(a) {
+  const head = '【附件：' + a.name
+    + '（' + (DOC_LABEL[a.flavor] || '文件') + '，' + fmtSize(a.size) + '）'
+    + (a.note ? '｜' + a.note : '') + '】';
+  return head + '\n' + a.text + '\n【附件结束：' + a.name + '】';
 }
 
 /** 本轮 contents：TEXT 块在前（与 AgentRequest.getMessage() 合并口径一致），媒体块按选择序 */
 function buildContents(msg, usable) {
+  const docTexts = usable.filter(a => a.kind === 'doc' && a.text).map(docToPromptText);
+  const fullText = [msg].concat(docTexts).filter(Boolean).join('\n\n');
   const blocks = [];
-  if (msg) blocks.push({ type: 'TEXT', text: msg });
-  for (const a of usable) {
+  if (fullText) blocks.push({ type: 'TEXT', text: fullText });
+  for (let i = 0; i < usable.length; i++) {
+    const a = usable[i];
+    if (a.kind === 'doc') continue; // 已并入 TEXT 块
     blocks.push({
-      type: a.kind === 'image' ? 'IMAGE_BASE64' : a.kind === 'video' ? 'VIDEO_BASE64' : 'AUDIO_BASE64',
+      type: a.kind === 'image' ? 'IMAGE_BASE64'
+        : a.kind === 'video' ? 'VIDEO_BASE64' : 'AUDIO_BASE64',
       base64: a.base64,
       mime: a.mime
     });
@@ -342,6 +975,34 @@ function addUserBubble(text, atts) {
       const img = document.createElement('img');
       img.className = 'att-img'; img.src = a.dataUrl; img.alt = a.name;
       b.appendChild(img);
+    } else if (a.kind === 'video' && a.dataUrl) {
+      const v = document.createElement('video');
+      v.className = 'att-media';
+      v.src = a.dataUrl; v.controls = true;
+      b.appendChild(v);
+    } else if (a.kind === 'audio' && a.dataUrl) {
+      const au = document.createElement('audio');
+      au.style.cssText = 'display:block;margin-top:6px;width:100%;max-width:260px';
+      au.src = a.dataUrl; au.controls = true;
+      b.appendChild(au);
+    } else if (a.kind === 'doc') {
+      const card = document.createElement('div');
+      card.className = 'doc-card';
+      const dn = document.createElement('div');
+      dn.className = 'dn';
+      dn.textContent = (DOC_LABEL[a.flavor] || '📄') + ' ' + a.name;
+      const dc = document.createElement('div');
+      dc.className = 'dc';
+      dc.textContent = fmtSize(a.size)
+        + (a.text ? ' · 抽出 ' + a.text.length + ' 字' : ' · 无文本')
+        + (a.note ? ' · ' + a.note : '');
+      card.appendChild(dn); card.appendChild(dc);
+      if (a.text) {
+        const pre = document.createElement('pre');
+        pre.textContent = a.text.length > 400 ? a.text.slice(0, 400) + '…' : a.text;
+        card.appendChild(pre);
+      }
+      b.appendChild(card);
     } else {
       const row = document.createElement('div');
       row.className = 'att-row';
@@ -372,8 +1033,8 @@ function appendRaw(text) {
 }
 
 // 把单个 AgentEvent 渲染到当前助手气泡
-let curBlock = null;        // 当前助手 bubble
-let curThink = null;        // 当前思考块
+let curBlock = null;
+let curThink = null;
 let curThinkText = null;
 let curTool = null;
 
@@ -400,13 +1061,23 @@ function renderEvent(ev) {
     }
     curThinkText.appendChild(document.createTextNode(ev.content || ''));
     scroll();
+  } else if (type === 'PLAN') {
+    const p = document.createElement('div');
+    p.className = 'think';
+    const tag = document.createElement('div');
+    tag.className = 'tag'; tag.textContent = '🧭 规划';
+    const body = document.createElement('div');
+    body.style.whiteSpace = 'pre-wrap';
+    body.textContent = ev.content || ev.payload || '';
+    p.appendChild(tag); p.appendChild(body);
+    ensureBlock().appendChild(p); scroll();
   } else if (type === 'TOOL_CALL') {
     curTool = document.createElement('div');
     curTool.className = 'tool';
     const tag = document.createElement('div');
     tag.className = 'tag'; tag.textContent = '🔧 调用工具：' + (ev.content || '');
     const body = document.createElement('div');
-    body.className = 'body';
+    body.className = 'body-pre';
     body.textContent = ev.payload || '';
     curTool.appendChild(tag); curTool.appendChild(body);
     ensureBlock().appendChild(curTool); scroll();
@@ -419,7 +1090,7 @@ function renderEvent(ev) {
     const tag = document.createElement('div');
     tag.className = 'tag'; tag.textContent = '✅ 工具结果：' + (ev.content || '');
     const body = document.createElement('div');
-    body.className = 'body';
+    body.className = 'body-pre';
     body.textContent = ev.payload || '';
     curTool.appendChild(tag); curTool.appendChild(body); scroll();
     curTool = null;
@@ -464,13 +1135,13 @@ function renderApproval(ev) {
 
   if (tools.length === 0) {
     const none = document.createElement('div');
-    none.className = 'body';
+    none.className = 'body-pre';
     none.textContent = '（未解析到待授权清单）';
     box.appendChild(none);
   }
   for (const t of tools) {
     const item = document.createElement('div');
-    item.className = 'body';
+    item.className = 'body-pre';
     let text = '• ' + (t.name || '未命名工具');
     if (t.arguments) text += '\n' + prettyJson(t.arguments);
     item.textContent = text;
@@ -512,9 +1183,9 @@ async function pump(res) {
   const decoder = new TextDecoder();
   let buf = '';
   while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
+    const r = await reader.read();
+    if (r.done) break;
+    buf += decoder.decode(r.value, { stream: true });
     let idx;
     while ((idx = buf.indexOf('\n\n')) >= 0) {
       const raw = buf.slice(0, idx);
@@ -529,10 +1200,23 @@ async function pump(res) {
 async function send() {
   if (streaming || reading) return;
   const msg = $('message').value.trim();
-  const usable = attached.filter(a => a.kind && a.base64);
+  const usable = attached.filter(a => !a.problem);
+  const bad = attached.filter(a => a.problem);
+  if (bad.length) {
+    toast('有 ' + bad.length + ' 个附件无法使用，请先移除');
+    return;
+  }
   if (!msg && !usable.length) return;
   const domain = ($('domain').value || 'default').trim();
   if (!domain) { alert('domain 不能为空'); return; }
+
+  const docCount = usable.filter(a => a.kind === 'doc').length;
+  const textLen = (msg ? msg.length : 0)
+    + usable.filter(a => a.kind === 'doc').reduce((s, a) => s + (a.text || '').length, 0);
+  if (textLen > MAX_DOC_CHARS * 1.5) {
+    toast('文本量过大（' + textLen + ' 字），请减少文档数量');
+    return;
+  }
 
   addUserBubble(msg, usable);
   resetBlock();
@@ -543,9 +1227,14 @@ async function send() {
   $('convStatus').textContent = '对话中…';
 
   // 有附件时走 contents（多模态契约）；纯文本保持旧体，两条路径都覆盖到
-  const body = usable.length
-    ? JSON.stringify({ sessionId, message: msg, domain, contents: buildContents(msg, usable) })
+  const contents = usable.length ? buildContents(msg, usable) : null;
+  const body = contents
+    ? JSON.stringify({ sessionId, message: msg, domain, contents: contents })
     : JSON.stringify({ sessionId, message: msg, domain });
+  appendRaw('[上行] 文本 ' + (msg ? msg.length : 0) + ' 字'
+    + (docCount ? '，文档 ' + docCount + ' 个已并入 TEXT 块' : '')
+    + '，内容块 ' + (contents ? contents.length : 0) + ' 个，请求体约 '
+    + fmtSize(body.length));
 
   try {
     const res = await fetch(base() + '/api/agent/chat', {
@@ -598,7 +1287,6 @@ async function resumeSession(approved) {
 }
 
 function processRawEvent(raw) {
-  // 每行可能是 "data: {...}"，提取 JSON
   const lines = raw.split('\n').filter(l => l.startsWith('data:'));
   const jsonLine = lines.map(l => l.slice(5).trim()).join('');
   if (!jsonLine) { if (raw.trim()) appendRaw('[非数据行] ' + raw); return; }
@@ -626,18 +1314,94 @@ function newSession() {
   attached = []; renderAttachments();
 }
 
+/* ---------------- 事件绑定 ---------------- */
+
+let pickAccept = null;
+function openPicker(accept) {
+  const p = $('filePicker');
+  p.accept = accept || '';
+  p.value = '';
+  p.click();
+}
+
 $('loginBtn').onclick = login;
 $('sendBtn').onclick = send;
 $('stopBtn').onclick = stop;
 $('newBtn').onclick = newSession;
-$('pickBtn').onclick = () => $('filePicker').click();
+$('pickImgBtn').onclick = () => openPicker('image/*');
+$('pickMediaBtn').onclick = () => openPicker('audio/*,video/*');
+$('pickDocBtn').onclick = () => openPicker(
+  '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.json,.md,.markdown,.txt,.log,'
+  + '.yaml,.yml,.xml,.html,.htm,.js,.ts,.java,.py,.go,.rs,.sql,.css,.vue,'
+  + 'application/pdf,text/*');
+$('pickAnyBtn').onclick = () => openPicker('');
 $('filePicker').addEventListener('change', () => {
   addFiles($('filePicker').files);
-  $('filePicker').value = ''; // 清空才能重复选同一个文件
+  $('filePicker').value = '';
 });
+
 $('message').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
+
+// 拖拽
+const inputBox = $('inputBox');
+['dragenter', 'dragover'].forEach(t => {
+  inputBox.addEventListener(t, (e) => {
+    e.preventDefault();
+    inputBox.classList.add('dragover');
+  });
+});
+['dragleave', 'drop'].forEach(t => {
+  inputBox.addEventListener(t, (e) => {
+    e.preventDefault();
+    if (t === 'dragleave' && inputBox.contains(e.relatedTarget)) return;
+    inputBox.classList.remove('dragover');
+  });
+});
+inputBox.addEventListener('drop', (e) => {
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+    addFiles(e.dataTransfer.files);
+  }
+});
+// 整页也接住，避免拖到别处时浏览器直接打开文件
+['dragover', 'drop'].forEach(t => {
+  window.addEventListener(t, (e) => {
+    if (inputBox.contains(e.target)) return;
+    e.preventDefault();
+  });
+});
+
+// 粘贴
+$('message').addEventListener('paste', (e) => {
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  const files = [];
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].kind !== 'file') continue;
+    const f = items[i].getAsFile();
+    if (!f) continue;
+    // 粘贴的截图没有有意义的名字，补一个便于区分
+    if (!f.name || f.name === 'image.png') {
+      const stamp = new Date();
+      const nm = '粘贴-' + stamp.getHours() + String(stamp.getMinutes()).padStart(2, '0')
+        + String(stamp.getSeconds()).padStart(2, '0') + '.' + (EXT_OF(f.name) || 'png');
+      try { files.push(new File([f], nm, { type: f.type })); }
+      catch (_) { files.push(f); }
+    } else {
+      files.push(f);
+    }
+  }
+  if (files.length) {
+    e.preventDefault();
+    addFiles(files);
+    toast('已粘贴 ' + files.length + ' 个文件');
+  }
+});
+
+// 路由说明
+$('routeHint').textContent = '图片走能力路由（主模型可看图则直进上下文，否则 seeImage 委派）；'
+  + '视频 / 音频按原样进主模型消息，需域所绑模型自身支持；'
+  + '文档在前端抽成文本并入 TEXT 块（后端不会解析文档格式）。';
 </script>
 </body>
 </html>

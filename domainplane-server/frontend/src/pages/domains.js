@@ -413,7 +413,8 @@
             });
     }
 
-    /* 知识体下拉：只列"能检索"的体（原文体不参与召回，绑了等于没有知识库）。
+    /* 知识体下拉：列出全部知识体。绑定只落盘不做校验，没配好的体也允许先绑——
+       体此刻不可用时这个域暂时没有知识库，体在「知识库」页补好后自动生效。
        空 = 这个域没有知识库，**不去找父域借**——域链决定"查得到谁的数据"，
        不决定"用谁的知识体"。 */
     function kbSelect(domain, kb) {
@@ -428,15 +429,26 @@
         }
         options += '<option value=""' + (bound ? '' : ' selected') + '>（不挂知识库）</option>';
         KNOWLEDGE_BODIES.forEach(function (b) {
-            /* 体的两路都在选项文案里：绑之前就能看出"这个体走几路" */
+            /* 体的两路都在选项文案里：绑之前就能看出"这个体走几路"。
+               空壳体（一路都没配）和连接坏了是两种状态，文案分开说 */
             var modes = (b.modes || []).map(function (k) { return KIND_LABEL[k] || k; }).join('+');
-            var tail = modes || '未配';
-            if (b.usable === false) { tail += ' · 连接不可用'; }
+            var tail = modes || '未配连接';
+            if (modes && b.usable === false) { tail += ' · 连接不可用'; }
+            if (b.rawLabel && !(b.raw === 'local')) { tail += ' · 原文 ' + b.rawLabel; }
             options += '<option value="' + esc(b.id) + '"' + (b.id === bound ? ' selected' : '') + '>'
                 + esc(b.name || b.id) + '（' + esc(tail) + '）</option>';
         });
         return '<select class="form-select" style="width:auto;min-width:12rem;display:inline-block;'
-            + 'vertical-align:middle;" data-kb="' + esc(domain) + '">' + options + '</select>';
+            + 'vertical-align:middle;" data-kb="' + esc(domain) + '"'
+            + ' title="' + esc(boundBodyTitle()) + '">' + options + '</select>';
+    }
+
+    /* 下拉的悬停说明：把"绑谁"说到数据层面（唯一名 + 冻结索引），而不是只给一个名字 */
+    function boundBodyTitle() {
+        return KNOWLEDGE_BODIES.map(function (b) {
+            return (b.name || b.id) + ' · ' + (b.slug || b.id) + ' · ' + (b.index || '无索引')
+                + (b.documents !== undefined ? ' · ' + num(b.documents) + ' 文档' : '');
+        }).join('\n');
     }
 
     function saveKb(select) {
@@ -674,7 +686,7 @@
             + '· 宽限期内可以「撤销删除」，撤销后一切照旧\n\n'
             + '第二步（宽限期到点，自动执行，不可撤销）：\n'
             + '· 递归删除它的全部子域\n'
-            + '· 该域及其子域的知识库索引与切片预览文件会被删除\n'
+            + '· 知识体只解除绑定：原文、索引、切片全部保留，别的域（或以后新建的域）可以接着用\n'
             + '· 该域及其子域的提示词、模型绑定、工具声明记录会一并清理\n'
             + '· 绑定该域的调用方会在启动校验或首次调用时报「域不存在」',
             { title: '删除域', okText: '标记删除', danger: true }
@@ -714,7 +726,7 @@
         var ok = await Console.confirm(
             '立即彻底删除域 ' + id + '？\n\n'
             + '· 跳过宽限期，现在就递归清除它和全部子域\n'
-            + '· 知识库索引与切片、提示词、模型绑定、工具声明一并清理\n'
+            + '· 提示词、模型绑定、工具声明一并清理；知识体只解绑，数据原样保留\n'
             + '· 不等在飞的会话收尾，也不可撤销（误删只能从历史版本库回滚）',
             { title: '立即彻底删除', okText: '彻底删除', danger: true }
         );

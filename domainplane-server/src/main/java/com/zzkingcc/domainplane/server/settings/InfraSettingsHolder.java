@@ -205,6 +205,25 @@ public class InfraSettingsHolder {
     }
 
     /**
+     * 只替换知识体表（知识库页的增删改走这条），连接与 Redis 原样保留。
+     *
+     * <p>与 {@link #apply} 同一条落盘 + 热替换路径：知识体是"数据身份"，加一个体就要
+     * 让 {@code RetrievalPlan} / 后端注册表立刻看到它，不能等重启。</p>
+     *
+     * <p>拷一份当前生效的连接与 Redis 再提交：{@code apply} 会整份落盘，少传一项就等于
+     * 把它清空。共享连接对象的引用是安全的——这里从不修改它们。</p>
+     */
+    public synchronized void replaceBodies(Map<String, InfraSettings.KnowledgeBody> bodies) {
+        InfraSettings currentSettings = current();
+        InfraSettings next = new InfraSettings();
+        next.setConfigured(true);
+        next.setRedis(currentSettings.getRedis());
+        next.setConnections(currentSettings.connectionsOrEmpty());
+        next.setBodies(new LinkedHashMap<>(bodies));
+        apply(next);
+    }
+
+    /**
      * 合并：管控台填写优先，缺失字段回落到 yaml / 环境变量。
      */
     private InfraSettings merge(InfraSettings ui) {
@@ -503,18 +522,28 @@ public class InfraSettingsHolder {
             String version = client.version();
             List<String> collections = client.listCollections();
             return new VectorStoreProbe(version, candidate.effectiveMetric(), collections.size(),
-                    vectorNote(version, collections.size()));
+                    vectorNote(version, collections.isEmpty()));
         } catch (Exception e) {
             throw new IllegalStateException(describe(e), e);
         }
     }
 
-    /** 向量库侧的能力提示 */
-    private static String vectorNote(String version, int collectionCount) {
+    /**
+     * 向量库侧的能力提示。
+     *
+     * <p>版本号读不到有两种成因，分开说：集合也读不到（{@code /collections} 返回空）
+     * 极可能是探到了别的 HTTP 服务；集合能读到说明确实是 Qdrant，
+     * 只是地址带了路径前缀（例如 {@code http://host:6333/dashboard}）导致根响应不是 JSON。</p>
+     */
+    private static String vectorNote(String version, boolean collectionsEmpty) {
         if (version == null) {
-            return "连接正常，但未读到版本号（该服务可能不是 Qdrant，或未开放根路径）。";
+            if (collectionsEmpty) {
+                return "连接正常，但未读到版本号与集合列表（该地址可能不是 Qdrant 服务）。";
+            }
+            return "向量库连接正常：未读到版本号（已读到集合列表）。地址请填根路径，不要带 /dashboard 等路径后缀。";
         }
-        return "向量库连接正常：版本 " + version + "，已有 " + collectionCount + " 个集合。";
+        return "向量库连接正常：版本 " + version
+                + (collectionsEmpty ? "，当前 0 个集合（新库正常现象）。" : "，集合可正常枚举。");
     }
 
     /**

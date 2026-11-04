@@ -18,6 +18,8 @@
     --text: var(--tblr-body-color);
     --muted: var(--tblr-secondary);
     --border: var(--tblr-border-color);
+    /* 轻分隔线：卡片描边、虚线分隔、表头（比 --border 更淡，避免整页都是硬边） */
+    --line: var(--tblr-border-color-translucent);
     --green: var(--tblr-success);
     --amber: var(--tblr-warning);
     --red: var(--tblr-danger);

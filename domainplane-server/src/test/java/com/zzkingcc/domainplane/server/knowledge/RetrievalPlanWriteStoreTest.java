@@ -78,6 +78,30 @@ class RetrievalPlanWriteStoreTest {
     }
 
     @Test
+    @DisplayName("读侧：两台不同实例必须返回扇出 store（只读一台会漏掉另一台独有的文档）")
+    void readStore_differentLocation_fanOut() {
+        StubStore kwStore = new StubStore();
+        StubStore vecStore = new StubStore();
+        RetrievalPlan plan = plan(
+                backend("es-kw", "http://es-a.internal:9200", kwStore),
+                backend("es-vec", "http://es-b.internal:9200", vecStore));
+
+        assertTrue(plan.readStore("default") instanceof FanOutStore,
+                "两台不同 ES：读侧也要合并，不能只看关键字那台");
+    }
+
+    @Test
+    @DisplayName("读侧：同一台实例返回单个 store，不多包一层")
+    void readStore_sameLocation_single() {
+        StubStore kwStore = new StubStore();
+        RetrievalPlan plan = plan(
+                backend("es-kw", "http://es.internal:9200", kwStore),
+                backend("es-vec", "http://es.internal:9200", new StubStore()));
+
+        assertSame(kwStore, plan.readStore("default"));
+    }
+
+    @Test
     @DisplayName("两个连接指向同一台实例（地址相同）：写入只落一份，不扇出")
     void sameLocation_noFanOut() {
         StubStore kwStore = new StubStore();

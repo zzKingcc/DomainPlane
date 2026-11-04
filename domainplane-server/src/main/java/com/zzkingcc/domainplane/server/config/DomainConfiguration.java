@@ -52,6 +52,10 @@ public class DomainConfiguration {
                         + "另有工具声明派生的域由注册表侧维护",
                 registry.ids().size(), registry.ids(),
                 registry.callableIds().size(), registry.callableIds());
+        // 注册表回注给存储：DomainStore 落盘时要靠它判定"哪些域还活着"（收敛知识体绑定）
+        // 与"这个域是不是内置/派生"（决定绑定落在 domains.json 还是 prompts.json）。
+        // 注册表 bean 依赖本 store，构造器注入会成环，只能在这里显式接线。
+        domainStore.setDomainRegistry(registry);
         return registry;
     }
 

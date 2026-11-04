@@ -203,11 +203,37 @@ public class ServerGlobalExceptionHandler {
 
     /**
      * 请求路径没有任何处理者：WARN 且不打堆栈
+     *
+     * <p>但并非所有 404 都值得 WARN。浏览器和 DevTools 会自发探测一些<b>约定俗成</b>
+     * 的路径，它们不存在是正常结果，记成 WARN 只会污染日志、把真正的资源缺失淹掉：</p>
+     * <ul>
+     *   <li>{@code favicon.ico} / {@code robots.txt} / {@code apple-touch-icon.png}：浏览器默认请求</li>
+     *   <li>{@code .well-known/appspecific/com.chrome.devtools.json}：Chrome 打开 DevTools 时
+     *       探测"应用是否支持工作区"的固定路径（每次开控制台都会来一次）</li>
+     *   <li>{@code *.map}：前端产物没有 source map，DevTools 一打开就去拉，必然 404</li>
+     * </ul>
+     * 这些一律降为 DEBUG，响应体仍照常回 {@code 40004}。
      */
+    private static boolean isBrowserProbe(String resourcePath) {
+        if (resourcePath == null) {
+            return false;
+        }
+        String p = resourcePath.toLowerCase(java.util.Locale.ROOT);
+        return "favicon.ico".equals(p)
+                || "robots.txt".equals(p)
+                || "sitemap.xml".equals(p)
+                || "apple-touch-icon.png".equals(p)
+                || "apple-touch-icon-precomposed.png".equals(p)
+                || p.startsWith(".well-known/")
+                || p.endsWith(".map");
+    }
+
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<Map<String, Object>> handleNoResourceFoundException(NoResourceFoundException e) {
         String resourcePath = e.getResourcePath();
-        if (!"favicon.ico".equals(resourcePath)) {
+        if (isBrowserProbe(resourcePath)) {
+            log.debug("[全局异常][RESOURCE] 浏览器探测请求无资源（静默）: {}", resourcePath);
+        } else {
             log.warn("[全局异常][RESOURCE] 资源未找到: {}", resourcePath);
         }
         return build(ErrorCode.RESOURCE_NOT_FOUND, "请求的资源不存在：" + resourcePath);

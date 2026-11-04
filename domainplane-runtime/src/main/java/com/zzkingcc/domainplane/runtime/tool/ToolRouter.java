@@ -43,11 +43,13 @@ public class ToolRouter {
         this.registry = registry;
         this.domainRegistry = domainRegistry == null ? new DomainRegistry() : domainRegistry;
         this.execution = execution == null ? ToolExecutorService.sharedDefault() : execution;
-        log.info("[工具路由] 初始化完成，注册表内共 {} 个工具，其中 {} 个需人工授权: {}",
+        // 与 ToolConfiguration 的"[工具装配] 扫描到 …"紧邻重复；这条留给"不经 ToolConfiguration
+        // 直接 new 出 ToolRouter"的场景（SDK 侧），服务端启动看不到它
+        log.debug("[工具路由] 初始化完成，注册表内共 {} 个工具，其中 {} 个需人工授权: {}",
                 registry.size(), registry.toolsRequiringApproval().size(),
                 registry.toolsRequiringApproval());
         if (registry.isEmpty()) {
-            log.warn("[工具路由] 当前没有任何工具被注册：请确认工具方法上标注了 @Tool，且所在 Bean 已被 Spring 扫描到");
+            log.debug("[工具路由] 当前没有任何工具被注册：请确认工具方法上标注了 @Tool，且所在 Bean 已被 Spring 扫描到");
         }
     }
 

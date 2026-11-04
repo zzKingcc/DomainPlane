@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -100,15 +101,13 @@ public class KnowledgeStatsService implements InfraSwappable {
     }
 
     /**
-     * 一次统计快照的两个视图。
+     * 一次统计快照。
      *
-     * @param byBody   知识体 id → [文档数, 切片数]（文档归属域当前绑的体；未绑体的域不计入）
-     * @param byDomain 归属域 → [文档数, 切片数]（删域预演用）
-     * @param indices  当前全部已存在的索引名（预演判"会删掉几个索引"用）
-     * @param stale    true = 本次数字来自缓存/旧快照（存储不可达或冷却期内），仅供展示提示
+     * @param byBody  知识体 id → [文档数, 切片数]
+     * @param indices 当前全部已存在的索引名（"体有没有索引"与"无主索引"都靠它判）
+     * @param stale   true = 本次数字来自缓存/旧快照（存储不可达或冷却期内），仅供展示提示
      */
-    public record Stats(Map<String, long[]> byBody, Map<String, long[]> byDomain,
-                        Set<String> indices, boolean stale) {
+    public record Stats(Map<String, long[]> byBody, Set<String> indices, boolean stale) {
     }
 
     /**
@@ -158,38 +157,41 @@ public class KnowledgeStatsService implements InfraSwappable {
 
     private Stats aggregate(Snapshot s) {
         Map<String, long[]> byBody = new LinkedHashMap<>();
-        Map<String, long[]> byDomain = new LinkedHashMap<>();
         for (KnowledgeBaseService.DocumentItem item : s.items) {
-            String domain = item.domain();
-            /* 早期切片可能没写 domain：这种文档不属于任何可删的域，byDomain 里也就不该有
-               一个 null 键（下游都是按域名字符串取，null 键只会制造"取不到"的假象） */
-            if (domain == null || domain.isBlank()) {
+            String raw = item.body();
+            /* metadata.domain 在 v1 里存的是域路径，v2 起存知识体 id。迁移后的旧文档仍带着
+               域路径：按"先当体 id、再当域路径反查体"两段解析，旧数据的数字不会凭空消失。 */
+            String bodyId = null;
+            if (raw != null && !raw.isBlank()) {
+                if (infraHolder.current().body(raw) != null) {
+                    bodyId = raw;
+                } else {
+                    String mapped = domainStore.bodyOf(raw);
+                    bodyId = mapped == null || mapped.isBlank() ? null : mapped;
+                }
+            }
+            if (bodyId == null) {
                 continue;
             }
-            accumulate(byDomain, domain, item.chunks());
-            String bodyId = domainStore.bodyOf(domain);
-            if (bodyId != null) {
-                accumulate(byBody, bodyId, item.chunks());
-            }
+            accumulate(byBody, bodyId, item.chunks());
         }
-        return new Stats(byBody, byDomain, Set.copyOf(s.indices()), s.stale());
+        return new Stats(byBody, Set.copyOf(s.indices()), s.stale());
     }
 
     /**
      * 知识库页的整页快照：同一次 {@link #load()} 里出全部数字与归属明细。
      *
      * <p><b>为什么不拆成三个接口</b>：知识库页要同时显示"全平台汇总 + 每个体的两槽落点
-     * + 每个索引在哪几台 + 孤儿索引"，其中"索引 → 后端"和"文档数"都只能靠远程枚举算出来。
+     * + 每个索引在哪几台 + 无主索引"，其中"索引 → 后端"和"文档数"都只能靠远程枚举算出来。
      * 三个接口各扫一遍，就是把刚拆掉的域空间页性能问题原样搬到这页；共用一份快照则
      * 60s 内只烧一次。页面渲染顺序按"先出骨架、再补数"。</p>
      *
      * @param documents 全平台文档数（按 docId 聚合，与文档表行数同源）
      * @param chunks    全平台切片数（跨后端取最大值，不重复计扇出）
-     * @param owners    索引名 → 存在该索引的后端 id（孤儿判定与"落点"列都用它）
+     * @param owners    索引名 → 存在该索引的后端 id（"落点"列与无主索引判定都用它）
      */
     public record Overview(Map<String, List<String>> owners, Map<String, long[]> byBody,
-                           Map<String, long[]> byDomain, Set<String> indices,
-                           long documents, long chunks, boolean stale) {
+                           Set<String> indices, long documents, long chunks, boolean stale) {
     }
 
     /** 整页快照（绝不抛异常，语义同 {@link #stats()}） */
@@ -200,8 +202,8 @@ public class KnowledgeStatsService implements InfraSwappable {
         for (KnowledgeBaseService.DocumentItem item : s.items) {
             chunks += item.chunks();
         }
-        return new Overview(s.owners, aggregated.byBody(), aggregated.byDomain(),
-                aggregated.indices(), s.items.size(), chunks, s.stale());
+        return new Overview(s.owners, aggregated.byBody(), aggregated.indices(),
+                s.items.size(), chunks, s.stale());
     }
 
     private static void accumulate(Map<String, long[]> into, String key, long chunks) {
@@ -217,19 +219,17 @@ public class KnowledgeStatsService implements InfraSwappable {
     }
 
     /**
-     * 每个域"一次检索能查到多少"：<b>沿域链（根 → 自身）累加，且只算自己绑了知识体的域</b>。
+     * 每个域"一次检索能查到多少"：<b>沿域链（根 → 自身）把各域绑的知识体去重后累加</b>。
      *
      * <p>这是与 {@link RetrievalPlan#channels(String)} 完全同口径的计数：那里对链上每个域
-     * 各开一条通道、查各自的 {@code KbIndexes.nameOf(域)}，而"没绑体就什么都不开（不拿父域的体
-     * 去查它的索引）"。所以：</p>
+     * 各开一条通道查它绑的体，并<b>按索引去重</b>（父子绑同一个体时只查一次，深的那条优先）。
+     * 所以这里也必须按体去重——否则"父子绑同一个体"会被算成两份，页面上出现一个
+     * 永远不会发生的翻倍数字。</p>
      *
      * <ul>
      *   <li>子域没绑体 → 它自己没有知识库，但它仍能查到<b>祖先域</b>的文档（祖先自己绑了体）；</li>
-     *   <li>子域的文档，父域<b>查不到</b>——通道只沿链向上，不向下。</li>
+     *   <li>子域绑的文档，父域<b>查不到</b>——通道只沿链向上，不向下。</li>
      * </ul>
-     *
-     * <p>绑定不可继承（{@link DomainStore#bodyOf} 只读本域），召回沿链累加，这两件事不冲突：
-     * 绑定决定"哪些域开通道"，链决定"一次检索并发查哪几条通道"。</p>
      *
      * <p>只返回有数的域（0 的不进 map，前端按 0 展示）：空数据不值得占 payload。</p>
      *
@@ -248,12 +248,13 @@ public class KnowledgeStatsService implements InfraSwappable {
                 continue;
             }
             long[] total = new long[2];
+            Set<String> seen = new LinkedHashSet<>();
             for (String step : Domains.chainOf(Domains.normalize(domain))) {
                 String body = bindings.get(step);
-                if (body == null || body.isBlank()) {
-                    continue;   // 这个域没绑体 = 不开通道，它的索引不会被本域查到
+                if (body == null || body.isBlank() || !seen.add(body)) {
+                    continue;   // 没绑体 = 不开通道；同一个体在链上出现两次只算一次
                 }
-                long[] acc = stats.byDomain().get(step);
+                long[] acc = stats.byBody().get(body);
                 if (acc == null) {
                     continue;
                 }

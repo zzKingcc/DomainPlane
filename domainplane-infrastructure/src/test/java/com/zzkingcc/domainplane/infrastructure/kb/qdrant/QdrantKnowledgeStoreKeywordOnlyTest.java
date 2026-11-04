@@ -166,7 +166,10 @@ class QdrantKnowledgeStoreKeywordOnlyTest {
         JsonNode body = lastBodyAs(client);
         assertTrue(body.has("vectors"));
         assertEquals(1536, body.get("vectors").get("size").asInt());
-        assertEquals("cosine", body.get("vectors").get("distance").asText());
+        /* Qdrant 的 distance 是 Rust 枚举，只认 PascalCase；配置里的小写词表（cosine）
+           直接透传会让它回 400 "did not match any variant of untagged enum VectorsConfig"，
+           这正是历史上上传报 60000 的一个真实成因。 */
+        assertEquals("Cosine", body.get("vectors").get("distance").asText());
     }
 
     @Test

@@ -1,7 +1,6 @@
 package com.zzkingcc.domainplane.server;
 
 import ch.qos.logback.classic.Logger;
-import com.zzkingcc.domainplane.api.support.KbIndexes;
 import com.zzkingcc.domainplane.runtime.tool.ToolRouter;
 import com.zzkingcc.domainplane.server.env.RuntimeEnvironment;
 import com.zzkingcc.domainplane.server.env.StorageLocations;
@@ -49,51 +48,76 @@ public class DomainPlaneServerApplication {
     }
 
     /**
-     * 启动完成摘要
+     * 启动完成摘要。
+     *
+     * <p>只陈述"这次启动实际生效的是什么"，不给操作指引（指引在管控台对应页面上）。
+     * 每行都必须能回答一个排障问题：服务在哪、数据在哪、谁在管、检索走哪、连不上时会怎样。
+     * 过时的入口（旧版 {@code /admin.html} 单页）与硬编码端口都不留在这里——
+     * 端口一律取本次实际的 {@code server.port}。</p>
      */
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady(ApplicationReadyEvent event) {
         var env = event.getApplicationContext().getEnvironment();
         String port = env.getProperty("server.port", "9527");
-        String logPath = storageLocations.logDir().toString();
         var infra = infraHolder.current();
 
-        log.info("=" .repeat(72));
-        log.info("DomainPlane 服务端启动成功");
-        log.info("  监听端口    : {}", port);
-        log.info("  Agent 接口  : http://localhost:{}/api/agent/**", port);
-        log.info("  运行环境    : {}  [容器: {}]", RuntimeEnvironment.describe(), RuntimeEnvironment.containerRuntime());
-        log.info("  存储目录    : {}（{}）",
-                storageLocations.settingsDir().toAbsolutePath(), storageLocations.settingsSource());
-        log.info("  日志目录    : {}（{}）",
-                storageLocations.logDir().toAbsolutePath(), storageLocations.logSource());
-        log.info("  blob 目录   : {}（{}）",
-                storageLocations.blobDir().toAbsolutePath(), storageLocations.blobSource());
-        log.info("  账号鉴权    : {}", accountStatus());
-        log.info("  管控台      : http://localhost:{}/console/login.html（未登录）/ admin.html", port);
-        log.info("  已注册工具  : {} 个（其中 {} 个需人工授权）",
+        log.info("=".repeat(72));
+        log.info("DomainPlane 启动完成 | 端口 {} | {} [{}]",
+                port, RuntimeEnvironment.describe(), RuntimeEnvironment.containerRuntime());
+        log.info("  管控台  : http://localhost:{}/console/login.html", port);
+        log.info("  接口    : http://localhost:{}/api/agent/**", port);
+        log.info("  账号    : {}", accountStatus());
+        log.info("  工具    : {} 个（{} 个需授权），域 {} 个",
                 toolRouter.toolDescriptors().size(),
-                toolRouter.toolsRequiringApproval().size());
-        log.info("  工具域      : {}", toolRouter.knownDomains());
-        log.info("  Elasticsearch: {}   知识库索引 {}{}", infra.defaultEs().describe(), KbIndexes.WILDCARD,
-                infraHolder.isEsConfigured() ? "（一域一索引，按需创建）" : "   ← 未配置，请到管控台「存储配置」页填写");
-        log.info("  Redis        : {}{}", infra.getRedis().describe(),
-                infraHolder.isRedisConfigured() ? "" : "   ← 未配置，请到管控台「存储配置」页填写");
-        logFileStatus(logPath);
-        log.info("=" .repeat(72));
+                toolRouter.toolsRequiringApproval().size(),
+                toolRouter.knownDomains().size());
+        log.info("  知识库  : {}", knowledgeStatus(infra));
+        log.info("  Redis   : {}{}", infra.getRedis().describe(),
+                infraHolder.isRedisConfigured() ? "" : "  ← 未配置");
+        log.info("  目录    : {} 存储({}) | {} blob({}) | {} 日志({})",
+                storageLocations.settingsDir().toAbsolutePath(), storageLocations.settingsSource(),
+                storageLocations.blobDir().toAbsolutePath(), storageLocations.blobSource(),
+                storageLocations.logDir().toAbsolutePath(), storageLocations.logSource());
+        logFileStatus();
+        log.info("=".repeat(72));
     }
 
     /**
-     * 打印文件日志的状态与开启方式。
+     * 两路各绑了哪台实例。
+     *
+     * <p>取的是"平台默认那对"（第一个在这一路配了连接的知识体），不是逐域明细——
+     * 启动日志只回答"默认会往哪写"，逐域的落点在管控台知识库页看。</p>
      */
-    private void logFileStatus(String logPath) {
+    private String knowledgeStatus(com.zzkingcc.domainplane.server.settings.InfraSettings infra) {
+        String keyword = describeSlot(infra, com.zzkingcc.domainplane.server.settings.InfraSettings.KIND_KEYWORD);
+        String vector = describeSlot(infra, com.zzkingcc.domainplane.server.settings.InfraSettings.KIND_VECTOR);
+        if (keyword == null && vector == null) {
+            return "未配置（管控台「存储配置」建连接与知识体后生效）";
+        }
+        return (keyword == null ? "关键字 未绑" : "关键字 " + keyword)
+                + " | "
+                + (vector == null ? "向量 未绑" : "向量 " + vector);
+    }
+
+    private String describeSlot(com.zzkingcc.domainplane.server.settings.InfraSettings infra, String kind) {
+        String id = infra.platformConnectionId(kind);
+        if (id == null) {
+            return null;
+        }
+        var conn = infra.connection(id);
+        if (conn == null) {
+            return id + "（已删除）";
+        }
+        return id + " " + conn.describe();
+    }
+
+    /** 文件日志是否开启；开了就只说落在哪，没开才说怎么开 */
+    private void logFileStatus() {
         if (fileLoggingEnabled()) {
-            log.info("  日志文件    : {}/domainplane-server.log（错误日志单独见 -error.log）", logPath);
+            log.info("  日志    : 控制台 + 文件（错误单独见 -error.log）");
             return;
         }
-        log.info("  日志文件    : 未开启，仅输出控制台");
-        log.info("             开启方式: 启动参数加 --logging.config=classpath:logback-file.xml");
-        log.info("                       并用 DOMAINPLANE_LOG_PATH 指定目录（建议绝对路径，如 /var/log/domainplane）");
+        log.info("  日志    : 仅控制台（开启文件日志：--logging.config=classpath:logback-file.xml）");
     }
 
     /** root logger 上是否挂着文件 appender —— 对应 {@code logback-file.xml} 的 FILE / ERROR_FILE */

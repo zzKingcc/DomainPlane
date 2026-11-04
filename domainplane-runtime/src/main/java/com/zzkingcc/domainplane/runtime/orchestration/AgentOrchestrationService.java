@@ -295,8 +295,6 @@ public class AgentOrchestrationService implements AgentService {
 
         // 工具规格不在构造期固化：域是按请求变化的，工具集必须在 agent 节点运行时
         // 用 toolRouter.toolSpecifications(domainId) 按本轮所处的域过滤。
-        int totalTools = toolRouter.toolSpecifications().size();
-        int approvalTools = toolRouter.toolsRequiringApproval().size();
 
         this.graph = new AgentGraphFactory(streamingChatModel, chatMemoryProvider, toolRouter,
                 toolCallEchoResolver, modelResolver, cancellationRegistry, streamSinks, timeouts,
@@ -316,10 +314,9 @@ public class AgentOrchestrationService implements AgentService {
         this.failureHandler = new TurnFailureHandler(turnLifecycle);
         this.compiledGraph = graph.build(deps.checkpointSaver(), deps.stateSerializer());
 
-        log.info("[Agent编排-LangGraph] 初始化完成,注册表内共 {} 个工具(其中 {} 个需授权);"
-                        + "已出现的域: {};实际可见工具集与系统提示词都按每次请求的域动态解析;"
-                        + "图结构: agent→(auto|review)→tools→agent(条件循环)",
-                totalTools, approvalTools, toolRouter.knownDomains());
+        // 工具数量与域清单由启动摘要统一打（DomainPlaneServerApplication），这里只说图形态
+        log.info("[Agent编排] 图就绪：agent→(auto|review)→tools→agent（条件循环）；"
+                + "工具集与系统提示词按请求域动态解析");
     }
 
     /**

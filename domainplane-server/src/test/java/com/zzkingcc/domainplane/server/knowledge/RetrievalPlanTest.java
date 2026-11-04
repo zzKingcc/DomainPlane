@@ -17,8 +17,11 @@ import com.zzkingcc.domainplane.server.config.KnowledgeProperties.Strategy;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -30,17 +33,21 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 检索计划：域链 → 通道规格。它只回答"查什么"，不碰 Spring、不建检索器实例，
+ * 检索计划：域链 → 知识体 → 通道规格。它只回答"查什么"，不碰 Spring、不建检索器实例，
  * 所以可以被完整单测——这是把通道解析从 {@code DomainChannelProvider} 抽出来的目的。
  *
- * <p>钉的行为分四组：① 域链展开（由根向下、depth 距查询域的距离、collection 命名）；
- * ② 策略门控（KEYWORD 不开向量路、VECTOR 不开关键词路，"根本不开"不是"开了不用"）；
- * ③ 未绑域通配（sourceId 用通配符；后端不支持通配时向量路跳过、关键词路枚举降级）；
- * ④ B4 取值源纪律（维度只读 vector 后端、登记视角以 keyword 后端为权威）。</p>
+ * <p>钉的行为分四组：</p>
+ * <ol>
+ *   <li><b>域链 × 绑体</b>：沿域链逐层找"绑了体的域"，一个体一个来源；两路都配的体开两路，
+ *       同名集合同一路只开一次（多域绑同一个体时不能把同一份数据查两遍）；</li>
+ *   <li><b>策略门控</b>：KEYWORD 不开向量路、VECTOR 不开关键词路，"根本不开"不是"开了不用"；</li>
+ *   <li><b>未绑域通配</b>：sourceId 用通配符；后端不支持通配时向量路跳过、关键词路枚举降级；</li>
+ *   <li><b>取值源纪律</b>：维度只读 vector 后端、登记视角以 keyword 后端为权威。</li>
+ * </ol>
  *
  * @author zzkingcc
  */
-@DisplayName("检索计划：域链展开 / 策略门控 / 通配降级 / 取值源纪律")
+@DisplayName("检索计划：域链×绑体 / 策略门控 / 通配降级 / 取值源纪律")
 class RetrievalPlanTest {
 
     private static final KeywordSearcher KW = (collection, queryText, topK) -> List.of();
@@ -87,45 +94,130 @@ class RetrievalPlanTest {
                 new MapKnowledgeBackendRegistry(List.of(backends)), "kb", 20, "kb", 30);
     }
 
-    // ==================== 域链展开 ====================
+    /**
+     * 域 → 体 的桩：只登记显式绑过的域，<b>不继承父域</b>（继承是域链展开这一步做的，
+     * 解析器本身就该是"问谁答谁"）。
+     */
+    private static final class StubLookup implements RetrievalPlan.BodyLookup {
+        /** domain → bodyId */
+        final Map<String, String> bound = new LinkedHashMap<>();
+        String keywordId = "kw-id";
+        String vectorId = "vec-id";
+        int keywordTopK = 20;
+        int vectorTopK = 30;
+
+        StubLookup bind(String domain, String bodyId) {
+            bound.put(domain, bodyId);
+            return this;
+        }
+
+        @Override
+        public List<RetrievalPlan.BodyBinding> bodiesOf(String domain) {
+            String bodyId = bound.get(domain);
+            return bodyId == null ? List.of() : bindingsOf(bodyId);
+        }
+
+        @Override
+        public RetrievalPlan.BodyBinding platformBody(String kind) {
+            List<RetrievalPlan.BodyBinding> list = bindingsOf("kb-platform");
+            return list.stream().filter(b -> b.kind().equals(kind)).findFirst().orElse(null);
+        }
+
+        @Override
+        public String bodyIdOf(String domain) {
+            return bound.get(domain);
+        }
+
+        @Override
+        public List<RetrievalPlan.BodyBinding> bodiesOfBody(String bodyId) {
+            return bindingsOf(bodyId);
+        }
+
+        private List<RetrievalPlan.BodyBinding> bindingsOf(String bodyId) {
+            List<RetrievalPlan.BodyBinding> out = new ArrayList<>(2);
+            if (vectorId != null) {
+                out.add(new RetrievalPlan.BodyBinding(bodyId, "vector", vectorId, vectorTopK,
+                        KbIndexes.nameOfBody(bodyId, bodyId)));
+            }
+            if (keywordId != null) {
+                out.add(new RetrievalPlan.BodyBinding(bodyId, "keyword", keywordId, keywordTopK,
+                        KbIndexes.nameOfBody(bodyId, bodyId)));
+            }
+            return List.copyOf(out);
+        }
+    }
+
+    private static RetrievalPlan planWithLookup(StubLookup lookup, Strategy strategy,
+                                                KnowledgeBackend... backends) {
+        return new RetrievalPlan(strategy, new MapKnowledgeBackendRegistry(List.of(backends)), lookup);
+    }
+
+    // ==================== 域链 × 绑体 ====================
 
     @Test
-    @DisplayName("域链由根向下逐层展开，depth = 距查询域的距离（自身为 0）")
-    void channels_spanDomainChainWithDepth() {
-        RetrievalPlan plan = hybridPlan(backend("kb", FULL, List.of(), new StubStore("kb")));
+    @DisplayName("域链逐层找绑了体的域：depth = 距查询域的距离，每个体两路")
+    void channels_spanDomainChainOfBodies() {
+        StubLookup lookup = new StubLookup()
+                .bind("default", "kb-root")
+                .bind("default.sales", "kb-sales");
+        RetrievalPlan plan = planWithLookup(lookup, Strategy.HYBRID,
+                backend("kw-id", FULL, List.of(), new StubStore("kw")),
+                backend("vec-id", FULL, List.of(), new StubStore("vec")));
 
         List<RetrievalPlan.ChannelSpec> specs = plan.channels("default.sales.eu");
 
-        List<String> chain = Domains.chainOf("default.sales.eu");
-        assertEquals(3, chain.size());
-        assertEquals(chain.size() * 2, specs.size(), "hybrid：每个来源两路（向量 + 关键词）");
-
-        // 顺序：逐来源「先向量后关键词」
-        assertEquals(List.of(
-                        chain.get(0), chain.get(0), chain.get(1), chain.get(1), chain.get(2), chain.get(2)),
-                specs.stream().map(RetrievalPlan.ChannelSpec::sourceId).toList());
-        assertEquals(List.of(2, 2, 1, 1, 0, 0),
-                specs.stream().map(RetrievalPlan.ChannelSpec::depth).toList());
-        assertEquals(List.of(Modality.VECTOR, Modality.KEYWORD,
-                        Modality.VECTOR, Modality.KEYWORD, Modality.VECTOR, Modality.KEYWORD),
-                specs.stream().map(RetrievalPlan.ChannelSpec::modality).toList());
+        // 链上 3 个域，只有 2 个绑了体；未绑体的叶子域不产生空来源
+        assertEquals(4, specs.size(), "2 个体 × 2 路");
+        assertEquals(List.of("default", "default", "default.sales", "default.sales"),
+                specs.stream().map(RetrievalPlan.ChannelSpec::sourceId).toList(),
+                "sourceId 是贡献绑定的域；展开顺序沿用域链（根在前），融合层按 depth 折损");
+        assertEquals(List.of(2, 2, 1, 1), specs.stream().map(RetrievalPlan.ChannelSpec::depth).toList(),
+                "depth = 距查询域的距离（default.sales.eu 自身 0，default.sales 1，default 2）");
+        assertEquals(List.of(Modality.VECTOR, Modality.KEYWORD, Modality.VECTOR, Modality.KEYWORD),
+                specs.stream().map(RetrievalPlan.ChannelSpec::modality).toList(),
+                "来源内顺序与改造前一致：先向量后关键词");
     }
 
     @Test
-    @DisplayName("collection = KbIndexes.nameOf(域)，locationId = backendId|collection|modality")
+    @DisplayName("同一份数据只开一次：两个域绑同一个体，或上下两层的体指向同一个集合")
+    void channels_dedupeByLocation() {
+        StubLookup lookup = new StubLookup()
+                .bind("default", "kb-shared")
+                .bind("default.sales", "kb-shared");
+        RetrievalPlan plan = planWithLookup(lookup, Strategy.HYBRID,
+                backend("kw-id", FULL, List.of(), new StubStore("kw")),
+                backend("vec-id", FULL, List.of(), new StubStore("vec")));
+
+        List<RetrievalPlan.ChannelSpec> specs = plan.channels("default.sales");
+
+        assertEquals(2, specs.size(), "同一个体的同一路不能被查两遍（否则重复召回、白烧两次超时）");
+        assertEquals(List.of("default.sales", "default.sales"),
+                specs.stream().map(RetrievalPlan.ChannelSpec::sourceId).toList(),
+                "去重留最近的 depth（同数据命中时优先算近的），来源 id 也随之取近的那个域");
+        assertEquals(List.of(0, 0), specs.stream().map(RetrievalPlan.ChannelSpec::depth).toList());
+    }
+
+    @Test
+    @DisplayName("collection = 体冻结的索引名，locationId = backendId|collection|modality")
     void channels_carryCollectionAndLocation() {
-        RetrievalPlan plan = hybridPlan(backend("kb", FULL, List.of(), new StubStore("kb")));
+        StubLookup lookup = new StubLookup().bind("default.sales", "kb-sales");
+        RetrievalPlan plan = planWithLookup(lookup, Strategy.HYBRID,
+                backend("kw-id", FULL, List.of(), new StubStore("kw")),
+                backend("vec-id", FULL, List.of(), new StubStore("vec")));
 
         RetrievalPlan.ChannelSpec spec = plan.channels("default.sales").get(0);
+        String index = KbIndexes.nameOfBody("kb-sales", "kb-sales");
 
-        assertEquals(KbIndexes.nameOf("default"), spec.collection());
-        assertEquals("kb|" + KbIndexes.nameOf("default") + "|VECTOR", spec.locationId());
-        assertEquals(30, spec.topK(), "向量路 topK 取 vector 后端配置");
+        assertEquals(index, spec.collection(), "集合名来自体，不再来自域");
+        assertEquals("vec-id|" + index + "|VECTOR", spec.locationId());
+        assertEquals("default.sales", spec.sourceId(),
+                "融合用的来源 id 仍是域（多个域共用一个体时，命中深度按各自距离算）");
+        assertEquals(30, spec.topK(), "向量路 topK 取该路配置");
         assertNotNull(spec.vectorSearcher());
         assertNull(spec.keywordSearcher(), "向量规格不挂关键词检索器");
 
         RetrievalPlan.ChannelSpec kwSpec = plan.channels("default.sales").get(1);
-        assertEquals(20, kwSpec.topK(), "关键词路 topK 取 keyword 后端配置");
+        assertEquals(20, kwSpec.topK(), "关键词路 topK 取该路配置");
         assertNotNull(kwSpec.keywordSearcher());
         assertNull(kwSpec.vectorSearcher());
     }
@@ -135,14 +227,16 @@ class RetrievalPlanTest {
     @Test
     @DisplayName("KEYWORD 策略：向量通道根本不开（不是开了不用）")
     void keywordStrategy_opensNoVectorChannel() {
-        RetrievalPlan plan = new RetrievalPlan(Strategy.KEYWORD,
-                new MapKnowledgeBackendRegistry(List.of(
-                        backend("kb", FULL, List.of(), new StubStore("kb")))),
-                "kb", 20, "kb", 30);
+        StubLookup lookup = new StubLookup()
+                .bind("default", "kb-root")
+                .bind("default.sales", "kb-sales");
+        RetrievalPlan plan = planWithLookup(lookup, Strategy.KEYWORD,
+                backend("kw-id", FULL, List.of(), new StubStore("kw")),
+                backend("vec-id", FULL, List.of(), new StubStore("vec")));
 
         List<RetrievalPlan.ChannelSpec> specs = plan.channels("default.sales.eu");
 
-        assertEquals(3, specs.size());
+        assertEquals(2, specs.size());
         assertTrue(specs.stream().allMatch(s -> s.modality() == Modality.KEYWORD));
         assertTrue(specs.stream().allMatch(s -> s.vectorSearcher() == null));
     }
@@ -150,14 +244,16 @@ class RetrievalPlanTest {
     @Test
     @DisplayName("VECTOR 策略：关键词通道根本不开")
     void vectorStrategy_opensNoKeywordChannel() {
-        RetrievalPlan plan = new RetrievalPlan(Strategy.VECTOR,
-                new MapKnowledgeBackendRegistry(List.of(
-                        backend("kb", FULL, List.of(), new StubStore("kb")))),
-                "kb", 20, "kb", 30);
+        StubLookup lookup = new StubLookup()
+                .bind("default", "kb-root")
+                .bind("default.sales", "kb-sales");
+        RetrievalPlan plan = planWithLookup(lookup, Strategy.VECTOR,
+                backend("kw-id", FULL, List.of(), new StubStore("kw")),
+                backend("vec-id", FULL, List.of(), new StubStore("vec")));
 
         List<RetrievalPlan.ChannelSpec> specs = plan.channels("default.sales.eu");
 
-        assertEquals(3, specs.size());
+        assertEquals(2, specs.size());
         assertTrue(specs.stream().allMatch(s -> s.modality() == Modality.VECTOR));
         assertTrue(specs.stream().allMatch(s -> s.keywordSearcher() == null));
     }
@@ -165,7 +261,7 @@ class RetrievalPlanTest {
     // ==================== 未绑域通配 ====================
 
     @Test
-    @DisplayName("域为 null（管控台预览）：sourceId 与 collection 都用通配符，depth 0")
+    @DisplayName("域为 null（诊断 / 通配）：sourceId 与 collection 都用通配符，depth 0")
     void nullDomain_wildcardChannels() {
         RetrievalPlan plan = hybridPlan(backend("kb", FULL, List.of(), new StubStore("kb")));
 
@@ -213,7 +309,7 @@ class RetrievalPlanTest {
     }
 
     @Test
-    @DisplayName("后端不提供存储能力：取值抛 60007（应被启动期校验拦截）")
+    @DisplayName("后端不提供存储能力：取值抛 60007（保存存储配置时的自检本该给过警告）")
     void store_missingCapability_throws60007() {
         RetrievalPlan plan = new RetrievalPlan(Strategy.HYBRID,
                 new MapKnowledgeBackendRegistry(List.of(

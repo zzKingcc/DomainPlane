@@ -283,7 +283,7 @@
       var kb = d.knowledge || {};
       var stat = kb.body ? kbRetrievableOf(d.name) : null;
       var bodyStat = kb.body ? kbStatOf(kb.body) : null;
-      var statNote = !kb.body ? "" : !KB_STATS ? '<span class="card-note">\u7EDF\u8BA1\u52A0\u8F7D\u4E2D\u2026</span>' : KB_STATS.failed ? '<span class="card-note">\u7EDF\u8BA1\u4E0D\u53EF\u7528</span>' : '<span class="card-note">\u6587\u6863 ' + num(stat && stat.documents) + " \xB7 \u5207\u7247 " + num(stat && stat.chunks) + (KB_STATS.stale ? " \uFF08\u65E7\u6570\u636E\uFF09" : "") + "</span>" + (bodyStat && bodyStat.domainCount > 1 ? ' <span class="card-note">\u4F53\u5171 ' + num(bodyStat.documents) + " \xB7 " + bodyStat.domainCount + " \u57DF\u5171\u7528</span>" : "");
+      var statNote = !kb.body ? "" : !KB_STATS ? '<span class="card-note">\u7EDF\u8BA1\u52A0\u8F7D\u4E2D\u2026</span>' : KB_STATS.failed ? '<span class="card-note">\u7EDF\u8BA1\u4E0D\u53EF\u7528</span>' : '<span class="card-note">\u6587\u6863 ' + num(stat && stat.documents) + " \xB7 \u5207\u7247 " + num(stat && stat.chunks) + (KB_STATS.stale ? "\uFF08\u65E7\u6570\u636E\uFF09" : "") + "</span>" + (bodyStat && bodyStat.domainCount > 1 ? ' <span class="card-note">\u4F53\u5171 ' + num(bodyStat.documents) + " \xB7 " + bodyStat.domainCount + " \u57DF\u5171\u7528</span>" : "");
       var kbLine = '<div><span class="k">\u77E5\u8BC6\u4F53</span>' + kbSelect(d.name, kb) + statNote + (kb.bodyMissing ? ' <span class="tag destructive" title="\u8FD9\u4E2A\u57DF\u7ED1\u7684\u77E5\u8BC6\u4F53\u5DF2\u88AB\u5220\uFF0C\u672C\u7AD9\u6CA1\u6709\u77E5\u8BC6\u5E93">\u77E5\u8BC6\u4F53\u5DF2\u5931\u6548</span>' : "") + (kb.bodyDead ? ' <span class="tag destructive" title="\u77E5\u8BC6\u4F53\u7684\u8FDE\u63A5\u5168\u90FD\u4E0D\u53EF\u7528\uFF0C\u68C0\u7D22\u5DE5\u5177\u5DF2\u4ECE\u8FD9\u4E2A\u57DF\u4E0B\u7EBF">\u77E5\u8BC6\u4F53\u8FDE\u63A5\u4E0D\u53EF\u7528</span>' : "") + (d.runningSessions ? ' <span class="tag approval">\u5728\u98DE\u4F1A\u8BDD ' + num(d.runningSessions) + "</span>" : "") + "</div>";
       var parentLine = d.parentId ? '<div><span class="k">\u4E0A\u7EA7\u57DF</span><button class="dp-jump" data-jump="' + esc(d.parentId) + '">' + esc(d.parentId) + "</button></div>" : "";
       box.innerHTML = '<section class="card dp-panel dp-detail-card"><div class="card-body"><header class="card-head">' + DOM_ICON + '<h2 class="mono">' + esc(d.name) + "</h2>" + sourceTag(d) + (d.pendingDelete ? '<span class="tag destructive" title="\u5904\u4E8E\u8F6F\u5220\u9664\u5BBD\u9650\u671F\uFF0C\u5230\u671F\u540E\u5F7B\u5E95\u6E05\u7406">\u5F85\u5220\u9664</span>' : "") + (d.callable ? '<span class="tag read" title="\u53EF\u8C03\u7528\u5355\u5143\uFF1A\u80FD\u4F5C\u4E3A\u5165\u53E3\u88AB\u8C03\u7528">\u53EF\u8C03\u7528</span>' : '<span class="tag approval" title="\u88C5\u914D\u8282\u70B9\uFF1A\u53EA\u628A\u5DE5\u5177 / \u63D0\u793A\u8BCD / \u6A21\u578B / \u77E5\u8BC6\u4F20\u7ED9\u540E\u4EE3\uFF0C\u4E0D\u80FD\u76F4\u63A5\u5F53\u5165\u53E3">\u88C5\u914D\u8282\u70B9</span>') + '<span class="spacer"></span>' + (d.callable ? echoSwitch(d) + planSwitch(d) : "") + '<span class="card-note">\u5DE5\u5177 ' + num(d.toolCount) + " \xB7 \u9700\u786E\u8BA4 " + num(d.approvalCount) + "</span>" + (d.hasChildren ? "" : '<button class="btn btn-sm btn-outline-secondary" data-callable="' + esc(d.name) + '" data-to="' + (d.callable ? "false" : "true") + '">' + (d.callable ? "\u8BBE\u4E3A\u88C5\u914D\u8282\u70B9" : "\u8BBE\u4E3A\u53EF\u8C03\u7528") + "</button>") + '<button class="btn btn-sm btn-outline-secondary" data-cfg="' + esc(d.name) + '">\u914D\u7F6E\u6A21\u578B</button><button class="btn btn-sm btn-outline-secondary" data-mcpcfg="' + esc(d.name) + '">\u914D\u7F6E MCP</button>' + (d.deletable && !d.pendingDelete ? '<button class="btn btn-sm btn-outline-danger" data-del="' + esc(d.name) + '">\u5220\u9664</button>' : "") + "</header>" + (d.pendingDelete ? pendingDeleteBox(d) : "") + (d.hasChildren ? '<p class="dp-kb-note">\u8BE5\u57DF\u6709 ' + num(d.directChildCount) + " \u4E2A\u76F4\u63A5\u5B50\u57DF\uFF08\u5168\u90E8\u540E\u4EE3 " + num(d.childrenCount) + ' \u4E2A\uFF09\uFF0C\u6309"\u53EA\u6709\u53F6\u5B50\u57DF\u53EF\u4F5C\u4E3A\u53EF\u8C03\u7528\u5355\u5143"\u7684\u89C4\u5219\uFF0C\u5B83\u53EA\u80FD\u4F5C\u88C5\u914D\u8282\u70B9\uFF0C\u4E0D\u80FD\u5F53\u5165\u53E3\u3002\u9700\u8981\u8FD9\u4E00\u5C42\u5165\u53E3\u8BF7\u53E6\u5EFA\u65E0\u5B50\u57DF\u7684\u57DF\u3002</p>' : "") + '<div class="model-meta">' + parentLine + '<div><span class="k">\u53EF\u8C03\u7528\u6A21\u578B</span>' + boundTags + "</div>" + capabilityLineOf(d.name) + mcpLine + kbLine + "</div><h3>\u53EF\u89C1\u5DE5\u5177\uFF08\u542B\u6CBF\u94FE\u7EE7\u627F\uFF09</h3>" + toolLine + "</div></section>";
@@ -360,22 +360,22 @@
         });
       });
     }
-    function saveEcho(input) {
-      var domain = input.getAttribute("data-echo");
+    function savePlan(input) {
+      var domain = input.getAttribute("data-plan");
       var on = input.checked;
       input.disabled = true;
-      Console.api.put("/admin/domains/" + encodeURIComponent(domain) + "/tool-call-echo", { echo: on }).catch(function(e) {
+      Console.api.put("/admin/domains/" + encodeURIComponent(domain) + "/plan-display", { display: on }).catch(function(e) {
         input.checked = !on;
         Console.toast("\u4FDD\u5B58\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message), { type: "error" });
       }).then(function() {
         input.disabled = false;
       });
     }
-    function savePlan(input) {
-      var domain = input.getAttribute("data-plan");
+    function saveEcho(input) {
+      var domain = input.getAttribute("data-echo");
       var on = input.checked;
       input.disabled = true;
-      Console.api.put("/admin/domains/" + encodeURIComponent(domain) + "/plan-display", { display: on }).catch(function(e) {
+      Console.api.put("/admin/domains/" + encodeURIComponent(domain) + "/tool-call-echo", { echo: on }).catch(function(e) {
         input.checked = !on;
         Console.toast("\u4FDD\u5B58\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message), { type: "error" });
       }).then(function() {
@@ -396,13 +396,21 @@
         var modes = (b.modes || []).map(function(k) {
           return KIND_LABEL[k] || k;
         }).join("+");
-        var tail = modes || "\u672A\u914D";
-        if (b.usable === false) {
+        var tail = modes || "\u672A\u914D\u8FDE\u63A5";
+        if (modes && b.usable === false) {
           tail += " \xB7 \u8FDE\u63A5\u4E0D\u53EF\u7528";
+        }
+        if (b.rawLabel && !(b.raw === "local")) {
+          tail += " \xB7 \u539F\u6587 " + b.rawLabel;
         }
         options += '<option value="' + esc(b.id) + '"' + (b.id === bound ? " selected" : "") + ">" + esc(b.name || b.id) + "\uFF08" + esc(tail) + "\uFF09</option>";
       });
-      return '<select class="form-select" style="width:auto;min-width:12rem;display:inline-block;vertical-align:middle;" data-kb="' + esc(domain) + '">' + options + "</select>";
+      return '<select class="form-select" style="width:auto;min-width:12rem;display:inline-block;vertical-align:middle;" data-kb="' + esc(domain) + '" title="' + esc(boundBodyTitle()) + '">' + options + "</select>";
+    }
+    function boundBodyTitle() {
+      return KNOWLEDGE_BODIES.map(function(b) {
+        return (b.name || b.id) + " \xB7 " + (b.slug || b.id) + " \xB7 " + (b.index || "\u65E0\u7D22\u5F15") + (b.documents !== void 0 ? " \xB7 " + num(b.documents) + " \u6587\u6863" : "");
+      }).join("\n");
     }
     function saveKb(select) {
       var domain = select.getAttribute("data-kb");
@@ -609,7 +617,7 @@
     function deleteDomain(id) {
       return __async(this, null, function* () {
         var ok = yield Console.confirm(
-          "\u786E\u8BA4\u5220\u9664\u57DF " + id + "\uFF1F\n\n\u7B2C\u4E00\u6B65\uFF08\u672C\u64CD\u4F5C\uFF09\uFF1A\u6807\u8BB0\u4E3A\u5F85\u5220\u9664\uFF0C\u8FDB\u5165 " + graceText(GRACE_MS || 0) + " \u5BBD\u9650\u671F\n\xB7 \u57DF\u53CA\u5176\u5B50\u57DF\u90FD\u8FD8\u5728\uFF0C\u77E5\u8BC6\u5E93 / \u63D0\u793A\u8BCD / \u6A21\u578B\u7ED1\u5B9A\u4E00\u4E2A\u90FD\u4E0D\u52A8\n\xB7 \u53EA\u662F\u4E0D\u518D\u63A5\u53D7\u65B0\u4F1A\u8BDD\uFF08\u62A5 10011\uFF09\uFF1B\u8FDB\u884C\u4E2D\u7684\u4F1A\u8BDD\u4E0E\u5F85\u4EBA\u5DE5\u786E\u8BA4\u7684\u65AD\u70B9\u7167\u5E38\u6536\u5C3E\n\xB7 \u5BBD\u9650\u671F\u5185\u53EF\u4EE5\u300C\u64A4\u9500\u5220\u9664\u300D\uFF0C\u64A4\u9500\u540E\u4E00\u5207\u7167\u65E7\n\n\u7B2C\u4E8C\u6B65\uFF08\u5BBD\u9650\u671F\u5230\u70B9\uFF0C\u81EA\u52A8\u6267\u884C\uFF0C\u4E0D\u53EF\u64A4\u9500\uFF09\uFF1A\n\xB7 \u9012\u5F52\u5220\u9664\u5B83\u7684\u5168\u90E8\u5B50\u57DF\n\xB7 \u8BE5\u57DF\u53CA\u5176\u5B50\u57DF\u7684\u77E5\u8BC6\u5E93\u7D22\u5F15\u4E0E\u5207\u7247\u9884\u89C8\u6587\u4EF6\u4F1A\u88AB\u5220\u9664\n\xB7 \u8BE5\u57DF\u53CA\u5176\u5B50\u57DF\u7684\u63D0\u793A\u8BCD\u3001\u6A21\u578B\u7ED1\u5B9A\u3001\u5DE5\u5177\u58F0\u660E\u8BB0\u5F55\u4F1A\u4E00\u5E76\u6E05\u7406\n\xB7 \u7ED1\u5B9A\u8BE5\u57DF\u7684\u8C03\u7528\u65B9\u4F1A\u5728\u542F\u52A8\u6821\u9A8C\u6216\u9996\u6B21\u8C03\u7528\u65F6\u62A5\u300C\u57DF\u4E0D\u5B58\u5728\u300D",
+          "\u786E\u8BA4\u5220\u9664\u57DF " + id + "\uFF1F\n\n\u7B2C\u4E00\u6B65\uFF08\u672C\u64CD\u4F5C\uFF09\uFF1A\u6807\u8BB0\u4E3A\u5F85\u5220\u9664\uFF0C\u8FDB\u5165 " + graceText(GRACE_MS || 0) + " \u5BBD\u9650\u671F\n\xB7 \u57DF\u53CA\u5176\u5B50\u57DF\u90FD\u8FD8\u5728\uFF0C\u77E5\u8BC6\u5E93 / \u63D0\u793A\u8BCD / \u6A21\u578B\u7ED1\u5B9A\u4E00\u4E2A\u90FD\u4E0D\u52A8\n\xB7 \u53EA\u662F\u4E0D\u518D\u63A5\u53D7\u65B0\u4F1A\u8BDD\uFF08\u62A5 10011\uFF09\uFF1B\u8FDB\u884C\u4E2D\u7684\u4F1A\u8BDD\u4E0E\u5F85\u4EBA\u5DE5\u786E\u8BA4\u7684\u65AD\u70B9\u7167\u5E38\u6536\u5C3E\n\xB7 \u5BBD\u9650\u671F\u5185\u53EF\u4EE5\u300C\u64A4\u9500\u5220\u9664\u300D\uFF0C\u64A4\u9500\u540E\u4E00\u5207\u7167\u65E7\n\n\u7B2C\u4E8C\u6B65\uFF08\u5BBD\u9650\u671F\u5230\u70B9\uFF0C\u81EA\u52A8\u6267\u884C\uFF0C\u4E0D\u53EF\u64A4\u9500\uFF09\uFF1A\n\xB7 \u9012\u5F52\u5220\u9664\u5B83\u7684\u5168\u90E8\u5B50\u57DF\n\xB7 \u77E5\u8BC6\u4F53\u53EA\u89E3\u9664\u7ED1\u5B9A\uFF1A\u539F\u6587\u3001\u7D22\u5F15\u3001\u5207\u7247\u5168\u90E8\u4FDD\u7559\uFF0C\u522B\u7684\u57DF\uFF08\u6216\u4EE5\u540E\u65B0\u5EFA\u7684\u57DF\uFF09\u53EF\u4EE5\u63A5\u7740\u7528\n\xB7 \u8BE5\u57DF\u53CA\u5176\u5B50\u57DF\u7684\u63D0\u793A\u8BCD\u3001\u6A21\u578B\u7ED1\u5B9A\u3001\u5DE5\u5177\u58F0\u660E\u8BB0\u5F55\u4F1A\u4E00\u5E76\u6E05\u7406\n\xB7 \u7ED1\u5B9A\u8BE5\u57DF\u7684\u8C03\u7528\u65B9\u4F1A\u5728\u542F\u52A8\u6821\u9A8C\u6216\u9996\u6B21\u8C03\u7528\u65F6\u62A5\u300C\u57DF\u4E0D\u5B58\u5728\u300D",
           { title: "\u5220\u9664\u57DF", okText: "\u6807\u8BB0\u5220\u9664", danger: true }
         );
         if (!ok) {
@@ -641,7 +649,7 @@
     function purgeNow(id, btn) {
       return __async(this, null, function* () {
         var ok = yield Console.confirm(
-          "\u7ACB\u5373\u5F7B\u5E95\u5220\u9664\u57DF " + id + "\uFF1F\n\n\xB7 \u8DF3\u8FC7\u5BBD\u9650\u671F\uFF0C\u73B0\u5728\u5C31\u9012\u5F52\u6E05\u9664\u5B83\u548C\u5168\u90E8\u5B50\u57DF\n\xB7 \u77E5\u8BC6\u5E93\u7D22\u5F15\u4E0E\u5207\u7247\u3001\u63D0\u793A\u8BCD\u3001\u6A21\u578B\u7ED1\u5B9A\u3001\u5DE5\u5177\u58F0\u660E\u4E00\u5E76\u6E05\u7406\n\xB7 \u4E0D\u7B49\u5728\u98DE\u7684\u4F1A\u8BDD\u6536\u5C3E\uFF0C\u4E5F\u4E0D\u53EF\u64A4\u9500\uFF08\u8BEF\u5220\u53EA\u80FD\u4ECE\u5386\u53F2\u7248\u672C\u5E93\u56DE\u6EDA\uFF09",
+          "\u7ACB\u5373\u5F7B\u5E95\u5220\u9664\u57DF " + id + "\uFF1F\n\n\xB7 \u8DF3\u8FC7\u5BBD\u9650\u671F\uFF0C\u73B0\u5728\u5C31\u9012\u5F52\u6E05\u9664\u5B83\u548C\u5168\u90E8\u5B50\u57DF\n\xB7 \u63D0\u793A\u8BCD\u3001\u6A21\u578B\u7ED1\u5B9A\u3001\u5DE5\u5177\u58F0\u660E\u4E00\u5E76\u6E05\u7406\uFF1B\u77E5\u8BC6\u4F53\u53EA\u89E3\u7ED1\uFF0C\u6570\u636E\u539F\u6837\u4FDD\u7559\n\xB7 \u4E0D\u7B49\u5728\u98DE\u7684\u4F1A\u8BDD\u6536\u5C3E\uFF0C\u4E5F\u4E0D\u53EF\u64A4\u9500\uFF08\u8BEF\u5220\u53EA\u80FD\u4ECE\u5386\u53F2\u7248\u672C\u5E93\u56DE\u6EDA\uFF09",
           { title: "\u7ACB\u5373\u5F7B\u5E95\u5220\u9664", okText: "\u5F7B\u5E95\u5220\u9664", danger: true }
         );
         if (!ok) {
@@ -676,10 +684,10 @@
       });
     }
     function kbStatOf(bodyId) {
-      var bodies = KB_STATS && KB_STATS.bodies || [];
-      for (var i = 0; i < bodies.length; i++) {
-        if (bodies[i].id === bodyId) {
-          return bodies[i];
+      var list = KB_STATS && KB_STATS.bodies || [];
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === bodyId) {
+          return list[i];
         }
       }
       return null;
@@ -772,16 +780,13 @@
         if (SELECTED) {
           expandAncestors(SELECTED);
         }
-        return Promise.all([loadBindings(), loadGrace()]).then(function() {
+        return Promise.all([loadBindings(), loadGrace()]);
+      }).then(function() {
+        renderTree();
+        renderDetail();
+        return loadKbStats().then(function() {
           renderTree();
           renderDetail();
-          // 知识库统计是异步补数：先渲染树与详情，数字到了再重绘一次。
-          // 不能放进上面的 Promise.all —— ES 不可达时这个请求要烧一个 connectTimeout，
-          // 整页会一起卡在"正在加载域空间…"上。
-          return loadKbStats().then(function() {
-            renderTree();
-            renderDetail();
-          });
         });
       }).catch(function(e) {
         var box = document.getElementById("treeList");

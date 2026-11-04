@@ -184,16 +184,16 @@ class InfraSettingsConnectionsTest {
     }
 
     @Test
-    @DisplayName("把 Qdrant 填进关键字槽：保存时拦下（它提供不了全文检索）")
-    void qdrantOnKeywordSlot_isRejected() {
+    @DisplayName("把 Qdrant 填进关键字槽：保存放行（类型合规性是运行期的事，检索时该路会被跳过）")
+    void qdrantOnKeywordSlot_isStoredAsIs() {
         InfraSettings s = withDefaults(
                 es("es-kw", "es.internal", 9200),
                 qdrant("qdrant-vec", "http://qdrant.internal:6333"),
                 body("kb-bad", "qdrant-vec", null));
 
-        List<String> problems = s.validate();
-        assertTrue(problems.stream().anyMatch(p -> p.contains("关键字") && p.contains("qdrant-vec")),
-                problems.toString());
+        assertTrue(s.validate().isEmpty(), s.validate().toString());
+        // 配置如实落盘；真正检索时 backendFor 会因缺 keyword 能力跳过这一路并留错误日志
+        assertNotNull(s.usableBody("kb-bad"), "连接存在且可用，保存不拦");
     }
 
     @Test

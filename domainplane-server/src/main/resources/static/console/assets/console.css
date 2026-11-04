@@ -729,6 +729,43 @@ tbody tr:hover { background: #fcfcfd; }
 .dp-confirm .modal-body { white-space: pre-wrap; line-height: 1.7; color: var(--text); }
 .dp-confirm .modal-footer { gap: 8px; }
 
+/* ---------- 看文档：切片预览弹层 ----------
+   比确认框宽（切片正文是段落，窄了折得很碎），高度锁在视口内自己滚：
+   .modal-dialog-scrollable 只让 body 滚，表头/按钮始终在。 */
+.dp-preview .modal-dialog { max-width: 760px; margin: 40px auto; }
+.dp-preview .modal-content { animation: dp-modal-drop .18s ease-out; }
+.dp-preview .modal-body { padding: 12px 16px; }
+.dp-preview-meta { color: var(--muted); font-size: 12px; margin-right: auto; }
+.dp-preview-meta.warn { color: var(--amber); }
+.dp-preview-loading,
+.dp-preview-empty {
+    padding: 24px 8px; text-align: center; color: var(--muted); line-height: 1.7;
+}
+.dp-chunk {
+    border: 1px solid var(--border); border-radius: 6px;
+    /* 浅一档的面（不是 rgba 叠加）：弹层本身是白卡，再叠 2% 黑几乎看不出来，
+       分不出"这是切片正文" */
+    background: var(--tblr-bg-surface-secondary, #f7f8fa);
+    padding: 8px 10px; margin-bottom: 8px;
+}
+.dp-chunk-head {
+    display: flex; gap: 8px; align-items: baseline;
+    font-size: 12px; color: var(--muted); margin-bottom: 4px;
+}
+.dp-chunk-seq { font-weight: 600; color: var(--primary); }
+.dp-chunk-text {
+    margin: 0; padding: 0; white-space: pre-wrap; word-break: break-word;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px; line-height: 1.7; color: var(--text);
+    /* Tabler 的 prose 组件给 pre 自带一套"深色代码块"皮肤
+       （background: var(--tblr-bg-surface-dark) + color: var(--tblr-light)），
+       只覆盖 color 会留下"黑底 + 灰字"——正文根本看不清。这里把皮肤整体关掉：
+       底色由外层 .dp-chunk 提供，文字用正文色。 */
+    background: transparent;
+    border-radius: 0;
+    max-height: 240px; overflow-y: auto;
+}
+
 /* ===== 模态框 / 遮罩层 =====
    点「添加 / 编辑」时弹出的表单层：全屏半透明遮罩 + 居中面板。
    注意：.modal-mask 用了 display:flex，必须显式让 [hidden] 覆盖它，
@@ -1087,6 +1124,13 @@ tbody tr:hover { background: #fcfcfd; }
 /* 面板内说明段：全局 reset 把 p 的间距清了，不补一条会和下面的操作行贴脸 */
 .dp-kb-note { font-size: 13px; color: var(--muted); line-height: 1.7; margin-bottom: 14px; }
 .dp-kb-note b { color: var(--text); font-weight: 600; }
+
+/* 健康矩阵：状态字 + 连接 + 集合 + 维度四列。
+   表头压暗、单元格居左，维度列不折行（数字要能一列对齐看出差异）。 */
+.dp-kb-health-head { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+.dp-kb-health { font-size: 13px; margin-bottom: 12px; }
+.dp-kb-health th { font-size: 12px; font-weight: 500; color: var(--muted); }
+.dp-kb-health td { vertical-align: middle; white-space: nowrap; }
 
 /* ===== L2 · 请求趋势（SVG 折线，无 Chart.js） =====
    窗口数据来自后端 MetricsRegistry 采样（累计值差分前已算成速率）。
@@ -1482,6 +1526,18 @@ tbody tr:hover { background: #fcfcfd; }
 }
 .profile-head h4 { font-size: 14px; font-weight: 600; margin: 0; }
 .profile-head .spacer { flex: 1 1 auto; }
+/* 卡片头保存按钮：移动到右上角、紧挨删除。脏（改动过）才可点、靛蓝；初始/已保存置灰 */
+.profile-head .btn-save-body {
+    padding: 3px 14px; font-size: 12px; font-weight: 600;
+    border-radius: 6px; border: 1px solid transparent; cursor: pointer;
+}
+.profile-head .btn-save-body:not(:disabled) { background: #6366f1; color: #fff; }
+.profile-head .btn-save-body:not(:disabled):hover { background: #4f46e5; }
+.profile-head .btn-save-body:disabled {
+    background: var(--tblr-bg-surface-secondary, #f7f8fa);
+    color: var(--muted); border-color: var(--border);
+    cursor: not-allowed; opacity: 1;
+}
 .p-meta { font-size: 12px; color: var(--muted); }
 .p-dot { width: 8px; height: 8px; border-radius: 50%; background: #6366f1; flex: 0 0 8px; }
 
@@ -1499,6 +1555,14 @@ tbody tr:hover { background: #fcfcfd; }
     overflow-wrap: anywhere;
 }
 .slot.empty .slot-h { font-family: inherit; font-style: italic; }
+
+/* 知识体卡片的操作条：每个体自带保存，不再靠面板头上那一个总保存 */
+.profile-foot {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px;
+    background: var(--tblr-bg-surface-secondary, #f7f8fa);
+    border-top: 1px solid var(--border);
+}
 
 @media (max-width: 900px) {
     .p-ns, .slot { grid-template-columns: 76px 1fr; }
@@ -1695,3 +1759,164 @@ tbody tr:hover { background: #fcfcfd; }
 }
 .dp-filter-clear { margin-left: auto; }
 
+
+/* ---------- 卡片：自定义参数（JSON）文本框 ----------
+   未命中内置适配的档案走这条：适配 schema 编不出控件，只能手填键值对。
+   刻意用中性色而不是绿框：绿色在本页专指「命中适配、schema 驱动」，
+   两种入口长得一样会让人以为这里填的也是适配参数。 */
+.dp-params {
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--tblr-bg-surface-secondary, #f7f8fa);
+    padding: 8px 12px; margin-bottom: 14px;
+    /* 与 .model-meta 并排；参数框比键值列更宽，窄屏自动折到下一行 */
+    flex: 1 1 320px; min-width: 0;
+    display: flex; flex-direction: column; gap: 6px;
+}
+.dp-params-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.dp-params-head .k { font-size: 12px; font-weight: 600; color: var(--text); }
+.dp-params-hint { font-size: 12px; color: var(--muted); line-height: 1.6; }
+/* 输入框落在浅灰底上，底色要回到白卡，否则两者混成一片（白底 + 灰底边界只剩 1px 边框） */
+.dp-params-json {
+    font-size: 12px; line-height: 1.6; min-height: 62px; resize: vertical;
+    background: var(--card); color: var(--text);
+}
+.dp-params-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 保存失败的提示是后端原文（含 JSON 解析的行列号），比一句「参数非法」有用得多，
+   所以不截断：允许折行，按钮留在右侧 */
+.dp-params-status {
+    flex: 1 1 200px; min-width: 0; font-size: 12px; line-height: 1.6;
+    color: var(--muted); margin-right: auto; word-break: break-word;
+}
+.dp-params-status.ok { color: var(--green); }
+.dp-params-status.err { color: var(--red); }
+
+/* ==========================================================================
+   知识库 v2：知识体卡片网格
+   ---------------------------------------------------------------------------
+   卡片是页面的一等对象：身份（唯一名 + 冻结索引）、落点（两槽 + 原文）、
+   计数、绑定域、动作，全部在卡片里闭环。网格用 auto-fill 保证宽屏多列、
+   窄屏单列，卡片等高（动作条沉底）避免参差。
+   ========================================================================== */
+.dp-kb-toolbar { display: flex; align-items: center; gap: 8px; }
+.dp-kb-toolbar .btn svg { margin-right: 4px; vertical-align: -2px; }
+.dp-kb-snapshot { font-size: 12px; color: var(--muted); margin-left: 12px; }
+.dp-kb-snapshot.warn { color: var(--amber); }
+.page-head { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+
+.dp-kb-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 14px;
+    margin: 16px 0 18px;
+}
+.dp-kb-loading { color: var(--muted); font-size: 13px; padding: 18px 4px; }
+
+.dp-kb-card {
+    display: flex;
+    flex-direction: column;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 14px 12px;
+    min-height: 236px;
+    transition: box-shadow .18s ease, border-color .18s ease;
+}
+.dp-kb-card:hover { box-shadow: 0 6px 20px rgba(15, 23, 42, .08); border-color: #d7dce5; }
+.dp-kb-card.s-dead { border-color: #f3d6d6; }
+.dp-kb-card.s-missing { border-color: #f3d6d6; background: #fffafa; }
+.dp-kb-card.s-no_index { border-color: #f6e3c2; }
+
+.dp-kb-card-head { display: flex; align-items: flex-start; gap: 10px; }
+.dp-kb-title { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
+.dp-kb-title b { font-size: 15px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dp-kb-slug {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; color: var(--muted); background: #f4f5f7;
+    padding: 1px 5px; border-radius: 4px; align-self: flex-start;
+}
+.dp-kb-head-right { flex: 0 0 auto; }
+
+.dp-kb-index {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    margin: 10px 0 8px; padding: 6px 8px;
+    background: #f8f9fb; border-radius: 6px; font-size: 11.5px;
+}
+.dp-kb-index code { font-size: 11.5px; color: #334155; overflow-wrap: anywhere; }
+.dp-kb-copy {
+    border: 0; background: transparent; color: var(--tblr-primary);
+    font-size: 11px; padding: 0 2px; cursor: pointer;
+}
+.dp-kb-copy:hover { text-decoration: underline; }
+.dp-kb-label { font-size: 11px; color: var(--muted); text-transform: none; }
+
+.dp-kb-meta { display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.dp-kb-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dp-kb-row .dp-kb-label { flex: 0 0 3em; }
+.dp-kb-vals { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.dp-slot-kind { font-size: 11px; color: var(--muted); margin-right: 1px; }
+
+.dp-kb-stats {
+    display: flex; gap: 16px; margin: 12px 0 6px;
+    font-size: 12px; color: var(--muted);
+}
+.dp-kb-stats b { color: var(--text); font-size: 14px; font-weight: 600; margin-right: 2px; }
+.dp-kb-domains { min-height: 22px; display: flex; gap: 4px; flex-wrap: wrap; }
+
+.dp-kb-actions {
+    margin-top: auto; padding-top: 10px; border-top: 1px dashed var(--line);
+    display: flex; gap: 6px; flex-wrap: wrap;
+}
+.dp-kb-actions .btn { white-space: nowrap; }
+.dp-kb-ghost-note { font-size: 12px; color: var(--red); line-height: 1.5; }
+
+.dp-kb-empty {
+    grid-column: 1 / -1; text-align: center; padding: 34px 16px;
+    border: 1px dashed var(--line); border-radius: 10px; background: var(--card);
+}
+.dp-kb-empty-icon { color: #b9c0cc; margin-bottom: 6px; }
+.dp-kb-empty h4 { font-size: 15px; margin: 0 0 6px; }
+.dp-kb-empty p { font-size: 13px; color: var(--muted); margin: 0 auto 12px; max-width: 520px; line-height: 1.7; }
+
+.dp-kb-orphan-note { font-size: 12.5px; color: var(--muted); line-height: 1.7; margin-bottom: 10px; }
+.dp-kb-orphan-list { display: flex; flex-direction: column; gap: 6px; }
+.dp-kb-orphan-row {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 6px 8px; background: #fafbfc; border-radius: 6px;
+}
+.dp-kb-orphan-row code { font-size: 12px; }
+.dp-kb-orphan-owners { margin-left: auto; display: flex; gap: 4px; }
+
+/* 文档弹层 */
+.dp-docs-head {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    font-size: 12.5px; color: var(--muted); margin-bottom: 10px;
+}
+.dp-docs-head code { font-size: 12px; color: #334155; }
+.dp-upload-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.dp-upload-row input[type="file"] { font-size: 12.5px; }
+.dp-docs-scroll { max-height: 46vh; margin-top: 10px; }
+
+/* 体表单 / 绑定 / 重建选项 */
+.dp-body-form { display: flex; flex-direction: column; gap: 12px; }
+.dp-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.dp-form-field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.dp-form-field > span { font-weight: 600; color: var(--text); }
+.dp-form-field em { font-style: normal; font-weight: 400; color: var(--muted); margin-left: 4px; font-size: 11.5px; }
+.dp-form-field small { color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+.dp-form-hint { font-size: 12px; color: var(--muted); line-height: 1.7; }
+.dp-bind-list {
+    display: flex; flex-direction: column; gap: 2px;
+    max-height: 46vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px;
+}
+.dp-bind-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border-radius: 6px; font-size: 12.5px; cursor: pointer;
+}
+.dp-bind-row:hover { background: #f7f8fb; }
+.dp-rebuild-opt { display: flex; flex-direction: column; gap: 10px; }
+.dp-rebuild-opt label {
+    display: grid; grid-template-columns: 20px 1fr; column-gap: 8px; row-gap: 2px;
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer;
+}
+.dp-rebuild-opt label span { grid-column: 2; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.dp-danger-text { color: var(--red); }

@@ -80,7 +80,7 @@ public class AccountStore {
         Seed seed = readSeed();
         if (seed == null || isBlank(seed.getUsername()) || isBlank(seed.getPassword())) {
             log.info("[账号] 未找到账号文件与可用种子（{}），将以【无账号】状态启动："
-                    + "请打开 http://localhost:9527/console/login.html 完成首次初始化",
+                    + "请打开管控台登录页 /console/login.html 完成首次初始化",
                     accountFile.toAbsolutePath());
             refreshCache();
             return state;

@@ -148,8 +148,7 @@ public class EsKnowledgeStore implements KnowledgeStore, DedupLookup {
                           动态建成默认 mapping（中文检索质量下降且无任何提示）。
                           两种情况导入都不算成功，不会静默降级后照样返回成功。
                     最常见原因：该 ES 未安装 analysis-ik 插件（IK 是插件，任何版本都需单独安装）。
-                    确认方式：管控台 http://localhost:9527/admin.html「存储配置」页点一次
-                              「测试连接」，它会明确告知 IK 是否可用。
+                    确认方式：管控台「存储配置」页点一次「测试连接」，它会明确告知 IK 是否可用。
                     原始原因：{}
                     ===============================================
                     """, collection, e.getMessage());
@@ -457,11 +456,11 @@ public class EsKnowledgeStore implements KnowledgeStore, DedupLookup {
                 }
                 idToName.putIfAbsent(docId, text(md.get(ChunkMetadataKeys.FILE_NAME)));
                 idToChunks.merge(docId, 1, Integer::sum);
-                idToDomain.putIfAbsent(docId, domainOf(md));
+                idToDomain.putIfAbsent(docId, bodyOf(md));
             }
             List<DocumentAgg> items = new ArrayList<>();
             idToName.forEach((id, fileName) ->
-                    items.add(new DocumentAgg(id, fileName, idToDomain.getOrDefault(id, Domains.DEFAULT),
+                    items.add(new DocumentAgg(id, fileName, idToDomain.get(id),
                             idToChunks.getOrDefault(id, 0))));
             return items;
         } catch (Exception e) {
@@ -604,13 +603,13 @@ public class EsKnowledgeStore implements KnowledgeStore, DedupLookup {
         return md instanceof Map ? (Map<String, Object>) md : null;
     }
 
-    /** 读取切片元数据里的归属域；字段缺失或为空时按根域算（历史数据与"未声明"同义） */
-    private static String domainOf(Map<String, Object> md) {
+    /** 读取切片元数据里的知识体 id；缺失（早期文档）返回 null——体已经不是必填的历史语义了 */
+    private static String bodyOf(Map<String, Object> md) {
         Object raw = md.get(ChunkMetadataKeys.DOMAIN);
         if (raw != null && !raw.toString().isBlank()) {
             return raw.toString();
         }
-        return Domains.DEFAULT;
+        return null;
     }
 
     private static String text(Object value) {

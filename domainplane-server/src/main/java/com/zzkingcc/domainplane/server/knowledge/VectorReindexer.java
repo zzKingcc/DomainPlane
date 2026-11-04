@@ -115,7 +115,7 @@ public class VectorReindexer {
         // ===== ① 全捞（对账 → 读 archive；archive 全失兜底 scan） =====
         Map<String, List<KbChunk>> all = new LinkedHashMap<>();
         for (String collection : collections) {
-            List<KbChunk> chunks = loadAll(archive, reconciler, source, collection);
+            List<KbChunk> chunks = loadCollection(archive, reconciler, source, collection);
             all.put(collection, chunks);
         }
         int totalChunks = all.values().stream().mapToInt(List::size).sum();
@@ -158,13 +158,17 @@ public class VectorReindexer {
     /**
      * 单个 collection 的原文装载：对账 → archive 读；archive 全失兜底 scan。
      *
-     * 对账传 {@link Duration#ZERO} 关护栏：用户点了"重建"，意图明确，
-     * 不该被"文件太新"挡下；孤儿更必须在重灌前清掉（否则复活已删文档）。
+     * <p>公开给"按知识体重建"用：那条路径只处理一个体自己的索引，不能走
+     * {@link #reindex(ChunkArchive, ChunkArchiveReconciler, KnowledgeStore, EmbeddingModel, int)}
+     * ——它会遍历源后端的全部 collection。</p>
+     *
+     * <p>对账传 {@link Duration#ZERO} 关护栏：用户点了"重建"，意图明确，
+     * 不该被"文件太新"挡下；孤儿更必须在重灌前清掉（否则复活已删文档）。</p>
      */
-    private static List<KbChunk> loadAll(ChunkArchive archive,
-                                         ChunkArchiveReconciler reconciler,
-                                         KnowledgeStore store,
-                                         String collection) {
+    public static List<KbChunk> loadCollection(ChunkArchive archive,
+                                               ChunkArchiveReconciler reconciler,
+                                               KnowledgeStore store,
+                                               String collection) {
         reconciler.reconcileCollection(collection, Duration.ZERO);
 
         Set<String> docIds = new LinkedHashSet<>(archive.docIdsOf(collection));
@@ -217,7 +221,7 @@ public class VectorReindexer {
     }
 
     /** 单个 collection 的重灌：25 条/批 embed 后整批 write */
-    private static int reindexCollection(KnowledgeStore store, EmbeddingModel embeddingModel,
+    public static int reindexCollection(KnowledgeStore store, EmbeddingModel embeddingModel,
                                          String collection, List<KbChunk> chunks) {
         if (chunks.isEmpty()) {
             return 0;
