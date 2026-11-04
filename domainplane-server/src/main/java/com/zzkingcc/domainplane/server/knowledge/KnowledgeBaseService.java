@@ -736,6 +736,83 @@ public class KnowledgeBaseService {
     }
 
     /**
+     * 合并知识体：把 source 的原文重灌进 target（P5 运维区的"合并知识体"）。
+     *
+     * <p>为什么走原文而不是"搬索引"：两个体的索引名不同、向量模型可能也不同，
+     * 只有原文与后端无关。所以读 source 的切片档案、按 target 当前模型重算向量、
+     * 写进 target 的索引——与"换落点"用的是同一套重建动作。</p>
+     *
+     * <p>同名文档（按文件名，忽略大小写）：{@code replace=false} 时跳过并计数，
+     * 由页面如实报"跳过 N 篇"；{@code true} 时覆盖。source 体<b>不动</b>——
+     * 合并完是否删它由用户在卡片上显式决定（删体是唯一毁数据的入口）。</p>
+     *
+     * @param targetId 目标体（接收方）
+     * @param sourceId 源体（提供原文）
+     * @param replace  同名文档是否覆盖
+     * @return 合并结果
+     */
+    public MergeResult mergeBodies(String targetId, String sourceId, boolean replace) {
+        String target = trimToNull(targetId);
+        String source = trimToNull(sourceId);
+        if (target == null || source == null) {
+            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER, "要指定目标体和源体");
+        }
+        if (target.equals(source)) {
+            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER, "不能把知识体合并到它自己");
+        }
+        String targetIndex = indexOf(target);
+        String sourceIndex = indexOf(source);
+        if (!modelHolder.isEmbeddingConfigured()) {
+            throw new NotConfiguredException("合并要按目标体当前的向量模型重算每一片："
+                    + "先在「模型设置」页启用 Embedding 模型");
+        }
+        KnowledgeStore targetStore = writeStore(target);
+        Set<String> targetNames = new LinkedHashSet<>();
+        for (DocumentAgg doc : mergeDocuments(targetIndex, LIST_MAX_SIZE)) {
+            if (doc.fileName() != null) {
+                targetNames.add(lower(doc.fileName()));
+            }
+        }
+        Set<String> sourceDocs = chunkArchive.docIdsOf(sourceIndex);
+        int merged = 0;
+        int skipped = 0;
+        int written = 0;
+        for (String docId : sourceDocs) {
+            java.util.Optional<List<KbChunk>> chunks = chunkArchive.read(sourceIndex, docId);
+            if (chunks.isEmpty() || chunks.get().isEmpty()) {
+                skipped++;
+                continue;
+            }
+            String fileName = chunks.get().get(0).metadata() == null ? null
+                    : chunks.get().get(0).metadata().get(ChunkMetadataKeys.FILE_NAME);
+            String key = fileName == null ? null : lower(fileName);
+            if (key != null && !replace && targetNames.contains(key)) {
+                skipped++;
+                continue;
+            }
+            written += VectorReindexer.reindexCollection(targetStore, embeddingModel, targetIndex, chunks.get());
+            merged++;
+            if (key != null) {
+                targetNames.add(key);
+            }
+        }
+        log.info("[知识库] 合并完成：{} → {}，写入 {} 个文档 / {} 条切片，跳过 {}（源体未删）",
+                source, target, merged, written, skipped);
+        return new MergeResult(target, source, merged, skipped, written, sourceDocs.size());
+    }
+
+    /**
+     * 合并结果。
+     *
+     * @param documents 实际写入目标体的文档数
+     * @param skipped   跳过的文档数（同名且未开覆盖，或源档案缺失）
+     * @param total     源体档案里的文档总数
+     */
+    public record MergeResult(String target, String source, int documents, int skipped,
+                              int chunksWritten, int total) {
+    }
+
+    /**
      * 换落点的预演结果。
      *
      * @param ready             能不能迁；false 时看 {@code reason}

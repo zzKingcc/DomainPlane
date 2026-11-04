@@ -118,6 +118,22 @@
                     <div class="dp-kb-orphan-list" id="orphanList"></div>
                 </div>
             </div>
+
+            <!-- 运维区：诊断 / 认领 / 清理 / 合并。默认收起，展开才查（每格都要连远程） -->
+            <div class="card dp-panel dp-kb-ops" id="opsCard">
+                <div class="card-body">
+                    <div class="dp-op-head">
+                        <span class="dp-op-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+                        </span>
+                        <h3>运维</h3>
+                        <span class="spacer"></span>
+                        <span class="muted-sm" id="opsSummary">诊断 · 认领无主集合 · 清理遗留 · 合并知识体</span>
+                        <button class="linkbtn" id="opsToggleBtn">展开</button>
+                    </div>
+                    <div id="opsBody" hidden></div>
+                </div>
+            </div>
         </div>
     </main>
 </div>

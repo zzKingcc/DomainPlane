@@ -1071,6 +1071,219 @@
         });
     }
 
+    /* ==================== 运维区 ==================== */
+
+    var OPS_STATUS = {
+        ok: ['在用', 'ok'],
+        legacy: ['遗留', 'warn'],
+        orphan: ['无主', 'err']
+    };
+
+    /**
+     * 运维区默认收起：展开才诊断。
+     *
+     * 诊断要逐台枚举集合、问维度与切片数，全部是远程调用；放进首屏等于每次打开知识库
+     * 都多等几秒。事件只在这里绑一次（内容会整体重绘，委托给容器）。
+     */
+    function initOps() {
+        var btn = document.getElementById('opsToggleBtn');
+        var box = document.getElementById('opsBody');
+        if (!btn || !box) { return; }
+        btn.addEventListener('click', function () {
+            if (!box.hidden) {
+                box.hidden = true;
+                btn.textContent = '展开';
+                return;
+            }
+            box.hidden = false;
+            btn.textContent = '收起';
+            loadOps();
+        });
+        box.addEventListener('click', onOpsClick);
+    }
+
+    function loadOps() {
+        var box = document.getElementById('opsBody');
+        if (!box) { return; }
+        box.innerHTML = '<div class="dp-kb-loading">正在诊断…（逐台枚举集合）</div>';
+        Console.api.get('/admin/bodies/ops/diagnostics').then(function (d) {
+            box.innerHTML = opsHtml(d);
+        }).catch(function (e) {
+            box.innerHTML = '<div class="dp-kb-empty"><h4>诊断失败</h4><p>' + esc(e.message) + '</p></div>';
+        });
+    }
+
+    function opsHtml(d) {
+        var s = d.summary || {};
+        var head = '<div class="dp-kb-note">' + fmt(s.collections) + ' 个集合 · ' + fmt(s.chunks)
+            + ' 条切片 · 无主 ' + fmt(s.orphans) + ' · 遗留 ' + fmt(s.legacy) + '</div>';
+        var blocks = (d.backends || []).map(function (b) {
+            var rows = (b.collections || []).map(function (c) {
+                var pair = OPS_STATUS[c.status] || [c.status || '—', ''];
+                var act = '';
+                if (c.status === 'orphan') {
+                    act = '<button class="linkbtn" data-adopt="' + esc(c.name) + '" data-conn="'
+                        + esc(b.id) + '">认领</button>';
+                } else if (c.status === 'legacy') {
+                    act = '<button class="linkbtn danger" data-clean="' + esc(c.name) + '" data-conn="'
+                        + esc(b.id) + '">清理</button>';
+                }
+                return '<tr><td class="mono">' + esc(c.name) + '</td>'
+                    + '<td>' + (c.bodyName ? esc(c.bodyName) : '<span class="muted-sm">—</span>') + '</td>'
+                    + '<td><span class="dp-chip ' + pair[1] + '">' + esc(pair[0]) + '</span></td>'
+                    + '<td>' + (c.dimension == null ? '—' : c.dimension) + '</td>'
+                    + '<td>' + fmt(c.chunks) + '</td>'
+                    + '<td class="ta-r">' + act + '</td></tr>';
+            }).join('');
+            return '<div class="dp-ops-block">'
+                + '<div class="dp-ops-block-head"><code>' + esc(b.id) + '</code>'
+                + '<span class="muted-sm">' + esc(b.location || '') + '</span>'
+                + (b.reachable ? '' : '<span class="dp-chip err">不可达</span>')
+                + '</div>'
+                + (b.reachable
+                    ? (rows
+                        ? '<table class="table dp-kb-health"><thead><tr><th>集合</th><th>归属</th>'
+                            + '<th>状态</th><th>维度</th><th>切片</th><th class="ta-r">操作</th></tr></thead>'
+                            + '<tbody>' + rows + '</tbody></table>'
+                        : '<div class="muted-sm">这台连接上没有知识库集合</div>')
+                    : '<div class="muted-sm">连不上，跳过这一台</div>')
+                + '</div>';
+        }).join('');
+        return head + (blocks || '<div class="muted-sm">还没有可用的连接</div>') + mergeHtml();
+    }
+
+    function mergeHtml() {
+        var bodies = (state.snap && state.snap.bodies) || [];
+        var opts = bodies.map(function (b) {
+            return '<option value="' + esc(b.id) + '">' + esc(b.name || b.id) + '</option>';
+        }).join('');
+        if (!opts) { return ''; }
+        return '<div class="dp-ops-block">'
+            + '<div class="dp-ops-block-head"><b>合并知识体</b>'
+            + '<span class="muted-sm">把源体的原文重灌进目标体；源体不删</span></div>'
+            + '<div class="dp-form-grid">'
+            + '<label class="dp-form-field"><span>源体（提供原文）</span>'
+            + '<select class="form-select" id="mergeSource">' + opts + '</select></label>'
+            + '<label class="dp-form-field"><span>目标体（接收）</span>'
+            + '<select class="form-select" id="mergeTarget">' + opts + '</select></label>'
+            + '</div>'
+            + '<label class="dp-op-check"><input type="checkbox" id="mergeReplace"> 同名文档覆盖</label>'
+            + '<button class="btn btn-sm btn-outline-secondary" id="mergeGo">合并</button>'
+            + '</div>';
+    }
+
+    function onOpsClick(e) {
+        var t = e.target;
+        if (!t || !t.getAttribute) { return; }
+        var adopt = t.getAttribute('data-adopt');
+        if (adopt) { openAdopt(t.getAttribute('data-conn'), adopt); return; }
+        var clean = t.getAttribute('data-clean');
+        if (clean) { cleanCollection(t.getAttribute('data-conn'), clean); return; }
+        if (t.id === 'mergeGo') { openMerge(); }
+    }
+
+    /**
+     * 认领无主集合：集合名原样当作体的冻结索引，已有数据不动。
+     *
+     * 唯一名必须新起（它是体的身份，也是以后新建索引的派生源），不跟着集合名走——
+     * 集合名是 <code>domainplane_kb_&lt;slug&gt;_&lt;hash&gt;</code> 形态，直接拿来当 slug 不合规。
+     */
+    function openAdopt(connection, index) {
+        openModal({
+            title: '认领集合',
+            body: '<div class="dp-kb-note">集合 <code>' + esc(index) + '</code> 会<b>原样</b>作为知识体的'
+                + '冻结索引名：已有数据不动，也不用重传。</div>'
+                + '<label class="dp-form-field"><span>唯一名（slug）<em>必填</em></span>'
+                + '<input class="form-control" id="adoptSlug" placeholder="sales-kb" maxlength="40"></label>'
+                + '<label class="dp-form-field"><span>展示名</span>'
+                + '<input class="form-control" id="adoptName" placeholder="销售知识库"></label>',
+            footer: '<button class="btn btn-primary" id="adoptGo">认领</button>',
+            onOpen: function (root) {
+                root.querySelector('#adoptGo').addEventListener('click', function () {
+                    var slug = root.querySelector('#adoptSlug').value.trim();
+                    var name = root.querySelector('#adoptName').value.trim();
+                    if (!slug) {
+                        Console.toast('先填唯一名', { type: 'warning' });
+                        return;
+                    }
+                    var btn = root.querySelector('#adoptGo');
+                    btn.disabled = true;
+                    Console.api.post('/admin/bodies/ops/adopt', {
+                        connection: connection, index: index, slug: slug, name: name
+                    }).then(function () {
+                        closeModal();
+                        Console.toast('已认领为知识体「' + (name || slug) + '」', { type: 'success' });
+                        loadSnapshot();
+                        loadOps();
+                    }).catch(function (err) {
+                        btn.disabled = false;
+                        Console.toast('认领失败：' + err.message, { type: 'error', wide: true });
+                    });
+                });
+            }
+        });
+    }
+
+    function cleanCollection(connection, index) {
+        openModal({
+            title: '清理遗留集合',
+            body: '<div class="dp-kb-note">这个集合属于某个知识体，但那个体已经换到别的落点了。'
+                + '删的只是这份残留副本，不影响该体当前的数据。</div>'
+                + '<label class="dp-form-field"><span>输入集合名 <code>' + esc(index) + '</code> 确认</span>'
+                + '<input class="form-control mono" id="cleanConfirm"></label>',
+            footer: '<button class="btn btn-outline-danger" id="cleanGo">删除</button>',
+            onOpen: function (root) {
+                root.querySelector('#cleanGo').addEventListener('click', function () {
+                    var typed = root.querySelector('#cleanConfirm').value.trim();
+                    var btn = root.querySelector('#cleanGo');
+                    btn.disabled = true;
+                    var url = '/admin/bodies/ops/collections?connection=' + encodeURIComponent(connection)
+                        + '&index=' + encodeURIComponent(index) + '&confirm=' + encodeURIComponent(typed);
+                    Console.api.del(url).then(function () {
+                        closeModal();
+                        Console.toast('已清理「' + index + '」', { type: 'success' });
+                        loadOps();
+                    }).catch(function (err) {
+                        btn.disabled = false;
+                        Console.toast('清理失败：' + err.message, { type: 'error', wide: true });
+                    });
+                });
+            }
+        });
+    }
+
+    function openMerge() {
+        var source = document.getElementById('mergeSource');
+        var target = document.getElementById('mergeTarget');
+        var replace = document.getElementById('mergeReplace');
+        if (!source || !target) { return; }
+        if (source.value === target.value) {
+            Console.toast('源体和目标体不能是同一个', { type: 'warning' });
+            return;
+        }
+        var srcName = source.options[source.selectedIndex].textContent;
+        var tgtName = target.options[target.selectedIndex].textContent;
+        Console.confirm('把「' + srcName + '」的原文合并进「' + tgtName + '」？\n\n'
+            + '· 按目标体当前的向量模型重算每一片\n'
+            + '· 源知识体不会被删除\n'
+            + '· 同名文档' + (replace && replace.checked ? '覆盖' : '跳过'),
+            { title: '合并知识体', okText: '开始合并' }).then(function (ok) {
+            if (!ok) { return; }
+            Console.toast('正在合并，文档多时会比较久…', { type: 'info' });
+            Console.api.post('/admin/bodies/ops/merge', {
+                source: source.value,
+                target: target.value,
+                replace: !!(replace && replace.checked)
+            }).then(function (res) {
+                Console.toast(res.message || '合并完成', { type: 'success', wide: true });
+                loadSnapshot();
+                loadOps();
+            }).catch(function (err) {
+                Console.toast('合并失败：' + err.message, { type: 'error', wide: true });
+            });
+        });
+    }
+
     /* ==================== 接线 ==================== */
 
     function onGridClick(e) {
@@ -1129,6 +1342,7 @@
     Console.renderSidebar('knowledge');
     var grid = document.getElementById('bodyGrid');
     grid.addEventListener('click', onGridClick);
+    initOps();
     document.getElementById('createBodyBtn').addEventListener('click', openCreate);
     document.getElementById('refreshBtn').addEventListener('click', function () {
         loadSnapshot();

@@ -1132,6 +1132,12 @@ tbody tr:hover { background: #fcfcfd; }
 .dp-kb-health th { font-size: 12px; font-weight: 500; color: var(--muted); }
 .dp-kb-health td { vertical-align: middle; white-space: nowrap; }
 
+/* 运维区：每台连接一段，段内是集合表。块之间靠留白分隔，不画卡片套卡片。 */
+.dp-ops-block { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--tblr-border-color, #e6e8eb); }
+.dp-ops-block:first-of-type { border-top: 0; padding-top: 0; }
+.dp-ops-block-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.dp-ops-block-head code { font-size: 12px; color: var(--text); }
+
 /* ===== L2 · 请求趋势（SVG 折线，无 Chart.js） =====
    窗口数据来自后端 MetricsRegistry 采样（累计值差分前已算成速率）。
    svg 用 preserveAspectRatio="none" 做宽度自适应，描边必须 non-scaling-stroke，

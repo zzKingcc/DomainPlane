@@ -894,6 +894,178 @@
         }
       });
     }
+    var OPS_STATUS = {
+      ok: ["\u5728\u7528", "ok"],
+      legacy: ["\u9057\u7559", "warn"],
+      orphan: ["\u65E0\u4E3B", "err"]
+    };
+    function initOps() {
+      var btn = document.getElementById("opsToggleBtn");
+      var box = document.getElementById("opsBody");
+      if (!btn || !box) {
+        return;
+      }
+      btn.addEventListener("click", function() {
+        if (!box.hidden) {
+          box.hidden = true;
+          btn.textContent = "\u5C55\u5F00";
+          return;
+        }
+        box.hidden = false;
+        btn.textContent = "\u6536\u8D77";
+        loadOps();
+      });
+      box.addEventListener("click", onOpsClick);
+    }
+    function loadOps() {
+      var box = document.getElementById("opsBody");
+      if (!box) {
+        return;
+      }
+      box.innerHTML = '<div class="dp-kb-loading">\u6B63\u5728\u8BCA\u65AD\u2026\uFF08\u9010\u53F0\u679A\u4E3E\u96C6\u5408\uFF09</div>';
+      Console.api.get("/admin/bodies/ops/diagnostics").then(function(d) {
+        box.innerHTML = opsHtml(d);
+      }).catch(function(e) {
+        box.innerHTML = '<div class="dp-kb-empty"><h4>\u8BCA\u65AD\u5931\u8D25</h4><p>' + esc(e.message) + "</p></div>";
+      });
+    }
+    function opsHtml(d) {
+      var s = d.summary || {};
+      var head = '<div class="dp-kb-note">' + fmt(s.collections) + " \u4E2A\u96C6\u5408 \xB7 " + fmt(s.chunks) + " \u6761\u5207\u7247 \xB7 \u65E0\u4E3B " + fmt(s.orphans) + " \xB7 \u9057\u7559 " + fmt(s.legacy) + "</div>";
+      var blocks = (d.backends || []).map(function(b) {
+        var rows = (b.collections || []).map(function(c) {
+          var pair = OPS_STATUS[c.status] || [c.status || "\u2014", ""];
+          var act = "";
+          if (c.status === "orphan") {
+            act = '<button class="linkbtn" data-adopt="' + esc(c.name) + '" data-conn="' + esc(b.id) + '">\u8BA4\u9886</button>';
+          } else if (c.status === "legacy") {
+            act = '<button class="linkbtn danger" data-clean="' + esc(c.name) + '" data-conn="' + esc(b.id) + '">\u6E05\u7406</button>';
+          }
+          return '<tr><td class="mono">' + esc(c.name) + "</td><td>" + (c.bodyName ? esc(c.bodyName) : '<span class="muted-sm">\u2014</span>') + '</td><td><span class="dp-chip ' + pair[1] + '">' + esc(pair[0]) + "</span></td><td>" + (c.dimension == null ? "\u2014" : c.dimension) + "</td><td>" + fmt(c.chunks) + '</td><td class="ta-r">' + act + "</td></tr>";
+        }).join("");
+        return '<div class="dp-ops-block"><div class="dp-ops-block-head"><code>' + esc(b.id) + '</code><span class="muted-sm">' + esc(b.location || "") + "</span>" + (b.reachable ? "" : '<span class="dp-chip err">\u4E0D\u53EF\u8FBE</span>') + "</div>" + (b.reachable ? rows ? '<table class="table dp-kb-health"><thead><tr><th>\u96C6\u5408</th><th>\u5F52\u5C5E</th><th>\u72B6\u6001</th><th>\u7EF4\u5EA6</th><th>\u5207\u7247</th><th class="ta-r">\u64CD\u4F5C</th></tr></thead><tbody>' + rows + "</tbody></table>" : '<div class="muted-sm">\u8FD9\u53F0\u8FDE\u63A5\u4E0A\u6CA1\u6709\u77E5\u8BC6\u5E93\u96C6\u5408</div>' : '<div class="muted-sm">\u8FDE\u4E0D\u4E0A\uFF0C\u8DF3\u8FC7\u8FD9\u4E00\u53F0</div>') + "</div>";
+      }).join("");
+      return head + (blocks || '<div class="muted-sm">\u8FD8\u6CA1\u6709\u53EF\u7528\u7684\u8FDE\u63A5</div>') + mergeHtml();
+    }
+    function mergeHtml() {
+      var bodies = state.snap && state.snap.bodies || [];
+      var opts = bodies.map(function(b) {
+        return '<option value="' + esc(b.id) + '">' + esc(b.name || b.id) + "</option>";
+      }).join("");
+      if (!opts) {
+        return "";
+      }
+      return '<div class="dp-ops-block"><div class="dp-ops-block-head"><b>\u5408\u5E76\u77E5\u8BC6\u4F53</b><span class="muted-sm">\u628A\u6E90\u4F53\u7684\u539F\u6587\u91CD\u704C\u8FDB\u76EE\u6807\u4F53\uFF1B\u6E90\u4F53\u4E0D\u5220</span></div><div class="dp-form-grid"><label class="dp-form-field"><span>\u6E90\u4F53\uFF08\u63D0\u4F9B\u539F\u6587\uFF09</span><select class="form-select" id="mergeSource">' + opts + '</select></label><label class="dp-form-field"><span>\u76EE\u6807\u4F53\uFF08\u63A5\u6536\uFF09</span><select class="form-select" id="mergeTarget">' + opts + '</select></label></div><label class="dp-op-check"><input type="checkbox" id="mergeReplace"> \u540C\u540D\u6587\u6863\u8986\u76D6</label><button class="btn btn-sm btn-outline-secondary" id="mergeGo">\u5408\u5E76</button></div>';
+    }
+    function onOpsClick(e) {
+      var t = e.target;
+      if (!t || !t.getAttribute) {
+        return;
+      }
+      var adopt = t.getAttribute("data-adopt");
+      if (adopt) {
+        openAdopt(t.getAttribute("data-conn"), adopt);
+        return;
+      }
+      var clean = t.getAttribute("data-clean");
+      if (clean) {
+        cleanCollection(t.getAttribute("data-conn"), clean);
+        return;
+      }
+      if (t.id === "mergeGo") {
+        openMerge();
+      }
+    }
+    function openAdopt(connection, index) {
+      openModal({
+        title: "\u8BA4\u9886\u96C6\u5408",
+        body: '<div class="dp-kb-note">\u96C6\u5408 <code>' + esc(index) + '</code> \u4F1A<b>\u539F\u6837</b>\u4F5C\u4E3A\u77E5\u8BC6\u4F53\u7684\u51BB\u7ED3\u7D22\u5F15\u540D\uFF1A\u5DF2\u6709\u6570\u636E\u4E0D\u52A8\uFF0C\u4E5F\u4E0D\u7528\u91CD\u4F20\u3002</div><label class="dp-form-field"><span>\u552F\u4E00\u540D\uFF08slug\uFF09<em>\u5FC5\u586B</em></span><input class="form-control" id="adoptSlug" placeholder="sales-kb" maxlength="40"></label><label class="dp-form-field"><span>\u5C55\u793A\u540D</span><input class="form-control" id="adoptName" placeholder="\u9500\u552E\u77E5\u8BC6\u5E93"></label>',
+        footer: '<button class="btn btn-primary" id="adoptGo">\u8BA4\u9886</button>',
+        onOpen: function(root) {
+          root.querySelector("#adoptGo").addEventListener("click", function() {
+            var slug = root.querySelector("#adoptSlug").value.trim();
+            var name = root.querySelector("#adoptName").value.trim();
+            if (!slug) {
+              Console.toast("\u5148\u586B\u552F\u4E00\u540D", { type: "warning" });
+              return;
+            }
+            var btn = root.querySelector("#adoptGo");
+            btn.disabled = true;
+            Console.api.post("/admin/bodies/ops/adopt", {
+              connection,
+              index,
+              slug,
+              name
+            }).then(function() {
+              closeModal();
+              Console.toast("\u5DF2\u8BA4\u9886\u4E3A\u77E5\u8BC6\u4F53\u300C" + (name || slug) + "\u300D", { type: "success" });
+              loadSnapshot();
+              loadOps();
+            }).catch(function(err) {
+              btn.disabled = false;
+              Console.toast("\u8BA4\u9886\u5931\u8D25\uFF1A" + err.message, { type: "error", wide: true });
+            });
+          });
+        }
+      });
+    }
+    function cleanCollection(connection, index) {
+      openModal({
+        title: "\u6E05\u7406\u9057\u7559\u96C6\u5408",
+        body: '<div class="dp-kb-note">\u8FD9\u4E2A\u96C6\u5408\u5C5E\u4E8E\u67D0\u4E2A\u77E5\u8BC6\u4F53\uFF0C\u4F46\u90A3\u4E2A\u4F53\u5DF2\u7ECF\u6362\u5230\u522B\u7684\u843D\u70B9\u4E86\u3002\u5220\u7684\u53EA\u662F\u8FD9\u4EFD\u6B8B\u7559\u526F\u672C\uFF0C\u4E0D\u5F71\u54CD\u8BE5\u4F53\u5F53\u524D\u7684\u6570\u636E\u3002</div><label class="dp-form-field"><span>\u8F93\u5165\u96C6\u5408\u540D <code>' + esc(index) + '</code> \u786E\u8BA4</span><input class="form-control mono" id="cleanConfirm"></label>',
+        footer: '<button class="btn btn-outline-danger" id="cleanGo">\u5220\u9664</button>',
+        onOpen: function(root) {
+          root.querySelector("#cleanGo").addEventListener("click", function() {
+            var typed = root.querySelector("#cleanConfirm").value.trim();
+            var btn = root.querySelector("#cleanGo");
+            btn.disabled = true;
+            var url = "/admin/bodies/ops/collections?connection=" + encodeURIComponent(connection) + "&index=" + encodeURIComponent(index) + "&confirm=" + encodeURIComponent(typed);
+            Console.api.del(url).then(function() {
+              closeModal();
+              Console.toast("\u5DF2\u6E05\u7406\u300C" + index + "\u300D", { type: "success" });
+              loadOps();
+            }).catch(function(err) {
+              btn.disabled = false;
+              Console.toast("\u6E05\u7406\u5931\u8D25\uFF1A" + err.message, { type: "error", wide: true });
+            });
+          });
+        }
+      });
+    }
+    function openMerge() {
+      var source = document.getElementById("mergeSource");
+      var target = document.getElementById("mergeTarget");
+      var replace = document.getElementById("mergeReplace");
+      if (!source || !target) {
+        return;
+      }
+      if (source.value === target.value) {
+        Console.toast("\u6E90\u4F53\u548C\u76EE\u6807\u4F53\u4E0D\u80FD\u662F\u540C\u4E00\u4E2A", { type: "warning" });
+        return;
+      }
+      var srcName = source.options[source.selectedIndex].textContent;
+      var tgtName = target.options[target.selectedIndex].textContent;
+      Console.confirm(
+        "\u628A\u300C" + srcName + "\u300D\u7684\u539F\u6587\u5408\u5E76\u8FDB\u300C" + tgtName + "\u300D\uFF1F\n\n\xB7 \u6309\u76EE\u6807\u4F53\u5F53\u524D\u7684\u5411\u91CF\u6A21\u578B\u91CD\u7B97\u6BCF\u4E00\u7247\n\xB7 \u6E90\u77E5\u8BC6\u4F53\u4E0D\u4F1A\u88AB\u5220\u9664\n\xB7 \u540C\u540D\u6587\u6863" + (replace && replace.checked ? "\u8986\u76D6" : "\u8DF3\u8FC7"),
+        { title: "\u5408\u5E76\u77E5\u8BC6\u4F53", okText: "\u5F00\u59CB\u5408\u5E76" }
+      ).then(function(ok) {
+        if (!ok) {
+          return;
+        }
+        Console.toast("\u6B63\u5728\u5408\u5E76\uFF0C\u6587\u6863\u591A\u65F6\u4F1A\u6BD4\u8F83\u4E45\u2026", { type: "info" });
+        Console.api.post("/admin/bodies/ops/merge", {
+          source: source.value,
+          target: target.value,
+          replace: !!(replace && replace.checked)
+        }).then(function(res) {
+          Console.toast(res.message || "\u5408\u5E76\u5B8C\u6210", { type: "success", wide: true });
+          loadSnapshot();
+          loadOps();
+        }).catch(function(err) {
+          Console.toast("\u5408\u5E76\u5931\u8D25\uFF1A" + err.message, { type: "error", wide: true });
+        });
+      });
+    }
     function onGridClick(e) {
       var t = e.target;
       var btn = t && t.closest ? t.closest("[data-act]") : null;
@@ -965,6 +1137,7 @@
     Console.renderSidebar("knowledge");
     var grid = document.getElementById("bodyGrid");
     grid.addEventListener("click", onGridClick);
+    initOps();
     document.getElementById("createBodyBtn").addEventListener("click", openCreate);
     document.getElementById("refreshBtn").addEventListener("click", function() {
       loadSnapshot();

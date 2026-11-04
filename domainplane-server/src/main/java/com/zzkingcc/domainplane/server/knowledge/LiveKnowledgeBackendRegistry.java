@@ -58,7 +58,11 @@ public class LiveKnowledgeBackendRegistry implements KnowledgeBackendRegistry {
                 }
             }
         }
-        this.backends = Map.copyOf(map);
+        /* 用 unmodifiableMap 包 LinkedHashMap，不用 Map.copyOf：
+           Map.copyOf 返回的不可变 Map **不保序**（迭代顺序是 key 的哈希顺序），
+           于是 {@link #all()} 的顺序会随 JVM / 类加载变化——运维区的诊断表每刷新一次
+           换一个排列，测试里"取第 0 个后端"也会时对时错。顺序在这里是展示契约。 */
+        this.backends = java.util.Collections.unmodifiableMap(map);
         log.info("[知识库装配] 后端集合已替换：{} 个（{}）", map.size(), map.keySet());
         for (Runnable listener : onReplace) {
             try {
