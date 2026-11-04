@@ -231,6 +231,11 @@
                     + (v.collectionPrefix ? ' · 前缀 ' + v.collectionPrefix : '')
                 : '未填地址';
         }
+        if (c.type === 's3') {
+            var s3 = c.s3 || {};
+            if (!s3.bucket || !s3.endpoint) { return '未填地址'; }
+            return s3.bucket + ' @ ' + s3.endpoint + (s3.prefix ? ' · 前缀 ' + s3.prefix : '');
+        }
         var es = c.es || {};
         return es.host
             ? es.host + ':' + (es.port || 9200) + ' · ' + (es.scheme || 'http')
@@ -238,17 +243,19 @@
             : '未填地址';
     }
 
-    /* 被哪些知识体引用（两路都算）：改连接前先看影响面 */
+    /* 被哪些知识体引用（两路 + 原文落点）：改连接前先看影响面。
+       原文的缺省值是 local，所以"没写 raw 的体"也算在用本地落点。 */
     function refsOf(id) {
         var names = [];
         STATE.bodies.forEach(function (b) {
-            if (b.keyword === id || b.vector === id) { names.push(b.name || b.id); }
+            var isRaw = b.raw ? b.raw === id : (id === 'local');
+            if (b.keyword === id || b.vector === id || isRaw) { names.push(b.name || b.id); }
         });
         return names;
     }
 
     function rowHtml(c) {
-        var dot = c.type === 'qdrant' ? 'dot-vec' : 'dot-es';
+        var dot = c.type === 'qdrant' ? 'dot-vec' : (c.type === 's3' ? 'dot-blob' : 'dot-es');
         var refs = refsOf(c.id);
         var usable = c.usable !== false;
         return '<tr class="conn-row">'
@@ -273,13 +280,33 @@
     }
 
     function renderConns() {
-        var kw = [], vec = [];
+        var kw = [], vec = [], raw = [];
         STATE.connections.forEach(function (c) {
+            // s3 不参与召回，只可能是原文落点：别塞进 2-1 / 2-2 两张召回路表
+            if (c.type === 's3') { raw.push(c); return; }
             if (c.usage === 'vector') { vec.push(c); } else { kw.push(c); }
         });
         el('connBodyEs').innerHTML = kw.length ? kw.map(rowHtml).join('') : emptyRow('还没有关键字连接，点「+ 新增」加一台');
         el('connBodyVec').innerHTML = vec.length ? vec.map(rowHtml).join('') : emptyRow('还没有向量连接，点「+ 新增」加一台');
+        /* 原文表第一行永远是内置本地盘（它不是一个连接，但知识体可以选它） */
+        el('connBodyTxt').innerHTML = localRawRowHtml()
+            + (raw.length ? raw.map(rowHtml).join('') : '');
         el('connCount').textContent = STATE.connections.length + ' 个连接';
+    }
+
+    /** 内置本地原文存储那一行：不可编辑、不可删除，但会被知识体引用 */
+    function localRawRowHtml() {
+        var refs = refsOf('local');
+        return '<tr class="conn-row">'
+            + '<td><span class="conn-name"><i class="conn-dot dot-blob"></i>本地原文存储</span></td>'
+            + '<td class="mono">应用数据目录 · 内置</td>'
+            + '<td><span class="mbadge ok">已启用</span></td>'
+            + '<td><span class="refs">' + (refs.length
+                ? refs.map(function (n) {
+                    return '<span class="ref-chip">' + Console.escapeHtml(n) + '</span>';
+                }).join('')
+                : '<span class="none">未被引用</span>') + '</span></td>'
+            + '<td class="ta-r"><span class="muted-sm">内置</span></td></tr>';
     }
 
     /* ===== 知识体 ===== */
@@ -489,7 +516,8 @@
         Console.api.post('/admin/infra/test?type=' + encodeURIComponent(kind), payload)
             .then(function (data) {
                 var render = kind === 'redis' ? renderRedisProbe
-                    : (kind === 'es' ? renderEsProbe : renderVectorProbe);
+                    : (kind === 'es' ? renderEsProbe
+                        : (kind === 's3' ? renderS3Probe : renderVectorProbe));
                 showHtmlResult(resultId, render(data), 'ok');
             })
             .catch(function (e) {
@@ -497,6 +525,79 @@
                 showResult(resultId, '连接失败：' + e.message, 'err');
             })
             .then(function () { btn.disabled = false; });
+    }
+
+    /* ---------- 2-3 原文：S3 兼容对象存储（COS / OSS / MinIO 一套表单） ---------- */
+    var s3Mode = 'new';
+    var s3EditId = null;
+
+    var S3_FIELDS = [
+        ['s3Endpoint', 'endpoint', 's'],
+        ['s3Bucket', 'bucket', 's'],
+        ['s3Region', 'region', 's'],
+        ['s3AccessKey', 'accessKey', 's'],
+        ['s3SecretKey', 'secretKey', 's'],
+        ['s3Prefix', 'prefix', 's']
+    ];
+
+    function openS3Modal(mode, id) {
+        s3Mode = mode;
+        s3EditId = id || null;
+        var conn = connById(s3EditId);
+        setText('connModalS3Title', mode === 'new' ? '新增对象存储连接' : ('编辑连接 · ' + id));
+        setHidden('s3NameRow', mode !== 'new');
+        hideResult('s3Result');
+        setNameHelp('s3ConnNameHelp', '知识体的「原文落点」下拉里显示的就是这个名字。', false);
+        if (mode === 'new') {
+            el('s3ConnName').value = '';
+            writeFields(S3_FIELDS, null);
+            el('s3PathStyle').checked = false;
+        } else {
+            writeFields(S3_FIELDS, conn && conn.s3);
+            el('s3PathStyle').checked = !!(conn && conn.s3 && conn.s3.pathStyle);
+        }
+        setText('saveS3Btn', mode === 'new' ? '加入连接' : '保存并生效');
+        showModal('connModalS3');
+    }
+
+    function s3Payload() {
+        var payload = readFields(S3_FIELDS) || {};
+        payload.pathStyle = !!el('s3PathStyle').checked;
+        return payload;
+    }
+
+    function renderS3Probe(data) {
+        return '<b>连接正常</b> · ' + Console.escapeHtml(String(data.detail || '对象存储可达'));
+    }
+
+    async function saveS3(btn) {
+        var name = s3Mode === 'new' ? el('s3ConnName').value.trim() : s3EditId;
+        if (s3Mode === 'new') {
+            if (!name) {
+                setNameHelp('s3ConnNameHelp', '先给这个连接起个名字。', true);
+                el('s3ConnName').focus();
+                return false;
+            }
+            if (findConn(name)) {
+                setNameHelp('s3ConnNameHelp', '已经有叫「' + name + '」的连接了，换一个。', true);
+                el('s3ConnName').focus();
+                return false;
+            }
+        }
+        var conn = {
+            id: name, name: name, type: 's3', usage: null,
+            es: null, vector: null, s3: s3Payload()
+        };
+        var idx = -1;
+        STATE.connections.forEach(function (c, i) { if (c.id === name) { idx = i; } });
+        var prev = idx >= 0 ? STATE.connections[idx] : null;
+        if (idx >= 0) { STATE.connections[idx] = conn; } else { STATE.connections.push(conn); }
+        renderConns();
+        var data = await commit(function () {
+            if (prev) { STATE.connections[idx] = prev; } else { STATE.connections.pop(); }
+        }, 's3Result', '连接「' + name + '」已保存并生效', btn);
+        if (data) { hideModal('connModalS3'); }
+        return !!data;
     }
 
     /* ---------- 2-1 关键字 ---------- */
@@ -709,8 +810,22 @@
     Array.prototype.forEach.call(document.querySelectorAll('[data-add-conn]'), function (btn) {
         btn.addEventListener('click', function () {
             var seg = btn.getAttribute('data-add-conn');
-            if (seg === 'es') { openEsModal('new'); } else { openVecModal('new'); }
+            if (seg === 'es') { openEsModal('new'); }
+            else if (seg === 's3') { openS3Modal('new'); }
+            else { openVecModal('new'); }
         });
+    });
+
+    el('saveS3Btn').addEventListener('click', function () { saveS3(this); });
+    el('cancelS3Btn').addEventListener('click', function () { hideModal('connModalS3'); });
+    el('connModalS3Close').addEventListener('click', function () { hideModal('connModalS3'); });
+    el('testS3Btn').addEventListener('click', function () {
+        testConn('s3', {
+            id: s3EditId || el('s3ConnName').value.trim(),
+            name: el('s3ConnName').value.trim(),
+            type: 's3',
+            s3: s3Payload()
+        }, 's3Result', this);
     });
 
     /* 表格里的编辑 / 删除（行是动态渲染的，用委托） */
@@ -720,7 +835,9 @@
             if (!t.getAttribute) { return; }
             var edit = t.getAttribute('data-edit');
             if (edit) {
-                if (seg === 'es') { openEsModal('edit', edit); } else { openVecModal('edit', edit); }
+                if (seg === 'es') { openEsModal('edit', edit); }
+                else if (seg === 's3') { openS3Modal('edit', edit); }
+                else { openVecModal('edit', edit); }
                 return;
             }
             var del = t.getAttribute('data-del');
@@ -757,6 +874,7 @@
     }
     bindTable('connBodyEs', 'es');
     bindTable('connBodyVec', 'vector');
+    bindTable('connBodyTxt', 's3');
 
     /* 2-1 弹窗 */
     el('saveEsBtn').addEventListener('click', function () { saveEs(this); });

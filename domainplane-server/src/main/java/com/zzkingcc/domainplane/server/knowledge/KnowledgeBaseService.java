@@ -614,6 +614,128 @@ public class KnowledgeBaseService {
     }
 
     /**
+     * 换原文落点的预演：只数对象，不动任何东西。
+     *
+     * <p>报"有多少个对象"而不是字节数：{@code listKeys} 拿不到大小，为了一个预演数字
+     * 去 HEAD 每个对象，代价远大于收益（页面上的容量统计在别处）。</p>
+     */
+    public BodyRawPlan planRaw(String bodyId, String targetLocation) {
+        String index = indexOf(bodyId);
+        InfraSettings.KnowledgeBody body = bodyResolver.body(bodyId);
+        String current = body == null ? InfraSettings.RAW_LOCAL : body.rawLocation();
+        String target = trimToNull(targetLocation);
+        if (target == null) {
+            return new BodyRawPlan(bodyId, index, current, null, 0, 0, false, "没选目标落点");
+        }
+        if (target.equals(current)) {
+            return new BodyRawPlan(bodyId, index, current, target, 0, 0, false,
+                    "原文已经落在这个位置，没有要搬的东西");
+        }
+        try {
+            com.zzkingcc.domainplane.runtime.storage.BlobStore from = chunkArchive.storeAt(current);
+            int chunks = from.listKeys(ChunkArchive.PREFIX + index + "/").size();
+            int files = from.listKeys(ChunkArchive.FILES_PREFIX + index + "/").size();
+            chunkArchive.storeAt(target);   // 目标不可用会在这里抛
+            return new BodyRawPlan(bodyId, index, current, target, chunks, files, true, null);
+        } catch (RuntimeException e) {
+            return new BodyRawPlan(bodyId, index, current, target, 0, 0, false,
+                    "落点不可用：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 换原文落点：<b>先搬后切</b>。
+     *
+     * <p>顺序硬要求：把该体的全部对象（切片档案 + 原始文件）复制到新落点，
+     * <b>逐个校验、数量对上</b>之后才由调用方切 {@code raw} 字段。反过来先切指针，
+     * 等于让"读原文"立刻指向一个空目录，而旧落点的数据既查不到也不会被清理。</p>
+     *
+     * <p>旧落点上的副本<b>不删</b>：与索引换落点同一条纪律（删是运维动作，
+     * 且删错了就没有回退依据）。原文键带索引前缀，不可能属于别的体，将来清理是安全的。</p>
+     *
+     * @return 搬迁结果
+     */
+    public BodyRawMigration migrateRaw(String bodyId, String targetLocation) {
+        String index = indexOf(bodyId);
+        InfraSettings.KnowledgeBody body = bodyResolver.body(bodyId);
+        if (body == null) {
+            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER, "知识体不存在：" + bodyId);
+        }
+        String current = body.rawLocation();
+        String target = trimToNull(targetLocation);
+        if (target == null) {
+            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER, "没选目标落点");
+        }
+        if (target.equals(current)) {
+            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER,
+                    "原文已经落在这个位置（" + current + "），不需要迁移");
+        }
+        com.zzkingcc.domainplane.runtime.storage.BlobStore from;
+        com.zzkingcc.domainplane.runtime.storage.BlobStore to;
+        try {
+            from = chunkArchive.storeAt(current);
+            to = chunkArchive.storeAt(target);
+        } catch (RuntimeException e) {
+            throw new KnowledgeBaseException(ErrorCode.INVALID_PARAMETER,
+                    "原文落点不可用：" + e.getMessage());
+        }
+        List<String> keys = new ArrayList<>();
+        keys.addAll(from.listKeys(ChunkArchive.PREFIX + index + "/"));
+        keys.addAll(from.listKeys(ChunkArchive.FILES_PREFIX + index + "/"));
+
+        long bytes = 0;
+        int copied = 0;
+        try {
+            for (String key : keys) {
+                java.util.Optional<java.io.InputStream> in = from.open(key);
+                if (in.isEmpty()) {
+                    continue;
+                }
+                byte[] data;
+                try (java.io.InputStream stream = in.get()) {
+                    data = stream.readAllBytes();
+                }
+                to.put(key, new java.io.ByteArrayInputStream(data), data.length);
+                bytes += data.length;
+                copied++;
+            }
+        } catch (java.io.IOException | RuntimeException e) {
+            throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
+                    "搬原文到 " + target + " 失败（已搬 " + copied + "/" + keys.size()
+                            + " 个对象），已中止（原落点未改动）：" + e.getMessage(), e);
+        }
+
+        /* 校验"目标上真有这些对象"再让调用方切指针。
+           对象数对不上说明中途有对象没写成功（S3 的最终一致性 / 权限策略都可能造成），
+           此时切指针会得到"档案缺一部分"的体——那比重来一次糟得多。 */
+        int atTarget = to.listKeys(ChunkArchive.PREFIX + index + "/").size()
+                + to.listKeys(ChunkArchive.FILES_PREFIX + index + "/").size();
+        if (atTarget < copied) {
+            throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
+                    "搬完校验不一致：源 " + keys.size() + " 个对象、复制 " + copied
+                            + " 个、目标上只有 " + atTarget + " 个，已中止（原落点未改动）");
+        }
+        log.info("[原文档案] 知识体 {} 的原文已从 {} 搬到 {}：{} 个对象、{} 字节（旧落点副本保留未删）",
+                bodyId, current, target, copied, bytes);
+        return new BodyRawMigration(bodyId, index, current, target, copied, bytes);
+    }
+
+    /**
+     * 换原文落点的预演结果。
+     *
+     * @param chunksObjects 切片档案对象数
+     * @param fileObjects   原始文件对象数
+     */
+    public record BodyRawPlan(String bodyId, String index, String from, String to,
+                              int chunksObjects, int fileObjects, boolean ready, String reason) {
+    }
+
+    /** 换原文落点的执行结果 */
+    public record BodyRawMigration(String bodyId, String index, String from, String to,
+                                   int objects, long bytes) {
+    }
+
+    /**
      * 换落点的预演结果。
      *
      * @param ready             能不能迁；false 时看 {@code reason}
@@ -1233,6 +1355,28 @@ public class KnowledgeBaseService {
     }
 
     /**
+     * 读某文档的原始文件字节（「下载原文」）。
+     *
+     * <p>没有归档过原始文件时返回空——v2 之前上传的存量文档只有切片 JSON，
+     * 而切片 JSON 还原不出原始字节（解析与切分都是有损的）。</p>
+     *
+     * @return 字节；未归档时为空
+     */
+    public java.util.Optional<byte[]> readRawFile(String bodyId, String docId) {
+        String index = indexOf(bodyId);
+        java.util.Optional<java.io.InputStream> in = chunkArchive.openFile(index, docId);
+        if (in.isEmpty()) {
+            return java.util.Optional.empty();
+        }
+        try (java.io.InputStream stream = in.get()) {
+            return java.util.Optional.of(stream.readAllBytes());
+        } catch (java.io.IOException e) {
+            throw new KnowledgeBaseException(ErrorCode.KNOWLEDGE_BASE_ERROR,
+                    "读取原始文件失败（docId=" + docId + "）：" + e.getMessage(), e);
+        }
+    }
+
+    /**
      * 删除一个知识体里的某个文档（全部切片 + 原文档案 + 预览 txt），并释放其文件名。
      *
      * <p>与 v1 的 {@code delete(docId)} 不同：这里<b>必须带体 id</b>。docId 全局唯一，
@@ -1339,6 +1483,14 @@ public class KnowledgeBaseService {
                档案里就如实反映），与 ChunkExporter 同一条"所见即所存"口径。
                写失败只告警（ChunkArchive 内部处理），缺档由对账补写。 */
             chunkArchive.write(index, docId, readStore(bodyId).readByDocId(index, docId));
+
+            /* 原始文件字节：切片 JSON 是"切完之后"的粒度，改解析器或改切片策略时
+               只有原始字节能真正重切，所以默认一并归档（体上 archiveRaw=false 可关，
+               代价是占用接近翻倍）。写失败只告警——上传已经成功，缺原始文件不影响检索。 */
+            InfraSettings.KnowledgeBody archiveBody = bodyResolver.body(bodyId);
+            if (archiveBody == null || archiveBody.archiveRawFiles()) {
+                chunkArchive.writeFile(index, docId, source.content());
+            }
 
             /* 新文档已确认落库，此刻才清理同名旧文档。顺序不能换：反过来的话，新文档任一
                环节失败都会让这次"覆盖更新"变成"只删不写"，旧文档永久消失。

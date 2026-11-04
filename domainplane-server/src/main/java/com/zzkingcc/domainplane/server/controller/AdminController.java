@@ -1559,6 +1559,23 @@ public class AdminController {
                 result.put("note", probeResult.note());
                 result.put("message", probeResult.note() == null
                         ? "向量库连接正常" : probeResult.note());
+            } else if ("s3".equals(kind)) {
+                InfraSettings.ObjectStorage cfg = conn == null ? null : conn.getS3();
+                if (cfg == null || !cfg.isUsable()) {
+                    throw new IllegalStateException("对象存储没填完整：endpoint / 桶 / AK / SK 都要填");
+                }
+                com.zzkingcc.domainplane.server.storage.S3BlobStore s3 =
+                        new com.zzkingcc.domainplane.server.storage.S3BlobStore(cfg);
+                try {
+                    boolean reachable = s3.ping();
+                    result.put("success", reachable);
+                    result.put("detail", cfg.describe());
+                    result.put("message", reachable
+                            ? "对象存储连接正常：" + cfg.describe()
+                            : "对象存储不可达：检查 endpoint / 桶名 / 凭证与「路径风格」开关");
+                } finally {
+                    s3.close();
+                }
             } else {
                 InfraSettingsHolder.EsProbe probeResult =
                         infraHolder.testEs(conn == null ? null : conn.getEs());

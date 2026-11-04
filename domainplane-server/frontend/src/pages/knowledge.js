@@ -638,8 +638,9 @@
     function rawOptions(selected) {
         var opts = state.rawOptions || [];
         return opts.map(function (o) {
-            return '<option value="' + esc(o.id) + '"' + (o.id === selected ? ' selected' : '') + '>'
-                + esc(o.label || o.id) + '</option>';
+            return '<option value="' + esc(o.id) + '"' + (o.id === selected ? ' selected' : '')
+                + (o.detail ? ' title="' + esc(o.detail) + '"' : '') + '>'
+                + esc(o.label || o.id) + (o.available === false ? '（不可用）' : '') + '</option>';
         }).join('');
     }
 
@@ -663,11 +664,12 @@
             + '<label class="dp-form-field"><span>向量落点 <em>语义检索</em></span>'
             + '<select class="form-select" id="bodyVector">' + connectionOptions('vector', b ? b.vector : null) + '</select></label>'
             + '</div>'
-            + (creating ? '' : '<div class="dp-form-hint">改这两栏不会直接生效：保存时先预演，'
-                + '确认后把文档从原文重建到新连接、校验条数，写完才切换。</div>')
+            + (creating ? '' : '<div class="dp-form-hint">改落点不会直接生效：保存时先预演，'
+                + '确认后把数据搬（或从原文重建）到新位置，写完校验通过才切换。</div>')
             + '<label class="dp-form-field"><span>原文落点</span>'
             + '<select class="form-select" id="bodyRaw">' + rawOptions(rawId) + '</select>'
-            + '<small>原文是权威副本：删了索引能从这里重建；换文档服务器后这一栏会多出新的落点。</small></label>'
+            + '<small>原文是权威副本：删了索引能从这里重建。换落点会把档案与原始文件搬过去，'
+            + '搬完校验通过才切。对象存储连接在「存储配置」页加。</small></label>'
             + '<div class="dp-form-hint">至少选一路。两路指向同一台机器时只写一份；分属两台时同一份切片写两份。</div>'
             + '</div>';
     }
@@ -707,10 +709,10 @@
     }
 
     /**
-     * 设置：名字 / 说明 / 原文落点直接保存；两路落点走「迁移」。
+     * 设置：名字 / 说明直接保存；两路落点与原文落点都走「迁移」。
      *
-     * 落点不能直接改（后端也会拒）：迁移要把数据从原文写满到新连接再切指针，
-     * 直接改指针的唯一结果是检索立刻查空、旧机器上的数据再也看不见。
+     * 落点不能直接改（后端也会拒）：索引那一路要把数据从原文写满到新连接再切指针，
+     * 原文那一路要把对象搬过去再切——直接改指针的唯一结果是"立刻查空、旧数据再也看不见"。
      */
     function openSettings(bodyId) {
         var b = bodyById(bodyId);
@@ -729,8 +731,11 @@
                     ['keyword', 'vector'].forEach(function (k) {
                         if (from[k] !== to[k]) { changed.push(k); }
                     });
-                    if (changed.length > 1) {
-                        Console.toast('一次只能迁一路落点：先迁其中一路，保存后再迁另一路',
+                    var rawFrom = (b.raw && b.raw.location) || 'local';
+                    var rawTo = f.raw || 'local';
+                    var rawChanged = rawFrom !== rawTo;
+                    if (changed.length + (rawChanged ? 1 : 0) > 1) {
+                        Console.toast('一次只改一项：索引落点（关键字 / 向量）与原文落点要分开迁',
                             { type: 'warning', wide: true });
                         return;
                     }
@@ -741,14 +746,19 @@
                     }
                     btn.disabled = true;
                     saveMeta(bodyId, f).then(function () {
+                        if (rawChanged) {
+                            return migrateRaw(bodyId, rawTo, rawFrom);
+                        }
                         if (!changed.length) { return false; }
                         return migrateRoute(bodyId, changed[0], to[changed[0]], from[changed[0]]);
                     }).then(function (moved) {
                         closeModal();
                         if (moved) {
-                            Console.toast('落点已切换：索引名不变，旧连接上的同名集合保留未删',
+                            Console.toast(rawChanged
+                                ? '原文已搬到新落点；旧落点上的副本保留未删'
+                                : '落点已切换：索引名不变，旧连接上的同名集合保留未删',
                                 { type: 'success', wide: true });
-                        } else if (changed.length) {
+                        } else if (changed.length || rawChanged) {
                             Console.toast('已保存（落点没有迁移）', { type: 'info' });
                         } else {
                             Console.toast('已保存', { type: 'success' });
@@ -763,12 +773,51 @@
         });
     }
 
-    /** 只提交名字 / 说明 / 原文落点：两路落点由 migrateRoute 走 /routes */
+    /** 只提交名字 / 说明：两路落点与原文落点都由迁移端点负责 */
     function saveMeta(bodyId, f) {
         return Console.api.put('/admin/bodies/' + encodeURIComponent(bodyId), {
             name: f.name,
-            description: f.description,
-            raw: f.raw
+            description: f.description
+        });
+    }
+
+    /** 原文落点的人话名字（下拉选项由后端给，这里只做回显兜底） */
+    function rawLabelOf(id) {
+        var opts = state.rawOptions || [];
+        for (var i = 0; i < opts.length; i++) {
+            if (opts[i].id === id) { return opts[i].label || id; }
+        }
+        return id === 'local' ? '本地原文存储' : id;
+    }
+
+    /**
+     * 换原文落点：先预演（后端只数对象），确认后把档案与原始文件搬到新落点。
+     *
+     * 与 migrateRoute 的差别：索引那一路的上游是原文（可以重建），原文这一路没有上游
+     * ——搬不过去就是真丢了，所以文案要写明"旧副本保留"。
+     *
+     * @return Promise&lt;boolean&gt; true = 已搬完，false = 用户取消
+     */
+    function migrateRaw(bodyId, target, fromId) {
+        var url = '/admin/bodies/' + encodeURIComponent(bodyId) + '/routes';
+        return Console.api.put(url + '?dryRun=true', { raw: target }).then(function (plan) {
+            if (!plan.ready) {
+                throw new Error(plan.reason || '这个原文落点换不上去');
+            }
+            var lines = [
+                '把原文从「' + rawLabelOf(fromId) + '」搬到「' + rawLabelOf(target) + '」？',
+                '',
+                '· ' + fmt(plan.chunksObjects) + ' 份切片档案 + ' + fmt(plan.fileObjects) + ' 个原始文件',
+                '· 逐个复制并校验对象数，全部对上之后才切指针',
+                '· 搬到一半失败会中止，原落点不变',
+                '· 旧落点上的副本不会自动删除'
+            ];
+            return Console.confirm(lines.join('\n'), { title: '迁移原文', okText: '开始搬迁' })
+                .then(function (ok) {
+                    if (!ok) { return false; }
+                    Console.toast('正在搬原文，对象多时会比较久…', { type: 'info' });
+                    return Console.api.put(url, { raw: target }).then(function () { return true; });
+                });
         });
     }
 

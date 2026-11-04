@@ -201,6 +201,16 @@ public class InfraSettingsHolder {
             if (cand.getVector() != null && !hasText(cand.getVector().getToken())) {
                 cand.getVector().setToken(old.getVector() == null ? null : old.getVector().getToken());
             }
+            /* 对象存储：AK / SK 留空 = 沿用已存的那份（与 ES 口令、Qdrant token 同口径）。
+               两个都要处理——只补 SK 的话，编辑页面只回填 AK 时会把 SK 冲成空。 */
+            if (cand.getS3() != null) {
+                if (!hasText(cand.getS3().getAccessKey())) {
+                    cand.getS3().setAccessKey(old.getS3() == null ? null : old.getS3().getAccessKey());
+                }
+                if (!hasText(cand.getS3().getSecretKey())) {
+                    cand.getS3().setSecretKey(old.getS3() == null ? null : old.getS3().getSecretKey());
+                }
+            }
         }
     }
 

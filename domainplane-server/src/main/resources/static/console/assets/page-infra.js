@@ -229,20 +229,28 @@
         var v = c.vector || {};
         return v.uri ? v.uri + (v.metric ? " \xB7 " + v.metric : "") + (v.collectionPrefix ? " \xB7 \u524D\u7F00 " + v.collectionPrefix : "") : "\u672A\u586B\u5730\u5740";
       }
+      if (c.type === "s3") {
+        var s3 = c.s3 || {};
+        if (!s3.bucket || !s3.endpoint) {
+          return "\u672A\u586B\u5730\u5740";
+        }
+        return s3.bucket + " @ " + s3.endpoint + (s3.prefix ? " \xB7 \u524D\u7F00 " + s3.prefix : "");
+      }
       var es = c.es || {};
       return es.host ? es.host + ":" + (es.port || 9200) + " \xB7 " + (es.scheme || "http") + (es.username ? " \xB7 " + es.username : "") : "\u672A\u586B\u5730\u5740";
     }
     function refsOf(id) {
       var names = [];
       STATE.bodies.forEach(function(b) {
-        if (b.keyword === id || b.vector === id) {
+        var isRaw = b.raw ? b.raw === id : id === "local";
+        if (b.keyword === id || b.vector === id || isRaw) {
           names.push(b.name || b.id);
         }
       });
       return names;
     }
     function rowHtml(c) {
-      var dot = c.type === "qdrant" ? "dot-vec" : "dot-es";
+      var dot = c.type === "qdrant" ? "dot-vec" : c.type === "s3" ? "dot-blob" : "dot-es";
       var refs = refsOf(c.id);
       var usable = c.usable !== false;
       return '<tr class="conn-row"><td><span class="conn-name"><i class="conn-dot ' + dot + '"></i>' + Console.escapeHtml(c.id) + '</span></td><td class="mono">' + Console.escapeHtml(addressOf(c)) + '</td><td><span class="mbadge ' + (usable ? "ok" : "off") + '">' + (usable ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E") + '</span></td><td><span class="refs">' + (refs.length ? refs.map(function(n) {
@@ -253,8 +261,12 @@
       return '<tr><td colspan="5" class="muted-sm">' + Console.escapeHtml(text) + "</td></tr>";
     }
     function renderConns() {
-      var kw = [], vec = [];
+      var kw = [], vec = [], raw = [];
       STATE.connections.forEach(function(c) {
+        if (c.type === "s3") {
+          raw.push(c);
+          return;
+        }
         if (c.usage === "vector") {
           vec.push(c);
         } else {
@@ -263,7 +275,14 @@
       });
       el("connBodyEs").innerHTML = kw.length ? kw.map(rowHtml).join("") : emptyRow("\u8FD8\u6CA1\u6709\u5173\u952E\u5B57\u8FDE\u63A5\uFF0C\u70B9\u300C+ \u65B0\u589E\u300D\u52A0\u4E00\u53F0");
       el("connBodyVec").innerHTML = vec.length ? vec.map(rowHtml).join("") : emptyRow("\u8FD8\u6CA1\u6709\u5411\u91CF\u8FDE\u63A5\uFF0C\u70B9\u300C+ \u65B0\u589E\u300D\u52A0\u4E00\u53F0");
+      el("connBodyTxt").innerHTML = localRawRowHtml() + (raw.length ? raw.map(rowHtml).join("") : "");
       el("connCount").textContent = STATE.connections.length + " \u4E2A\u8FDE\u63A5";
+    }
+    function localRawRowHtml() {
+      var refs = refsOf("local");
+      return '<tr class="conn-row"><td><span class="conn-name"><i class="conn-dot dot-blob"></i>\u672C\u5730\u539F\u6587\u5B58\u50A8</span></td><td class="mono">\u5E94\u7528\u6570\u636E\u76EE\u5F55 \xB7 \u5185\u7F6E</td><td><span class="mbadge ok">\u5DF2\u542F\u7528</span></td><td><span class="refs">' + (refs.length ? refs.map(function(n) {
+        return '<span class="ref-chip">' + Console.escapeHtml(n) + "</span>";
+      }).join("") : '<span class="none">\u672A\u88AB\u5F15\u7528</span>') + '</span></td><td class="ta-r"><span class="muted-sm">\u5185\u7F6E</span></td></tr>';
     }
     var SLOT_META = {
       keyword: {
@@ -444,13 +463,100 @@
       btn.disabled = true;
       showResult(resultId, "\u6D4B\u8BD5\u4E2D\u2026\uFF08\u4F1A\u771F\u5B9E\u5EFA\u7ACB\u4E00\u6B21\u8FDE\u63A5\uFF0C\u5E76\u63A2\u6D4B\u7248\u672C\u4E0E\u80FD\u529B\uFF09", "");
       Console.api.post("/admin/infra/test?type=" + encodeURIComponent(kind), payload).then(function(data) {
-        var render = kind === "redis" ? renderRedisProbe : kind === "es" ? renderEsProbe : renderVectorProbe;
+        var render = kind === "redis" ? renderRedisProbe : kind === "es" ? renderEsProbe : kind === "s3" ? renderS3Probe : renderVectorProbe;
         showHtmlResult(resultId, render(data), "ok");
       }).catch(function(e) {
         console.debug("[domainplane] \u8FDE\u63A5\u6D4B\u8BD5\u5931\u8D25\uFF1A", e);
         showResult(resultId, "\u8FDE\u63A5\u5931\u8D25\uFF1A" + e.message, "err");
       }).then(function() {
         btn.disabled = false;
+      });
+    }
+    var s3Mode = "new";
+    var s3EditId = null;
+    var S3_FIELDS = [
+      ["s3Endpoint", "endpoint", "s"],
+      ["s3Bucket", "bucket", "s"],
+      ["s3Region", "region", "s"],
+      ["s3AccessKey", "accessKey", "s"],
+      ["s3SecretKey", "secretKey", "s"],
+      ["s3Prefix", "prefix", "s"]
+    ];
+    function openS3Modal(mode, id) {
+      s3Mode = mode;
+      s3EditId = id || null;
+      var conn = connById(s3EditId);
+      setText("connModalS3Title", mode === "new" ? "\u65B0\u589E\u5BF9\u8C61\u5B58\u50A8\u8FDE\u63A5" : "\u7F16\u8F91\u8FDE\u63A5 \xB7 " + id);
+      setHidden("s3NameRow", mode !== "new");
+      hideResult("s3Result");
+      setNameHelp("s3ConnNameHelp", "\u77E5\u8BC6\u4F53\u7684\u300C\u539F\u6587\u843D\u70B9\u300D\u4E0B\u62C9\u91CC\u663E\u793A\u7684\u5C31\u662F\u8FD9\u4E2A\u540D\u5B57\u3002", false);
+      if (mode === "new") {
+        el("s3ConnName").value = "";
+        writeFields(S3_FIELDS, null);
+        el("s3PathStyle").checked = false;
+      } else {
+        writeFields(S3_FIELDS, conn && conn.s3);
+        el("s3PathStyle").checked = !!(conn && conn.s3 && conn.s3.pathStyle);
+      }
+      setText("saveS3Btn", mode === "new" ? "\u52A0\u5165\u8FDE\u63A5" : "\u4FDD\u5B58\u5E76\u751F\u6548");
+      showModal("connModalS3");
+    }
+    function s3Payload() {
+      var payload = readFields(S3_FIELDS) || {};
+      payload.pathStyle = !!el("s3PathStyle").checked;
+      return payload;
+    }
+    function renderS3Probe(data) {
+      return "<b>\u8FDE\u63A5\u6B63\u5E38</b> \xB7 " + Console.escapeHtml(String(data.detail || "\u5BF9\u8C61\u5B58\u50A8\u53EF\u8FBE"));
+    }
+    function saveS3(btn) {
+      return __async(this, null, function* () {
+        var name = s3Mode === "new" ? el("s3ConnName").value.trim() : s3EditId;
+        if (s3Mode === "new") {
+          if (!name) {
+            setNameHelp("s3ConnNameHelp", "\u5148\u7ED9\u8FD9\u4E2A\u8FDE\u63A5\u8D77\u4E2A\u540D\u5B57\u3002", true);
+            el("s3ConnName").focus();
+            return false;
+          }
+          if (findConn(name)) {
+            setNameHelp("s3ConnNameHelp", "\u5DF2\u7ECF\u6709\u53EB\u300C" + name + "\u300D\u7684\u8FDE\u63A5\u4E86\uFF0C\u6362\u4E00\u4E2A\u3002", true);
+            el("s3ConnName").focus();
+            return false;
+          }
+        }
+        var conn = {
+          id: name,
+          name,
+          type: "s3",
+          usage: null,
+          es: null,
+          vector: null,
+          s3: s3Payload()
+        };
+        var idx = -1;
+        STATE.connections.forEach(function(c, i) {
+          if (c.id === name) {
+            idx = i;
+          }
+        });
+        var prev = idx >= 0 ? STATE.connections[idx] : null;
+        if (idx >= 0) {
+          STATE.connections[idx] = conn;
+        } else {
+          STATE.connections.push(conn);
+        }
+        renderConns();
+        var data = yield commit(function() {
+          if (prev) {
+            STATE.connections[idx] = prev;
+          } else {
+            STATE.connections.pop();
+          }
+        }, "s3Result", "\u8FDE\u63A5\u300C" + name + "\u300D\u5DF2\u4FDD\u5B58\u5E76\u751F\u6548", btn);
+        if (data) {
+          hideModal("connModalS3");
+        }
+        return !!data;
       });
     }
     var esMode = "new";
@@ -695,10 +801,29 @@
         var seg = btn.getAttribute("data-add-conn");
         if (seg === "es") {
           openEsModal("new");
+        } else if (seg === "s3") {
+          openS3Modal("new");
         } else {
           openVecModal("new");
         }
       });
+    });
+    el("saveS3Btn").addEventListener("click", function() {
+      saveS3(this);
+    });
+    el("cancelS3Btn").addEventListener("click", function() {
+      hideModal("connModalS3");
+    });
+    el("connModalS3Close").addEventListener("click", function() {
+      hideModal("connModalS3");
+    });
+    el("testS3Btn").addEventListener("click", function() {
+      testConn("s3", {
+        id: s3EditId || el("s3ConnName").value.trim(),
+        name: el("s3ConnName").value.trim(),
+        type: "s3",
+        s3: s3Payload()
+      }, "s3Result", this);
     });
     function bindTable(bodyId, seg) {
       el(bodyId).addEventListener("click", function(e) {
@@ -711,6 +836,8 @@
           if (edit) {
             if (seg === "es") {
               openEsModal("edit", edit);
+            } else if (seg === "s3") {
+              openS3Modal("edit", edit);
             } else {
               openVecModal("edit", edit);
             }
@@ -764,6 +891,7 @@
     }
     bindTable("connBodyEs", "es");
     bindTable("connBodyVec", "vector");
+    bindTable("connBodyTxt", "s3");
     el("saveEsBtn").addEventListener("click", function() {
       saveEs(this);
     });

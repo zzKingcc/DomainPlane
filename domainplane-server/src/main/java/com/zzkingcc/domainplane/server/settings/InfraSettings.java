@@ -54,8 +54,12 @@ public class InfraSettings {
     /** Qdrant 连接类型 */
     public static final String TYPE_QDRANT = "qdrant";
 
+    /** S3 兼容对象存储连接类型（COS / OSS / MinIO / AWS 都走它，只做一套驱动） */
+    public static final String TYPE_S3 = "s3";
+
     /** 受支持的连接类型白名单 */
-    public static final List<String> SUPPORTED_TYPES = List.of(TYPE_ELASTICSEARCH, TYPE_QDRANT);
+    public static final List<String> SUPPORTED_TYPES =
+            List.of(TYPE_ELASTICSEARCH, TYPE_QDRANT, TYPE_S3);
 
     /** 召回路：关键字（全文检索） */
     public static final String KIND_KEYWORD = "keyword";
@@ -66,10 +70,16 @@ public class InfraSettings {
     /** 知识体可配的两路（一个体里各自可选，互不排斥） */
     public static final List<String> SUPPORTED_KINDS = List.of(KIND_KEYWORD, KIND_VECTOR);
 
-    /** 原文落点：平台内置 BlobStore（当前唯一实现） */
+    /** 原文落点：平台内置 BlobStore（本地盘） */
     public static final String RAW_LOCAL = "local";
 
-    /** 受支持的原文落点白名单（S3 / COS / OSS / 文件服务器接入后在此追加，同时补 BlobStore 驱动） */
+    /**
+     * 原文落点的<b>历史默认值</b>清单：只含本地盘。
+     *
+     * <p>v2 起真实可选值由 {@link #rawLocations()} 现算——每条 {@code s3} 连接都可以被
+     * 知识体选为原文落点。这个常量只用于"没有任何对象存储连接时"的默认值与旧配置兜底，
+     * <b>不要再拿它当白名单</b>（那样加了连接也选不到）。</p>
+     */
     public static final List<String> SUPPORTED_RAW_LOCATIONS = List.of(RAW_LOCAL);
 
     /** 原文落点的人话名字：页面与接口共用一处，免得两边说法漂移 */
@@ -125,7 +135,7 @@ public class InfraSettings {
         /** 展示名（可为空，空则回落到 id） */
         private String name;
 
-        /** 类型：{@code elasticsearch} / {@code qdrant} */
+        /** 类型：{@code elasticsearch} / {@code qdrant} / {@code s3} */
         private String type = TYPE_ELASTICSEARCH;
 
         /**
@@ -146,6 +156,9 @@ public class InfraSettings {
         /** Qdrant 连接参数（仅 type=qdrant 时有意义） */
         private VectorStore vector;
 
+        /** 对象存储连接参数（仅 type=s3 时有意义）：原文落点的候选 */
+        private ObjectStorage s3;
+
         @JsonIgnore
         public String effectiveType() {
             return hasText(type) ? type.trim().toLowerCase() : TYPE_ELASTICSEARCH;
@@ -159,6 +172,11 @@ public class InfraSettings {
         @JsonIgnore
         public boolean isQdrant() {
             return TYPE_QDRANT.equals(effectiveType());
+        }
+
+        @JsonIgnore
+        public boolean isS3() {
+            return TYPE_S3.equals(effectiveType());
         }
 
         @JsonIgnore
@@ -180,6 +198,11 @@ public class InfraSettings {
                     return u;
                 }
             }
+            if (isS3()) {
+                // 对象存储不参与召回：它只可能是原文落点。
+                // 给它编一个"关键字"归属会让它混进两张召回路表，全是噪声
+                return null;
+            }
             return isQdrant() ? KIND_VECTOR : KIND_KEYWORD;
         }
 
@@ -191,6 +214,9 @@ public class InfraSettings {
             }
             if (isQdrant()) {
                 return vector != null && vector.isUsable();
+            }
+            if (isS3()) {
+                return s3 != null && s3.isUsable();
             }
             return false;
         }
@@ -214,6 +240,9 @@ public class InfraSettings {
             if (isQdrant()) {
                 return vector == null || !vector.isUsable() ? null : trimEndSlash(vector.getUri());
             }
+            if (isS3()) {
+                return s3 == null || !s3.isUsable() ? null : s3.location();
+            }
             return null;
         }
 
@@ -224,6 +253,9 @@ public class InfraSettings {
             }
             if (isQdrant()) {
                 return vector == null ? "未配置" : vector.describe();
+            }
+            if (isS3()) {
+                return s3 == null ? "未配置" : s3.describe();
             }
             return "不支持的类型 " + effectiveType();
         }
@@ -247,6 +279,11 @@ public class InfraSettings {
             }
             if (isQdrant() && vector != null) {
                 for (String p : vector.validate()) {
+                    problems.add("连接 " + id + "：" + p);
+                }
+            }
+            if (isS3() && s3 != null) {
+                for (String p : s3.validate()) {
                     problems.add("连接 " + id + "：" + p);
                 }
             }
@@ -306,14 +343,24 @@ public class InfraSettings {
         private String vector;
 
         /**
-         * 原文落点：{@link #RAW_LOCAL}（平台内置 BlobStore）或将来接入的文件服务连接 id。
+         * 原文落点：{@link #RAW_LOCAL}（内置本地盘）或一条 s3 连接的 id。
          *
-         * <p>原文是<b>权威源</b>（换模型/换落点都从它重灌），所以它和索引落点一样属于知识体的
-         * 身份配置。当前只有 {@code local} 一个可选值：S3 / COS / OSS / 自建文件服务器要等
-         * {@code BlobStore} 多驱动接入后才会出现在可选列表里（API 的 {@code rawOptions}
-         * 如实反映"现在能选什么"，不给假选项）。</p>
+         * <p>原文是<b>权威源</b>（换模型 / 换索引落点都从它重灌），所以它和索引落点一样
+         * 属于知识体的身份配置。可选值由 {@link InfraSettings#rawLocations()} 现算：
+         * 有 s3 连接才出现在下拉里，页面不做假选项。</p>
          */
         private String raw;
+
+        /**
+         * 是否归档原始文件字节（默认开）。
+         *
+         * <p>默认开：改解析器 / 改切片策略时只有原始字节能重切——切片 JSON 已经是
+         * "切完之后"的粒度，从它重切只能得到同样的切法。代价是占用接近翻倍，
+         * 所以留一个体级开关。</p>
+         *
+         * <p>{@code null} 按"开"处理：老配置没有这个字段，不该因为缺省值变成"不归档"。</p>
+         */
+        private Boolean archiveRaw;
 
         /** 一句话说明（卡片上显示，可空） */
         private String description;
@@ -327,6 +374,12 @@ public class InfraSettings {
         @JsonIgnore
         public String rawLocation() {
             return hasText(raw) ? raw.trim().toLowerCase() : RAW_LOCAL;
+        }
+
+        /** 是否归档原始文件字节：{@code null} 视为开 */
+        @JsonIgnore
+        public boolean archiveRawFiles() {
+            return archiveRaw == null || archiveRaw;
         }
 
         /** 唯一名：没写时按 id 规范化兜底（老数据 / yaml 合成的体没有这个字段） */
@@ -607,9 +660,15 @@ public class InfraSettings {
             problems.add(who + " 的索引名「" + body.getIndex() + "」不合规：必须以 "
                     + com.zzkingcc.domainplane.api.support.KbIndexes.PREFIX + " 开头");
         }
-        if (!SUPPORTED_RAW_LOCATIONS.contains(body.rawLocation())) {
-            problems.add(who + " 的原文落点「" + body.rawLocation() + "」不受支持，可选值："
-                    + SUPPORTED_RAW_LOCATIONS + "（文件服务接入后才会出现新的落点）");
+        if (!rawLocations().contains(body.rawLocation())) {
+            problems.add(who + " 的原文落点「" + body.rawLocation() + "」不可用，可选值："
+                    + rawLocations() + "（对象存储要先在「存储配置」页建一条 s3 连接）");
+        } else {
+            Connection rawConn = rawConnection(body.rawLocation());
+            if (rawConn != null && !rawConn.isS3()) {
+                problems.add(who + " 的原文落点「" + body.rawLocation()
+                        + "」指向的不是对象存储连接（原文只能落本地盘或 s3 连接）");
+            }
         }
         if (!body.configured()) {
             problems.add(who + " 一路都没配：至少选一个关键字连接（全文检索）或向量连接（语义检索）");
@@ -650,6 +709,38 @@ public class InfraSettings {
     @JsonIgnore
     public Map<String, Connection> connectionsOrEmpty() {
         return connections == null ? Map.of() : connections;
+    }
+
+    /**
+     * 真实可选的原文落点：{@code local} + 每一条 s3 连接。
+     *
+     * <p>页面的下拉与保存校验都用它，<b>不给假选项</b>：没有对象存储连接时只有本地那一项；
+     * 加了连接立刻可选，删了连接立刻不可选。与"计划稿里写了 COS/OSS 就先摆出来"相反——
+     * 摆出来的选项点了报错，比不摆更糟。</p>
+     */
+    @JsonIgnore
+    public List<String> rawLocations() {
+        List<String> out = new ArrayList<>(SUPPORTED_RAW_LOCATIONS);
+        for (Connection c : connectionsOrEmpty().values()) {
+            if (c != null && c.isS3() && hasText(c.getId()) && !out.contains(c.getId())) {
+                out.add(c.getId());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 原文落点 → 它对应的连接。
+     *
+     * @return {@code local}（或空）返回 {@code null}——内置 BlobStore 不是一条连接；
+     *         其它值返回那条连接（可能为 {@code null}，表示配置里已经没有了）
+     */
+    @JsonIgnore
+    public Connection rawConnection(String location) {
+        if (location == null || location.isBlank() || RAW_LOCAL.equals(location.trim())) {
+            return null;
+        }
+        return connection(location.trim());
     }
 
     @JsonIgnore
@@ -888,6 +979,141 @@ public class InfraSettings {
             String metric = effectiveMetric();
             if (!"cosine".equals(metric) && !"dot".equals(metric) && !"euclid".equals(metric)) {
                 problems.add("距离度量只支持 cosine / dot / euclid，当前为「" + metric + "」");
+            }
+            return problems;
+        }
+    }
+
+    /**
+     * 对象存储连接参数（<b>只做 S3 协议一套</b>）。
+     *
+     * <p>COS / OSS / MinIO / AWS S3 都兼容 S3 协议，差异集中在 endpoint 与极少数 header，
+     * 所以不为每家写一个 {@code *Store}——那会让"加一个新厂商"变成"复制一份驱动"。
+     * 私有化的 MinIO 常要 path-style（{@code endpoint/bucket} 而不是 {@code bucket.endpoint}），
+     * 单独一个开关。</p>
+     *
+     * <p>{@code prefix} 是对象键前缀：多个环境共用一个桶时靠它隔离；
+     * 留空表示直接写在桶根下。原文键本身已带 {@code kb/} 前缀，这里再加一层是可选的租户隔离。</p>
+     */
+    @Data
+    public static class ObjectStorage {
+
+        /** 完整服务地址，如 {@code https://cos.ap-guangzhou.myqcloud.com}。为空即视为"未配置" */
+        private String endpoint;
+
+        /** 桶名 */
+        private String bucket;
+
+        /** 区域（部分厂商必填，如 cos 的 ap-guangzhou；AWS 也要求） */
+        private String region;
+
+        /** Access Key */
+        private String accessKey;
+
+        /** Secret Key */
+        private String secretKey;
+
+        /** 对象键前缀，留空表示桶根（不含前导斜杠） */
+        private String prefix;
+
+        /** 路径风格：MinIO / 私有化部署通常要开（{@code endpoint/bucket}） */
+        private boolean pathStyle;
+
+        @JsonIgnore
+        public boolean isUsable() {
+            /* 四个都填才算可用：原文是"写多读多"的权威源，只读的公有桶撑不起这个角色，
+               少一个凭证的配置在运行期只会以 403 出现，不如配置阶段就说清 */
+            return hasText(endpoint) && hasText(bucket) && hasText(accessKey) && hasText(secretKey);
+        }
+
+        @JsonIgnore
+        public String effectiveEndpoint() {
+            return trimEndSlash(endpoint);
+        }
+
+        @JsonIgnore
+        public String effectivePrefix() {
+            if (prefix == null) {
+                return "";
+            }
+            String p = prefix.trim().replace('\\', '/');
+            while (p.startsWith("/")) {
+                p = p.substring(1);
+            }
+            while (p.endsWith("/")) {
+                p = p.substring(0, p.length() - 1);
+            }
+            return p;
+        }
+
+        /**
+         * 物理位置标识：{@code s3://桶@端点/前缀}。
+         *
+         * <p>用途与 ES 的 {@code location()} 一致——判断"两条连接是不是同一份数据"。
+         * 同桶同前缀 = 同一份；换了前缀就是另一份（对象键不重叠）。</p>
+         */
+        @JsonIgnore
+        public String location() {
+            if (!isUsable()) {
+                return null;
+            }
+            String base = "s3://" + bucket.trim().toLowerCase() + "@" + effectiveEndpoint().toLowerCase();
+            String p = effectivePrefix();
+            return p.isEmpty() ? base : base + "/" + p;
+        }
+
+        @JsonIgnore
+        public String getMaskedSecretKey() {
+            return mask(secretKey);
+        }
+
+        @JsonIgnore
+        public String getMaskedAccessKey() {
+            return mask(accessKey);
+        }
+
+        @JsonIgnore
+        public String describe() {
+            if (!hasText(bucket) || !hasText(endpoint)) {
+                return "未配置";
+            }
+            String p = effectivePrefix();
+            return bucket.trim() + " @ " + effectiveEndpoint() + (p.isEmpty() ? "" : "/" + p);
+        }
+
+        /**
+         * 形态校验：只判断"填得像不像"，不测连通性。
+         */
+        @JsonIgnore
+        public List<String> validate() {
+            List<String> problems = new ArrayList<>();
+            if (!hasText(endpoint) && !hasText(bucket) && !hasText(accessKey) && !hasText(secretKey)) {
+                return problems;   // 整段没填 = 这条连接还没配，交给 isUsable 判"不可用"
+            }
+            if (!hasText(endpoint)) {
+                problems.add("对象存储缺少 endpoint（如 https://cos.ap-guangzhou.myqcloud.com）");
+            } else {
+                String e = effectiveEndpoint();
+                if (!e.startsWith("http://") && !e.startsWith("https://")) {
+                    problems.add("endpoint 需带协议前缀（http:// 或 https://），当前为「" + endpoint + "」");
+                }
+                if (e.contains("://") && e.substring(e.indexOf("://") + 3).contains("/")) {
+                    problems.add("endpoint 只填到域名（不要带桶名或路径），当前为「" + endpoint + "」");
+                }
+            }
+            if (!hasText(bucket)) {
+                problems.add("对象存储缺少桶名（bucket）");
+            } else if (!bucket.trim().matches("[a-z0-9][a-z0-9.\\-]{1,61}[a-z0-9]")) {
+                problems.add("桶名只允许小写字母 / 数字 / 点 / 连字符（3~63 位，首尾为字母或数字），当前为「"
+                        + bucket + "」");
+            }
+            boolean hasAk = hasText(accessKey);
+            boolean hasSk = hasText(secretKey);
+            if (hasAk != hasSk) {
+                problems.add("Access Key 与 Secret Key 要一起填（或一起留空）");
+            }
+            if (prefix != null && (prefix.contains("..") || prefix.contains("\\"))) {
+                problems.add("对象键前缀不能包含 .. 或反斜杠，当前为「" + prefix + "」");
             }
             return problems;
         }

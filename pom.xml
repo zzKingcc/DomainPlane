@@ -45,6 +45,7 @@
         <spring-security-crypto.version>6.3.3</spring-security-crypto.version>
         <poi.version>5.4.1</poi.version>
         <pdfbox.version>3.0.8</pdfbox.version>
+        <awssdk.version>2.33.4</awssdk.version>
     </properties>
 
     <dependencyManagement>
@@ -62,6 +63,19 @@
                 <groupId>org.bsc.langgraph4j</groupId>
                 <artifactId>langgraph4j-bom</artifactId>
                 <version>${langgraph4j.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!--
+              S3 兼容对象存储（COS / OSS / MinIO / AWS 共用一套驱动）。
+              只引 s3 + url-connection-client：后者是同步实现，不带 netty，
+              产物体积与启动期线程都比默认异步客户端小一个量级。
+            -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${awssdk.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>

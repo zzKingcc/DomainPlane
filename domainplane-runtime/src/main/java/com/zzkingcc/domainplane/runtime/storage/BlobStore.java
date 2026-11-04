@@ -35,6 +35,19 @@ public interface BlobStore {
     void put(String key, InputStream data);
 
     /**
+     * 写入一个对象，并告知长度。
+     *
+     * <p>远程实现（S3 兼容）需要长度才能走流式上传；不知道长度就只能整体读进内存。
+     * 知道大小的调用方都应该走这个方法——原文档案 / 原始文件都是字节数组，长度本来就有。
+     * 本地实现忽略该参数（默认委托给 {@link #put(String, InputStream)}）。</p>
+     *
+     * @param size 字节数；未知传负数
+     */
+    default void put(String key, InputStream data, long size) {
+        put(key, data);
+    }
+
+    /**
      * 按键取回字节流。
      *
      * <p>取不到返回空——调用方要区分"从来没有 / 已被回收"与"存储故障"：

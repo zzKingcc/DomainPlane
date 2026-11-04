@@ -153,6 +153,19 @@
             <artifactId>spring-security-crypto</artifactId>
             <version>${spring-security-crypto.version}</version>
         </dependency>
+
+        <!-- ===== S3 兼容对象存储（原文落点） =====
+             只做一套 S3 驱动：COS / OSS / MinIO / AWS 的差异集中在 endpoint 与 pathStyle，
+             不需要各写一个。url-connection-client 是同步实现（不带 netty，线程与体积都小），
+             与 BlobStore 的同步契约一致。 -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

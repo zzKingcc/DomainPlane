@@ -229,4 +229,55 @@ class InfraSettingsConnectionsTest {
 
         assertNotNull(s.usableBody("kb-half"));
     }
+
+    // ==================== 原文落点（s3 连接，P4） ====================
+
+    private static InfraSettings.Connection s3(String id) {
+        InfraSettings.Connection c = new InfraSettings.Connection();
+        c.setId(id);
+        c.setName(id);
+        c.setType(InfraSettings.TYPE_S3);
+        InfraSettings.ObjectStorage o = new InfraSettings.ObjectStorage();
+        o.setEndpoint("https://cos.ap-guangzhou.myqcloud.com");
+        o.setBucket("dp-prod");
+        o.setRegion("ap-guangzhou");
+        o.setAccessKey("AKIDexample");
+        o.setSecretKey("secret");
+        o.setPrefix("domainplane/");
+        c.setS3(o);
+        return c;
+    }
+
+    @Test
+    @DisplayName("原文落点：local + 每条 s3 连接都可选；指向非对象存储 / 已删连接都会被拦")
+    void s3ConnectionAsRawLocation() {
+        InfraSettings s = withDefaults(es("es-kw", "es-a.internal", 9200), null,
+                body("kb-raw", "es-kw", null));
+        s.getConnections().put("cos-kb", s3("cos-kb"));
+
+        assertEquals(List.of("local", "cos-kb"), s.rawLocations(),
+                "没有 s3 连接时只有本地；有了连接立刻可选（页面不做假选项）");
+
+        InfraSettings.KnowledgeBody b = s.body("kb-raw");
+        b.setRaw("cos-kb");
+        assertTrue(s.validate().isEmpty(), s.validate().toString());
+
+        b.setRaw("es-kw");
+        assertTrue(s.validate().stream().anyMatch(p -> p.contains("原文落点") && p.contains("es-kw")),
+                "原文落在 ES 连接上必须报错（它不在可选的落点清单里）：" + s.validate());
+
+        b.setRaw("cos-gone");
+        assertTrue(s.validate().stream().anyMatch(p -> p.contains("原文落点") && p.contains("cos-gone")),
+                "指向不存在的连接要拦下：" + s.validate());
+    }
+
+    @Test
+    @DisplayName("s3 连接不参与召回：没有归属段，也拿得到物理位置指纹")
+    void s3ConnectionHasNoRecallUsage() {
+        InfraSettings.Connection c = s3("cos-kb");
+        assertNull(c.effectiveUsage(), "对象存储只可能是原文落点，不该混进两张召回路表");
+        assertTrue(c.isUsable(), "endpoint / 桶 / AK / SK 齐了才算可用");
+        assertEquals("s3://dp-prod@https://cos.ap-guangzhou.myqcloud.com/domainplane",
+                c.location(), "同桶同前缀 = 同一份数据");
+    }
 }

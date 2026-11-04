@@ -256,4 +256,42 @@ class ChunkArchiveTest {
         assertFalse(archive.isYoung(ChunkArchive.keyOf(INDEX, "fresh"), Duration.ofMinutes(5)),
                 "超过护栏窗口的不算 young");
     }
+
+    // ==================== 原始文件字节（P4） ====================
+
+    @Test
+    @DisplayName("原始文件：写入后可原样读回；删文档时一并删")
+    void rawFileRoundTrip() throws Exception {
+        byte[] origin = "%PDF-1.7 假装是原始字节".getBytes(StandardCharsets.UTF_8);
+
+        archive.writeFile(INDEX, "d1", origin);
+        assertTrue(archive.hasFile(INDEX, "d1"), "写完应能查到");
+
+        byte[] read;
+        try (InputStream in = archive.openFile(INDEX, "d1").orElseThrow()) {
+            read = in.readAllBytes();
+        }
+        assertEquals(new String(origin, StandardCharsets.UTF_8),
+                new String(read, StandardCharsets.UTF_8),
+                "字节必须原样往返：解析与切分都是有损的，还原不出来");
+
+        assertEquals(Set.of("d1"), archive.fileDocIdsOf(INDEX));
+
+        archive.delete(INDEX, "d1");
+        assertFalse(archive.hasFile(INDEX, "d1"), "删文档要连原始文件一起删");
+        assertTrue(archive.openFile(INDEX, "d1").isEmpty());
+    }
+
+    @Test
+    @DisplayName("原始文件与切片档案前缀分开：谁也不污染谁的清单")
+    void rawFilesDoNotPolluteChunkInventory() {
+        archive.write(INDEX, "d1", List.of(chunk("c1", "正文", "d1", null)));
+        archive.writeFile(INDEX, "d1", "bytes".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(Set.of("d1"), archive.docIdsOf(INDEX), "切片档案清单只认 kb/chunks/");
+        assertEquals(Set.of("d1"), archive.fileDocIdsOf(INDEX), "原始文件清单只认 kb/files/");
+        assertEquals(List.of(ChunkArchive.FILES_PREFIX + INDEX + "/d1"),
+                blob.listKeys(ChunkArchive.FILES_PREFIX),
+                "原始文件键不带扩展名：为了推断扩展名去 LIST 一次桶不值得，下载时用文档表里的文件名");
+    }
 }

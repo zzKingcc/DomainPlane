@@ -23,6 +23,10 @@ import com.zzkingcc.domainplane.server.settings.LlmModelHolder;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -91,6 +95,7 @@ public class AdminBodyController {
     private final RagProperties ragProperties;
     private final LlmModelHolder modelHolder;
     private final StorageLocations storageLocations;
+    private final com.zzkingcc.domainplane.server.storage.BlobStoreRegistry blobStores;
 
     public AdminBodyController(KnowledgeStatsService statsService,
                                KnowledgeBaseService knowledgeBase,
@@ -103,7 +108,8 @@ public class AdminBodyController {
                                @Qualifier("domainplaneRetrievalPlan") RetrievalPlan retrievalPlan,
                                RagProperties ragProperties,
                                LlmModelHolder modelHolder,
-                               StorageLocations storageLocations) {
+                               StorageLocations storageLocations,
+                               com.zzkingcc.domainplane.server.storage.BlobStoreRegistry blobStores) {
         this.statsService = statsService;
         this.knowledgeBase = knowledgeBase;
         this.bodyResolver = bodyResolver;
@@ -115,6 +121,7 @@ public class AdminBodyController {
         this.ragProperties = ragProperties;
         this.modelHolder = modelHolder;
         this.storageLocations = storageLocations;
+        this.blobStores = blobStores;
     }
 
     // ==================== 页面快照 ====================
@@ -332,8 +339,13 @@ public class AdminBodyController {
         if (request.getDescription() != null) {
             body.setDescription(request.getDescription());
         }
-        if (request.getRaw() != null) {
-            body.setRaw(trimToNull(request.getRaw()));
+        /* 原文落点同理：直接改指针会让"读原文"立刻指向一个空目录，
+           而旧落点的档案还在——既不报错也查不到。必须走 /routes 的搬迁分支。 */
+        if (request.getRaw() != null
+                && !eq(trimToNull(request.getRaw()), body.rawLocation())) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER,
+                    "换原文落点不能直接改：请走「迁移」——先把切片档案与原始文件搬到新落点、"
+                            + "校验对象数之后再切（PUT /admin/bodies/{id}/routes?dryRun=true 可先预演）");
         }
         if (!body.configured()) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER,
@@ -554,6 +566,41 @@ public class AdminBodyController {
         return result;
     }
 
+    /**
+     * 下载原始文件（必须是归档过原始字节的文档）。
+     *
+     * <p>文件名从文档表里取：原始文件的键不带扩展名（见 {@code ChunkArchive.fileKeyOf}），
+     * 下载时靠上传时记下的 {@code fileName} 还原。没归档的存量文档如实报"没有"，
+     * 不拿切片 JSON 拼一个假的原文出来。</p>
+     */
+    @GetMapping("/{id}/documents/{docId}/raw")
+    public ResponseEntity<byte[]> downloadRaw(@PathVariable("id") String id,
+                                              @PathVariable("docId") String docId) {
+        String bodyId = id == null ? null : id.trim();
+        InfraSettings.KnowledgeBody body = infraHolder.current().body(bodyId);
+        if (body == null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "知识体不存在：" + bodyId);
+        }
+        java.util.Optional<byte[]> content = knowledgeBase.readRawFile(bodyId, docId);
+        if (content.isEmpty()) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER,
+                    "这个文档没有归档原始文件：可能是 v2 之前上传的，或该体关闭了「归档原始文件」");
+        }
+        String fileName = knowledgeBase.list(List.of(body.effectiveIndex())).stream()
+                .filter(d -> docId.equals(d.docId()))
+                .map(KnowledgeBaseService.DocumentItem::fileName)
+                .filter(AdminBodyController::hasText)
+                .findFirst()
+                .orElse(docId);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment()
+                                .filename(fileName, java.nio.charset.StandardCharsets.UTF_8)
+                                .build().toString())
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .body(content.get());
+    }
+
     /** 删除一个文档（切片 + 原文档案 + 预览 txt） */
     @DeleteMapping("/{id}/documents/{docId}")
     public Map<String, Object> deleteDocument(@PathVariable("id") String id,
@@ -628,13 +675,13 @@ public class AdminBodyController {
         if (request == null) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, "缺少请求体（kind + connection）");
         }
-        if (hasText(request.getRaw())) {
-            // 原文落点白名单目前只有 local：接受别的值等于给用户一个假下拉
-            throw new BaseException(ErrorCode.INVALID_PARAMETER,
-                    "原文落点目前只有「本地原文存储」一项；对象存储连接要等 BlobStore 多驱动接入后才开放");
-        }
         String kind = request.getKind();
         String target = request.getConnection();
+
+        // 原文落点是另一条动线（搬对象，不是重建索引），单独一个分支
+        if (hasText(request.getRaw())) {
+            return switchRaw(bodyId, request.getRaw().trim(), dryRun);
+        }
 
         if (dryRun) {
             KnowledgeBaseService.BodyRoutePlan plan = knowledgeBase.planRoute(bodyId, kind, target);
@@ -688,6 +735,56 @@ public class AdminBodyController {
         out.put("legacyConnection", moved.legacyConnectionId());
         out.put("message", "这一路已切到「" + moved.to() + "」，索引名不变；旧连接「"
                 + moved.legacyConnectionId() + "」上的同名集合没有删除，确认不再需要后可手工清理");
+        return out;
+    }
+
+    /**
+     * 原文落点分支：{@code local} 与 s3 连接之间搬对象。
+     *
+     * <p>与索引换落点的差别：索引那一路是"从原文重建"（派生数据可以重算），
+     * 原文这一路是<b>搬字节</b>——它没有上游，丢了就真丢了。所以必须"先搬后切"，
+     * 且搬完逐个校验对象数。</p>
+     */
+    private Map<String, Object> switchRaw(String bodyId, String target, boolean dryRun) {
+        if (dryRun) {
+            KnowledgeBaseService.BodyRawPlan plan = knowledgeBase.planRaw(bodyId, target);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("code", 0);
+            out.put("dryRun", true);
+            out.put("body", bodyId);
+            out.put("index", plan.index());
+            out.put("kind", "raw");
+            out.put("from", plan.from());
+            out.put("to", plan.to());
+            out.put("ready", plan.ready());
+            out.put("reason", plan.reason());
+            out.put("chunksObjects", plan.chunksObjects());
+            out.put("fileObjects", plan.fileObjects());
+            return out;
+        }
+        KnowledgeBaseService.BodyRawMigration moved = knowledgeBase.migrateRaw(bodyId, target);
+        Map<String, InfraSettings.KnowledgeBody> bodies =
+                new LinkedHashMap<>(infraHolder.current().bodiesOrEmpty());
+        InfraSettings.KnowledgeBody current = bodies.get(bodyId);
+        if (current == null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "知识体在迁移过程中被删除：" + bodyId);
+        }
+        current.setRaw(moved.to());
+        bodies.put(bodyId, current);
+        infraHolder.replaceBodies(bodies);
+        statsService.invalidate();
+        log.info("[知识库] 知识体 {} 的原文落点已切换：{} → {}（{} 个对象 / {} 字节，旧落点副本保留）",
+                bodyId, moved.from(), moved.to(), moved.objects(), moved.bytes());
+        Map<String, Object> out = created("raw-migrated", bodyId);
+        out.put("index", moved.index());
+        out.put("kind", "raw");
+        out.put("from", moved.from());
+        out.put("to", moved.to());
+        out.put("objects", moved.objects());
+        out.put("bytes", moved.bytes());
+        out.put("legacyLocation", moved.from());
+        out.put("message", "原文已搬到「" + rawLabel(moved.to()) + "」；旧落点上的副本没有删除，"
+                + "确认不再需要后可手工清理");
         return out;
     }
 
@@ -949,36 +1046,51 @@ public class AdminBodyController {
         return v;
     }
 
-    /** 原文落点：当前只可能 local；列表来自白名单，页面据此渲染可选值（不造假选项） */
+    /** 原文落点：当前选中的是哪个、它长什么样 */
     private Map<String, Object> rawView(InfraSettings.KnowledgeBody body) {
         String location = body == null ? InfraSettings.RAW_LOCAL : body.rawLocation();
         Map<String, Object> raw = new LinkedHashMap<>();
         raw.put("location", location);
         raw.put("label", rawLabel(location));
         raw.put("detail", rawDetail(location));
+        raw.put("archiveRaw", body == null || body.archiveRawFiles());
         return raw;
     }
 
+    /**
+     * 可选的原文落点：{@code local} + 每条 s3 连接。
+     *
+     * <p>列表来自配置的现算值（{@link InfraSettings#rawLocations()}），
+     * 不写死也不给假选项——没有对象存储连接时只有本地那一项。</p>
+     */
     private List<Map<String, Object>> rawOptions() {
+        InfraSettings infra = infraHolder.current();
         List<Map<String, Object>> options = new ArrayList<>();
-        for (String location : InfraSettings.SUPPORTED_RAW_LOCATIONS) {
+        for (String location : infra.rawLocations()) {
             Map<String, Object> option = new LinkedHashMap<>();
             option.put("id", location);
             option.put("label", rawLabel(location));
             option.put("detail", rawDetail(location));
-            option.put("available", true);
+            option.put("available", blobStores.usable(location));
             options.add(option);
         }
         return options;
     }
 
     private String rawLabel(String location) {
-        return InfraSettings.RAW_LOCAL.equals(location) ? "本地原文存储" : location;
+        if (InfraSettings.RAW_LOCAL.equals(location)) {
+            return "本地原文存储";
+        }
+        InfraSettings.Connection conn = infraHolder.current().connection(location);
+        return conn == null ? location : conn.effectiveName();
     }
 
     private String rawDetail(String location) {
-        return InfraSettings.RAW_LOCAL.equals(location)
-                ? storageLocations.blobSource() : "文件服务连接 " + location;
+        if (InfraSettings.RAW_LOCAL.equals(location)) {
+            return storageLocations.blobSource();
+        }
+        InfraSettings.Connection conn = infraHolder.current().connection(location);
+        return conn == null ? "连接已不存在" : conn.describe();
     }
 
     private KnowledgeBackend backendOf(String connectionId) {

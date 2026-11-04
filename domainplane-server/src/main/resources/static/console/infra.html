@@ -142,6 +142,7 @@
                         <h4><span class="sub-no">2-3</span>原文<span class="sub-type">对象存储</span></h4>
                         <span class="spacer"></span>
                         <span class="sub-meta">对象键 = kb/chunks/{索引名}/{docId}.json</span>
+                        <button class="linkbtn" data-add-conn="s3">+ 新增</button>
                     </div>
                     <table class="conn-table">
                         <thead>
@@ -154,13 +155,7 @@
                         </tr>
                         </thead>
                         <tbody id="connBodyTxt">
-                        <tr class="conn-row">
-                            <td><span class="conn-name"><i class="conn-dot dot-blob"></i>blob-local</span></td>
-                            <td class="mono">本地磁盘 · 应用数据目录</td>
-                            <td><span class="mbadge ok">已启用</span></td>
-                            <td><span class="muted-sm">内置</span></td>
-                            <td class="ta-r"><span class="muted-sm">内置</span></td>
-                        </tr>
+                        <tr><td colspan="5" class="muted-sm">加载中…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -186,6 +181,74 @@
 </div>
 
 <!-- ==================== 2-1 关键字：新增 / 编辑弹窗（只属于这一段） ==================== -->
+<!-- ==================== 2-3 原文：对象存储连接（S3 协议一套，COS/OSS/MinIO 通用） ==================== -->
+<div class="modal-mask" id="connModalS3" hidden>
+    <div class="modal-panel modal-panel-wide" role="dialog" aria-modal="true" aria-labelledby="connModalS3Title">
+        <div class="modal-head">
+            <h3 id="connModalS3Title">新增对象存储连接</h3>
+            <span class="spacer"></span>
+            <button type="button" class="modal-close" id="connModalS3Close" aria-label="关闭">×</button>
+        </div>
+
+        <div class="field" id="s3NameRow">
+            <label>连接名称</label>
+            <input class="form-control mono" id="s3ConnName" placeholder="如 cos-kb" autocomplete="off">
+            <div class="help" id="s3ConnNameHelp">知识体的「原文落点」下拉里显示的就是这个名字。</div>
+        </div>
+
+        <div class="dp-row">
+            <div class="field">
+                <label>Endpoint</label>
+                <input class="form-control mono" id="s3Endpoint"
+                       placeholder="https://cos.ap-guangzhou.myqcloud.com">
+                <div class="help">只填到域名，不要带桶名或路径。</div>
+            </div>
+            <div class="field">
+                <label>桶 / Region</label>
+                <div class="inline-pair">
+                    <input class="form-control mono" id="s3Bucket" placeholder="domainplane-prod">
+                    <input class="form-control mono" id="s3Region" placeholder="ap-guangzhou">
+                </div>
+            </div>
+        </div>
+
+        <div class="dp-row">
+            <div class="field">
+                <label>Access Key</label>
+                <input class="form-control mono" id="s3AccessKey" autocomplete="off">
+            </div>
+            <div class="field">
+                <label>Secret Key</label>
+                <input class="form-control mono" id="s3SecretKey" type="password" autocomplete="off">
+                <div class="help" id="s3KeyHelp">留空表示不修改已保存的密钥。</div>
+            </div>
+        </div>
+
+        <div class="dp-row">
+            <div class="field">
+                <label>对象键前缀（可空）</label>
+                <input class="form-control mono" id="s3Prefix" placeholder="多环境共用一个桶时用它隔离">
+            </div>
+            <div class="field">
+                <label>路径风格</label>
+                <label class="help" style="display:flex;gap:6px;align-items:center;">
+                    <input type="checkbox" id="s3PathStyle">
+                    <span>MinIO / 私有化部署通常要开（endpoint/bucket）</span>
+                </label>
+            </div>
+        </div>
+
+        <div id="s3Result" class="result"></div>
+
+        <footer class="card-foot">
+            <button class="btn btn-outline-secondary" id="testS3Btn">测试连接</button>
+            <span class="spacer"></span>
+            <button class="btn btn-outline-secondary" id="cancelS3Btn">取消</button>
+            <button class="btn btn-outline-primary" id="saveS3Btn">保存并生效</button>
+        </footer>
+    </div>
+</div>
+
 <div class="modal-mask" id="connModalEs" hidden>
     <div class="modal-panel modal-panel-wide" role="dialog" aria-modal="true" aria-labelledby="connModalEsTitle">
         <div class="modal-head">

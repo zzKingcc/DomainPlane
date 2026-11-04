@@ -547,12 +547,12 @@
     function rawOptions(selected) {
       var opts = state.rawOptions || [];
       return opts.map(function(o) {
-        return '<option value="' + esc(o.id) + '"' + (o.id === selected ? " selected" : "") + ">" + esc(o.label || o.id) + "</option>";
+        return '<option value="' + esc(o.id) + '"' + (o.id === selected ? " selected" : "") + (o.detail ? ' title="' + esc(o.detail) + '"' : "") + ">" + esc(o.label || o.id) + (o.available === false ? "\uFF08\u4E0D\u53EF\u7528\uFF09" : "") + "</option>";
       }).join("");
     }
     function formHtml(b, creating) {
       var rawId = b && b.raw && b.raw.location || "local";
-      return '<div class="dp-body-form"><label class="dp-form-field"><span>\u552F\u4E00\u540D\uFF08slug\uFF09<em>\u5FC5\u586B</em></span><input class="form-control" id="bodySlug" value="' + esc(b ? b.slug || b.id : "") + '"' + (creating ? "" : " readonly") + ' placeholder="sales-kb" maxlength="40"><small>' + (creating ? "\u5C0F\u5199\u5B57\u6BCD / \u6570\u5B57 / \u8FDE\u5B57\u7B26\uFF0C2~40 \u4F4D\uFF0C\u9996\u5C3E\u5FC5\u987B\u662F\u5B57\u6BCD\u6216\u6570\u5B57\u3002\u7D22\u5F15\u540D\u7531\u5B83\u6D3E\u751F\uFF0C\u521B\u5EFA\u540E\u4E0D\u53EF\u4FEE\u6539\u3002" : "\u552F\u4E00\u540D\u51B3\u5B9A\u7D22\u5F15\u540D\uFF0C\u521B\u5EFA\u540E\u4E0D\u53EF\u4FEE\u6539\uFF08\u6539\u540D\u4F1A\u7B49\u4E8E\u6362\u4E00\u4EFD\u6570\u636E\uFF09\u3002") + '</small></label><label class="dp-form-field"><span>\u5C55\u793A\u540D</span><input class="form-control" id="bodyName" value="' + esc(b ? b.name || "" : "") + '" placeholder="\u9500\u552E\u77E5\u8BC6\u5E93"></label><label class="dp-form-field"><span>\u8BF4\u660E</span><textarea class="form-control" id="bodyDesc" rows="2" placeholder="\u8FD9\u4EFD\u8D44\u6599\u662F\u7ED9\u8C01\u7528\u7684\u3001\u591A\u4E45\u66F4\u65B0\u4E00\u6B21">' + esc(b && b.description ? b.description : "") + '</textarea></label><div class="dp-form-grid"><label class="dp-form-field"><span>\u5173\u952E\u5B57\u843D\u70B9 <em>\u5168\u6587\u68C0\u7D22</em></span><select class="form-select" id="bodyKeyword">' + connectionOptions("keyword", b ? b.keyword : null) + '</select></label><label class="dp-form-field"><span>\u5411\u91CF\u843D\u70B9 <em>\u8BED\u4E49\u68C0\u7D22</em></span><select class="form-select" id="bodyVector">' + connectionOptions("vector", b ? b.vector : null) + "</select></label></div>" + (creating ? "" : '<div class="dp-form-hint">\u6539\u8FD9\u4E24\u680F\u4E0D\u4F1A\u76F4\u63A5\u751F\u6548\uFF1A\u4FDD\u5B58\u65F6\u5148\u9884\u6F14\uFF0C\u786E\u8BA4\u540E\u628A\u6587\u6863\u4ECE\u539F\u6587\u91CD\u5EFA\u5230\u65B0\u8FDE\u63A5\u3001\u6821\u9A8C\u6761\u6570\uFF0C\u5199\u5B8C\u624D\u5207\u6362\u3002</div>') + '<label class="dp-form-field"><span>\u539F\u6587\u843D\u70B9</span><select class="form-select" id="bodyRaw">' + rawOptions(rawId) + '</select><small>\u539F\u6587\u662F\u6743\u5A01\u526F\u672C\uFF1A\u5220\u4E86\u7D22\u5F15\u80FD\u4ECE\u8FD9\u91CC\u91CD\u5EFA\uFF1B\u6362\u6587\u6863\u670D\u52A1\u5668\u540E\u8FD9\u4E00\u680F\u4F1A\u591A\u51FA\u65B0\u7684\u843D\u70B9\u3002</small></label><div class="dp-form-hint">\u81F3\u5C11\u9009\u4E00\u8DEF\u3002\u4E24\u8DEF\u6307\u5411\u540C\u4E00\u53F0\u673A\u5668\u65F6\u53EA\u5199\u4E00\u4EFD\uFF1B\u5206\u5C5E\u4E24\u53F0\u65F6\u540C\u4E00\u4EFD\u5207\u7247\u5199\u4E24\u4EFD\u3002</div></div>';
+      return '<div class="dp-body-form"><label class="dp-form-field"><span>\u552F\u4E00\u540D\uFF08slug\uFF09<em>\u5FC5\u586B</em></span><input class="form-control" id="bodySlug" value="' + esc(b ? b.slug || b.id : "") + '"' + (creating ? "" : " readonly") + ' placeholder="sales-kb" maxlength="40"><small>' + (creating ? "\u5C0F\u5199\u5B57\u6BCD / \u6570\u5B57 / \u8FDE\u5B57\u7B26\uFF0C2~40 \u4F4D\uFF0C\u9996\u5C3E\u5FC5\u987B\u662F\u5B57\u6BCD\u6216\u6570\u5B57\u3002\u7D22\u5F15\u540D\u7531\u5B83\u6D3E\u751F\uFF0C\u521B\u5EFA\u540E\u4E0D\u53EF\u4FEE\u6539\u3002" : "\u552F\u4E00\u540D\u51B3\u5B9A\u7D22\u5F15\u540D\uFF0C\u521B\u5EFA\u540E\u4E0D\u53EF\u4FEE\u6539\uFF08\u6539\u540D\u4F1A\u7B49\u4E8E\u6362\u4E00\u4EFD\u6570\u636E\uFF09\u3002") + '</small></label><label class="dp-form-field"><span>\u5C55\u793A\u540D</span><input class="form-control" id="bodyName" value="' + esc(b ? b.name || "" : "") + '" placeholder="\u9500\u552E\u77E5\u8BC6\u5E93"></label><label class="dp-form-field"><span>\u8BF4\u660E</span><textarea class="form-control" id="bodyDesc" rows="2" placeholder="\u8FD9\u4EFD\u8D44\u6599\u662F\u7ED9\u8C01\u7528\u7684\u3001\u591A\u4E45\u66F4\u65B0\u4E00\u6B21">' + esc(b && b.description ? b.description : "") + '</textarea></label><div class="dp-form-grid"><label class="dp-form-field"><span>\u5173\u952E\u5B57\u843D\u70B9 <em>\u5168\u6587\u68C0\u7D22</em></span><select class="form-select" id="bodyKeyword">' + connectionOptions("keyword", b ? b.keyword : null) + '</select></label><label class="dp-form-field"><span>\u5411\u91CF\u843D\u70B9 <em>\u8BED\u4E49\u68C0\u7D22</em></span><select class="form-select" id="bodyVector">' + connectionOptions("vector", b ? b.vector : null) + "</select></label></div>" + (creating ? "" : '<div class="dp-form-hint">\u6539\u843D\u70B9\u4E0D\u4F1A\u76F4\u63A5\u751F\u6548\uFF1A\u4FDD\u5B58\u65F6\u5148\u9884\u6F14\uFF0C\u786E\u8BA4\u540E\u628A\u6570\u636E\u642C\uFF08\u6216\u4ECE\u539F\u6587\u91CD\u5EFA\uFF09\u5230\u65B0\u4F4D\u7F6E\uFF0C\u5199\u5B8C\u6821\u9A8C\u901A\u8FC7\u624D\u5207\u6362\u3002</div>') + '<label class="dp-form-field"><span>\u539F\u6587\u843D\u70B9</span><select class="form-select" id="bodyRaw">' + rawOptions(rawId) + '</select><small>\u539F\u6587\u662F\u6743\u5A01\u526F\u672C\uFF1A\u5220\u4E86\u7D22\u5F15\u80FD\u4ECE\u8FD9\u91CC\u91CD\u5EFA\u3002\u6362\u843D\u70B9\u4F1A\u628A\u6863\u6848\u4E0E\u539F\u59CB\u6587\u4EF6\u642C\u8FC7\u53BB\uFF0C\u642C\u5B8C\u6821\u9A8C\u901A\u8FC7\u624D\u5207\u3002\u5BF9\u8C61\u5B58\u50A8\u8FDE\u63A5\u5728\u300C\u5B58\u50A8\u914D\u7F6E\u300D\u9875\u52A0\u3002</small></label><div class="dp-form-hint">\u81F3\u5C11\u9009\u4E00\u8DEF\u3002\u4E24\u8DEF\u6307\u5411\u540C\u4E00\u53F0\u673A\u5668\u65F6\u53EA\u5199\u4E00\u4EFD\uFF1B\u5206\u5C5E\u4E24\u53F0\u65F6\u540C\u4E00\u4EFD\u5207\u7247\u5199\u4E24\u4EFD\u3002</div></div>';
     }
     function readForm(root) {
       return {
@@ -607,9 +607,12 @@
                 changed.push(k);
               }
             });
-            if (changed.length > 1) {
+            var rawFrom = b.raw && b.raw.location || "local";
+            var rawTo = f.raw || "local";
+            var rawChanged = rawFrom !== rawTo;
+            if (changed.length + (rawChanged ? 1 : 0) > 1) {
               Console.toast(
-                "\u4E00\u6B21\u53EA\u80FD\u8FC1\u4E00\u8DEF\u843D\u70B9\uFF1A\u5148\u8FC1\u5176\u4E2D\u4E00\u8DEF\uFF0C\u4FDD\u5B58\u540E\u518D\u8FC1\u53E6\u4E00\u8DEF",
+                "\u4E00\u6B21\u53EA\u6539\u4E00\u9879\uFF1A\u7D22\u5F15\u843D\u70B9\uFF08\u5173\u952E\u5B57 / \u5411\u91CF\uFF09\u4E0E\u539F\u6587\u843D\u70B9\u8981\u5206\u5F00\u8FC1",
                 { type: "warning", wide: true }
               );
               return;
@@ -623,6 +626,9 @@
             }
             btn.disabled = true;
             saveMeta(bodyId, f).then(function() {
+              if (rawChanged) {
+                return migrateRaw(bodyId, rawTo, rawFrom);
+              }
               if (!changed.length) {
                 return false;
               }
@@ -631,10 +637,10 @@
               closeModal();
               if (moved) {
                 Console.toast(
-                  "\u843D\u70B9\u5DF2\u5207\u6362\uFF1A\u7D22\u5F15\u540D\u4E0D\u53D8\uFF0C\u65E7\u8FDE\u63A5\u4E0A\u7684\u540C\u540D\u96C6\u5408\u4FDD\u7559\u672A\u5220",
+                  rawChanged ? "\u539F\u6587\u5DF2\u642C\u5230\u65B0\u843D\u70B9\uFF1B\u65E7\u843D\u70B9\u4E0A\u7684\u526F\u672C\u4FDD\u7559\u672A\u5220" : "\u843D\u70B9\u5DF2\u5207\u6362\uFF1A\u7D22\u5F15\u540D\u4E0D\u53D8\uFF0C\u65E7\u8FDE\u63A5\u4E0A\u7684\u540C\u540D\u96C6\u5408\u4FDD\u7559\u672A\u5220",
                   { type: "success", wide: true }
                 );
-              } else if (changed.length) {
+              } else if (changed.length || rawChanged) {
                 Console.toast("\u5DF2\u4FDD\u5B58\uFF08\u843D\u70B9\u6CA1\u6709\u8FC1\u79FB\uFF09", { type: "info" });
               } else {
                 Console.toast("\u5DF2\u4FDD\u5B58", { type: "success" });
@@ -651,8 +657,41 @@
     function saveMeta(bodyId, f) {
       return Console.api.put("/admin/bodies/" + encodeURIComponent(bodyId), {
         name: f.name,
-        description: f.description,
-        raw: f.raw
+        description: f.description
+      });
+    }
+    function rawLabelOf(id) {
+      var opts = state.rawOptions || [];
+      for (var i = 0; i < opts.length; i++) {
+        if (opts[i].id === id) {
+          return opts[i].label || id;
+        }
+      }
+      return id === "local" ? "\u672C\u5730\u539F\u6587\u5B58\u50A8" : id;
+    }
+    function migrateRaw(bodyId, target, fromId) {
+      var url = "/admin/bodies/" + encodeURIComponent(bodyId) + "/routes";
+      return Console.api.put(url + "?dryRun=true", { raw: target }).then(function(plan) {
+        if (!plan.ready) {
+          throw new Error(plan.reason || "\u8FD9\u4E2A\u539F\u6587\u843D\u70B9\u6362\u4E0D\u4E0A\u53BB");
+        }
+        var lines = [
+          "\u628A\u539F\u6587\u4ECE\u300C" + rawLabelOf(fromId) + "\u300D\u642C\u5230\u300C" + rawLabelOf(target) + "\u300D\uFF1F",
+          "",
+          "\xB7 " + fmt(plan.chunksObjects) + " \u4EFD\u5207\u7247\u6863\u6848 + " + fmt(plan.fileObjects) + " \u4E2A\u539F\u59CB\u6587\u4EF6",
+          "\xB7 \u9010\u4E2A\u590D\u5236\u5E76\u6821\u9A8C\u5BF9\u8C61\u6570\uFF0C\u5168\u90E8\u5BF9\u4E0A\u4E4B\u540E\u624D\u5207\u6307\u9488",
+          "\xB7 \u642C\u5230\u4E00\u534A\u5931\u8D25\u4F1A\u4E2D\u6B62\uFF0C\u539F\u843D\u70B9\u4E0D\u53D8",
+          "\xB7 \u65E7\u843D\u70B9\u4E0A\u7684\u526F\u672C\u4E0D\u4F1A\u81EA\u52A8\u5220\u9664"
+        ];
+        return Console.confirm(lines.join("\n"), { title: "\u8FC1\u79FB\u539F\u6587", okText: "\u5F00\u59CB\u642C\u8FC1" }).then(function(ok) {
+          if (!ok) {
+            return false;
+          }
+          Console.toast("\u6B63\u5728\u642C\u539F\u6587\uFF0C\u5BF9\u8C61\u591A\u65F6\u4F1A\u6BD4\u8F83\u4E45\u2026", { type: "info" });
+          return Console.api.put(url, { raw: target }).then(function() {
+            return true;
+          });
+        });
       });
     }
     function migrateRoute(bodyId, kind, target, fromId) {

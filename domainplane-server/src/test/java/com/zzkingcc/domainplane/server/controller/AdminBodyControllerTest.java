@@ -27,6 +27,8 @@ import com.zzkingcc.domainplane.server.settings.InfraSettingsHolder;
 import com.zzkingcc.domainplane.server.settings.InfraSettingsStore;
 import com.zzkingcc.domainplane.server.settings.LlmModelHolder;
 import com.zzkingcc.domainplane.server.settings.LlmSettingsStore;
+import com.zzkingcc.domainplane.server.storage.BlobStoreRegistry;
+import com.zzkingcc.domainplane.server.storage.LocalBlobStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -199,7 +201,8 @@ class AdminBodyControllerTest {
         };
         return new AdminBodyController(stats, new StubKnowledgeBase(plan, realResolver), realResolver,
                 holder, domainStore, registry, backends, plan, new RagProperties(),
-                modelHolder(embeddingConfigured), storageLocations());
+                modelHolder(embeddingConfigured), storageLocations(),
+                new BlobStoreRegistry(new LocalBlobStore(tempDir.resolve("blobs")), holder));
     }
 
     private AdminBodyController controller(KnowledgeStatsService.Overview canned,
