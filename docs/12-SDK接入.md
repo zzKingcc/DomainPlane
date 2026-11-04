@@ -111,21 +111,23 @@ SDK 会校验流以 `DONE` / `STOPPED` / `ERROR` 收尾。只收到 `TOKEN` 就�
 @Resource
 private KnowledgeBaseClient kb;
 
+List<KnowledgeBaseClient.KnowledgeBody> bodies = kb.bodies();   // 先拿 bodyId
+String bodyId = bodies.get(0).id();
 KnowledgeBaseClient.UploadResult r =
-    kb.upload(Files.readAllBytes(path), "售后政策.pdf", false, "default.customer");
+    kb.upload(Files.readAllBytes(path), "售后政策.pdf", false, bodyId);
 
-List<KnowledgeBaseClient.DocumentItem> docs = kb.list();
-boolean deleted = kb.delete(r.docId());
+List<KnowledgeBaseClient.DocumentItem> docs = kb.list(bodyId);
+boolean deleted = kb.delete(bodyId, r.docId());
 ```
 
 | 方法 | 说明 |
 | --- | --- |
-| `upload(byte[], fileName, replace)` | 挂根域 |
-| `upload(byte[], fileName, replace, domain)` | 指定归属域；域决定哪些对话能检索到 |
-| `list()` | 全量文档（`docId` / `fileName` / `chunks`） |
-| `delete(docId)` | 删除，返回是否真删了 |
+| `bodies()` | 知识体清单（`id` / `name` / `slug` / `index` / `documents` / `chunks`） |
+| `upload(byte[], fileName, replace, bodyId)` | 上传到指定知识体；`bodyId` 不能为空 |
+| `list(bodyId)` | 该体的文档（`docId` / `fileName` / `chunks`） |
+| `delete(bodyId, docId)` | 删除该体下的一篇，返回是否真删了 |
 
-上传是 **multipart，字段名 `file`**，query 带 `replace` 与 `domain`。5MB 上限、8 种格式白名单在服务端校验。
+文档落在知识体里，"传到哪儿"必须显式给 `bodyId`，没有"默认域"可猜。上传是 **multipart，字段名 `file`**，query 只带 `replace`；路径 `/admin/bodies/{bodyId}/documents`。5MB 上限、8 种格式白名单在服务端校验。
 
 **检索不在客户端暴露。** 检索是服务端的事：模型通过 `searchKnowledge` 工具自动取用。SDK 侧没有 `search()`，这是有意的——检索参数（查哪个域、查几片、怎么融合）是平台配置，不是调用方参数。
 
@@ -179,9 +181,9 @@ public class OrderTools {
 | chat-client | `POST /api/agent/chat`（JSON → SSE） | Header |
 | chat-client | `POST /api/agent/resume?sessionId&approved&domain`（SSE） | Header |
 | chat-client | `POST /api/agent/stop/{sessionId}?domain` | Header |
-| kb-client | `POST /admin/kb/documents?replace&domain`（multipart `file`） | Header |
-| kb-client | `GET /admin/kb/documents` | Header |
-| kb-client | `DELETE /admin/kb/documents/{docId}` | Header |
+| kb-client | `POST /admin/bodies/{bodyId}/documents?replace`（multipart `file`） | Header |
+| kb-client | `GET /admin/bodies/{bodyId}/documents` | Header |
+| kb-client | `DELETE /admin/bodies/{bodyId}/documents/{docId}` | Header |
 | tool-provider | `POST /api/agent/tools/register` | Header |
 | 以上全部（首次） | `POST /api/agent/login` `{username,password}` → `{credential}` | 无 |
 | 服务端 → 工具实例 | `POST {endpoint}` | 无 |

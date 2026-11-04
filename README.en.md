@@ -21,7 +21,7 @@ Add scenarios and the "one service per scenario" approach makes you re-implement
 
 The other default — one big service plus a `tenant_id` column — leaks the tenant key into every query, every assembly step and every cleanup job. Miss one `WHERE` clause and you have a cross-tenant leak.
 
-DomainPlane takes a third route: **isolation is neither deployment nor a filter condition**. The domain decides how capabilities are assembled, and it also decides which index the knowledge lives in. Index names are derived deterministically from the domain path, so "querying the wrong domain" means *finding nothing* — not *reading someone else's data*.
+DomainPlane takes a third route: **isolation is neither deployment nor a filter condition**. The domain decides how capabilities are assembled and which knowledge bodies a turn may read. Each body owns one index whose name is derived from its unique slug and frozen at creation, so "querying the wrong body" means *finding nothing* — not *reading someone else's data*.
 
 ---
 
@@ -34,13 +34,13 @@ In most "multi-scenario" systems the scenario is a filter field. Here the domain
 | Dimension | Semantics along the chain | What does *not* hold |
 | --- | --- | --- |
 | Tools | Additive: declared on D or any ancestor → visible in D | Tools declared on a child are invisible to the parent |
-| Knowledge | Additive: retrieval domain = D + ancestors, every index is queried | Retrieval never flows downwards — a parent cannot read a child's documents |
+| Knowledge | Additive: retrieval domain = D + ancestors, every bound knowledge body is queried | Retrieval never flows downwards — a parent cannot read a child's documents |
 | Prompt | Additive: concatenated root → leaf, the root fragment is the base | Editing one fragment affects only that domain and its descendants |
 | Model | Nearest wins: the first binding on the chain | A child binding fully overrides the parent — no merging of endpoint families |
 
 Three additive dimensions and one override is not arbitrary. Tools, knowledge and prompt are *capability supply*: what a parent provides, a child should be able to use. A model is a *resource binding*: one domain uses exactly one profile, and merging endpoint families would produce the absurd "text from A, images from B" profile.
 
-**The cost is stated up front**: only leaf domains are callable entry points (a parent is an assembly node), otherwise you get the "half configured here, half configured there" hybrid assembly. And index names carry an 8-character hash — unreadable by design, so troubleshooting goes through the console rather than your eyes.
+**The cost is stated up front**: only leaf domains are callable entry points (a parent is an assembly node), otherwise you get the "half configured here, half configured there" hybrid assembly. And index names carry an 8-character hash — unreadable by design, so troubleshooting goes through the knowledge-base page rather than your eyes.
 
 ---
 
@@ -72,9 +72,9 @@ Three questions are kept strictly apart:
 - **Where it is read from** is decided by the knowledge body bound to the domain — and that binding is *not inherited*, otherwise a child's documents would silently land in the parent's store.
 - **How results are ranked** is decided by adaptive fusion: a single source uses score-based fusion, multiple sources use RRF, because scores across indexes are not comparable and only ranks can be trusted.
 
-A knowledge body has at most two slots (vector and keyword), each pointing at one connection. Both configured means hybrid retrieval; one configured means single-path; a broken path skips only itself. Keyword search requires Elasticsearch (BM25 + ik is a dialect); vectors can live in Elasticsearch or Qdrant — validated at save time, not at runtime.
+A knowledge body has at most two retrieval slots (vector and keyword), each pointing at one connection. Both configured means hybrid retrieval; one configured means single-path; a broken path skips only itself. The keyword slot expects Elasticsearch (BM25 + ik is a dialect); vectors can live in Elasticsearch or Qdrant. Saving does not validate types — a misconfigured path is skipped at retrieval time and logged.
 
-Index name = `domainplane_kb_` + sanitised domain path + 8-character hash, and retrieval carries **no domain filter** — isolation is already physical. Chunk text lives in the BlobStore (vectors stripped before writing); the index is derived, rebuildable data. Changing backends is a re-ingest, not a migration.
+Index name = `domainplane_kb_` + the body's unique slug + 8-character hash, derived once at creation and frozen thereafter: renaming the body, changing a connection or rebinding domains never moves data. Retrieval carries **no domain filter** — isolation is already physical. Chunk text and original file bytes live at the body's raw location (local disk or any S3-compatible connection); the index is derived, rebuildable data. Changing a landing spot writes the full dataset on the new connection, verifies the chunk count, then flips the pointer — the old collection is kept.
 
 ---
 
@@ -110,19 +110,19 @@ Callable models, visible tools and bound MCP connections sit on the same card. T
 
 There is exactly one embedding model platform-wide (both ingestion and retrieval depend on it), so it gets its own section. Other profiles are grouped by type, and "used by which domains" is printed on the card — no page jumping to change a binding. Context window and thinking-output toggles are edited in place.
 
-### Storage: connections and knowledge bodies, saved independently
+### Storage: the connection pool
 
 ![Storage](docs/assets/screenshots/console-infra.png)
 
-Keyword and vector connections have separate tables, each row showing **which knowledge bodies reference it**. Bodies then combine two connections. Saving also runs capability validation and a Redis persistence self-check — as **warnings, never a rejection**.
+Redis, keyword (Elasticsearch), vector (Qdrant) and raw (S3-compatible) connections each have their own section, with **which bodies reference it** printed per row. Bodies themselves are read-only here; creating them, changing their landing spots and deleting them all happen on the knowledge-base page. Saving only persists and hot-swaps; connectivity is a separate "test connection" action.
 
-### Knowledge base: two slots per body, landing spots visible
+### Knowledge base: the body is the first-class object
 
 ![Knowledge base](docs/assets/screenshots/console-knowledge.png)
 
-The body table flattens keyword slot, vector slot, retrieval mode, bound domains and document/chunk counts. Switching the embedding model offers three explicit actions — re-ingest, purge, rebuild — instead of silently recomputing.
+A body card carries every action for one dataset: upload, documents, health, rebuild, change landing spot, bind domains, delete. A collapsed operations section at the bottom handles diagnostics, adopting orphaned collections, cleaning up leftovers and merging bodies.
 
-> Screenshots from `v1.0-beta.2` with an empty library; data is demo data.
+> Screenshots from `v1.0-beta.2` with an empty library; the pages have since been rebuilt around knowledge bodies. Data is demo data.
 
 The other pages: overview (quality and tool risk mix), prompts (edit per domain chain segment), MCP connections (credentials only echoed as `hasHeaders`), tool instances (live list, circuit-break, force offline), session archive (memory, archive, assembly report, copy export), account (changing the password invalidates every credential).
 
@@ -140,7 +140,7 @@ DomainPlane solves a different problem: **one agent runtime shared by many busin
 | Multi-scenario model | **Domain tree, assembled per turn** | Per app / workflow | Per knowledge base | Per app | Per bot | Design your own |
 | Capability reuse | Declared on parent, inherited by children | Copy the app or share the workflow | Share a knowledge base | Copy the app | Copy the bot | Write it yourself |
 | Tools | Annotations / remote instances / MCP | Plugins + custom tools | Limited | HTTP tools | Plugins | Implement yourself |
-| Retrieval | One index per domain, vector + BM25 adaptive fusion | Built-in RAG | **Strong (deep parsing)** | Strong | Built-in | Build your own |
+| Retrieval | One index per knowledge body, shared by domains, vector + BM25 adaptive fusion | Built-in RAG | **Strong (deep parsing)** | Strong | Built-in | Build your own |
 | Multimodal | Image, video, TTS, transcription, vision | Partial | Limited | Limited | Partial | Depends on provider |
 | Console | 11 pages, hot-swappable connections | Yes | Yes | Yes | SaaS console | None |
 | Integration | HTTP/SSE + 3 SDKs | API | API | API | API | In-code |
@@ -167,7 +167,7 @@ java -DDOMAINPLANE_SETTINGS_PATH="$PWD/.dev/config" \
 curl http://localhost:9527/health
 ```
 
-Open `http://localhost:9527/console/login.html`, sign in with the seed account `domainplane` / `domainplane`, then four steps: storage (Redis required) → provider connection → model profile + capability probe → bind to a domain. That is enough to hold a conversation.
+Open `http://localhost:9527/console/login.html`, sign in with the seed account `domainplane` / `domainplane`, then four steps: storage (Redis required) → provider connection → model profile + capability probe → bind to a domain. To use retrieval, also create a knowledge body on the knowledge-base page, upload documents into it and bind that body to the domain. That is enough to hold a conversation.
 
 Calling it is one SSE request:
 
@@ -195,7 +195,7 @@ Java 21 · Spring Boot 3.5.7 · LangChain4j 1.18.1 · LangGraph4j 1.8.17 · Elas
 
 ```bash
 mvn clean package   # full build
-mvn -o test         # full test suite (1,313 tests / 2 skipped, measured 2026-11-02)
+mvn -o test         # full test suite (1,348 tests / 2 skipped, measured 2026-11-04)
 ```
 
 Before opening a PR:
@@ -232,7 +232,7 @@ The module docs are currently written in Chinese. One document per module: const
 | 04 | [Conversation orchestration](docs/04-对话编排.md) | State graph, nine events, approval and resume, stop semantics, planning, timeouts, failure exits |
 | 05 | [Memory and context](docs/05-记忆与上下文.md) | Append-only memory, the 24k budget and degradation order, summaries, history recall |
 | 06 | [Tool system](docs/06-工具体系.md) | Four annotations, visibility algorithm, approval and masking, remote instances and heartbeats |
-| 07 | [Knowledge base](docs/07-知识库.md) | Connection / body / domain model, index isolation, retrieval fusion, ingestion and chunking |
+| 07 | [Knowledge base](docs/07-知识库.md) | Bodies as data entities, three landing spots and route changes, raw archives, operations, retrieval fusion, ingestion and chunking |
 | 08 | [Models and multimodal](docs/08-模型与多模态.md) | Profiles and endpoint families, capability probing, protocol dispatch, parameter passthrough |
 | 09 | [MCP integration](docs/09-MCP接入.md) | Transports, tool bridging and naming, default approval, OAuth |
 | 10 | [Admin console](docs/10-管控台.md) | Eleven pages, page-to-endpoint map, how to change the front end |
@@ -241,4 +241,4 @@ The module docs are currently written in Chinese. One document per module: const
 | 13 | [Configuration reference](docs/13-配置参考.md) | Every yaml key and default, on-disk files, settings that must change together |
 | 14 | [Operations and limits](docs/14-运维与边界.md) | Single-instance constraint, backup and restore, background jobs, upgrades, troubleshooting |
 
-Pre-refactor long-form documents (design doc, architecture review, L1–L4 plans, deep-dive analysis) are no longer tracked in the repository; they are kept locally only and must not be treated as current truth.
+Pre-refactor long-form documents (design doc, architecture review, L1–L4 plans, deep-dive analysis) are no longer tracked in the repository; they are kept locally only. The knowledge-base v2 design draft was removed once P0–P5 shipped — docs 01–14 and the code are the current truth.
