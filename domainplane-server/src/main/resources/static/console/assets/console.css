@@ -1132,10 +1132,7 @@ tbody tr:hover { background: #fcfcfd; }
 .dp-kb-health th { font-size: 12px; font-weight: 500; color: var(--muted); }
 .dp-kb-health td { vertical-align: middle; white-space: nowrap; }
 
-/* 运维区：每台连接一段，段内是集合表。块之间靠留白分隔，不画卡片套卡片。 */
-.dp-ops-block { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--tblr-border-color, #e6e8eb); }
-.dp-ops-block:first-of-type { border-top: 0; padding-top: 0; }
-.dp-ops-block-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+/* 运维区规则见下方「知识库页 · 统一分区框」：每台连接 / 合并各自一张带边框的小卡。 */
 .dp-ops-block-head code { font-size: 12px; color: var(--text); }
 
 /* ===== L2 · 请求趋势（SVG 折线，无 Chart.js） =====
@@ -1157,118 +1154,368 @@ tbody tr:hover { background: #fcfcfd; }
 .dp-trend-legend b { margin-left: auto; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .dp-trend-window { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 6px; }
 
-/* ===== 提示词页 · 左右分栏（左域列表 / 右编辑器） =====
-   早年是整页表格：域一多，选完域要滚到页面底部才见编辑框，且编辑时看不到「编辑到第几个域」。
-   分栏后左列表自己滚、右编辑器常驻视野，两边的滚动互不干扰。
-   窄屏（<1100px）退回上下堆叠，左列表取消限高——此时页面整体滚，限高反而要多滚一次。 */
+/* ==========================================================================
+   域空间 / 提示词设定 · 统一分区卡、等高控件、栅格对齐
+   --------------------------------------------------------------------------
+   改版前两页的卡片都是「card-body 里混排标题 + 列表 + 图例」，控件高度由内容
+   撑出来（按钮 26px、下拉 30px、开关 18px），同一行高低不齐；左右两栏还各用
+   align-items:start，底边不对齐。
+   现在统一：分区卡 = 标题栏(56px) + 正文(18px 内边距) + 可选页脚；
+   同行控件一律 32px；键值信息用 108px 定宽标签列 + 自适应值列的栅格；
+   域结构改为「连线节点树」——用可见的竖干 / 肘形连线 / 节点圆点代替纯缩进。
+   ========================================================================== */
+.dp-domains, .dp-prompts { --dp-ctl: 32px; --dp-line: var(--line); --dp-rail: #cbd5e1; }
+
+/* ---- 页头：标题组与操作组同行、垂直居中，避免 baseline 对齐造成高低差 ---- */
+.dp-domains .page-head { align-items: center; gap: 16px; }
+.dp-domains .page-head .head-line { flex: 0 0 auto; align-items: center; }
+.dp-domains .page-head .count-badge { align-self: center; }
+.dp-domains .page-head .actions { margin-top: 0; gap: 8px; }
+.dp-domains .page-head .actions > * { height: var(--dp-ctl); box-sizing: border-box; }
+.dp-domains .page-head .actions .form-control { padding: 4px 10px; font-size: 13px; }
+.dp-domains .page-head .actions .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 0 12px; font-size: 13px; line-height: 1;
+}
+.dp-domains .page-head .actions .card-note { font-size: 12.5px; }
+.dp-domains .page-head .actions input[type="checkbox"] { width: 14px; height: 14px; margin: 0; }
+
+/* ---- 两页共用的分区卡骨架 ---- */
+.dp-domains-split,
 .dp-prompts-split {
     display: grid;
-    grid-template-columns: minmax(240px, 320px) 1fr;
+    grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
     gap: 16px;
-    align-items: start;
+    align-items: stretch;          /* 两栏顶边、底边对齐 */
 }
 @media (max-width: 1100px) {
-    .dp-prompts-split { grid-template-columns: 1fr; }
+    .dp-domains-split, .dp-prompts-split { grid-template-columns: 1fr; }
 }
-/* 左列表滚动区：高度锚视口扣掉页头 + 统计行 + 底部 sticky 操作区的粗略占比。
-   min-height 兜底：视口极矮时也不塌成一条。 */
-.dp-domain-scroll {
-    max-height: calc(100vh - 380px);
+.dp-domains .dp-panel,
+.dp-prompts .dp-panel {
+    display: flex; flex-direction: column;
+    min-width: 0; margin: 0;
+    background: var(--card);
+    border: 1px solid var(--dp-line);
+    border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .04);
+    overflow: hidden;
+}
+/* #detailBody 是栅格第二列的外壳，让它内部的卡也撑满整列 */
+.dp-domains #detailBody { display: flex; min-width: 0; }
+.dp-domains #detailBody > .dp-panel { flex: 1 1 auto; }
+
+.dp-panel-head {
+    display: flex; align-items: center; gap: 10px;
+    min-height: 56px; box-sizing: border-box;
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--dp-line);
+    background: var(--card);
+    flex-wrap: wrap; row-gap: 8px;
+}
+.dp-panel-head .spacer { flex: 1 1 auto; }
+.dp-panel-icon {
+    flex: 0 0 28px; width: 28px; height: 28px;
+    border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: color-mix(in oklab, var(--tblr-primary) 10%, transparent);
+    color: var(--tblr-primary);
+}
+.dp-panel-icon svg { width: 16px; height: 16px; }
+.dp-panel-title { min-width: 0; }
+.dp-panel-title h3 {
+    margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4;
+    color: var(--text); overflow-wrap: anywhere;
+}
+.dp-panel-title h3.mono { font-family: ui-monospace, Consolas, monospace; font-size: 14.5px; }
+.dp-panel-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.dp-panel-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
+.dp-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dp-head-actions .btn {
+    height: var(--dp-ctl); box-sizing: border-box;
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 0 11px; font-size: 12.5px; line-height: 1;
+}
+.dp-panel-body {
+    flex: 1 1 auto; min-height: 0;
+    padding: 18px;
+    display: flex; flex-direction: column;
+}
+.dp-panel-foot {
+    padding: 11px 18px;
+    border-top: 1px solid var(--dp-line);
+    background: color-mix(in oklab, var(--tblr-body-bg) 45%, var(--card));
+    font-size: 11.5px; color: var(--muted);
+}
+.dp-panel-foot .disclose { margin-top: 0; border: 0; background: transparent; padding: 0; }
+
+/* ==========================================================================
+   域结构：连线节点树
+   --------------------------------------------------------------------------
+   每棵树是一列扁平的 .dp-tree-line，层级不再靠「左边空多少」暗示，而是由
+   可见的竖干（.line）与肘形连线（.elbow）画出，节点圆点坐在连线上。
+   prefix 数组由 JS 逐层传递：每位表示「该层祖先后面还有没有兄弟」，
+   有则竖线继续、无则留空，这样最后一个分支不会拖出一条悬空的尾巴。
+   ========================================================================== */
+.dp-tree-current {
+    display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+    min-height: 34px; box-sizing: border-box;
+    padding: 7px 10px; margin-bottom: 14px;
+    background: var(--primary-dim);
+    border: 1px solid color-mix(in oklab, var(--tblr-primary) 18%, transparent);
+    border-radius: 8px;
+    font-size: 12px; color: var(--muted);
+}
+.dp-tree-current .lead { margin-right: 3px; }
+.dp-tree-current .seg { font-family: ui-monospace, Consolas, monospace; color: var(--text); }
+.dp-tree-current .seg:last-child { color: var(--primary); font-weight: 600; }
+.dp-tree-current .sep { color: #94a3b8; }
+.dp-domains .dp-domain-scroll {
+    max-height: calc(100vh - 420px);
     min-height: 220px;
     overflow-y: auto;
-    margin: 0 -4px;
+    margin: 0 -6px;
+    padding: 0 6px 2px;
 }
-.dp-domain-item {
-    display: flex; align-items: center; gap: 8px;
-    padding: 9px 12px; margin: 0 4px 4px;
-    border-radius: 6px; cursor: pointer;
-    border-left: 3px solid transparent;
-    font-size: 13px; color: var(--text);
+/* 行距做进 .dp-tree-line 自身的高度里：竖干才会跨过行间隙连续下来。
+   用 flex gap 会把竖线切成一段段，树就散了。 */
+.dp-tree { display: flex; flex-direction: column; }
+.dp-tree-line { display: flex; align-items: stretch; min-width: 0; height: 43px; }
+.dp-tree-rail { flex: 0 0 auto; display: flex; align-self: stretch; }
+.dp-tree-rail i { position: relative; display: block; flex: 0 0 18px; width: 18px; align-self: stretch; }
+.dp-tree-rail i.line::after {
+    content: ''; position: absolute; left: 8px; top: 0; bottom: 0;
+    border-left: 1px solid var(--dp-rail);
 }
-.dp-domain-item:hover { background: #f8fafc; }
-/* 选中态：左侧竖条 + 淡蓝底。这一列列表时「当前在编辑哪个域」必须一眼可辨——
-   否则改半天不知道存的哪个域，是这类分栏最容易出的误操作。 */
-.dp-domain-item.on { background: #eff6ff; border-left-color: var(--tblr-primary); }
-.dp-domain-name {
-    flex: 1 1 auto; min-width: 0;
-    font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.dp-tree-rail i.elbow::before {
+    content: ''; position: absolute; left: 8px; top: 0; height: 50%;
+    border-left: 1px solid var(--dp-rail);
 }
-.dp-domain-tag { flex: 0 0 auto; font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 4px; }
-.dp-domain-tag.ok { background: #ecfdf5; color: #047857; }
-.dp-domain-tag.miss { background: #fffbeb; color: #b45309; }
-.dp-domain-empty { padding: 28px 12px; text-align: center; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
-.dp-editor-empty { padding: 60px 16px; text-align: center; font-size: 13px; color: var(--muted); }
-
-/* ===== 域空间 · 左域结构树 / 右域详情 =====
-   早年整页平铺卡片：域一多既看不出谁继承谁，配一个域要翻很久。
-   分栏后左树自己滚、右详情常驻视野；树按 /admin/domains 的 parentId 嵌套，
-   纯前端渲染、零后端依赖。窄屏（<1100px）退回上下堆叠。 */
-.dp-domains-split {
-    display: grid;
-    grid-template-columns: minmax(260px, 340px) 1fr;
-    gap: 16px;
-    align-items: start;
+.dp-tree-rail i.elbow.more::before { height: 100%; }
+.dp-tree-rail i.elbow::after {
+    content: ''; position: absolute; left: 8px; right: 0; top: 50%;
+    border-top: 1px solid var(--dp-rail);
 }
-@media (max-width: 1100px) {
-    .dp-domains-split { grid-template-columns: 1fr; }
-}
-/* 子级容器：左侧竖线即「继承」的视觉表达，与文件树同构 */
-.dp-tree-kids { margin-left: 14px; border-left: 1px solid var(--border); }
 .dp-tree-row {
-    display: flex; align-items: center; gap: 6px;
-    padding: 7px 10px; margin: 0 4px 2px;
-    border-radius: 6px; cursor: pointer;
-    border-left: 3px solid transparent;
-    font-size: 13px; color: var(--text);
+    flex: 1 1 auto; min-width: 0;
+    display: flex; align-items: center; gap: 8px;
+    height: 38px; box-sizing: border-box; align-self: center;
+    padding: 0 10px;
+    background: var(--card);
+    border: 1px solid var(--dp-line);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
 }
-.dp-tree-row:hover { background: #f8fafc; }
-/* 选中态与提示词页左列表同一套语言：淡蓝底 + 左侧竖条。
-   分栏页「当前在看哪个域」必须一眼可辨，否则改半天不知道存的哪个域。 */
-.dp-tree-row.on { background: #eff6ff; border-left-color: var(--tblr-primary); }
+.dp-tree-row:hover {
+    border-color: color-mix(in oklab, var(--tblr-primary) 40%, var(--dp-line));
+    background: #f8fafc;
+}
+.dp-tree-row.on {
+    border-color: var(--primary);
+    background: var(--primary-dim);
+    box-shadow: inset 3px 0 0 var(--primary);
+}
 .dp-tree-chev {
-    flex: 0 0 16px; width: 16px; height: 16px; padding: 0;
-    border: 0; background: none; cursor: pointer;
-    color: #94a3b8; font-size: 10px; line-height: 1;
+    flex: 0 0 18px; width: 18px; height: 18px; padding: 0;
+    border: 1px solid var(--dp-line); border-radius: 5px;
+    background: var(--card); color: #94a3b8;
+    font-size: 10px; line-height: 1; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
-    border-radius: 4px;
 }
 .dp-tree-chev:hover { background: #eef2f7; color: var(--text); }
-/* 叶子节点占位：不显示箭头，但要把位置留出来，各行才对得齐 */
 .dp-tree-chev.leaf { visibility: hidden; cursor: default; }
-.dp-tree-dot { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; }
-.dp-tree-dot.on { background: #10b981; }
-.dp-tree-dot.off { background: #f59e0b; }
+.dp-tree-joint {
+    flex: 0 0 9px; width: 9px; height: 9px; border-radius: 50%;
+    border: 2px solid var(--card);
+}
+.dp-tree-joint.on { background: #10b981; box-shadow: 0 0 0 1px #10b981; }
+.dp-tree-joint.off { background: #f59e0b; box-shadow: 0 0 0 1px #f59e0b; }
+.dp-tree-row.on .dp-tree-joint { border-color: var(--primary-dim); }
 .dp-tree-name {
     flex: 0 1 auto; min-width: 0;
-    font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; font-weight: 500;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 13px; font-weight: 600;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.dp-tree-tag { flex: 0 0 auto; font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 4px; }
+.dp-tree-tag {
+    flex: 0 0 auto; font-size: 11px; line-height: 1;
+    padding: 4px 8px; border-radius: 12px;
+}
 .dp-tree-tag.src-builtin { background: #f1f5f9; color: #64748b; }
 .dp-tree-tag.src-manual { background: #eff6ff; color: #2563eb; }
 .dp-tree-tag.src-derived { background: #f5f3ff; color: #7c3aed; }
-.dp-tree-count { margin-left: auto; font-size: 11.5px; color: #94a3b8; font-variant-numeric: tabular-nums; }
-.dp-tree-row.on .dp-tree-count { color: #2563eb; }
-/* 图例：三个视觉编码（点色 / 来源签 / 数字）各一行说不清，收成一行小字 */
-.dp-tree-legend {
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    margin-top: 10px; padding-top: 10px;
-    border-top: 1px solid var(--border);
-    font-size: 11px; color: var(--muted);
+.dp-tree-count {
+    margin-left: auto; flex: 0 0 auto;
+    min-width: 22px; text-align: center;
+    font-size: 11.5px; font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    background: color-mix(in oklab, var(--tblr-body-bg) 60%, var(--card));
+    border: 1px solid var(--dp-line); border-radius: 12px; padding: 2px 6px;
 }
-.dp-tree-legend i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: -1px; }
+.dp-tree-row.on .dp-tree-count {
+    color: #2563eb; background: var(--card);
+    border-color: color-mix(in oklab, var(--tblr-primary) 30%, transparent);
+}
+.dp-tree-legend { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.dp-tree-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.dp-tree-legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .dp-tree-legend i.on { background: #10b981; }
 .dp-tree-legend i.off { background: #f59e0b; }
-/* 右详情卡：回写开关 / 计数 / 四五个按钮全在标题行，必须允许换行 */
-.dp-detail-card .card-head { flex-wrap: wrap; row-gap: 8px; }
-/* 父域 / 子域跳转：内联小链接，不抢按钮的视觉权重 */
+
+/* ---- 域详情：开关条 + 定宽键值栅格 + 工具区 ---- */
+.dp-detail-strip {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    min-height: 48px; box-sizing: border-box;
+    padding: 8px 14px; margin-bottom: 16px;
+    border: 1px solid var(--dp-line); border-radius: 8px;
+    background: color-mix(in oklab, var(--tblr-body-bg) 45%, var(--card));
+}
+.dp-detail-strip .spacer { flex: 1 1 auto; }
+.dp-detail-strip .card-note { font-size: 12.5px; white-space: nowrap; }
+.echo-switch { gap: 8px; font-size: 12.5px; }
+.echo-switch-label { color: var(--text); }
+.dp-meta-grid {
+    display: flex; flex-direction: column;
+    border: 1px solid var(--dp-line); border-radius: 8px; overflow: hidden;
+}
+.dp-meta-row {
+    display: flex; align-items: center; gap: 12px;
+    min-height: 42px; box-sizing: border-box;
+    padding: 8px 14px;
+    font-size: 13px; line-height: 1.6;
+}
+.dp-meta-row + .dp-meta-row { border-top: 1px solid var(--dp-line); }
+.dp-meta-row > .k { flex: 0 0 108px; width: 108px; color: var(--muted); font-size: 12.5px; }
+.dp-meta-row > .v { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dp-meta-row .dp-kb-select {
+    height: 30px; padding: 2px 28px 2px 10px; font-size: 12.5px;
+    min-width: 13rem; width: auto; border-radius: 6px;
+}
+.dp-meta-row .card-note { font-size: 12px; }
+.dp-detail-section { margin-top: 18px; }
+.dp-detail-section-head {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+    font-size: 13px; font-weight: 600; color: var(--text);
+}
+.dp-detail-section-head .sub { font-size: 12px; font-weight: 400; color: var(--muted); }
+.tool-tags {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    padding: 12px 14px; min-height: 48px; box-sizing: border-box;
+    border: 1px solid var(--dp-line); border-radius: 8px;
+    background: color-mix(in oklab, var(--tblr-body-bg) 45%, var(--card));
+}
 .dp-jump {
     border: 0; background: none; padding: 0; cursor: pointer;
     font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
     color: var(--primary);
 }
 .dp-jump:hover { text-decoration: underline; }
+.dp-domains .dp-kb-note {
+    padding: 10px 12px; margin-bottom: 14px;
+    border: 1px solid color-mix(in oklab, var(--tblr-primary) 18%, transparent);
+    border-radius: 8px; background: var(--primary-dim);
+    font-size: 12.5px; color: var(--text); line-height: 1.7;
+}
+
+/* ==========================================================================
+   提示词设定页
+   ========================================================================== */
+.dp-prompts > #orphanBox + .row-cards { margin-top: 16px; }
+.dp-prompts .dp-stat { border-radius: 10px; }
+.dp-prompts .dp-stat .card-body { padding: 16px 18px; }
+.dp-prompts .dp-stat-icon { flex: 0 0 42px; width: 42px; height: 42px; border-radius: 12px; }
+.dp-prompts .dp-stat-label { font-size: 12.5px; }
+.dp-prompts .dp-stat-value { font-size: 23px; }
+.orphan-box {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 12px 14px; border-radius: 8px;
+    background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+    font-size: 12.5px; line-height: 1.7;
+}
+.orphan-box .ob-icon { flex: 0 0 auto; color: #d97706; margin-top: 1px; display: inline-flex; }
+.orphan-box b { color: #92400e; }
+.orphan-box .ob-list { font-family: ui-monospace, Consolas, monospace; }
+.dp-prompts .dp-domain-scroll { max-height: calc(100vh - 440px); min-height: 200px; }
+.dp-domain-list { display: flex; flex-direction: column; gap: 6px; }
+.dp-domain-item {
+    display: flex; align-items: center; gap: 10px;
+    height: 38px; box-sizing: border-box;
+    padding: 0 12px;
+    border: 1px solid var(--dp-line); border-radius: 8px;
+    background: var(--card); cursor: pointer;
+    transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
+}
+.dp-domain-item:hover {
+    border-color: color-mix(in oklab, var(--tblr-primary) 40%, var(--dp-line));
+    background: #f8fafc;
+}
+.dp-domain-item.on {
+    border-color: var(--primary); background: var(--primary-dim);
+    box-shadow: inset 3px 0 0 var(--primary);
+}
+.dp-domain-name {
+    flex: 1 1 auto; min-width: 0;
+    font-family: ui-monospace, Consolas, monospace; font-size: 13px; font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dp-domain-tag { flex: 0 0 auto; font-size: 11.5px; line-height: 1; padding: 4px 9px; border-radius: 12px; }
+.dp-domain-tag.ok { background: #ecfdf5; color: #047857; }
+.dp-domain-tag.miss { background: #fffbeb; color: #b45309; }
+.dp-domain-empty { padding: 28px 12px; text-align: center; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
+.dp-editor-empty {
+    flex: 1 1 auto;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; padding: 48px 16px; text-align: center;
+    font-size: 13px; color: var(--muted);
+}
+.dp-editor-empty .ee-icon {
+    width: 48px; height: 48px; border-radius: 14px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: color-mix(in oklab, var(--tblr-primary) 10%, transparent);
+    color: var(--tblr-primary);
+}
+.dp-editor-empty .ee-icon svg { width: 24px; height: 24px; }
+.dp-prompts textarea {
+    width: 100%; box-sizing: border-box; resize: vertical;
+    font-family: ui-monospace, Consolas, "Courier New", monospace;
+    font-size: 13.5px; line-height: 1.8; color: var(--text);
+    background: #fff; border: 1px solid var(--dp-line); border-radius: 8px;
+    padding: 12px 14px; min-height: 200px;
+}
+.dp-prompts textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,.1); }
+.dp-prompts .meta {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-top: 12px; font-size: 12.5px; color: var(--muted);
+}
+.dp-prompts .meta > span {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px; border: 1px solid var(--dp-line); border-radius: 6px;
+    background: color-mix(in oklab, var(--tblr-body-bg) 45%, var(--card));
+}
+.dp-prompts .meta b { color: var(--text); font-variant-numeric: tabular-nums; }
+.dp-preview-head {
+    display: flex; align-items: center; gap: 8px; margin: 18px 0 8px;
+    font-size: 13px; font-weight: 600; color: var(--text);
+}
+.dp-preview-head .sub { font-size: 12px; font-weight: 400; color: var(--muted); }
+pre.preview {
+    margin: 0; padding: 14px 16px; border-radius: 8px;
+    border: 1px solid #1e293b;
+    background: #0f172a; color: #e2e8f0;
+    font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
+    line-height: 1.8; white-space: pre-wrap; word-break: break-word;
+    max-height: 320px; overflow: auto;
+}
+pre.preview .mark { color: #93c5fd; }
+.dp-prompts .disclose {
+    border: 1px solid var(--dp-line); border-radius: 8px;
+    background: var(--card);
+    padding: 10px 12px; margin-top: 14px;
+}
+.dp-prompts .disclose > .disclose-body { font-size: 12.5px; }
+
+
 
 /* ===== 账号页（console/account.html）=====
    三段纵向堆叠：总览四卡（密码状态 / 最近登录 / 来源 / 记录数）→ 账号卡（头像 + 名 + chip + 账号文件）
@@ -1887,10 +2134,70 @@ tbody tr:hover { background: #fcfcfd; }
 .dp-kb-orphan-list { display: flex; flex-direction: column; gap: 6px; }
 .dp-kb-orphan-row {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    padding: 6px 8px; background: #fafbfc; border-radius: 6px;
+    padding: 8px 10px; background: #fafbfc; border: 1px solid var(--line); border-radius: 6px;
 }
 .dp-kb-orphan-row code { font-size: 12px; }
 .dp-kb-orphan-owners { margin-left: auto; display: flex; gap: 4px; }
+
+/* ==========================================================================
+   知识库页 · 统一分区框
+   --------------------------------------------------------------------------
+   改版前：统计行是 4 张带边框的卡、说明条是一行裸文字、知识体卡片散落在灰底上、
+   无主索引/运维又是两张卡 —— 区域之间「有的有框、有的没框」，视觉权重不齐。
+   现在把「知识体 / 无主索引 / 运维」收成同一种 .dp-kb-section：
+   白底 + 1px 边框 + 10px 圆角 + 基础阴影，标题栏一条浅分隔线，
+   与上方统计卡、表格容器共用同一套卡片语言。
+   ========================================================================== */
+.dp-kb-section {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .04);
+    overflow: hidden;
+}
+.dp-kb-section-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 13px 20px;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+}
+.dp-kb-section-head h3 { font-size: 15px; font-weight: 600; margin: 0; color: var(--text); }
+.dp-kb-section-head .spacer { flex: 1 1 auto; }
+.dp-kb-section-body { padding: 20px; }
+/* 知识体区里放的是一排白卡，给容器铺一层极浅的灰，白卡才浮得出来，
+   否则「白卡压白底」只剩两条描边，等于没框 */
+#bodiesSection .dp-kb-section-body {
+    background: color-mix(in oklab, var(--tblr-body-bg) 45%, var(--card));
+}
+.dp-kb-section-body > .dp-kb-grid { margin: 0; }
+
+/* 说明条：从裸文字改成带浅色描边的提示条，图标 + 正文两端对齐 */
+.dp-kb-intro {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 10px 12px; margin-bottom: 16px;
+    background: var(--primary-dim);
+    border: 1px solid color-mix(in oklab, var(--tblr-primary) 18%, transparent);
+    border-radius: 8px;
+    font-size: 13px; color: var(--text); line-height: 1.7;
+}
+.dp-kb-intro > span:last-child { flex: 1 1 auto; min-width: 0; }
+.dp-kb-intro-icon { flex: 0 0 auto; color: var(--primary); margin-top: 2px; display: inline-flex; }
+.dp-kb-intro b { color: var(--text); font-weight: 600; }
+.mbadge.warn { background: var(--tblr-warning-lt); color: #b45309; }
+
+/* 运维区：常开，内部每台连接 / 合并各自一张带边框的小卡，替代原来只有顶部分隔线的散段 */
+.dp-ops-summary {
+    padding: 9px 12px; margin-bottom: 2px;
+    background: var(--primary-dim);
+    border: 1px solid color-mix(in oklab, var(--tblr-primary) 18%, transparent);
+    border-radius: 8px;
+    font-size: 12.5px; color: var(--text); line-height: 1.7;
+}
+.dp-ops-block {
+    margin-top: 14px; padding: 14px 16px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+}
+.dp-ops-block-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
 
 /* 文档弹层 */
 .dp-docs-head {

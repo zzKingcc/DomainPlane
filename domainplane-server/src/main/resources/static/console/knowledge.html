@@ -88,28 +88,40 @@
                 </div>
             </div>
 
-            <!-- 说明条：讲清"知识体是数据身份、域是消费者"，删域不删数据 —— 这是本页的角色定义 -->
-            <div class="dp-kb-note">
-                <b>一个知识体 = 一份数据 + 一个索引。</b>索引名在创建时按唯一名派生并冻结，之后改名不搬数据。
-                域只决定「哪些对话能查到它」：一个体可以被多个域共用，删域只解绑，不删原文、不删索引。
-            </div>
-
-            <!-- 知识体卡片：页面第一等对象，所有动作都从卡片发起 -->
-            <div class="dp-kb-grid" id="bodyGrid">
-                <div class="dp-kb-loading">读取知识体…</div>
-            </div>
+            <!-- 知识体：页面第一等对象。整块围成一个带边框的区域，和下面的无主索引 / 运维同构 -->
+            <section class="dp-kb-section" id="bodiesSection">
+                <div class="dp-kb-section-head">
+                    <span class="dp-op-icon dp-op-icon-blue">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+                    </span>
+                    <h3>知识体</h3>
+                    <span class="spacer"></span>
+                    <span class="mbadge" id="bodyCount">—</span>
+                </div>
+                <div class="dp-kb-section-body">
+                    <!-- 说明条：讲清"知识体是数据身份、域是消费者"，删域不删数据 —— 本页的角色定义 -->
+                    <div class="dp-kb-note dp-kb-intro">
+                        <span class="dp-kb-intro-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span>
+                        <span><b>一个知识体 = 一份数据 + 一个索引。</b>索引名在创建时按唯一名派生并冻结，之后改名不搬数据。
+                        域只决定「哪些对话能查到它」：一个体可以被多个域共用，删域只解绑，不删原文、不删索引。</span>
+                    </div>
+                    <div class="dp-kb-grid" id="bodyGrid">
+                        <div class="dp-kb-loading">读取知识体…</div>
+                    </div>
+                </div>
+            </section>
 
             <!-- 无主索引：后端上有、但没有对应知识体的集合。只说清事实与处理方式，不提供"一键删除" -->
-            <div class="card dp-panel dp-kb-orphans" id="orphanCard" style="display:none;">
-                <div class="card-body">
-                    <div class="dp-op-head">
-                        <span class="dp-op-icon dp-op-icon-amber">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
-                        </span>
-                        <h3>无主索引</h3>
-                        <span class="spacer"></span>
-                        <span class="mbadge warn" id="orphanCount">—</span>
-                    </div>
+            <section class="dp-kb-section dp-kb-orphans" id="orphanCard" style="display:none;">
+                <div class="dp-kb-section-head">
+                    <span class="dp-op-icon dp-op-icon-amber">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+                    </span>
+                    <h3>无主索引</h3>
+                    <span class="spacer"></span>
+                    <span class="mbadge warn" id="orphanCount">—</span>
+                </div>
+                <div class="dp-kb-section-body">
                     <div class="dp-kb-orphan-note">
                         这些集合在后端上存在，但没有知识体认领它们。常见来源：v1 时代按域建的索引、被手工改过的配置。
                         平台<b>不会自动删除</b>它们——删掉就再也找不回来。要接管，按它的集合名新建一个知识体（引擎不会搬动已有数据）；
@@ -117,23 +129,20 @@
                     </div>
                     <div class="dp-kb-orphan-list" id="orphanList"></div>
                 </div>
-            </div>
+            </section>
 
-            <!-- 运维区：诊断 / 认领 / 清理 / 合并。默认收起，展开才查（每格都要连远程） -->
-            <div class="card dp-panel dp-kb-ops" id="opsCard">
-                <div class="card-body">
-                    <div class="dp-op-head">
-                        <span class="dp-op-icon">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
-                        </span>
-                        <h3>运维</h3>
-                        <span class="spacer"></span>
-                        <span class="muted-sm" id="opsSummary">诊断 · 认领无主集合 · 清理遗留 · 合并知识体</span>
-                        <button class="linkbtn" id="opsToggleBtn">展开</button>
-                    </div>
-                    <div id="opsBody" hidden></div>
+            <!-- 运维区：诊断 / 认领 / 清理 / 合并。常开，进页面即诊断（逐台枚举集合，异步不挡首屏） -->
+            <section class="dp-kb-section dp-kb-ops" id="opsCard">
+                <div class="dp-kb-section-head">
+                    <span class="dp-op-icon dp-op-icon-purple">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+                    </span>
+                    <h3>运维</h3>
+                    <span class="spacer"></span>
+                    <button class="btn btn-sm btn-outline-secondary" id="opsRefreshBtn">重新诊断</button>
                 </div>
-            </div>
+                <div class="dp-kb-section-body" id="opsBody"></div>
+            </section>
         </div>
     </main>
 </div>

@@ -6,22 +6,20 @@
     <title>域空间 · DomainPlane 管控台</title>
     <link rel="stylesheet" href="assets/console.css">
     <style>
-        .dom-icon { width: 17px; height: 17px; flex: 0 0 17px; color: var(--primary); }
-        .card-head h2.mono { font-family: ui-monospace, Consolas, monospace; }
+        .dom-icon { width: 16px; height: 16px; flex: 0 0 16px; color: var(--primary); }
 
         /* 遮罩层里的模型卡片：点一下即选中/取消 */
         .pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
         .pick-card {
-            border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;
+            border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
             cursor: pointer; background: var(--card);
+            transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
         }
-        .pick-card:hover { border-color: var(--primary); }
+        .pick-card:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(15, 23, 42, .06); }
         .pick-card.on { border-color: var(--primary); background: var(--primary-dim); }
         .pick-card .pc-name { font-size: 13.5px; font-weight: 600; font-family: ui-monospace, Consolas, monospace; }
-        .pick-card .pc-note { font-size: 12px; color: var(--muted); margin-top: 4px; word-break: break-all; }
-        .pick-card .pc-tags { margin-top: 8px; }
-
-        .tool-tags { display: flex; flex-wrap: wrap; }
+        .pick-card .pc-note { font-size: 12px; color: var(--muted); margin-top: 6px; word-break: break-all; line-height: 1.6; }
+        .pick-card .pc-tags { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
     </style>
 </head>
 <body>
@@ -39,7 +37,7 @@
                 </div>
                 <div class="actions">
                     <input class="form-control" type="text" id="newDomain" placeholder="完整路径域，如 default.customer-service"
-                           style="width:240px; font-family:ui-monospace,Consolas,monospace;">
+                           style="width:300px; font-family:ui-monospace,Consolas,monospace;">
                     <!-- nowrap 必须写在这里：label 是 inline-flex，里面的「可调用」是匿名 flex 项，
                          中文可在任意两字间断行，行内空间一紧就会被挤成竖排三个字；
                          flex:0 0 auto 同时禁止这一行把 label 压扁 -->
@@ -55,26 +53,32 @@
         </div>
         <div class="page-body dp-domains">
 
-            <!-- 左：域结构树（按 parentId 嵌套，点节点选中）。
+            <!-- 左：域结构树（按 parentId 组树，点节点选中）。
                  早年是整页平铺卡片：域一多既看不出层级，配一个域要翻很久。
-                 树把「谁继承谁」直接画出来，右侧只放当前选中域的配置。 -->
+                 现在用连线节点树把「谁继承谁」直接画出来，右侧只放当前选中域的配置。 -->
             <div class="dp-domains-split">
-                <div class="card dp-panel">
-                    <div class="card-body">
-                        <div class="card-head">
-                            <h2>域结构</h2>
-                            <span class="spacer"></span>
+                <section class="card dp-panel dp-tree-panel">
+                    <div class="dp-panel-head">
+                        <span class="dp-panel-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="5" rx="1"/><rect x="2" y="17" width="8" height="5" rx="1"/><rect x="14" y="17" width="8" height="5" rx="1"/><path d="M12 7v5M6 17v-2.5a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 .5.5V17"/></svg>
+                        </span>
+                        <div class="dp-panel-title"><h3>域结构</h3></div>
+                        <span class="spacer"></span>
+                        <div class="dp-head-actions">
                             <button class="btn btn-sm btn-outline-secondary" id="treeExpandBtn">展开</button>
                             <button class="btn btn-sm btn-outline-secondary" id="treeCollapseBtn">折叠</button>
                         </div>
-                        <div class="dp-domain-scroll" id="treeList"></div>
-                        <div class="dp-tree-legend">
-                            <span><i class="on"></i>可调用单元</span>
-                            <span><i class="off"></i>装配节点</span>
-                            <span>数字 = 可见工具数</span>
-                        </div>
                     </div>
-                </div>
+                    <div class="dp-panel-body">
+                        <div class="dp-tree-current" id="treePath"></div>
+                        <div class="dp-domain-scroll" id="treeList"></div>
+                    </div>
+                    <div class="dp-panel-foot dp-tree-legend">
+                        <span><i class="on"></i>可调用单元</span>
+                        <span><i class="off"></i>装配节点</span>
+                        <span>数字 = 可见工具数</span>
+                    </div>
+                </section>
                 <div id="detailBody"></div>
             </div>
         </div>

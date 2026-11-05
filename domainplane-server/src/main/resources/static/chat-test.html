@@ -1,0 +1,1736 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DomainPlane 对话测试台</title>
+<style>
+  :root {
+    --bg: #e9ecf0; --panel: #ffffff; --border: #e3e6ec; --text: #1f2329;
+    --muted: #8a9099; --primary: #3b6cf6; --wx: #07c160; --wx-d: #06ad56;
+    --user: #95ec69; --assistant: #ffffff; --think: #fff7e6;
+    --tool: #eef9f0; --err: #fdecec; --err-t: #c0392b; --ok: #1a9c5b;
+    --doc: #f2f0ff; --doc-t: #4b3fbf; --chat-bg: #f5f5f5;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; display: flow-root;
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px;
+  }
+  input, textarea, button, select { font: inherit; color: var(--text); }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+
+  /* ==================== 窗口骨架 ==================== */
+  .app {
+    height: calc(100vh - 48px); max-width: 980px; margin: 24px auto;
+    display: flex; flex-direction: column; background: var(--panel);
+    border: 1px solid #dcdfe4; border-radius: 12px; overflow: hidden;
+    box-shadow: 0 14px 40px rgba(31, 35, 41, .10);
+  }
+  .topbar {
+    flex: 0 0 60px; height: 60px; display: flex; align-items: center; gap: 10px;
+    padding: 0 18px; background: #fafafa; border-bottom: 1px solid #e6e8eb;
+  }
+  .logo {
+    width: 34px; height: 34px; flex: 0 0 34px; border-radius: 8px; background: var(--wx);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; letter-spacing: .3px;
+  }
+  .brand-t { font-size: 14px; font-weight: 600; line-height: 1.3; }
+  .brand-s {
+    font-size: 11px; color: var(--muted); margin-top: 2px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .spacer { flex: 1 1 auto; }
+  .conv-status {
+    font-size: 12px; color: var(--muted); padding: 3px 9px;
+    border-radius: 12px; background: #eef0f3;
+  }
+  .txt-btn {
+    border: 1px solid transparent; background: transparent; color: #5b626c;
+    border-radius: 6px; padding: 6px 10px; font-size: 12px;
+  }
+  .txt-btn:hover:not(:disabled) { background: #eef0f3; color: var(--text); }
+  .txt-btn:disabled { color: #c2c7cf; }
+  .login-trigger {
+    display: inline-flex; align-items: center; gap: 7px; background: #fff;
+    border: 1px solid #dcdfe4; color: #3a4048; border-radius: 18px;
+    padding: 7px 14px; font-size: 12px; margin-left: 4px;
+  }
+  .login-trigger:hover { border-color: var(--wx); color: var(--wx); }
+  .login-trigger .dot { width: 7px; height: 7px; border-radius: 50%; background: #c9ced6; }
+  .login-trigger.logged { background: #f1fbf5; border-color: #b7e7c9; color: #1a7a43; }
+  .login-trigger.logged .dot { background: var(--wx); }
+
+  /* ==================== 对话区（微信式气泡） ==================== */
+  .chat { flex: 1 1 auto; overflow-y: auto; background: var(--chat-bg); padding: 20px 24px; }
+  .msg { margin: 16px 0; display: flex; align-items: flex-start; gap: 10px; }
+  .msg.user { justify-content: flex-end; }
+  .msg::before, .msg::after {
+    width: 34px; height: 34px; flex: 0 0 34px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #fff;
+  }
+  .msg.assistant::before { content: 'DP'; background: var(--primary); }
+  .msg.user::after { content: '我'; background: #d8dde4; color: #5b626c; }
+  .bubble {
+    position: relative; max-width: min(76%, 700px); min-width: 32px;
+    padding: 9px 12px; border-radius: 6px; white-space: pre-wrap;
+    word-break: break-word; line-height: 1.6; font-size: 14px;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, .04);
+  }
+  .msg.user .bubble { background: var(--user); border: 1px solid #8bdd5d; }
+  .msg.assistant .bubble { background: var(--assistant); border: 1px solid #e7e9ec; }
+  .bubble::before, .bubble::after {
+    content: ''; position: absolute; top: 12px; width: 0; height: 0;
+    border: 6px solid transparent;
+  }
+  .msg.assistant .bubble::before { left: -12px; border-right-color: #e7e9ec; }
+  .msg.user .bubble::after { right: -12px; border-left-color: #8bdd5d; }
+  .think {
+    background: var(--think); border-left: 3px solid #f0c14b; padding: 8px 10px;
+    margin: 6px 0; border-radius: 6px; color: #7a5b00; font-size: 13px;
+  }
+  .think .tag { font-weight: 600; color: #9a6b00; }
+  .tool {
+    background: var(--tool); border-left: 3px solid #2e9e54; padding: 8px 10px;
+    margin: 6px 0; border-radius: 6px; font-size: 13px;
+  }
+  .tool .tag { font-weight: 600; color: #1c7a3e; }
+  .body-pre {
+    color: #444; white-space: pre-wrap; word-break: break-word; max-height: 200px;
+    overflow: auto; margin-top: 4px;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;
+  }
+  .err {
+    background: var(--err); border-left: 3px solid var(--err-t); color: var(--err-t);
+    padding: 8px 10px; margin: 6px 0; border-radius: 6px; font-size: 13px; white-space: pre-wrap;
+  }
+  .done { text-align: center; color: #a3a8b0; font-size: 12px; margin: 10px 0; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .pill { font-size: 11px; color: var(--muted); }
+
+  /* ==================== 输入区 ==================== */
+  .composer {
+    flex: 0 0 auto; background: #fafafa; border-top: 1px solid #e3e5e8;
+    padding: 8px 14px 10px;
+  }
+  .attach-list { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .attach-list:empty { display: none; }
+  .quota { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--muted); padding: 0 2px 6px; }
+  .quota:empty { display: none; }
+  .quota b { color: var(--text); font-weight: 600; }
+  .quota .over { color: var(--err-t); }
+  .input-box {
+    border: 1px solid var(--border); border-radius: 9px; background: #fff;
+    display: flex; flex-direction: column; transition: border-color .15s, background .15s;
+  }
+  .input-box.dragover { border-color: var(--wx); background: #f5fcf7; }
+  .toolbar { display: flex; gap: 2px; align-items: center; padding: 6px 8px 0; }
+  .tool-btn {
+    border: none; background: transparent; color: #6b717a; font-size: 16px;
+    padding: 4px 8px; border-radius: 6px; line-height: 1.2;
+  }
+  .tool-btn:hover { background: #eef0f3; color: var(--wx); }
+  input[type=file] { display: none; }
+  .input-box textarea {
+    border: none; border-radius: 0; background: transparent; resize: none;
+    min-height: 68px; padding: 6px 12px; font-size: 14px; line-height: 1.6; width: 100%;
+  }
+  .input-box textarea:focus { outline: none; }
+  .drop-tip { display: none; }
+  .input-box.dragover .drop-tip {
+    display: block; padding: 8px 12px; color: var(--wx); font-size: 12px; background: #eefaf2;
+  }
+  .composer-foot { display: flex; justify-content: flex-end; padding: 0 10px 8px; }
+  #sendBtn {
+    background: var(--wx); color: #fff; border: none; border-radius: 6px;
+    padding: 7px 24px; font-size: 13px;
+  }
+  #sendBtn:hover:not(:disabled) { background: var(--wx-d); }
+  #sendBtn:disabled { background: #c9ced6; }
+  .raw-panel { margin-top: 8px; }
+  .raw-panel summary {
+    cursor: pointer; color: var(--muted); font-size: 11px; padding: 4px 2px; list-style: none;
+  }
+  .raw-panel summary::-webkit-details-marker { display: none; }
+  .raw-panel summary::before { content: '\25B8  '; }
+  .raw-panel[open] summary::before { content: '\25BE  '; }
+  #rawlog {
+    background: #0f1115; color: #d6e2ff; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px; padding: 10px; border-radius: 6px; max-height: 220px; overflow: auto;
+    white-space: pre-wrap;
+  }
+
+  /* ==================== 附件 chip ==================== */
+  .att {
+    display: flex; align-items: center; gap: 9px; max-width: 300px;
+    border: 1px solid var(--border); border-radius: 9px; padding: 6px 8px;
+    background: #fff; font-size: 12px;
+  }
+  .att .thumb {
+    width: 38px; height: 38px; flex: 0 0 38px; border-radius: 6px; overflow: hidden;
+    background: #eef1f6; display: flex; align-items: center; justify-content: center; font-size: 17px;
+  }
+  .att .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .att .thumb.doc {
+    background: var(--doc); color: var(--doc-t); font-weight: 700;
+    font-size: 10px; letter-spacing: .02em;
+  }
+  .att .meta { min-width: 0; flex: 1 1 auto; }
+  .att .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .att .sub { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .att .x {
+    flex: 0 0 auto; cursor: pointer; color: var(--muted); border: none; background: none;
+    padding: 0 2px; font-size: 15px; line-height: 1; width: auto;
+  }
+  .att .x:hover { color: var(--err-t); }
+  .att.bad { border-color: #f0b9b3; background: #fff6f5; }
+  .att.bad .sub { color: var(--err-t); }
+  .att.busy { opacity: .65; }
+  .att .bar { height: 2px; background: #e6eaf2; border-radius: 2px; margin-top: 3px; overflow: hidden; }
+  .att .bar i { display: block; height: 100%; width: 0; background: var(--primary); transition: width .2s; }
+
+  /* 气泡内的附件展示 */
+  .bubble .att-img { max-width: 260px; max-height: 200px; border-radius: 8px; display: block; margin-top: 6px; }
+  .bubble .att-media { max-width: 260px; display: block; margin-top: 6px; border-radius: 8px; }
+  .bubble .att-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .bubble .att-row .pill { background: #eef2f8; border-radius: 6px; padding: 2px 8px; }
+  .bubble .doc-card {
+    margin-top: 6px; border: 1px solid #ddd8f7; background: var(--doc);
+    border-radius: 7px; padding: 6px 9px; font-size: 12px; color: var(--doc-t);
+  }
+  .bubble .doc-card .dn { font-weight: 600; }
+  .bubble .doc-card .dc { color: #6f66a8; font-size: 11px; margin-top: 2px; }
+  .bubble .doc-card pre {
+    margin: 6px 0 0; max-height: 160px; overflow: auto; white-space: pre-wrap;
+    word-break: break-word; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px; color: #3f3a66; background: #fff; border-radius: 5px; padding: 6px;
+  }
+
+  /* ==================== 登录遮罩层 ==================== */
+  .overlay {
+    display: none; position: fixed; inset: 0; z-index: 150;
+    align-items: center; justify-content: center; padding: 20px;
+  }
+  .overlay.show { display: flex; }
+  .overlay-mask { position: absolute; inset: 0; background: rgba(20, 24, 30, .42); backdrop-filter: blur(3px); }
+  .login-card {
+    position: relative; width: min(420px, 100%); background: #fff; border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .22); padding: 22px 24px 20px;
+    animation: pop .18s ease-out;
+  }
+  @keyframes pop {
+    from { transform: translateY(10px) scale(.98); opacity: 0; }
+    to { transform: none; opacity: 1; }
+  }
+  .login-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .login-head h3 { margin: 0; font-size: 16px; font-weight: 600; }
+  .close-x {
+    border: none; background: transparent; color: #9aa0a8; font-size: 22px;
+    line-height: 1; padding: 0 4px; width: auto;
+  }
+  .close-x:hover { color: var(--text); }
+  .field { margin-bottom: 11px; }
+  .field label { display: block; text-align: left; color: #6b717a; font-size: 12px; margin-bottom: 5px; }
+  .field input {
+    width: 100%; border: 1px solid var(--border); border-radius: 7px;
+    padding: 8px 10px; background: #fff; font-size: 13px;
+  }
+  .field input:focus { outline: none; border-color: var(--wx); box-shadow: 0 0 0 2px rgba(7, 193, 96, .12); }
+  .login-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 16px; }
+  #loginBtn {
+    background: var(--wx); color: #fff; border: none; border-radius: 7px;
+    padding: 8px 16px; font-size: 13px; white-space: nowrap;
+  }
+  #loginBtn:hover:not(:disabled) { background: var(--wx-d); }
+  #loginBtn:disabled { background: #c9ced6; }
+  .status { font-size: 12px; padding: 3px 9px; border-radius: 12px; background: #eee; color: var(--muted); }
+  .status.ok { background: #e6f7ee; color: var(--ok); }
+  .status.bad { background: var(--err); color: var(--err-t); }
+  .cors-tip {
+    display: none; margin: 0 0 12px; padding: 10px 12px;
+    border: 1px solid #f0c14b; border-radius: 8px;
+    background: #fff7e6; color: #7a5b00; font-size: 12px; line-height: 1.8;
+  }
+  .cors-tip.show { display: block; }
+  .cors-tip a { color: var(--primary); font-weight: 600; }
+
+  /* ==================== 轻提示 / 媒体 / 放大 ==================== */
+  #toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(12px);
+    background: #1f2329; color: #fff; font-size: 12px; padding: 8px 15px;
+    border-radius: 20px; opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s; z-index: 300; max-width: 80vw; text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .gen-media {
+    margin: 8px 0 2px; padding: 8px; border: 1px solid #dbe3f0;
+    border-radius: 8px; background: #f7f9fc; max-width: 340px;
+  }
+  .gen-media .gm-head { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #6b7280; margin-bottom: 6px; }
+  .gen-media .gm-id { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .gen-media .gm-head a { margin-left: auto; color: var(--primary); text-decoration: none; }
+  .gen-media img, .gen-media video { max-width: 100%; max-height: 240px; border-radius: 6px; display: block; cursor: zoom-in; }
+  .gen-media video { cursor: default; }
+  .gen-media audio { width: 100%; display: block; }
+  #lightbox {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: rgba(12, 15, 20, .82); align-items: center; justify-content: center; padding: 24px;
+  }
+  #lightbox.show { display: flex; }
+  #lightbox img { max-width: 94vw; max-height: 90vh; border-radius: 8px; }
+
+  @media (max-width: 760px) {
+    .app { height: 100vh; margin: 0; border: none; border-radius: 0; }
+    .topbar { padding: 0 12px; }
+    .chat { padding: 14px 12px; }
+    .bubble { max-width: 82%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="logo">DP</div>
+    <div>
+      <div class="brand-t">DomainPlane 对话测试台</div>
+      <div class="brand-s">会话 <span id="sidLabel" class="pill">—</span></div>
+    </div>
+    <div class="spacer"></div>
+    <span id="convStatus" class="conv-status">空闲</span>
+    <button id="newBtn" class="txt-btn" type="button">新建会话</button>
+    <button id="stopBtn" class="txt-btn" type="button" disabled>停止</button>
+    <button id="openLoginBtn" class="login-trigger" type="button">
+      <span class="dot"></span><span id="loginLabel">登录</span>
+    </button>
+  </header>
+
+  <div id="chat" class="chat"></div>
+
+  <footer class="composer">
+    <div id="attachList" class="attach-list"></div>
+    <div class="quota" id="quotaBar"></div>
+
+    <div class="input-box" id="inputBox">
+      <div class="toolbar">
+        <button id="pickImgBtn" class="tool-btn" type="button" title="图片">🖼️</button>
+        <button id="pickMediaBtn" class="tool-btn" type="button" title="音频 / 视频">🎵</button>
+        <button id="pickDocBtn" class="tool-btn" type="button" title="PDF / Word / Excel / PPT / 文本 / 代码">📄</button>
+        <button id="pickAnyBtn" class="tool-btn" type="button" title="不限制类型">📎</button>
+        <input id="filePicker" type="file" multiple>
+      </div>
+      <textarea id="message" placeholder="输入消息，回车发送（Shift+Enter 换行）；可拖拽或粘贴文件"></textarea>
+      <div class="drop-tip">松开即添加附件</div>
+      <div class="composer-foot">
+        <button id="sendBtn" type="button">发送</button>
+      </div>
+    </div>
+
+    <details class="raw-panel">
+      <summary>原始事件流（排障用）</summary>
+      <div id="rawlog"></div>
+    </details>
+  </footer>
+
+</div>
+
+<!-- 登录遮罩层：点遮罩 / 右上角 × / Esc 均可关闭 -->
+<div id="loginOverlay" class="overlay" aria-hidden="true">
+  <div class="overlay-mask" id="loginMask"></div>
+  <div class="login-card" role="dialog" aria-modal="true" aria-label="连接与登录">
+    <div class="login-head">
+      <h3>连接与登录</h3>
+      <button id="loginClose" class="close-x" type="button" aria-label="关闭">×</button>
+    </div>
+    <div id="corsTip" class="cors-tip"></div>
+    <div class="field">
+      <label for="baseUrl">服务地址</label>
+      <input id="baseUrl" value="http://localhost:9527" placeholder="http://host:port">
+    </div>
+    <div class="field">
+      <label for="username">账号</label>
+      <input id="username" placeholder="管控台账号">
+    </div>
+    <div class="field">
+      <label for="password">密码</label>
+      <input id="password" type="password" placeholder="管控台密码">
+    </div>
+    <div class="field">
+      <label for="credential">或粘贴凭证</label>
+      <input id="credential" placeholder="X-DomainPlane-Credential，留空则用登录获取的">
+    </div>
+    <div class="field">
+      <label for="domain">域 (domain)</label>
+      <input id="domain" value="default" placeholder="default">
+    </div>
+    <div class="login-foot">
+      <span id="credStatus" class="status">未设置凭证</span>
+      <button id="loginBtn" type="button">登录获取凭证</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const base = () => ($('baseUrl').value || '').replace(/\/+$/, '');
+const getCred = () => ($('credential').value || '').trim()
+  || sessionStorage.getItem('dp_cred') || '';
+const setCred = (c) => { sessionStorage.setItem('dp_cred', c); };
+
+/* 本页是单文件工具，常被直接双击（file://）或挂在别的静态端口上打开。
+   服务端默认关闭跨域（domainplane.cors.allowed-origins 默认为空），而登录请求带
+   application/json 会先发 OPTIONS 预检：预检被拒 -> fetch 只抛一个笼统的 TypeError，
+   页面表现就是「一直登不上」且看不出原因。
+   同源打开（服务地址 /chat-test.html）可彻底绕开预检，不用放宽服务端 CORS 策略。 */
+function isCrossOrigin() {
+  if (location.protocol === 'file:') return true;
+  try { return location.origin !== new URL(base()).origin; } catch (_) { return true; }
+}
+function selfOriginLabel() {
+  return location.protocol === 'file:' ? 'file://（Origin: null）' : location.origin;
+}
+function sameOriginHint() {
+  const tip = $('corsTip');
+  if (!tip) return;
+  const b = base();
+  let target;
+  try { target = new URL('/chat-test.html', b).href; }
+  catch (_) { target = b.replace(/\/+$/, '') + '/chat-test.html'; }
+  if (!isCrossOrigin()) { tip.className = 'cors-tip'; tip.innerHTML = ''; return; }
+  tip.className = 'cors-tip show';
+  tip.innerHTML = '当前页面与服务端不同源（' + selfOriginLabel() + ' → ' + b + '）。'
+    + '服务端默认关闭跨域，登录请求的预检会被直接拒绝，表现就是「登不上」。'
+    + '<br>请用服务地址打开本页：<a href="' + target + '">' + target + '</a>'
+    + '（本页已放在服务端静态目录下，同源访问无需改任何配置）。';
+}
+
+let sessionId = 'dp-test-' + Math.random().toString(36).slice(2, 10);
+$('sidLabel').textContent = sessionId;
+let streaming = false;
+/** 本轮流是否见过终止事件（DONE/STOPPED/ERROR/INTERRUPT）——没有它就是被掐断的半截答案 */
+let sawTerminal = false;
+
+function toast(text) {
+  const t = $('toast');
+  t.textContent = text;
+  t.className = 'show';
+  clearTimeout(t._h);
+  t._h = setTimeout(() => { t.className = ''; }, 2600);
+}
+
+// ==================== 对话区只呈现治理后的内容 ====================
+// 约定：界面上的错误只呈现服务端治理后的字段（error / codeName / action / traceId）。
+// 原始错误报文与浏览器异常原文一律不进对话区；排障靠 rawlog 里的码 + traceId 关联服务端日志。
+
+/** 服务端错误报文 → 对话区一行治理后错误 */
+function showGovernedError(body) {
+  let e = null;
+  try { e = (typeof body === 'string' ? JSON.parse(body) : body) || null; } catch (_) { e = null; }
+  const d = document.createElement('div');
+  d.className = 'err';
+  if (e && typeof e === 'object' && e.code) {
+    let text = '⚠️ ' + (e.error || '服务端错误') + (e.codeName ? '（' + e.codeName + '）' : '');
+    if (e.action) text += '\n' + e.action;
+    if (e.traceId) text += '\ntraceId=' + e.traceId;
+    d.textContent = text;
+    appendRaw('[服务端错误] code=' + e.code + ' codeName=' + (e.codeName || '-') + ' traceId=' + (e.traceId || '-'));
+  } else {
+    d.textContent = '⚠️ 服务端返回了无法识别的响应，请稍后重试';
+    appendRaw('[服务端错误] 响应体不是可识别的错误报文');
+  }
+  ensureBlock().appendChild(d); scroll();
+}
+
+/** 网络层失败（连接被拒 / 流被重置）：不呈现浏览器异常原文 */
+function showNetworkFailure() {
+  const d = document.createElement('div');
+  d.className = 'err';
+  d.textContent = '⚠️ 连接中断：本轮回复可能不完整，请重新发送';
+  ensureBlock().appendChild(d); scroll();
+  appendRaw('[网络异常] 请求未能完成');
+}
+
+/** 流未收到终止事件即结束 = 半截答案，必须显式呈现（与服务端 SDK 同一判据） */
+function showTruncated() {
+  const d = document.createElement('div');
+  d.className = 'err';
+  d.textContent = '⚠️ 本轮未正常结束（缺少终止事件），以上内容可能不完整';
+  ensureBlock().appendChild(d); scroll();
+  appendRaw('[流截断] 未收到 DONE/STOPPED/ERROR 即结束');
+}
+
+async function login() {
+  const u = $('username').value.trim();
+  const p = $('password').value;
+  const btn = $('loginBtn');
+  btn.disabled = true;
+  try {
+    const res = await fetch(base() + '/api/agent/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p })
+    });
+    const j = await res.json().catch(() => null);
+    if (res.ok && j && j.credential) {
+      setCred(j.credential);
+      // 手填凭证优先于 sessionStorage：不清掉的话刚换到的新凭证会被旧值盖住
+      $('credential').value = '';
+      $('credStatus').textContent = '已获取凭证 ✓';
+      $('credStatus').className = 'status ok';
+      refreshLoginBadge();
+    } else {
+      let text = '登录失败';
+      if (j && j.error) {
+        text += '：' + j.error + (j.codeName ? '（' + j.codeName + '）' : '');
+        if (j.action) text += '，' + j.action;
+        if (j.traceId) text += '（traceId=' + j.traceId + '）';
+      } else {
+        text += '：HTTP ' + res.status;
+      }
+      $('credStatus').textContent = text;
+      $('credStatus').className = 'status bad';
+    }
+  } catch (e) {
+    $('credStatus').textContent = isCrossOrigin()
+      ? '登录失败：跨域预检被拒，请用上方服务地址打开本页'
+      : '登录失败：无法连接服务端（' + base() + '）';
+    $('credStatus').className = 'status bad';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function headers(extra) {
+  const h = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
+  const c = getCred();
+  if (c) h['X-DomainPlane-Credential'] = c;
+  return h;
+}
+
+/* ==================================================================
+ * 附件：图片 / 音频 / 视频 / 文档
+ *
+ * 与后端契约（api/model/ContentType）对齐——后端只认四种上行内容块：
+ *   TEXT / IMAGE_BASE64 / AUDIO_BASE64 / VIDEO_BASE64（URL 变体在测试台不用）
+ * 所以：
+ *   · 图 / 音 / 视 → 原样转 base64，走对应内容块（base64 不带 data: 前缀）
+ *   · 各类文档     → 前端就地抽取纯文本，塞进同一个 TEXT 块（带文件头标注），
+ *                    后端没有 DOCUMENT 类型，硬塞别的 type 会被契约拒掉
+ * ================================================================== */
+
+/** 单文件原始大小上限（字节）。超过就不读，直接在 chip 上标红 */
+const MAX_FILE_BYTES = 40 * 1024 * 1024;
+/** 单个文档抽出的文本上限（字符）。超了截断并告知，否则一轮请求体会被撑爆 */
+const MAX_DOC_CHARS = 200000;
+/** 所有附件拼出来的上行 payload 软上限（字符），仅用于提示，不阻断 */
+const SOFT_PAYLOAD_CHARS = 600000;
+
+let attached = [];
+/** 文件读取/解析中（异步）：没读完不发放 */
+let reading = false;
+
+const KIND_ICON = { image: '🖼️', video: '🎬', audio: '🎵', doc: '📄' };
+
+const EXT_OF = (name) => {
+  const i = (name || '').lastIndexOf('.');
+  return i >= 0 ? name.slice(i + 1).toLowerCase() : '';
+};
+
+/** 按 mime + 扩展名双判：浏览器给部分文档的 type 是空的，不能只信 mime */
+function kindOf(file) {
+  const mime = file.type || '';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  const ext = EXT_OF(file.name);
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif'].indexOf(ext) >= 0) return 'image';
+  if (['mp4', 'webm', 'mov', 'm4v', 'avi', 'mkv', 'ogv'].indexOf(ext) >= 0) return 'video';
+  if (['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'opus', 'weba'].indexOf(ext) >= 0) return 'audio';
+  return 'doc';
+}
+
+/** 文档子类：决定抽取方式和展示标签 */
+function docFlavorOf(name, mime) {
+  const ext = EXT_OF(name);
+  if (ext === 'pdf' || mime === 'application/pdf') return 'pdf';
+  if (ext === 'docx') return 'docx';
+  if (ext === 'doc') return 'doc';
+  if (ext === 'xlsx' || ext === 'xlsm') return 'xlsx';
+  if (ext === 'xls') return 'xls';
+  if (ext === 'pptx') return 'pptx';
+  if (ext === 'ppt') return 'ppt';
+  if (ext === 'csv' || mime === 'text/csv') return 'csv';
+  if (ext === 'json' || mime === 'application/json') return 'json';
+  if (['md', 'markdown'].indexOf(ext) >= 0) return 'md';
+  if (mime.startsWith('text/') || ['txt', 'log', 'yaml', 'yml', 'xml', 'html', 'htm'].indexOf(ext) >= 0) return 'text';
+  if (['js', 'mjs', 'ts', 'jsx', 'tsx', 'java', 'py', 'go', 'rs', 'c', 'h', 'cpp', 'hpp',
+       'cs', 'kt', 'rb', 'php', 'sh', 'bash', 'sql', 'css', 'scss', 'vue', 'lua', 'toml',
+       'ini', 'conf', 'properties', 'gradle'].indexOf(ext) >= 0) return 'code';
+  return 'unknown';
+}
+
+const DOC_LABEL = {
+  pdf: 'PDF', docx: 'Word', doc: 'Word', xlsx: 'Excel', xls: 'Excel',
+  pptx: 'PPT', ppt: 'PPT', csv: 'CSV', json: 'JSON', md: 'Markdown',
+  text: '文本', code: '代码', unknown: '文件'
+};
+
+/** 附件缩略图位置上的短格式角标 */
+const DOC_TAG = {
+  pdf: 'PDF', docx: 'DOC', doc: 'DOC', xlsx: 'XLS', xls: 'XLS',
+  pptx: 'PPT', ppt: 'PPT', csv: 'CSV', json: 'JSON', md: 'MD',
+  text: 'TXT', code: '</>', unknown: 'FILE'
+};
+
+/** 支持"抽成纯文本"的文档子类 */
+const EXTRACTABLE = {
+  csv: 1, json: 1, md: 1, text: 1, code: 1
+};
+
+function fmtSize(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+/** data URL → { mime, base64 }：前缀里取 mime，逗号后是纯 base64 */
+function splitDataUrl(dataUrl) {
+  const comma = dataUrl.indexOf(',');
+  const head = dataUrl.slice(5, comma); // 去掉开头的 "data:"
+  return { mime: head.split(';')[0] || 'application/octet-stream', base64: dataUrl.slice(comma + 1) };
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error || new Error('读取失败'));
+    r.readAsDataURL(file);
+  });
+}
+
+function readAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error || new Error('读取失败'));
+    r.readAsArrayBuffer(file);
+  });
+}
+
+function readAsText(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error || new Error('读取失败'));
+    r.readAsText(file, 'utf-8');
+  });
+}
+
+/* ---------------- 文档文本抽取 ---------------- */
+
+/** 二进制里挑出可见文本：PDF / docx / xlsx 兜底用。
+ *  只保留可打印 ASCII + CJK，过滤掉解压后的大量乱码噪声。 */
+function salvageText(buf) {
+  const bytes = new Uint8Array(buf);
+  const out = [];
+  let run = [];
+  const push = () => {
+    if (run.length >= 4) out.push(decodeUtf8(run));
+    run = [];
+  };
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    if (b === 9 || b === 10 || b === 13 || (b >= 32 && b < 127)) { run.push(b); continue; }
+    // UTF-8 多字节（中文等）：交给 TextDecoder 判合法性
+    if (b >= 0xc2) {
+      const chunk = bytes.subarray(i, Math.min(i + 4, bytes.length));
+      const s = decodeUtf8(chunk);
+      if (s && s !== '\ufffd') { run.push.apply(run, chunk); i += chunk.length - 1; continue; }
+    }
+    push();
+  }
+  push();
+  return out.join(' ').replace(/\s{2,}/g, ' ').trim();
+}
+
+function decodeUtf8(arr) {
+  try { return new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(arr)); }
+  catch (_) { return ''; }
+}
+
+/** docx / xlsx / pptx 都是 zip：手工解出 word/document.xml 等，抽 <w:t> / <t> 文本。
+ *  不引第三方库（测试页是单文件、离线可用），zip 只读 store/deflate 两种压缩方式。 */
+async function unzipEntries(buf) {
+  const u8 = new Uint8Array(buf);
+  const dv = new DataView(buf);
+  // 找 End of Central Directory（0x06054b50），从尾部往前扫
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 66000); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('不是有效的 zip');
+  const count = dv.getUint16(eocd + 10, true);
+  let off = dv.getUint32(eocd + 16, true);
+  const entries = {};
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(off, true) !== 0x02014b50) break;
+    const method = dv.getUint16(off + 10, true);
+    const compSize = dv.getUint32(off + 20, true);
+    const nameLen = dv.getUint16(off + 28, true);
+    const extraLen = dv.getUint16(off + 30, true);
+    const cmtLen = dv.getUint16(off + 32, true);
+    const localOff = dv.getUint32(off + 42, true);
+    const name = decodeUtf8(u8.subarray(off + 46, off + 46 + nameLen));
+    entries[name] = { method: method, compSize: compSize, localOff: localOff };
+    off += 46 + nameLen + extraLen + cmtLen;
+  }
+  return {
+    names: Object.keys(entries),
+    async read(name) {
+      const e = entries[name];
+      if (!e) return null;
+      const lo = e.localOff;
+      if (dv.getUint32(lo, true) !== 0x04034b50) return null;
+      const nameLen = dv.getUint16(lo + 26, true);
+      const extraLen = dv.getUint16(lo + 28, true);
+      const start = lo + 30 + nameLen + extraLen;
+      const data = u8.subarray(start, start + e.compSize);
+      if (e.method === 0) return data;
+      if (e.method === 8) {
+        if (typeof DecompressionStream === 'undefined') return null;
+        const ds = new DecompressionStream('deflate-raw');
+        const blob = new Blob([data]);
+        const stream = blob.stream().pipeThrough(ds);
+        const ab = await new Response(stream).arrayBuffer();
+        return new Uint8Array(ab);
+      }
+      return null;
+    }
+  };
+}
+
+function xmlToText(xml) {
+  return xml
+    .replace(/<w:tab\/>/g, '\t')
+    .replace(/<\/w:p>/g, '\n')
+    .replace(/<\/a:p>/g, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+async function extractDocx(buf) {
+  const zip = await unzipEntries(buf);
+  const main = zip.names.filter(n => /^word\/document\d*\.xml$/.test(n))[0] || 'word/document.xml';
+  const d = await zip.read(main);
+  if (!d) return null;
+  return xmlToText(decodeUtf8(d));
+}
+
+async function extractPptx(buf) {
+  const zip = await unzipEntries(buf);
+  const slides = zip.names
+    .filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+    .sort((a, b) => {
+      const na = parseInt(a.replace(/\D/g, ''), 10);
+      const nb = parseInt(b.replace(/\D/g, ''), 10);
+      return na - nb;
+    });
+  const parts = [];
+  for (let i = 0; i < slides.length; i++) {
+    const d = await zip.read(slides[i]);
+    if (d) parts.push('[第 ' + (i + 1) + ' 页]\n' + xmlToText(decodeUtf8(d)));
+  }
+  return parts.join('\n\n') || null;
+}
+
+async function extractXlsx(buf) {
+  const zip = await unzipEntries(buf);
+  // 共享字符串表 + 每张工作表
+  const ssRaw = await zip.read('xl/sharedStrings.xml');
+  const shared = [];
+  if (ssRaw) {
+    const s = decodeUtf8(ssRaw);
+    const items = s.split(/<si>/).slice(1);
+    for (let i = 0; i < items.length; i++) {
+      const texts = items[i].match(/<t[^>]*>([\s\S]*?)<\/t>/g) || [];
+      shared.push(texts.map(t => xmlToText(t)).join(''));
+    }
+  }
+  const sheets = zip.names
+    .filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))
+    .sort((a, b) => parseInt(a.replace(/\D/g, ''), 10) - parseInt(b.replace(/\D/g, ''), 10));
+  const out = [];
+  for (let i = 0; i < sheets.length; i++) {
+    const d = await zip.read(sheets[i]);
+    if (!d) continue;
+    const xml = decodeUtf8(d);
+    const lines = [];
+    // 按 <c ...>...</c> 整段匹配：type 属性在开标签里，只按开标签切会把 t="s" 丢掉
+    const cellRe = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+    const rowRe = /<row\b[^>]*>([\s\S]*?)<\/row>/g;
+    const rowSelfRe = /<row\b[^>]*\/>/g;
+    let rm;
+    while ((rm = rowRe.exec(xml)) !== null) {
+      const body = rm[1];
+      const vals = [];
+      let cm;
+      cellRe.lastIndex = 0;
+      while ((cm = cellRe.exec(body)) !== null) {
+        const attrs = cm[1] || '';
+        const inner = cm[2] || '';
+        const typeM = attrs.match(/\bt="([^"]+)"/);
+        const type = typeM ? typeM[1] : '';
+        const vm = inner.match(/<v>([\s\S]*?)<\/v>/);
+        const isM = inner.match(/<is>([\s\S]*?)<\/is>/);
+        if (type === 's' && vm) {
+          const idx = parseInt(vm[1], 10);
+          vals.push(shared[idx] != null ? shared[idx] : '');
+        } else if (type === 'inlineStr' && isM) {
+          vals.push(xmlToText(isM[1]));
+        } else if (type === 'str' && vm) {
+          vals.push(xmlToText(vm[1]));
+        } else if (vm) {
+          vals.push(xmlToText(vm[1]));
+        } else {
+          vals.push('');
+        }
+      }
+      const joined = vals.join('\t').replace(/[\t\s]+$/, '');
+      if (joined.trim()) lines.push(joined);
+    }
+    if (lines.length) out.push('[工作表 ' + (i + 1) + ']\n' + lines.join('\n'));
+  }
+  return out.join('\n\n') || null;
+}
+
+/** PDF：浏览器没有可编程 PDF 解析 API，这里走"解 Flate 流 + 抽文本操作符"的轻量路径。
+ *  结果是纯文本，够用于测试台上行链路；扫描件（无文本层）抽不出东西，会明确告知。 */
+async function extractPdf(buf) {
+  const u8 = new Uint8Array(buf);
+  const raw = decodeLatin1(u8);
+  const chunks = [];
+  // 逐个 stream 解压。流的真实长度看对象头里的 /Length：
+  // 直接按 endstream 前的位置切片会把尾部的 \n 也带进去，
+  // DecompressionStream 遇到尾部垃圾数据会直接抛错（不是软失败）。
+  const re = /stream\r?\n/g;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    const start = m.index + m[0].length;
+    const endIdx = raw.indexOf('endstream', start);
+    if (endIdx < 0) break;
+    // 往前找本对象头，取 /Length N（间接引用形如 /Length 12 0 R 的取不到，退回 endstream）
+    const headStart = Math.max(0, raw.lastIndexOf(' obj', m.index) - 400);
+    const head = raw.slice(headStart, m.index);
+    const lm = head.match(/\/Length\s+(\d+)(?!\s+\d+\s+R)/);
+    let segEnd = endIdx;
+    if (lm) {
+      const declared = parseInt(lm[1], 10);
+      if (declared > 0 && start + declared <= raw.length) segEnd = start + declared;
+    } else {
+      // 没有可信长度就退一步去掉尾部空白（\r\n 不属于压缩数据）
+      while (segEnd > start && (raw.charCodeAt(segEnd - 1) === 10 || raw.charCodeAt(segEnd - 1) === 13)) segEnd--;
+    }
+    const seg = u8.subarray(start, segEnd);
+    let text = null;
+    try {
+      const ds = new DecompressionStream('deflate');
+      const ab = await new Response(new Blob([seg]).stream().pipeThrough(ds)).arrayBuffer();
+      text = decodeLatin1(new Uint8Array(ab));
+    } catch (_) { text = null; }
+    if (text && (text.indexOf('Tj') >= 0 || text.indexOf('TJ') >= 0)) chunks.push(pdfOpsToText(text));
+    re.lastIndex = endIdx + 9;
+  }
+  if (!chunks.length) chunks.push(pdfOpsToText(raw));
+  const text = chunks.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return text || null;
+}
+
+function decodeLatin1(u8) {
+  let s = '';
+  const CH = 0x8000;
+  for (let i = 0; i < u8.length; i += CH) {
+    s += String.fromCharCode.apply(null, u8.subarray(i, Math.min(i + CH, u8.length)));
+  }
+  return s;
+}
+
+/** 从 PDF 内容流里抽文本绘制操作符：Tj / TJ / ' / " 前的字符串操作数。
+ *  不按行切——一行里常有多组 BT..ET，按行处理会把合法文本漏掉。 */
+function pdfOpsToText(stream) {
+  const out = [];
+  // 三种操作数形态：字面量串 (...) 、十六进制串 <...> 、数组 [...]
+  const tok = /\((?:\\.|[^\\)])*\)|<[0-9A-Fa-f\s]+>|\[\s*[-+0-9.]*\s*(?:\((?:\\.|[^\\)])*\)|<[0-9A-Fa-f\s]+>|[-+0-9.]+\s*)*\]|\bT[jJ]\b|\bTd\b|\bTD\b|\bT\*\b|'|"/g;
+  let m;
+  while ((m = tok.exec(stream)) !== null) {
+    const t = m[0];
+    if (t === 'Tj' || t === 'TJ' || t === "'" || t === '"' || t === 'Td' || t === 'TD' || t === 'T*') {
+      // 遇到文本定位/绘制操作：这是本段的收尾
+      if (t === 'Td' || t === 'TD' || t === 'T*') out.push('\n');
+      continue;
+    }
+    if (t.charAt(0) === '(') {
+      out.push(pdfLiteralToString(t.slice(1, -1)));
+    } else if (t.charAt(0) === '<') {
+      out.push(pdfHexToString(t.slice(1, -1)));
+    } else if (t.charAt(0) === '[') {
+      // TJ 数组：内部每个串 + 可能的偏移数字（负数 = 字间距，按空格处理）
+      const inner = t.slice(1, -1);
+      const sub = inner.match(/\((?:\\.|[^\\)])*\)|<[0-9A-Fa-f\s]+>|[-+][0-9.]+|[0-9.]+/g) || [];
+      for (let i = 0; i < sub.length; i++) {
+        const s = sub[i];
+        if (s.charAt(0) === '(') out.push(pdfLiteralToString(s.slice(1, -1)));
+        else if (s.charAt(0) === '<') out.push(pdfHexToString(s.slice(1, -1)));
+        else if (parseFloat(s) < -100) out.push(' ');
+      }
+    }
+  }
+  return out.join('')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function pdfLiteralToString(s) {
+  return s.replace(/\\([nrtbf()\\])/g, (all, c) => {
+    if (c === 'n') return '\n';
+    if (c === 'r') return '\r';
+    if (c === 't') return '\t';
+    if (c === 'b' || c === 'f') return '';
+    return c;
+  }).replace(/\\([0-7]{1,3})/g, (all, oct) => String.fromCharCode(parseInt(oct, 8)));
+}
+
+function pdfHexToString(hex) {
+  const clean = hex.replace(/\s+/g, '');
+  // UTF-16BE（常见于含中文的 PDF）：以 FEFF 开头或偶数长度按 UTF-16 解
+  if (clean.length % 4 === 0) {
+    let out = '';
+    for (let i = 0; i < clean.length; i += 4) {
+      const cp = parseInt(clean.slice(i, i + 4), 16);
+      if (!isNaN(cp)) out += String.fromCharCode(cp);
+    }
+    return out.replace(/\ufffd/g, '');
+  }
+  let out2 = '';
+  for (let i = 0; i < clean.length; i += 2) {
+    const cp = parseInt(clean.slice(i, i + 2), 16);
+    if (!isNaN(cp)) out2 += String.fromCharCode(cp);
+  }
+  return out2;
+}
+
+/** 统一入口：文件 → { text, note } */
+async function extractTextFromFile(file, flavor) {
+  const name = file.name;
+  if (EXTRACTABLE[flavor]) {
+    let t = await readAsText(file);
+    // UTF-8 解出大量替换符 = 大概率不是 UTF-8（GBK 等），退到 ArrayBuffer 抢救
+    if ((t.match(/\ufffd/g) || []).length > t.length * 0.05) {
+      t = salvageText(await readAsArrayBuffer(file));
+    }
+    return { text: t, note: '' };
+  }
+  if (flavor === 'docx') {
+    const t = await extractDocx(await readAsArrayBuffer(file));
+    if (t) return { text: t, note: '' };
+    return { text: salvageText(await readAsArrayBuffer(file)), note: '按纯文本兜底抽取，格式可能丢失' };
+  }
+  if (flavor === 'pptx') {
+    const t = await extractPptx(await readAsArrayBuffer(file));
+    if (t) return { text: t, note: '' };
+    return { text: salvageText(await readAsArrayBuffer(file)), note: '按纯文本兜底抽取，格式可能丢失' };
+  }
+  if (flavor === 'xlsx') {
+    const t = await extractXlsx(await readAsArrayBuffer(file));
+    if (t) return { text: t, note: '' };
+    return { text: salvageText(await readAsArrayBuffer(file)), note: '按纯文本兜底抽取，格式可能丢失' };
+  }
+  if (flavor === 'pdf') {
+    const t = await extractPdf(await readAsArrayBuffer(file));
+    if (t) return { text: t, note: '' };
+    return {
+      text: '',
+      note: 'PDF 文本层抽取失败（可能是扫描件或加密文档）'
+    };
+  }
+  if (flavor === 'doc' || flavor === 'xls' || flavor === 'ppt') {
+    const t = salvageText(await readAsArrayBuffer(file));
+    return {
+      text: t,
+      note: '旧版二进制格式（.' + EXT_OF(name) + '）只能抢救性抽取，建议另存为新格式后重传'
+    };
+  }
+  // unknown
+  const t = salvageText(await readAsArrayBuffer(file));
+  return { text: t, note: t ? '未知类型，按可见文本抢救性提取' : '' };
+}
+
+/* ---------------- 附件状态与渲染 ---------------- */
+
+function renderAttachments() {
+  const box = $('attachList');
+  box.innerHTML = '';
+  attached.forEach((a, i) => {
+    const el = document.createElement('div');
+    el.className = 'att'
+      + (a.problem ? ' bad' : '')
+      + (a.busy ? ' busy' : '');
+    el.title = (a.mime || '未知类型') + ' · ' + fmtSize(a.size) + (a.problem ? '\n' + a.problem : '');
+
+    const th = document.createElement('div');
+    th.className = 'thumb';
+    if (a.kind === 'image' && a.dataUrl) {
+      const img = document.createElement('img');
+      img.src = a.dataUrl; img.alt = a.name;
+      th.appendChild(img);
+    } else if (a.kind === 'doc') {
+      th.className = 'thumb doc';
+      th.textContent = (DOC_TAG[a.flavor] || 'FILE');
+    } else {
+      th.textContent = a.busy ? '⏳' : (a.problem ? '⚠️' : (KIND_ICON[a.kind] || '📄'));
+    }
+    el.appendChild(th);
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const nm = document.createElement('div');
+    nm.className = 'nm'; nm.textContent = a.name;
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    let label;
+    if (a.problem) label = a.problem;
+    else if (a.busy) label = a.busy;
+    else if (a.kind === 'doc') {
+      label = (DOC_LABEL[a.flavor] || '文件') + ' · ' + fmtSize(a.size)
+        + (a.text ? ' · 抽出 ' + a.text.length + ' 字' : ' · 未抽出文本');
+    } else {
+      label = a.kind + ' · ' + fmtSize(a.size);
+    }
+    sub.textContent = label;
+    meta.appendChild(nm); meta.appendChild(sub);
+    if (a.busy && a.progress != null) {
+      const bar = document.createElement('div');
+      bar.className = 'bar';
+      const iv = document.createElement('i');
+      iv.style.width = a.progress + '%';
+      bar.appendChild(iv);
+      meta.appendChild(bar);
+    }
+    el.appendChild(meta);
+
+    const x = document.createElement('button');
+    x.className = 'x'; x.type = 'button'; x.textContent = '×'; x.title = '移除';
+    x.onclick = () => { attached.splice(i, 1); renderAttachments(); renderQuota(); };
+    el.appendChild(x);
+
+    box.appendChild(el);
+  });
+  renderQuota();
+}
+
+/** 配额条：让"为什么发不出去"在发送前就可见 */
+function renderQuota() {
+  const bar = $('quotaBar');
+  const rows = [];
+  const total = attached.reduce((s, a) => s + (a.size || 0), 0);
+  const txt = attached.reduce((s, a) => s + ((a.text || '').length), 0);
+  const enc = attached.reduce((s, a) => s + ((a.base64 || '').length), 0);
+  if (attached.length) {
+    rows.push('附件 <b>' + attached.length + '</b> 个 · 原始合计 <b>' + fmtSize(total) + '</b>');
+    if (enc) rows.push('媒体编码后 <b>' + fmtSize(enc) + '</b>');
+    if (txt) rows.push('文档文本 <b>' + txt.toLocaleString() + '</b> 字');
+    if (enc + txt > SOFT_PAYLOAD_CHARS) {
+      rows.push('<span class="over">payload 偏大（>' + Math.round(SOFT_PAYLOAD_CHARS / 1000) + 'k），可能被模型侧拒收</span>');
+    }
+  }
+  bar.innerHTML = rows.length ? rows.join('') : '';
+}
+
+function addFiles(fileList) {
+  const files = Array.prototype.slice.call(fileList || []);
+  if (!files.length) return;
+  const accepted = [];
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    if (attached.some(a => a.name === f.name && a.size === f.size)) continue;
+    const kind = kindOf(f);
+    const flavor = kind === 'doc' ? docFlavorOf(f.name, f.type || '') : null;
+    const item = {
+      name: f.name, size: f.size, mime: f.type || '',
+      kind: kind, flavor: flavor,
+      dataUrl: null, base64: null, text: null,
+      problem: null, busy: null, progress: 0
+    };
+    if (f.size > MAX_FILE_BYTES) {
+      item.problem = '超过 ' + fmtSize(MAX_FILE_BYTES) + ' 上限，已跳过';
+    }
+    attached.push(item);
+    if (!item.problem) accepted.push({ file: f, item: item });
+  }
+  renderAttachments();
+  if (!accepted.length) {
+    if (files.length) toast('文件已在列表中或超过大小上限');
+    return;
+  }
+  reading = true;
+  if (!streaming) $('convStatus').textContent = '解析中…';
+  // 串行处理：浏览器同时在读多个大文件会明显卡顿，且顺序稳定便于观察
+  const next = (idx) => {
+    if (idx >= accepted.length) {
+      reading = false;
+      if (!streaming) $('convStatus').textContent = '空闲';
+      renderAttachments();
+      return;
+    }
+    const job = accepted[idx];
+    job.item.busy = '读取中…';
+    renderAttachments();
+    parseOne(job.file, job.item).then(() => {
+      job.item.busy = null;
+      renderAttachments();
+      next(idx + 1);
+    });
+  };
+  next(0);
+}
+
+function parseOne(file, item) {
+  if (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio') {
+    return readAsDataUrl(file).then(dataUrl => {
+      const parts = splitDataUrl(dataUrl);
+      item.dataUrl = item.kind === 'image' ? dataUrl : null;
+      item.base64 = parts.base64;
+      if (!item.mime) item.mime = parts.mime; // file.type 为空时以 data URL 头为准
+      if (!parts.base64) item.problem = '文件内容为空';
+    }).catch(() => {
+      item.problem = '读取失败';
+    });
+  }
+  item.busy = '抽取文本…';
+  return extractTextFromFile(file, item.flavor).then(r => {
+    let text = r.text || '';
+    if (r.note) item.problem = null; // note 只是提示，不算失败
+    item.note = r.note || '';
+    if (text.length > MAX_DOC_CHARS) {
+      text = text.slice(0, MAX_DOC_CHARS)
+        + '\n\n…（已截断，原文共 ' + r.text.length + ' 字，仅上传前 ' + MAX_DOC_CHARS + ' 字）';
+      item.note = (item.note ? item.note + '；' : '') + '超长已截断';
+    }
+    item.text = text;
+    if (!text) item.problem = '未能抽出文本，该文件无法作为上行内容';
+  }).catch(() => {
+    item.problem = '解析失败';
+  });
+}
+
+/* ---------------- 上行组装 ---------------- */
+
+/** 文档 → 一段带文件头的纯文本，并入 TEXT 块 */
+function docToPromptText(a) {
+  const head = '【附件：' + a.name
+    + '（' + (DOC_LABEL[a.flavor] || '文件') + '，' + fmtSize(a.size) + '）'
+    + (a.note ? '｜' + a.note : '') + '】';
+  return head + '\n' + a.text + '\n【附件结束：' + a.name + '】';
+}
+
+/** 本轮 contents：TEXT 块在前（与 AgentRequest.getMessage() 合并口径一致），媒体块按选择序 */
+function buildContents(msg, usable) {
+  const docTexts = usable.filter(a => a.kind === 'doc' && a.text).map(docToPromptText);
+  const fullText = [msg].concat(docTexts).filter(Boolean).join('\n\n');
+  const blocks = [];
+  if (fullText) blocks.push({ type: 'TEXT', text: fullText });
+  for (let i = 0; i < usable.length; i++) {
+    const a = usable[i];
+    if (a.kind === 'doc') continue; // 已并入 TEXT 块
+    blocks.push({
+      type: a.kind === 'image' ? 'IMAGE_BASE64'
+        : a.kind === 'video' ? 'VIDEO_BASE64' : 'AUDIO_BASE64',
+      base64: a.base64,
+      mime: a.mime
+    });
+  }
+  return blocks;
+}
+
+function addUserBubble(text, atts) {
+  const d = document.createElement('div');
+  d.className = 'msg user';
+  const b = document.createElement('div');
+  b.className = 'bubble';
+  if (text) b.appendChild(document.createTextNode(text));
+  (atts || []).forEach(a => {
+    if (a.kind === 'image' && a.dataUrl) {
+      const img = document.createElement('img');
+      img.className = 'att-img'; img.src = a.dataUrl; img.alt = a.name;
+      b.appendChild(img);
+    } else if (a.kind === 'video' && a.dataUrl) {
+      const v = document.createElement('video');
+      v.className = 'att-media';
+      v.src = a.dataUrl; v.controls = true;
+      b.appendChild(v);
+    } else if (a.kind === 'audio' && a.dataUrl) {
+      const au = document.createElement('audio');
+      au.style.cssText = 'display:block;margin-top:6px;width:100%;max-width:260px';
+      au.src = a.dataUrl; au.controls = true;
+      b.appendChild(au);
+    } else if (a.kind === 'doc') {
+      const card = document.createElement('div');
+      card.className = 'doc-card';
+      const dn = document.createElement('div');
+      dn.className = 'dn';
+      dn.textContent = (DOC_LABEL[a.flavor] || '📄') + ' ' + a.name;
+      const dc = document.createElement('div');
+      dc.className = 'dc';
+      dc.textContent = fmtSize(a.size)
+        + (a.text ? ' · 抽出 ' + a.text.length + ' 字' : ' · 无文本')
+        + (a.note ? ' · ' + a.note : '');
+      card.appendChild(dn); card.appendChild(dc);
+      if (a.text) {
+        const pre = document.createElement('pre');
+        pre.textContent = a.text.length > 400 ? a.text.slice(0, 400) + '…' : a.text;
+        card.appendChild(pre);
+      }
+      b.appendChild(card);
+    } else {
+      const row = document.createElement('div');
+      row.className = 'att-row';
+      const pill = document.createElement('span');
+      pill.className = 'pill';
+      pill.textContent = (KIND_ICON[a.kind] || '📄') + ' ' + a.name + '（' + fmtSize(a.size) + '）';
+      row.appendChild(pill);
+      b.appendChild(row);
+    }
+  });
+  d.appendChild(b); $('chat').appendChild(d); scroll();
+}
+
+function addAssistantBlock() {
+  const d = document.createElement('div');
+  d.className = 'msg assistant';
+  const b = document.createElement('div');
+  b.className = 'bubble';
+  d.appendChild(b); $('chat').appendChild(d); scroll();
+  return b;
+}
+
+function scroll() { const c = $('chat'); c.scrollTop = c.scrollHeight; }
+
+function appendRaw(text) {
+  $('rawlog').textContent += text + '\n';
+  $('rawlog').scrollTop = $('rawlog').scrollHeight;
+}
+
+// 把单个 AgentEvent 渲染到当前助手气泡
+let curBlock = null;
+let curThink = null;
+let curThinkText = null;
+let curTool = null;
+
+function ensureBlock() {
+  if (!curBlock) curBlock = addAssistantBlock();
+  return curBlock;
+}
+
+function renderEvent(ev) {
+  const type = ev.type;
+  if (type === 'TOKEN') {
+    const b = ensureBlock();
+    b.appendChild(document.createTextNode(ev.content || ''));
+    scroll();
+  } else if (type === 'THINKING') {
+    if (!curThink) {
+      curThink = document.createElement('div');
+      curThink.className = 'think';
+      const tag = document.createElement('div');
+      tag.className = 'tag'; tag.textContent = '🤔 思考过程';
+      curThinkText = document.createElement('div');
+      curThink.appendChild(tag); curThink.appendChild(curThinkText);
+      ensureBlock().appendChild(curThink);
+    }
+    curThinkText.appendChild(document.createTextNode(ev.content || ''));
+    scroll();
+  } else if (type === 'PLAN') {
+    const p = document.createElement('div');
+    p.className = 'think';
+    const tag = document.createElement('div');
+    tag.className = 'tag'; tag.textContent = '🧭 规划';
+    const body = document.createElement('div');
+    body.style.whiteSpace = 'pre-wrap';
+    body.textContent = ev.content || ev.payload || '';
+    p.appendChild(tag); p.appendChild(body);
+    ensureBlock().appendChild(p); scroll();
+  } else if (type === 'TOOL_CALL') {
+    curTool = document.createElement('div');
+    curTool.className = 'tool';
+    const tag = document.createElement('div');
+    tag.className = 'tag'; tag.textContent = '🔧 调用工具：' + (ev.content || '');
+    const body = document.createElement('div');
+    body.className = 'body-pre';
+    body.textContent = ev.payload || '';
+    curTool.appendChild(tag); curTool.appendChild(body);
+    ensureBlock().appendChild(curTool); scroll();
+  } else if (type === 'TOOL_RESULT') {
+    if (!curTool) {
+      curTool = document.createElement('div');
+      curTool.className = 'tool';
+      ensureBlock().appendChild(curTool);
+    }
+    const tag = document.createElement('div');
+    tag.className = 'tag'; tag.textContent = '✅ 工具结果：' + (ev.content || '');
+    const body = document.createElement('div');
+    body.className = 'body-pre';
+    body.textContent = ev.payload || '';
+    curTool.appendChild(tag); curTool.appendChild(body); scroll();
+    curTool = null;
+  } else if (type === 'MEDIA') {
+    renderMedia(ev.payload);
+  } else if (type === 'ERROR') {
+    sawTerminal = true;
+    const d = document.createElement('div');
+    d.className = 'err';
+    d.textContent = '⚠️ 错误' + (ev.codeName ? '（' + ev.codeName + '）' : '')
+      + '：' + (ev.content || '未知错误') + (ev.traceId ? '  traceId=' + ev.traceId : '');
+    ensureBlock().appendChild(d); scroll();
+  } else if (type === 'INTERRUPT') {
+    sawTerminal = true;
+    renderApproval(ev);
+  } else if (type === 'STOPPED') {
+    sawTerminal = true;
+    const d = document.createElement('div');
+    d.className = 'done'; d.textContent = '— 已停止 —';
+    $('chat').appendChild(d); scroll();
+  } else if (type === 'DONE') {
+    sawTerminal = true;
+    const d = document.createElement('div');
+    d.className = 'done'; d.textContent = '— 本轮结束 —';
+    $('chat').appendChild(d); scroll();
+  }
+}
+
+function resetBlock() { curBlock = null; curThink = null; curThinkText = null; curTool = null; }
+
+/* ---------------- 生成媒体渲染（MEDIA 事件） ----------------
+ * 服务端把工具产出的字节原样推下来（encoding=base64），或只给一个地址（encoding=url）。
+ * 会话记录里没有这些字节，只有工具结果文本里的引用名 —— 刷新页面就看不到了，属预期。
+ */
+
+const MEDIA_EXT = {
+  'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif',
+  'audio/mpeg': '.mp3', 'audio/mp3': '.mp3', 'audio/wav': '.wav', 'audio/ogg': '.ogg',
+  'video/mp4': '.mp4', 'video/webm': '.webm'
+};
+
+function mediaSrc(m) {
+  if (!m) return '';
+  if (m.encoding === 'url') return m.data || '';
+  const mime = m.mime || (m.kind === 'image' ? 'image/png' : 'application/octet-stream');
+  return 'data:' + mime + ';base64,' + (m.data || '');
+}
+
+function openLightbox(src) {
+  let box = document.getElementById('lightbox');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'lightbox';
+    box.onclick = () => box.classList.remove('show');
+    document.body.appendChild(box);
+  }
+  box.innerHTML = '';
+  const img = document.createElement('img');
+  img.src = src;
+  box.appendChild(img);
+  box.classList.add('show');
+}
+
+function renderMedia(payload) {
+  let m;
+  try { m = JSON.parse(payload || '{}'); } catch (_) { return; }
+  const src = mediaSrc(m);
+  if (!src) return;
+
+  const box = document.createElement('div');
+  box.className = 'gen-media';
+
+  const head = document.createElement('div');
+  head.className = 'gm-head';
+  const idEl = document.createElement('span');
+  idEl.className = 'gm-id';
+  idEl.textContent = m.id || '';
+  head.appendChild(idEl);
+  const dl = document.createElement('a');
+  dl.href = src;
+  dl.download = (m.id || 'media') + (MEDIA_EXT[m.mime] || '');
+  dl.textContent = '下载';
+  head.appendChild(dl);
+  box.appendChild(head);
+
+  if (m.kind === 'audio') {
+    const au = document.createElement('audio');
+    au.src = src; au.controls = true;
+    box.appendChild(au);
+  } else if (m.kind === 'video') {
+    const v = document.createElement('video');
+    v.src = src; v.controls = true;
+    box.appendChild(v);
+  } else {
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = m.id || '生成图片';
+    img.onclick = () => openLightbox(src);
+    box.appendChild(img);
+  }
+
+  ensureBlock().appendChild(box);
+  scroll();
+}
+
+/** 审批中断：列出服务端给出的待授权工具 + 批准/拒绝，点击后回传 resume 并续收事件流 */
+function renderApproval(ev) {
+  const box = document.createElement('div');
+  box.className = 'tool';
+  const tag = document.createElement('div');
+  tag.className = 'tag'; tag.textContent = '⏸ 需要人工授权';
+  box.appendChild(tag);
+
+  let tools = [];
+  try {
+    const parsed = JSON.parse(ev.payload || '{}');
+    tools = Array.isArray(parsed.tools) ? parsed.tools : [];
+  } catch (_) { tools = []; }
+
+  if (tools.length === 0) {
+    const none = document.createElement('div');
+    none.className = 'body-pre';
+    none.textContent = '（未解析到待授权清单）';
+    box.appendChild(none);
+  }
+  for (const t of tools) {
+    const item = document.createElement('div');
+    item.className = 'body-pre';
+    let text = '• ' + (t.name || '未命名工具');
+    if (t.arguments) text += '\n' + prettyJson(t.arguments);
+    item.textContent = text;
+    box.appendChild(item);
+  }
+
+  const bar = document.createElement('div');
+  bar.className = 'row';
+  const approve = document.createElement('button');
+  approve.textContent = '批准执行';
+  const reject = document.createElement('button');
+  reject.textContent = '拒绝';
+  reject.className = 'ghost';
+  const settle = (label) => {
+    approve.disabled = true;
+    reject.disabled = true;
+    const st = document.createElement('span');
+    st.className = 'pill';
+    st.textContent = label;
+    bar.replaceWith(st);
+  };
+  approve.onclick = () => { settle('已批准，执行中…'); resumeSession(true); };
+  reject.onclick = () => { settle('已拒绝，处理中…'); resumeSession(false); };
+  bar.appendChild(approve); bar.appendChild(reject);
+  box.appendChild(bar);
+
+  ensureBlock().appendChild(box); scroll();
+}
+
+function prettyJson(v) {
+  try { return JSON.stringify(typeof v === 'string' ? JSON.parse(v) : v, null, 2); }
+  catch (_) { return String(v); }
+}
+
+/** 读完整条 SSE 流；结束仍未见过终止事件即按截断呈现 */
+async function pump(res) {
+  sawTerminal = false;
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const r = await reader.read();
+    if (r.done) break;
+    buf += decoder.decode(r.value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const raw = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      processRawEvent(raw);
+    }
+  }
+  if (buf.trim()) processRawEvent(buf);
+  if (!sawTerminal) showTruncated();
+}
+
+async function send() {
+  if (streaming || reading) return;
+  const msg = $('message').value.trim();
+  const usable = attached.filter(a => !a.problem);
+  const bad = attached.filter(a => a.problem);
+  if (bad.length) {
+    toast('有 ' + bad.length + ' 个附件无法使用，请先移除');
+    return;
+  }
+  if (!msg && !usable.length) return;
+  const domain = ($('domain').value || 'default').trim();
+  if (!domain) { alert('domain 不能为空'); return; }
+
+  const docCount = usable.filter(a => a.kind === 'doc').length;
+  const textLen = (msg ? msg.length : 0)
+    + usable.filter(a => a.kind === 'doc').reduce((s, a) => s + (a.text || '').length, 0);
+  if (textLen > MAX_DOC_CHARS * 1.5) {
+    toast('文本量过大（' + textLen + ' 字），请减少文档数量');
+    return;
+  }
+
+  addUserBubble(msg, usable);
+  resetBlock();
+  $('message').value = '';
+  streaming = true;
+  $('sendBtn').disabled = true;
+  $('stopBtn').disabled = false;
+  $('convStatus').textContent = '对话中…';
+
+  // 有附件时走 contents（多模态契约）；纯文本保持旧体，两条路径都覆盖到
+  const contents = usable.length ? buildContents(msg, usable) : null;
+  const body = contents
+    ? JSON.stringify({ sessionId, message: msg, domain, contents: contents })
+    : JSON.stringify({ sessionId, message: msg, domain });
+  appendRaw('[上行] 文本 ' + (msg ? msg.length : 0) + ' 字'
+    + (docCount ? '，文档 ' + docCount + ' 个已并入 TEXT 块' : '')
+    + '，内容块 ' + (contents ? contents.length : 0) + ' 个，请求体约 '
+    + fmtSize(body.length));
+
+  try {
+    const res = await fetch(base() + '/api/agent/chat', {
+      method: 'POST', headers: headers(), body
+    });
+    if (!res.ok) {
+      // 服务端没收下（参数错 / 未认证）：不清附件，用户改完可直接重发
+      showGovernedError(await res.text().catch(() => ''));
+      return;
+    }
+    attached = []; renderAttachments();
+    await pump(res);
+  } catch (e) {
+    showNetworkFailure();
+  } finally {
+    streaming = false;
+    $('sendBtn').disabled = false;
+    $('stopBtn').disabled = true;
+    $('convStatus').textContent = '空闲';
+  }
+}
+
+/** 审批结果回传：批准 / 拒绝后继续同一会话，事件续进当前对话块 */
+async function resumeSession(approved) {
+  if (streaming) return;
+  const domain = ($('domain').value || 'default').trim();
+  streaming = true;
+  $('sendBtn').disabled = true;
+  $('stopBtn').disabled = false;
+  $('convStatus').textContent = approved ? '批准执行中…' : '拒绝处理中…';
+  try {
+    const res = await fetch(base() + '/api/agent/resume'
+      + '?sessionId=' + encodeURIComponent(sessionId)
+      + '&approved=' + approved
+      + '&domain=' + encodeURIComponent(domain),
+      { method: 'POST', headers: headers() });
+    if (!res.ok) {
+      showGovernedError(await res.text().catch(() => ''));
+      return;
+    }
+    await pump(res);
+  } catch (e) {
+    showNetworkFailure();
+  } finally {
+    streaming = false;
+    $('sendBtn').disabled = false;
+    $('stopBtn').disabled = true;
+    $('convStatus').textContent = '空闲';
+  }
+}
+
+function processRawEvent(raw) {
+  const lines = raw.split('\n').filter(l => l.startsWith('data:'));
+  const jsonLine = lines.map(l => l.slice(5).trim()).join('');
+  if (!jsonLine) { if (raw.trim()) appendRaw('[非数据行] ' + raw); return; }
+  let ev;
+  try { ev = JSON.parse(jsonLine); }
+  catch (e) { appendRaw('[解析失败] ' + jsonLine); return; }
+  appendRaw(rawOf(ev));
+  renderEvent(ev);
+}
+
+/** 原始事件日志：MEDIA 的字节体不进日志（一份图 base64 上兆，写进去只会把排障面板撑爆） */
+function rawOf(ev) {
+  if (ev.type !== 'MEDIA') return JSON.stringify(ev);
+  let m = {};
+  try { m = JSON.parse(ev.payload || '{}'); } catch (_) { m = {}; }
+  return JSON.stringify({
+    type: 'MEDIA', sessionId: ev.sessionId, id: m.id, kind: m.kind,
+    mime: m.mime, encoding: m.encoding, dataChars: (m.data || '').length
+  });
+}
+
+async function stop() {
+  if (!streaming) return;
+  const domain = ($('domain').value || 'default').trim();
+  try {
+    await fetch(base() + '/api/agent/stop/' + encodeURIComponent(sessionId)
+      + '?domain=' + encodeURIComponent(domain), { method: 'POST', headers: headers() });
+  } catch (e) { /* 错误会以 STOPPED 事件体现在对话流里 */ }
+}
+
+function newSession() {
+  sessionId = 'dp-test-' + Math.random().toString(36).slice(2, 10);
+  $('sidLabel').textContent = sessionId;
+  $('chat').innerHTML = '';
+  resetBlock();
+  attached = []; renderAttachments();
+}
+
+/* ---------------- 登录遮罩层 ---------------- */
+function refreshLoginBadge() {
+  const ok = !!getCred();
+  const btn = $('openLoginBtn');
+  if (!btn) return;
+  btn.classList.toggle('logged', ok);
+  $('loginLabel').textContent = ok ? '已登录' : '登录';
+}
+
+function openLogin() {
+  sameOriginHint();
+  const ov = $('loginOverlay');
+  ov.classList.add('show');
+  ov.setAttribute('aria-hidden', 'false');
+  setTimeout(() => { const u = $('username'); if (u) u.focus(); }, 0);
+}
+
+function closeLogin() {
+  const ov = $('loginOverlay');
+  ov.classList.remove('show');
+  ov.setAttribute('aria-hidden', 'true');
+}
+
+/* ---------------- 事件绑定 ---------------- */
+
+let pickAccept = null;
+function openPicker(accept) {
+  const p = $('filePicker');
+  p.accept = accept || '';
+  p.value = '';
+  p.click();
+}
+
+$('loginBtn').onclick = login;
+$('openLoginBtn').onclick = openLogin;
+$('loginClose').onclick = closeLogin;
+$('loginMask').onclick = closeLogin;
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLogin(); });
+$('credential').addEventListener('input', refreshLoginBadge);
+refreshLoginBadge();
+$('sendBtn').onclick = send;
+$('stopBtn').onclick = stop;
+$('newBtn').onclick = newSession;
+$('pickImgBtn').onclick = () => openPicker('image/*');
+$('pickMediaBtn').onclick = () => openPicker('audio/*,video/*');
+$('pickDocBtn').onclick = () => openPicker(
+  '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.json,.md,.markdown,.txt,.log,'
+  + '.yaml,.yml,.xml,.html,.htm,.js,.ts,.java,.py,.go,.rs,.sql,.css,.vue,'
+  + 'application/pdf,text/*');
+$('pickAnyBtn').onclick = () => openPicker('');
+$('filePicker').addEventListener('change', () => {
+  addFiles($('filePicker').files);
+  $('filePicker').value = '';
+});
+
+$('message').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+
+// 拖拽
+const inputBox = $('inputBox');
+['dragenter', 'dragover'].forEach(t => {
+  inputBox.addEventListener(t, (e) => {
+    e.preventDefault();
+    inputBox.classList.add('dragover');
+  });
+});
+['dragleave', 'drop'].forEach(t => {
+  inputBox.addEventListener(t, (e) => {
+    e.preventDefault();
+    if (t === 'dragleave' && inputBox.contains(e.relatedTarget)) return;
+    inputBox.classList.remove('dragover');
+  });
+});
+inputBox.addEventListener('drop', (e) => {
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+    addFiles(e.dataTransfer.files);
+  }
+});
+// 整页也接住，避免拖到别处时浏览器直接打开文件
+['dragover', 'drop'].forEach(t => {
+  window.addEventListener(t, (e) => {
+    if (inputBox.contains(e.target)) return;
+    e.preventDefault();
+  });
+});
+
+// 粘贴
+$('message').addEventListener('paste', (e) => {
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  const files = [];
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].kind !== 'file') continue;
+    const f = items[i].getAsFile();
+    if (!f) continue;
+    // 粘贴的截图没有有意义的名字，补一个便于区分
+    if (!f.name || f.name === 'image.png') {
+      const stamp = new Date();
+      const nm = '粘贴-' + stamp.getHours() + String(stamp.getMinutes()).padStart(2, '0')
+        + String(stamp.getSeconds()).padStart(2, '0') + '.' + (EXT_OF(f.name) || 'png');
+      try { files.push(new File([f], nm, { type: f.type })); }
+      catch (_) { files.push(f); }
+    } else {
+      files.push(f);
+    }
+  }
+  if (files.length) {
+    e.preventDefault();
+    addFiles(files);
+    toast('已粘贴 ' + files.length + ' 个文件');
+  }
+});
+
+// 从服务端同源打开时对齐地址：localhost / 127.0.0.1 写法不同也会被判成跨域。
+// 先确认当前 origin 上确实有后端（/admin/session 免鉴权），避免把自建静态服务的
+// origin 误当成 API 地址；只有 baseUrl 还是出厂默认值时才动，手填过的不覆盖。
+(function alignBaseUrl() {
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  const box = $('baseUrl');
+  if (!box || (box.value !== 'http://localhost:9527' && box.value.trim())) return;
+  fetch(location.origin + '/admin/session', { method: 'GET' }).then(function (r) {
+    if (!r.ok) return;
+    box.value = location.origin;
+    sameOriginHint();
+  }).catch(function () { /* 当前 origin 不是后端，保留跨域提示 */ });
+})();
+sameOriginHint();
+$('baseUrl').addEventListener('change', sameOriginHint);
+$('baseUrl').addEventListener('input', sameOriginHint);
+</script>
+</body>
+</html>

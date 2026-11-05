@@ -114,6 +114,20 @@ public final class AgentEvent implements Serializable {
         return new AgentEvent(AgentEventType.TOOL_RESULT, sessionId, toolName, result);
     }
 
+    /**
+     * 一份生成媒体的原样下发。
+     *
+     * <p>{@code payload} 是单个媒体对象的 JSON：
+     * {@code {"id":"img_xxx","kind":"image","mime":"image/png","encoding":"base64","data":"..."}}，
+     * {@code encoding} 为 {@code url} 时 {@code data} 是服务商给的地址而非字节。</p>
+     *
+     * <p>与 {@link #toolResult} 的分工：工具结果文本里只有引用名，那份文本会进图状态、
+     * 模型上下文与会话归档；这里的字节只过事件流，调用方拿到即渲染，不落任何持久记录。</p>
+     */
+    public static AgentEvent media(String sessionId, String mediaJson) {
+        return new AgentEvent(AgentEventType.MEDIA, sessionId, null, mediaJson);
+    }
+
     /** 挂起等待人工授权 */
     public static AgentEvent interrupt(String sessionId, String toolsJson) {
         return new AgentEvent(AgentEventType.INTERRUPT, sessionId, null, toolsJson);

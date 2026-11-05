@@ -31,10 +31,25 @@ public class ServerAgentController {
 
     private final AgentService agentService;
     private final ServerInfo serverInfo;
+    /**
+     * 生成媒体的直传通道：把能力工具挂起的字节转成 {@code MEDIA} 事件下发。
+     *
+     * <p>为 {@code null} 时退化成"只下发工具结果文本"（旧行为），
+     * 便于只验证入口逻辑的单测构造控制器。</p>
+     */
+    private final com.zzkingcc.domainplane.server.vision.GeneratedMediaRelay mediaRelay;
 
-    public ServerAgentController(AgentService agentService, ServerInfo serverInfo) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public ServerAgentController(AgentService agentService, ServerInfo serverInfo,
+                                 com.zzkingcc.domainplane.server.vision.GeneratedMediaRelay mediaRelay) {
         this.agentService = agentService;
         this.serverInfo = serverInfo;
+        this.mediaRelay = mediaRelay;
+    }
+
+    /** 兼容构造：不接媒体直传（旧单测） */
+    public ServerAgentController(AgentService agentService, ServerInfo serverInfo) {
+        this(agentService, serverInfo, null);
     }
 
     /**
@@ -113,7 +128,17 @@ public class ServerAgentController {
         log.info("[Agent入口] 会话[{}] chat 请求, domain={}, 消息长度={}",
                 validated.getSessionId(), validated.getDomain(),
                 validated.getMessage().length());
-        return agentService.chat(validated);
+        return relayMedia(agentService.chat(validated), validated.getSessionId());
+    }
+
+    /**
+     * 把生成媒体嵌进事件流。
+     *
+     * <p>放在入口而不是编排层：字节的读者是调用方，编排层只需要引用名。
+     * 编排层一旦持有字节，它就会跟着图状态一起被检查点与归档带走。</p>
+     */
+    private Flux<AgentEvent> relayMedia(Flux<AgentEvent> stream, String sessionId) {
+        return mediaRelay == null ? stream : mediaRelay.attach(stream, sessionId);
     }
 
     /**
@@ -130,7 +155,7 @@ public class ServerAgentController {
                                    @RequestParam String domain) {
         log.info("[Agent入口] 会话[{}] resume 请求, approved={}, domain={}",
                 sessionId, approved, domain);
-        return agentService.resume(sessionId, approved, domain);
+        return relayMedia(agentService.resume(sessionId, approved, domain), sessionId);
     }
 
     /**

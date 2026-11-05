@@ -40,7 +40,7 @@
         btn.addEventListener("click", function() {
           var key = btn.getAttribute("data-export");
           var parts = String(key).split("|");
-          var url = "/admin/sessions/export?session=" + encodeURIComponent(parts[1] || key) + (parts.length > 1 ? "&domain=" + encodeURIComponent(parts[0]) : "");
+          var url = "/admin/sessions/export?sessionId=" + encodeURIComponent(parts[1] || key) + (parts.length > 1 ? "&domain=" + encodeURIComponent(parts[0]) : "");
           window.location.href = url;
         });
       });
@@ -48,7 +48,7 @@
     function loadAssembly(sessionKey) {
       var box = document.getElementById("assemblyBox");
       var parts = String(sessionKey).split("|");
-      var url = "/admin/sessions/assembly?session=" + encodeURIComponent(parts[1] || sessionKey) + (parts.length > 1 ? "&domain=" + encodeURIComponent(parts[0]) : "") + "&limit=10";
+      var url = "/admin/sessions/assembly?sessionId=" + encodeURIComponent(parts[1] || sessionKey) + (parts.length > 1 ? "&domain=" + encodeURIComponent(parts[0]) : "") + "&limit=10";
       box.className = "card dp-panel";
       box.innerHTML = '<div class="card-body">' + Console.loadingHtml("\u6B63\u5728\u8BFB\u53D6\u88C5\u914D\u6E05\u5355\u2026") + "</div>";
       Console.api.get(url).then(function(data) {

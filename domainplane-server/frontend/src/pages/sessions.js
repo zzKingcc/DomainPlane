@@ -57,7 +57,7 @@
             btn.addEventListener('click', function () {
                 var key = btn.getAttribute('data-export');
                 var parts = String(key).split('|');
-                var url = '/admin/sessions/export?session=' + encodeURIComponent(parts[1] || key)
+                var url = '/admin/sessions/export?sessionId=' + encodeURIComponent(parts[1] || key)
                     + (parts.length > 1 ? '&domain=' + encodeURIComponent(parts[0]) : '');
                 window.location.href = url;
             });
@@ -71,7 +71,7 @@
     function loadAssembly(sessionKey) {
         var box = document.getElementById('assemblyBox');
         var parts = String(sessionKey).split('|');
-        var url = '/admin/sessions/assembly?session=' + encodeURIComponent(parts[1] || sessionKey)
+        var url = '/admin/sessions/assembly?sessionId=' + encodeURIComponent(parts[1] || sessionKey)
             + (parts.length > 1 ? '&domain=' + encodeURIComponent(parts[0]) : '')
             + '&limit=10';
         box.className = 'card dp-panel';

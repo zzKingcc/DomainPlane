@@ -27,6 +27,10 @@ import java.util.List;
  * <p><b>绝不把 base64 拼进返回值</b>：返回值会进工具调用事件与会话记忆，两者都会落库：
  * 一张 1024×1024 的图 base64 上兆，塞进去等于把整段图像数据写进对话历史。</p>
  *
+ * <p><b>但调用方要看得见图</b>：字节另外挂到 {@code GeneratedMediaRelay}，
+ * 由 SSE 出口转成 {@code MEDIA} 事件原样下发。于是同一次生图有两条路 ——
+ * 编号走文本（落库的是索引）、字节走事件流（不落任何持久记录）。</p>
+ *
  * <p><b>可见性</b>：由「该域（链上）绑没绑可用的生图模型」决定，不写死在注解里。
  * 初始声明哨兵 {@link ToolDescriptor#UNBOUND_DOMAIN}（对任何域都不可见），由
  * {@code ModelCapabilityToolBinder} 在启动与模型配置变更时重算：绑了生图模型的域才拿到它，
@@ -44,11 +48,29 @@ public class ImageGenTool extends CapabilityToolSupport {
     /** 服务商没给内容类型时的兜底 —— 绝大多数 OpenAI 兼容生图端点的 b64 就是 PNG */
     private static final String DEFAULT_MIME = "image/png";
 
+    /**
+     * 字节直传通道：图要"看得见"又不能进返回值（返回值会落库），
+     * 于是字节走事件流、编号走文本。为 {@code null} 时降级成"只有编号"
+     * （单测里构造工具不关心展示时不必提供）。
+     */
+    private final com.zzkingcc.domainplane.server.vision.GeneratedMediaRelay mediaRelay;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ImageGenTool(DefaultModelResolver resolver,
+                        ModelEndpointClient client,
+                        com.zzkingcc.domainplane.runtime.vision.MediaAttachmentStore store,
+                        CapabilityCallExecutor executor,
+                        com.zzkingcc.domainplane.server.vision.GeneratedMediaRelay mediaRelay) {
+        super(resolver, client, store, executor);
+        this.mediaRelay = mediaRelay;
+    }
+
+    /** 兼容构造：不需要直传字节的场合（只关心工具可见性的测试）用它 */
     public ImageGenTool(DefaultModelResolver resolver,
                         ModelEndpointClient client,
                         com.zzkingcc.domainplane.runtime.vision.MediaAttachmentStore store,
                         CapabilityCallExecutor executor) {
-        super(resolver, client, store, executor);
+        this(resolver, client, store, executor, null);
     }
 
     @Tool(value = TOOL_NAME,
@@ -91,19 +113,40 @@ public class ImageGenTool extends CapabilityToolSupport {
         });
     }
 
-    /** 一张生成的图 → 引用名；既没有地址也没有字节时返回 null（上游异常，不该造一个取不到的引用名） */
+    /**
+     * 一张生成的图 → 引用名；既没有地址也没有字节时返回 null（上游异常，不该造一个取不到的引用名）。
+     *
+     * <p>同一份字节走两条路：<b>引用名</b>回给模型（进图状态 / 归档 / 工具结果文本），
+     * <b>原始字节</b>挂到直传队列（只走 SSE，调用方当场渲染）。两路分开是刻意的：
+     * 合在一起就等于把上兆的 base64 写进会话历史，那是这条链路最初的问题。</p>
+     */
     private String storeGenerated(ModelEndpointClient.GeneratedImage image) {
         if (image == null) {
             return null;
         }
         if (!isBlank(image.b64Json())) {
-            return store.put(Kind.IMAGE, DEFAULT_MIME, image.b64Json(), null);
+            String reference = store.put(Kind.IMAGE, DEFAULT_MIME, image.b64Json(), null);
+            publish(reference, DEFAULT_MIME, image.b64Json(),
+                    com.zzkingcc.domainplane.server.vision.GeneratedMediaRelay.ENCODING_BASE64);
+            return reference;
         }
         if (!isBlank(image.url())) {
             // URL 引用的内容类型由服务商那边决定，此处不猜一个 mime 出来：
             // 猜错会让下游按错的类型拼 data URL
-            return store.put(Kind.IMAGE, null, null, image.url());
+            String reference = store.put(Kind.IMAGE, null, null, image.url());
+            publish(reference, null, image.url(),
+                    com.zzkingcc.domainplane.server.vision.GeneratedMediaRelay.ENCODING_URL);
+            return reference;
         }
         return null;
+    }
+
+    /** 把字节挂到本轮直传队列；没配通道（单测）时静默跳过 */
+    private void publish(String reference, String mime, String data, String encoding) {
+        if (mediaRelay == null || reference == null) {
+            return;
+        }
+        mediaRelay.publish(new com.zzkingcc.domainplane.server.vision.GeneratedMediaRelay.Item(
+                reference, "image", mime, data, encoding));
     }
 }

@@ -7,6 +7,8 @@
    ========================================================================== */
 (function () {
     var esc = Console.escapeHtml;
+    function setText(id, v) { var n = document.getElementById(id); if (n) { n.textContent = v; } }
+    function setHtml(id, v) { var n = document.getElementById(id); if (n) { n.innerHTML = v; } }
 
     var DATA = null;             /* /admin/domains */
     var SELECTED = '';           /* 当前选中的域 */
@@ -169,44 +171,75 @@
         return map;
     }
 
+    /* 当前选中域的完整路径：节点上只显示末段，短名字省下的宽度让给连线和标签。
+       完整路径在树上方的路径条里补回，避免「sales 到底是哪个 sales」的歧义。 */
+    function renderTreePath() {
+        var box = document.getElementById('treePath');
+        if (!box) { return; }
+        if (!SELECTED) {
+            box.innerHTML = '<span class="lead">当前路径</span><span class="seg">—</span>';
+            return;
+        }
+        var segs = chainOf(SELECTED).map(shortName);
+        box.innerHTML = '<span class="lead">当前路径</span>'
+            + segs.map(function (s, i) {
+                return (i ? '<span class="sep">›</span>' : '') + '<span class="seg">' + esc(s) + '</span>';
+            }).join('');
+    }
+
     function renderTree() {
         var box = document.getElementById('treeList');
         var domains = (DATA && DATA.domains) || [];
         if (!box) { return; }
-        document.getElementById('domainCount').textContent = domains.length + ' 个域';
+        setText('domainCount', domains.length + ' 个域');
+        renderTreePath();
         if (!domains.length) {
             box.innerHTML = '<div class="dp-domain-empty">当前没有任何域。根域 <span class="mono">default</span> 由服务端自建，'
                 + '其余域用上方输入框新建，标识须为从根域出发的完整路径。</div>';
             return;
         }
         var map = childrenMap();
-        box.innerHTML = treeLevel(map[''] || [], map, 0);
+        box.innerHTML = '<div class="dp-tree">' + treeLevel(map[''] || [], map, 0, []) + '</div>';
         bindTreeEvents(box);
     }
 
-    function treeLevel(list, map, depth) {
-        return list.map(function (d) {
+    /* 扁平输出一列节点行：层级由 rails（竖干 + 肘形连线）画出来，不靠 padding 猜。
+       prefix[k] = 第 k 层祖先后面还有没有兄弟节点；有则那一列继续画竖线，无则留空，
+       这样最后一个分支下方不会拖出一条悬空的线。 */
+    function treeLevel(list, map, depth, prefix) {
+        var out = '';
+        list.forEach(function (d, i) {
             var kids = map[d.name] || [];
-            /* 第一层默认展开；其余层听 EXPANDED 的 */
-            var expanded = !!EXPANDED[d.name] || depth === 0;
             var hasKids = kids.length > 0;
+            var expanded = EXPANDED[d.name] !== false;
+            var isLast = i === list.length - 1;
+            var rails = prefix.map(function (cont) {
+                return '<i class="' + (cont ? 'line' : 'blank') + '"></i>';
+            }).join('');
+            if (depth > 0) { rails += '<i class="elbow ' + (isLast ? 'last' : 'more') + '"></i>'; }
             var tagCls = SOURCE_TAG_CLS[String(d.source || '').toUpperCase()] || 'src-derived';
             var srcLabel = d.source === 'BUILTIN' ? '根域' : (d.source === 'MANUAL' ? '人工' : '派生');
-            var html = '<div class="dp-tree-row' + (d.name === SELECTED ? ' on' : '') + '" data-domain="' + esc(d.name) + '">'
-                + (hasKids
-                    ? '<button class="dp-tree-chev" data-chev="' + esc(d.name) + '" title="' + (expanded ? '折叠' : '展开') + '">' + (expanded ? '▾' : '▸') + '</button>'
-                    : '<span class="dp-tree-chev leaf"></span>')
-                + '<span class="dp-tree-dot ' + (d.callable ? 'on' : 'off') + '" title="' + (d.callable ? '可调用单元' : '装配节点') + '"></span>'
+            var pending = d.pendingDelete ? ' <span class="tag destructive">待删除</span>' : '';
+            var chev = hasKids
+                ? '<button class="dp-tree-chev" data-chev="' + esc(d.name) + '" data-open="' + (expanded ? '1' : '0') + '"'
+                    + ' title="' + (expanded ? '折叠' : '展开') + '">' + (expanded ? '▾' : '▸') + '</button>'
+                : '<span class="dp-tree-chev leaf"></span>';
+            out += '<div class="dp-tree-line"><div class="dp-tree-rail">' + rails + '</div>'
+                + '<div class="dp-tree-row' + (d.name === SELECTED ? ' on' : '') + '" data-domain="' + esc(d.name) + '">'
+                + chev
+                + '<span class="dp-tree-joint ' + (d.callable ? 'on' : 'off') + '" title="'
+                    + (d.callable ? '可调用单元' : '装配节点') + '"></span>'
                 + '<span class="dp-tree-name" title="' + esc(d.name) + (d.pendingDelete ? '（待删除）' : '') + '">'
-                + esc(shortName(d.name)) + (d.pendingDelete ? ' <span class="tag destructive">待删除</span>' : '') + '</span>'
+                    + esc(shortName(d.name)) + pending + '</span>'
                 + '<span class="dp-tree-tag ' + tagCls + '">' + srcLabel + '</span>'
                 + '<span class="dp-tree-count">' + num(d.toolCount) + '</span>'
-                + '</div>';
+                + '</div></div>';
             if (hasKids && expanded) {
-                html += '<div class="dp-tree-kids">' + treeLevel(kids, map, depth + 1) + '</div>';
+                out += treeLevel(kids, map, depth + 1,
+                    depth > 0 ? prefix.concat([!isLast]) : prefix.slice());
             }
-            return html;
-        }).join('');
+        });
+        return out;
     }
 
     function bindTreeEvents(box) {
@@ -218,8 +251,9 @@
         box.querySelectorAll('.dp-tree-chev[data-chev]').forEach(function (btn) {
             btn.addEventListener('click', function (e) {
                 e.stopPropagation();
-                var name = btn.getAttribute('data-chev');
-                EXPANDED[name] = !EXPANDED[name];
+                /* 按按钮自己记录的当前开合状态取反，别用 !EXPANDED[name]：
+                   初始是 undefined，取反后还是 true，第一次点会「点了没反应」 */
+                EXPANDED[btn.getAttribute('data-chev')] = btn.getAttribute('data-open') !== '1';
                 renderTree();
             });
         });
@@ -244,13 +278,15 @@
     }
 
     /* ==================== 右侧详情卡 ==================== */
+    /* ==================== 右侧详情卡 ==================== */
     function renderDetail() {
         var box = document.getElementById('detailBody');
         if (!box) { return; }
         var d = currentDomain();
         if (!d) {
-            box.innerHTML = '<div class="card dp-panel"><div class="card-body">'
-                + '<div class="dp-editor-empty">从左侧选一个域查看与配置。</div></div></div>';
+            box.innerHTML = '<section class="card dp-panel"><div class="dp-panel-body">'
+                + '<div class="dp-editor-empty"><span class="ee-icon">' + DOM_ICON + '</span>'
+                + '<span>从左侧选一个域查看与配置。</span></div></div></section>';
             return;
         }
         var resolved = resolveAlong(d.name, 'chat');
@@ -271,14 +307,14 @@
                 + (resolved.source === d.name ? '' : '<span class="card-note">继承自 ' + esc(resolved.source) + '</span>')
             : '<span class="tag write">无可调用模型</span>';
         var tools = (d.tools || []).map(toolTag).join('');
-        var toolLine = tools ? '<div class="tool-tags">' + tools + '</div>' : '<span class="perm-none">该域没有可见工具</span>';
+        var toolLine = tools || '<span class="perm-none">该域没有可见工具</span>';
         var mcpConns = (d.mcp && d.mcp.connections) || [];
         var mcpInherited = d.mcp && d.mcp.inheritedFrom;
         var mcpLine = (mcpConns.length || mcpInherited)
-            ? '<div><span class="k">MCP 连接</span>'
+            ? '<div class="dp-meta-row"><span class="k">MCP 连接</span><div class="v">'
                 + mcpConns.map(function (c) { return '<span class="tag public mono">' + esc(c) + '</span>'; }).join(' ')
                 + (mcpInherited ? ' <span class="card-note">继承自 ' + esc(mcpInherited) + '</span>' : '')
-                + '</div>'
+                + '</div></div>'
             : '';
         var kb = d.knowledge || {};
         /* 主数字是本域可检索的量（本域 + 已绑知识体的上级域，与检索通道同口径）；
@@ -293,42 +329,55 @@
                 + (bodyStat && bodyStat.domainCount > 1
                     ? ' <span class="card-note">体共 ' + num(bodyStat.documents) + ' · ' + bodyStat.domainCount + ' 域共用</span>'
                     : '');
-        var kbLine = '<div><span class="k">知识体</span>' + kbSelect(d.name, kb) + statNote
+        var kbLine = '<div class="dp-meta-row"><span class="k">知识体</span><div class="v">' + kbSelect(d.name, kb) + statNote
             + (kb.bodyMissing ? ' <span class="tag destructive" title="这个域绑的知识体已被删，本站没有知识库">知识体已失效</span>' : '')
             + (kb.bodyDead ? ' <span class="tag destructive" title="知识体的连接全都不可用，检索工具已从这个域下线">知识体连接不可用</span>' : '')
             + (d.runningSessions ? ' <span class="tag approval">在飞会话 ' + num(d.runningSessions) + '</span>' : '')
-            + '</div>';
+            + '</div></div>';
         var parentLine = d.parentId
-            ? '<div><span class="k">上级域</span><button class="dp-jump" data-jump="' + esc(d.parentId) + '">' + esc(d.parentId) + '</button></div>'
+            ? '<div class="dp-meta-row"><span class="k">上级域</span><div class="v">'
+                + '<button class="dp-jump" data-jump="' + esc(d.parentId) + '">' + esc(d.parentId) + '</button></div></div>'
             : '';
-        box.innerHTML = '<section class="card dp-panel dp-detail-card"><div class="card-body">'
-            + '<header class="card-head">' + DOM_ICON + '<h2 class="mono">' + esc(d.name) + '</h2>' + sourceTag(d)
-            + (d.pendingDelete ? '<span class="tag destructive" title="处于软删除宽限期，到期后彻底清理">待删除</span>' : '')
-            + (d.callable
-                ? '<span class="tag read" title="可调用单元：能作为入口被调用">可调用</span>'
-                : '<span class="tag approval" title="装配节点：只把工具 / 提示词 / 模型 / 知识传给后代，不能直接当入口">装配节点</span>')
-            + '<span class="spacer"></span>'
-            + (d.callable ? echoSwitch(d) + planSwitch(d) : '')
-            + '<span class="card-note">工具 ' + num(d.toolCount) + ' · 需确认 ' + num(d.approvalCount) + '</span>'
-            + (d.hasChildren ? '' : '<button class="btn btn-sm btn-outline-secondary" data-callable="' + esc(d.name) + '" data-to="' + (d.callable ? 'false' : 'true') + '">'
-                + (d.callable ? '设为装配节点' : '设为可调用') + '</button>')
+        var switches = d.callable
+            ? echoSwitch(d) + planSwitch(d)
+            : '<span class="card-note">装配节点不设入口开关</span>';
+        var buttons = (d.hasChildren ? '' :
+                '<button class="btn btn-sm btn-outline-secondary" data-callable="' + esc(d.name) + '" data-to="'
+                    + (d.callable ? 'false' : 'true') + '">' + (d.callable ? '设为装配节点' : '设为可调用') + '</button>')
             + '<button class="btn btn-sm btn-outline-secondary" data-cfg="' + esc(d.name) + '">配置模型</button>'
             + '<button class="btn btn-sm btn-outline-secondary" data-mcpcfg="' + esc(d.name) + '">配置 MCP</button>'
-            + (d.deletable && !d.pendingDelete ? '<button class="btn btn-sm btn-outline-danger" data-del="' + esc(d.name) + '">删除</button>' : '')
-            + '</header>'
-            + (d.pendingDelete ? pendingDeleteBox(d) : '')
-            + (d.hasChildren
-                ? '<p class="dp-kb-note">该域有 ' + num(d.directChildCount) + ' 个直接子域（全部后代 ' + num(d.childrenCount)
-                    + ' 个），按"只有叶子域可作为可调用单元"的规则，它只能作装配节点，不能当入口。需要这一层入口请另建无子域的域。</p>'
-                : '')
-            + '<div class="model-meta">'
-            + parentLine
-            + '<div><span class="k">可调用模型</span>' + boundTags + '</div>'
-            + capabilityLineOf(d.name)
-            + mcpLine
-            + kbLine
+            + (d.deletable && !d.pendingDelete
+                ? '<button class="btn btn-sm btn-outline-danger" data-del="' + esc(d.name) + '">删除</button>' : '');
+        box.innerHTML = '<section class="card dp-panel dp-detail-card">'
+            + '<div class="dp-panel-head">'
+            +   '<span class="dp-panel-icon">' + DOM_ICON + '</span>'
+            +   '<div class="dp-panel-title"><h3 class="mono">' + esc(d.name) + '</h3>'
+            +     '<div class="dp-panel-tags">' + sourceTag(d)
+            +       (d.pendingDelete ? '<span class="tag destructive" title="处于软删除宽限期，到期后彻底清理">待删除</span>' : '')
+            +       (d.callable
+                        ? '<span class="tag read" title="可调用单元：能作为入口被调用">可调用</span>'
+                        : '<span class="tag approval" title="装配节点：只把工具 / 提示词 / 模型 / 知识传给后代，不能直接当入口">装配节点</span>')
+            +     '</div></div>'
+            +   '<span class="spacer"></span>'
+            +   '<div class="dp-head-actions">' + buttons + '</div>'
             + '</div>'
-            + '<h3>可见工具（含沿链继承）</h3>' + toolLine
+            + '<div class="dp-panel-body">'
+            +   (d.pendingDelete ? pendingDeleteBox(d) : '')
+            +   (d.hasChildren
+                    ? '<p class="dp-kb-note">该域有 ' + num(d.directChildCount) + ' 个直接子域（全部后代 ' + num(d.childrenCount)
+                        + ' 个），按"只有叶子域可作为可调用单元"的规则，它只能作装配节点，不能当入口。需要这一层入口请另建无子域的域。</p>'
+                    : '')
+            +   '<div class="dp-detail-strip">' + switches
+            +     '<span class="spacer"></span><span class="card-note">工具 ' + num(d.toolCount)
+            +       ' · 需确认 ' + num(d.approvalCount) + '</span></div>'
+            +   '<div class="dp-meta-grid">' + parentLine
+            +     '<div class="dp-meta-row"><span class="k">可调用模型</span><div class="v">' + boundTags + '</div></div>'
+            +     capabilityLineOf(d.name) + mcpLine + kbLine
+            +   '</div>'
+            +   '<div class="dp-detail-section">'
+            +     '<div class="dp-detail-section-head">可见工具 <span class="sub">含沿链继承</span></div>'
+            +     '<div class="tool-tags">' + toolLine + '</div>'
+            +   '</div>'
             + '</div></section>';
         bindDetailEvents(box);
     }
@@ -345,7 +394,9 @@
             parts.push('<span class="k">' + esc(FAMILY_LABEL[family]) + '</span> ' + names
                 + (resolved.source === domain ? '' : ' <span class="card-note">继承自 ' + esc(resolved.source) + '</span>'));
         });
-        return parts.length ? '<div><span class="k">能力模型</span>' + parts.join(' · ') + '</div>' : '';
+        return parts.length
+            ? '<div class="dp-meta-row"><span class="k">能力模型</span><div class="v">' + parts.join(' · ') + '</div></div>'
+            : '';
     }
 
     function bindDetailEvents(box) {
@@ -438,8 +489,7 @@
             options += '<option value="' + esc(b.id) + '"' + (b.id === bound ? ' selected' : '') + '>'
                 + esc(b.name || b.id) + '（' + esc(tail) + '）</option>';
         });
-        return '<select class="form-select" style="width:auto;min-width:12rem;display:inline-block;'
-            + 'vertical-align:middle;" data-kb="' + esc(domain) + '"'
+        return '<select class="form-select dp-kb-select" data-kb="' + esc(domain) + '"'
             + ' title="' + esc(boundBodyTitle()) + '">' + options + '</select>';
     }
 
@@ -884,7 +934,7 @@
         renderTree();
     });
     document.getElementById('treeCollapseBtn').addEventListener('click', function () {
-        EXPANDED = {};
+        ((DATA && DATA.domains) || []).forEach(function (d) { EXPANDED[d.name] = false; });
         renderTree();
     });
     document.getElementById('bindModalClose').addEventListener('click', closeBind);

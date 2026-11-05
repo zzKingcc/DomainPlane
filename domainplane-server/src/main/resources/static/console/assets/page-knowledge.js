@@ -186,6 +186,7 @@
       setNote("statChunksNote", snap.strategy === "HYBRID" ? "\u6DF7\u5408\u53EC\u56DE\uFF08\u5173\u952E\u5B57 + \u5411\u91CF\uFF09" : snap.strategy === "KEYWORD" ? "\u4EC5\u5173\u952E\u5B57\u53EC\u56DE" : "\u4EC5\u5411\u91CF\u53EC\u56DE");
       setValue("statBodies", fmt(p.bodies) + " \u4E2A", p.bodiesInUse || 0 ? "" : "warn");
       setNote("statBodiesNote", (p.bodiesInUse || 0) + " \u4E2A\u5728\u7528 \xB7 " + (p.bodiesUnbound || 0) + " \u4E2A\u6CA1\u7ED1\u5B9A\u57DF");
+      setNote("bodyCount", fmt((snap.bodies || []).length) + " \u4E2A");
       var noteEl = document.getElementById("snapshotNote");
       if (noteEl) {
         var bits = [];
@@ -900,21 +901,14 @@
       orphan: ["\u65E0\u4E3B", "err"]
     };
     function initOps() {
-      var btn = document.getElementById("opsToggleBtn");
+      var refresh = document.getElementById("opsRefreshBtn");
+      if (refresh) {
+        refresh.addEventListener("click", loadOps);
+      }
       var box = document.getElementById("opsBody");
-      if (!btn || !box) {
+      if (!box) {
         return;
       }
-      btn.addEventListener("click", function() {
-        if (!box.hidden) {
-          box.hidden = true;
-          btn.textContent = "\u5C55\u5F00";
-          return;
-        }
-        box.hidden = false;
-        btn.textContent = "\u6536\u8D77";
-        loadOps();
-      });
       box.addEventListener("click", onOpsClick);
     }
     function loadOps() {
@@ -931,7 +925,7 @@
     }
     function opsHtml(d) {
       var s = d.summary || {};
-      var head = '<div class="dp-kb-note">' + fmt(s.collections) + " \u4E2A\u96C6\u5408 \xB7 " + fmt(s.chunks) + " \u6761\u5207\u7247 \xB7 \u65E0\u4E3B " + fmt(s.orphans) + " \xB7 \u9057\u7559 " + fmt(s.legacy) + "</div>";
+      var head = '<div class="dp-ops-summary">' + fmt(s.collections) + " \u4E2A\u96C6\u5408 \xB7 " + fmt(s.chunks) + " \u6761\u5207\u7247 \xB7 \u65E0\u4E3B " + fmt(s.orphans) + " \xB7 \u9057\u7559 " + fmt(s.legacy) + "</div>";
       var blocks = (d.backends || []).map(function(b) {
         var rows = (b.collections || []).map(function(c) {
           var pair = OPS_STATUS[c.status] || [c.status || "\u2014", ""];
@@ -1140,13 +1134,13 @@
     initOps();
     document.getElementById("createBodyBtn").addEventListener("click", openCreate);
     document.getElementById("refreshBtn").addEventListener("click", function() {
-      loadSnapshot();
+      loadSnapshot().then(loadOps);
     });
     Console.ready(function() {
       loadEmbedding();
       loadConnections();
       loadDomains();
-      loadSnapshot();
+      loadSnapshot().then(loadOps);
     });
   })();
 })();

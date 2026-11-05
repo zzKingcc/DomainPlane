@@ -6,86 +6,166 @@
 <title>DomainPlane 对话测试台</title>
 <style>
   :root {
-    --bg: #f5f6f8; --panel: #ffffff; --border: #e3e6ec; --text: #1f2329;
-    --muted: #8a9099; --primary: #3b6cf6; --primary-d: #2f57c9;
-    --user: #e8f0ff; --assistant: #f3f5f9; --think: #fff7e6;
+    --bg: #e9ecf0; --panel: #ffffff; --border: #e3e6ec; --text: #1f2329;
+    --muted: #8a9099; --primary: #3b6cf6; --wx: #07c160; --wx-d: #06ad56;
+    --user: #95ec69; --assistant: #ffffff; --think: #fff7e6;
     --tool: #eef9f0; --err: #fdecec; --err-t: #c0392b; --ok: #1a9c5b;
-    --warn: #fff7e6; --warn-t: #9a6b00; --doc: #f2f0ff; --doc-t: #4b3fbf;
+    --doc: #f2f0ff; --doc-t: #4b3fbf; --chat-bg: #f5f5f5;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
-    margin: 0; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    margin: 0; display: flow-root;
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
     background: var(--bg); color: var(--text); font-size: 14px;
   }
-  .wrap { max-width: 960px; margin: 0 auto; padding: 18px; }
-  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-  .panel h2 { margin: 0 0 12px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
-  .grid { display: grid; grid-template-columns: 110px 1fr; gap: 10px 12px; align-items: center; }
-  label { color: var(--muted); text-align: right; }
-  input, textarea, button, select {
-    font: inherit; color: var(--text); border: 1px solid var(--border);
-    border-radius: 7px; padding: 8px 10px; background: #fff; width: 100%;
+  input, textarea, button, select { font: inherit; color: var(--text); }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+
+  /* ==================== 窗口骨架 ==================== */
+  .app {
+    height: calc(100vh - 48px); max-width: 980px; margin: 24px auto;
+    display: flex; flex-direction: column; background: var(--panel);
+    border: 1px solid #dcdfe4; border-radius: 12px; overflow: hidden;
+    box-shadow: 0 14px 40px rgba(31, 35, 41, .10);
   }
-  textarea { resize: vertical; min-height: 68px; }
-  button { cursor: pointer; background: var(--primary); color: #fff; border: none; width: auto; padding: 8px 16px; }
-  button:hover { background: var(--primary-d); }
-  button:disabled { background: #c5ccd6; cursor: not-allowed; }
-  button.ghost { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
-  button.ghost:hover { background: #f0f4ff; }
-  button.ghost:disabled { background: #fff; color: #c5ccd6; border-color: #dfe4ec; }
-  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .status { font-size: 12px; padding: 3px 9px; border-radius: 12px; background: #eee; color: var(--muted); }
-  .status.ok { background: #e6f7ee; color: var(--ok); }
-  .status.bad { background: var(--err); color: var(--err-t); }
-  #chat { min-height: 260px; max-height: 560px; overflow-y: auto; padding: 6px; }
-  .msg { margin: 10px 0; display: flex; }
+  .topbar {
+    flex: 0 0 60px; height: 60px; display: flex; align-items: center; gap: 10px;
+    padding: 0 18px; background: #fafafa; border-bottom: 1px solid #e6e8eb;
+  }
+  .logo {
+    width: 34px; height: 34px; flex: 0 0 34px; border-radius: 8px; background: var(--wx);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; letter-spacing: .3px;
+  }
+  .brand-t { font-size: 14px; font-weight: 600; line-height: 1.3; }
+  .brand-s {
+    font-size: 11px; color: var(--muted); margin-top: 2px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .spacer { flex: 1 1 auto; }
+  .conv-status {
+    font-size: 12px; color: var(--muted); padding: 3px 9px;
+    border-radius: 12px; background: #eef0f3;
+  }
+  .txt-btn {
+    border: 1px solid transparent; background: transparent; color: #5b626c;
+    border-radius: 6px; padding: 6px 10px; font-size: 12px;
+  }
+  .txt-btn:hover:not(:disabled) { background: #eef0f3; color: var(--text); }
+  .txt-btn:disabled { color: #c2c7cf; }
+  .login-trigger {
+    display: inline-flex; align-items: center; gap: 7px; background: #fff;
+    border: 1px solid #dcdfe4; color: #3a4048; border-radius: 18px;
+    padding: 7px 14px; font-size: 12px; margin-left: 4px;
+  }
+  .login-trigger:hover { border-color: var(--wx); color: var(--wx); }
+  .login-trigger .dot { width: 7px; height: 7px; border-radius: 50%; background: #c9ced6; }
+  .login-trigger.logged { background: #f1fbf5; border-color: #b7e7c9; color: #1a7a43; }
+  .login-trigger.logged .dot { background: var(--wx); }
+
+  /* ==================== 对话区（微信式气泡） ==================== */
+  .chat { flex: 1 1 auto; overflow-y: auto; background: var(--chat-bg); padding: 20px 24px; }
+  .msg { margin: 16px 0; display: flex; align-items: flex-start; gap: 10px; }
   .msg.user { justify-content: flex-end; }
-  .bubble { max-width: 82%; padding: 10px 13px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
-  .msg.user .bubble { background: var(--user); border-top-right-radius: 3px; }
-  .msg.assistant .bubble { background: var(--assistant); border-top-left-radius: 3px; width: 100%; }
-  .think { background: var(--think); border-left: 3px solid #f0c14b; padding: 8px 10px; margin: 6px 0; border-radius: 6px; color: #7a5b00; font-size: 13px; }
+  .msg::before, .msg::after {
+    width: 34px; height: 34px; flex: 0 0 34px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #fff;
+  }
+  .msg.assistant::before { content: 'DP'; background: var(--primary); }
+  .msg.user::after { content: '我'; background: #d8dde4; color: #5b626c; }
+  .bubble {
+    position: relative; max-width: min(76%, 700px); min-width: 32px;
+    padding: 9px 12px; border-radius: 6px; white-space: pre-wrap;
+    word-break: break-word; line-height: 1.6; font-size: 14px;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, .04);
+  }
+  .msg.user .bubble { background: var(--user); border: 1px solid #8bdd5d; }
+  .msg.assistant .bubble { background: var(--assistant); border: 1px solid #e7e9ec; }
+  .bubble::before, .bubble::after {
+    content: ''; position: absolute; top: 12px; width: 0; height: 0;
+    border: 6px solid transparent;
+  }
+  .msg.assistant .bubble::before { left: -12px; border-right-color: #e7e9ec; }
+  .msg.user .bubble::after { right: -12px; border-left-color: #8bdd5d; }
+  .think {
+    background: var(--think); border-left: 3px solid #f0c14b; padding: 8px 10px;
+    margin: 6px 0; border-radius: 6px; color: #7a5b00; font-size: 13px;
+  }
   .think .tag { font-weight: 600; color: #9a6b00; }
-  .tool { background: var(--tool); border-left: 3px solid #2e9e54; padding: 8px 10px; margin: 6px 0; border-radius: 6px; font-size: 13px; }
+  .tool {
+    background: var(--tool); border-left: 3px solid #2e9e54; padding: 8px 10px;
+    margin: 6px 0; border-radius: 6px; font-size: 13px;
+  }
   .tool .tag { font-weight: 600; color: #1c7a3e; }
-  .body-pre { color: #444; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; margin-top: 4px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
-  .err { background: var(--err); border-left: 3px solid var(--err-t); color: var(--err-t); padding: 8px 10px; margin: 6px 0; border-radius: 6px; font-size: 13px; white-space: pre-wrap; }
-  .done { text-align: center; color: var(--muted); font-size: 12px; margin: 8px 0; }
-  details { margin-top: 8px; }
-  summary { cursor: pointer; color: var(--muted); font-size: 12px; }
-  #rawlog { background: #0f1115; color: #d6e2ff; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; padding: 10px; border-radius: 6px; max-height: 260px; overflow: auto; white-space: pre-wrap; }
-  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .body-pre {
+    color: #444; white-space: pre-wrap; word-break: break-word; max-height: 200px;
+    overflow: auto; margin-top: 4px;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;
+  }
+  .err {
+    background: var(--err); border-left: 3px solid var(--err-t); color: var(--err-t);
+    padding: 8px 10px; margin: 6px 0; border-radius: 6px; font-size: 13px; white-space: pre-wrap;
+  }
+  .done { text-align: center; color: #a3a8b0; font-size: 12px; margin: 10px 0; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .pill { font-size: 11px; color: var(--muted); }
 
-  /* ==================== 输入区：上传 / 拖拽 / 粘贴 ==================== */
-  .input-box {
-    border: 1px solid var(--border); border-radius: 10px; background: #fff;
-    padding: 2px 2px 0; transition: border-color .15s, background .15s;
+  /* ==================== 输入区 ==================== */
+  .composer {
+    flex: 0 0 auto; background: #fafafa; border-top: 1px solid #e3e5e8;
+    padding: 8px 14px 10px;
   }
-  .input-box.dragover { border-color: var(--primary); background: #f7f9ff; }
-  .input-box textarea { border: none; border-radius: 10px 10px 0 0; min-height: 76px; }
-  .input-box textarea:focus { outline: none; }
-  .attach-bar {
-    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
-    padding: 8px 10px; border-top: 1px solid var(--border); background: #fafbfd;
-    border-radius: 0 0 10px 10px;
-  }
-  input[type=file] { display: none; }
-  .attach-bar button { padding: 5px 11px; font-size: 13px; }
-  .attach-bar .pill { margin-left: auto; }
-  .drop-tip { display: none; }
-  .input-box.dragover .drop-tip {
-    display: block; padding: 8px 12px; color: var(--primary);
-    font-size: 12px; background: #eef3ff;
-  }
-
-  /* 配额条 */
-  .quota { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--muted); padding: 0 2px 6px; margin-top: 8px; }
+  .attach-list { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .attach-list:empty { display: none; }
+  .quota { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--muted); padding: 0 2px 6px; }
+  .quota:empty { display: none; }
   .quota b { color: var(--text); font-weight: 600; }
   .quota .over { color: var(--err-t); }
+  .input-box {
+    border: 1px solid var(--border); border-radius: 9px; background: #fff;
+    display: flex; flex-direction: column; transition: border-color .15s, background .15s;
+  }
+  .input-box.dragover { border-color: var(--wx); background: #f5fcf7; }
+  .toolbar { display: flex; gap: 2px; align-items: center; padding: 6px 8px 0; }
+  .tool-btn {
+    border: none; background: transparent; color: #6b717a; font-size: 16px;
+    padding: 4px 8px; border-radius: 6px; line-height: 1.2;
+  }
+  .tool-btn:hover { background: #eef0f3; color: var(--wx); }
+  input[type=file] { display: none; }
+  .input-box textarea {
+    border: none; border-radius: 0; background: transparent; resize: none;
+    min-height: 68px; padding: 6px 12px; font-size: 14px; line-height: 1.6; width: 100%;
+  }
+  .input-box textarea:focus { outline: none; }
+  .drop-tip { display: none; }
+  .input-box.dragover .drop-tip {
+    display: block; padding: 8px 12px; color: var(--wx); font-size: 12px; background: #eefaf2;
+  }
+  .composer-foot { display: flex; justify-content: flex-end; padding: 0 10px 8px; }
+  #sendBtn {
+    background: var(--wx); color: #fff; border: none; border-radius: 6px;
+    padding: 7px 24px; font-size: 13px;
+  }
+  #sendBtn:hover:not(:disabled) { background: var(--wx-d); }
+  #sendBtn:disabled { background: #c9ced6; }
+  .raw-panel { margin-top: 8px; }
+  .raw-panel summary {
+    cursor: pointer; color: var(--muted); font-size: 11px; padding: 4px 2px; list-style: none;
+  }
+  .raw-panel summary::-webkit-details-marker { display: none; }
+  .raw-panel summary::before { content: '\25B8  '; }
+  .raw-panel[open] summary::before { content: '\25BE  '; }
+  #rawlog {
+    background: #0f1115; color: #d6e2ff; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px; padding: 10px; border-radius: 6px; max-height: 220px; overflow: auto;
+    white-space: pre-wrap;
+  }
 
-  /* 附件列表 */
-  .attach-list { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-  .attach-list:empty { display: none; }
+  /* ==================== 附件 chip ==================== */
   .att {
     display: flex; align-items: center; gap: 9px; max-width: 300px;
     border: 1px solid var(--border); border-radius: 9px; padding: 6px 8px;
@@ -93,8 +173,7 @@
   }
   .att .thumb {
     width: 38px; height: 38px; flex: 0 0 38px; border-radius: 6px; overflow: hidden;
-    background: #eef1f6; display: flex; align-items: center; justify-content: center;
-    font-size: 17px;
+    background: #eef1f6; display: flex; align-items: center; justify-content: center; font-size: 17px;
   }
   .att .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .att .thumb.doc {
@@ -132,81 +211,170 @@
     font-size: 11px; color: #3f3a66; background: #fff; border-radius: 5px; padding: 6px;
   }
 
-  /* 轻提示 */
+  /* ==================== 登录遮罩层 ==================== */
+  .overlay {
+    display: none; position: fixed; inset: 0; z-index: 150;
+    align-items: center; justify-content: center; padding: 20px;
+  }
+  .overlay.show { display: flex; }
+  .overlay-mask { position: absolute; inset: 0; background: rgba(20, 24, 30, .42); backdrop-filter: blur(3px); }
+  .login-card {
+    position: relative; width: min(420px, 100%); background: #fff; border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .22); padding: 22px 24px 20px;
+    animation: pop .18s ease-out;
+  }
+  @keyframes pop {
+    from { transform: translateY(10px) scale(.98); opacity: 0; }
+    to { transform: none; opacity: 1; }
+  }
+  .login-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .login-head h3 { margin: 0; font-size: 16px; font-weight: 600; }
+  .close-x {
+    border: none; background: transparent; color: #9aa0a8; font-size: 22px;
+    line-height: 1; padding: 0 4px; width: auto;
+  }
+  .close-x:hover { color: var(--text); }
+  .field { margin-bottom: 11px; }
+  .field label { display: block; text-align: left; color: #6b717a; font-size: 12px; margin-bottom: 5px; }
+  .field input {
+    width: 100%; border: 1px solid var(--border); border-radius: 7px;
+    padding: 8px 10px; background: #fff; font-size: 13px;
+  }
+  .field input:focus { outline: none; border-color: var(--wx); box-shadow: 0 0 0 2px rgba(7, 193, 96, .12); }
+  .login-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 16px; }
+  #loginBtn {
+    background: var(--wx); color: #fff; border: none; border-radius: 7px;
+    padding: 8px 16px; font-size: 13px; white-space: nowrap;
+  }
+  #loginBtn:hover:not(:disabled) { background: var(--wx-d); }
+  #loginBtn:disabled { background: #c9ced6; }
+  .status { font-size: 12px; padding: 3px 9px; border-radius: 12px; background: #eee; color: var(--muted); }
+  .status.ok { background: #e6f7ee; color: var(--ok); }
+  .status.bad { background: var(--err); color: var(--err-t); }
+  .cors-tip {
+    display: none; margin: 0 0 12px; padding: 10px 12px;
+    border: 1px solid #f0c14b; border-radius: 8px;
+    background: #fff7e6; color: #7a5b00; font-size: 12px; line-height: 1.8;
+  }
+  .cors-tip.show { display: block; }
+  .cors-tip a { color: var(--primary); font-weight: 600; }
+
+  /* ==================== 轻提示 / 媒体 / 放大 ==================== */
   #toast {
     position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(12px);
     background: #1f2329; color: #fff; font-size: 12px; padding: 8px 15px;
     border-radius: 20px; opacity: 0; pointer-events: none;
-    transition: opacity .2s, transform .2s; z-index: 99; max-width: 80vw;
-    text-align: center;
+    transition: opacity .2s, transform .2s; z-index: 300; max-width: 80vw; text-align: center;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .gen-media {
+    margin: 8px 0 2px; padding: 8px; border: 1px solid #dbe3f0;
+    border-radius: 8px; background: #f7f9fc; max-width: 340px;
+  }
+  .gen-media .gm-head { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #6b7280; margin-bottom: 6px; }
+  .gen-media .gm-id { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .gen-media .gm-head a { margin-left: auto; color: var(--primary); text-decoration: none; }
+  .gen-media img, .gen-media video { max-width: 100%; max-height: 240px; border-radius: 6px; display: block; cursor: zoom-in; }
+  .gen-media video { cursor: default; }
+  .gen-media audio { width: 100%; display: block; }
+  #lightbox {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: rgba(12, 15, 20, .82); align-items: center; justify-content: center; padding: 24px;
+  }
+  #lightbox.show { display: flex; }
+  #lightbox img { max-width: 94vw; max-height: 90vh; border-radius: 8px; }
+
+  @media (max-width: 760px) {
+    .app { height: 100vh; margin: 0; border: none; border-radius: 0; }
+    .topbar { padding: 0 12px; }
+    .chat { padding: 14px 12px; }
+    .bubble { max-width: 82%; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="app">
 
-  <div class="panel">
-    <h2>① 连接与凭证</h2>
-    <div class="grid">
-      <label>服务地址</label>
-      <input id="baseUrl" value="http://localhost:9527" placeholder="http://host:port">
-      <label>账号</label>
-      <input id="username" placeholder="管控台账号（初始化后必填）">
-      <label>密码</label>
-      <input id="password" type="password" placeholder="管控台密码">
-      <label></label>
-      <div class="row">
-        <button id="loginBtn">登录获取凭证</button>
-        <span id="credStatus" class="status">未设置凭证</span>
-        <span class="pill">未初始化过的服务端可跳过登录</span>
-      </div>
-      <label>或粘贴凭证</label>
-      <input id="credential" placeholder="X-DomainPlane-Credential，留空则用登录获取的">
-      <label>域 (domain)</label>
-      <input id="domain" value="default" placeholder="你绑定的域，默认 default">
+  <header class="topbar">
+    <div class="logo">DP</div>
+    <div>
+      <div class="brand-t">DomainPlane 对话测试台</div>
+      <div class="brand-s">会话 <span id="sidLabel" class="pill">—</span></div>
     </div>
-  </div>
+    <div class="spacer"></div>
+    <span id="convStatus" class="conv-status">空闲</span>
+    <button id="newBtn" class="txt-btn" type="button">新建会话</button>
+    <button id="stopBtn" class="txt-btn" type="button" disabled>停止</button>
+    <button id="openLoginBtn" class="login-trigger" type="button">
+      <span class="dot"></span><span id="loginLabel">登录</span>
+    </button>
+  </header>
 
-  <div class="panel">
-    <h2>② 对话测试</h2>
+  <div id="chat" class="chat"></div>
 
-    <div class="input-box" id="inputBox">
-      <textarea id="message" placeholder="输入消息，回车发送（Shift+Enter 换行）；可直接拖拽文件进来，或 Ctrl+V 粘贴截图"></textarea>
-      <div class="drop-tip">松开即添加附件</div>
-      <div class="attach-bar">
-        <button id="pickImgBtn" class="ghost" type="button" title="图片">🖼️ 图片</button>
-        <button id="pickMediaBtn" class="ghost" type="button" title="音频 / 视频">🎵 音视频</button>
-        <button id="pickDocBtn" class="ghost" type="button" title="PDF / Word / Excel / PPT / 文本 / 代码">📄 文档</button>
-        <button id="pickAnyBtn" class="ghost" type="button" title="不限制类型">📎 任意文件</button>
-        <span id="attachHint" class="pill">支持拖拽与粘贴</span>
-      </div>
-      <input id="filePicker" type="file" multiple>
-    </div>
-
+  <footer class="composer">
     <div id="attachList" class="attach-list"></div>
     <div class="quota" id="quotaBar"></div>
 
-    <div class="row" style="margin-top:12px;">
-      <button id="sendBtn">发送</button>
-      <button id="stopBtn" class="ghost" disabled>停止</button>
-      <button id="newBtn" class="ghost">新建会话</button>
-      <span id="convStatus" class="pill"></span>
+    <div class="input-box" id="inputBox">
+      <div class="toolbar">
+        <button id="pickImgBtn" class="tool-btn" type="button" title="图片">🖼️</button>
+        <button id="pickMediaBtn" class="tool-btn" type="button" title="音频 / 视频">🎵</button>
+        <button id="pickDocBtn" class="tool-btn" type="button" title="PDF / Word / Excel / PPT / 文本 / 代码">📄</button>
+        <button id="pickAnyBtn" class="tool-btn" type="button" title="不限制类型">📎</button>
+        <input id="filePicker" type="file" multiple>
+      </div>
+      <textarea id="message" placeholder="输入消息，回车发送（Shift+Enter 换行）；可拖拽或粘贴文件"></textarea>
+      <div class="drop-tip">松开即添加附件</div>
+      <div class="composer-foot">
+        <button id="sendBtn" type="button">发送</button>
+      </div>
     </div>
-    <div class="hint">sessionId：<span id="sidLabel" class="pill">—</span></div>
-    <div class="hint" id="routeHint"></div>
-  </div>
 
-  <div class="panel">
-    <h2>③ 对话内容</h2>
-    <div id="chat"></div>
-    <details>
+    <details class="raw-panel">
       <summary>原始事件流（排障用）</summary>
       <div id="rawlog"></div>
     </details>
-  </div>
+  </footer>
 
 </div>
+
+<!-- 登录遮罩层：点遮罩 / 右上角 × / Esc 均可关闭 -->
+<div id="loginOverlay" class="overlay" aria-hidden="true">
+  <div class="overlay-mask" id="loginMask"></div>
+  <div class="login-card" role="dialog" aria-modal="true" aria-label="连接与登录">
+    <div class="login-head">
+      <h3>连接与登录</h3>
+      <button id="loginClose" class="close-x" type="button" aria-label="关闭">×</button>
+    </div>
+    <div id="corsTip" class="cors-tip"></div>
+    <div class="field">
+      <label for="baseUrl">服务地址</label>
+      <input id="baseUrl" value="http://localhost:9527" placeholder="http://host:port">
+    </div>
+    <div class="field">
+      <label for="username">账号</label>
+      <input id="username" placeholder="管控台账号">
+    </div>
+    <div class="field">
+      <label for="password">密码</label>
+      <input id="password" type="password" placeholder="管控台密码">
+    </div>
+    <div class="field">
+      <label for="credential">或粘贴凭证</label>
+      <input id="credential" placeholder="X-DomainPlane-Credential，留空则用登录获取的">
+    </div>
+    <div class="field">
+      <label for="domain">域 (domain)</label>
+      <input id="domain" value="default" placeholder="default">
+    </div>
+    <div class="login-foot">
+      <span id="credStatus" class="status">未设置凭证</span>
+      <button id="loginBtn" type="button">登录获取凭证</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -215,6 +383,33 @@ const base = () => ($('baseUrl').value || '').replace(/\/+$/, '');
 const getCred = () => ($('credential').value || '').trim()
   || sessionStorage.getItem('dp_cred') || '';
 const setCred = (c) => { sessionStorage.setItem('dp_cred', c); };
+
+/* 本页是单文件工具，常被直接双击（file://）或挂在别的静态端口上打开。
+   服务端默认关闭跨域（domainplane.cors.allowed-origins 默认为空），而登录请求带
+   application/json 会先发 OPTIONS 预检：预检被拒 -> fetch 只抛一个笼统的 TypeError，
+   页面表现就是「一直登不上」且看不出原因。
+   同源打开（服务地址 /chat-test.html）可彻底绕开预检，不用放宽服务端 CORS 策略。 */
+function isCrossOrigin() {
+  if (location.protocol === 'file:') return true;
+  try { return location.origin !== new URL(base()).origin; } catch (_) { return true; }
+}
+function selfOriginLabel() {
+  return location.protocol === 'file:' ? 'file://（Origin: null）' : location.origin;
+}
+function sameOriginHint() {
+  const tip = $('corsTip');
+  if (!tip) return;
+  const b = base();
+  let target;
+  try { target = new URL('/chat-test.html', b).href; }
+  catch (_) { target = b.replace(/\/+$/, '') + '/chat-test.html'; }
+  if (!isCrossOrigin()) { tip.className = 'cors-tip'; tip.innerHTML = ''; return; }
+  tip.className = 'cors-tip show';
+  tip.innerHTML = '当前页面与服务端不同源（' + selfOriginLabel() + ' → ' + b + '）。'
+    + '服务端默认关闭跨域，登录请求的预检会被直接拒绝，表现就是「登不上」。'
+    + '<br>请用服务地址打开本页：<a href="' + target + '">' + target + '</a>'
+    + '（本页已放在服务端静态目录下，同源访问无需改任何配置）。';
+}
 
 let sessionId = 'dp-test-' + Math.random().toString(36).slice(2, 10);
 $('sidLabel').textContent = sessionId;
@@ -284,8 +479,11 @@ async function login() {
     const j = await res.json().catch(() => null);
     if (res.ok && j && j.credential) {
       setCred(j.credential);
+      // 手填凭证优先于 sessionStorage：不清掉的话刚换到的新凭证会被旧值盖住
+      $('credential').value = '';
       $('credStatus').textContent = '已获取凭证 ✓';
       $('credStatus').className = 'status ok';
+      refreshLoginBadge();
     } else {
       let text = '登录失败';
       if (j && j.error) {
@@ -299,7 +497,9 @@ async function login() {
       $('credStatus').className = 'status bad';
     }
   } catch (e) {
-    $('credStatus').textContent = '登录失败：无法连接服务端';
+    $('credStatus').textContent = isCrossOrigin()
+      ? '登录失败：跨域预检被拒，请用上方服务地址打开本页'
+      : '登录失败：无法连接服务端（' + base() + '）';
     $('credStatus').className = 'status bad';
   } finally {
     btn.disabled = false;
@@ -1094,6 +1294,8 @@ function renderEvent(ev) {
     body.textContent = ev.payload || '';
     curTool.appendChild(tag); curTool.appendChild(body); scroll();
     curTool = null;
+  } else if (type === 'MEDIA') {
+    renderMedia(ev.payload);
   } else if (type === 'ERROR') {
     sawTerminal = true;
     const d = document.createElement('div');
@@ -1118,6 +1320,81 @@ function renderEvent(ev) {
 }
 
 function resetBlock() { curBlock = null; curThink = null; curThinkText = null; curTool = null; }
+
+/* ---------------- 生成媒体渲染（MEDIA 事件） ----------------
+ * 服务端把工具产出的字节原样推下来（encoding=base64），或只给一个地址（encoding=url）。
+ * 会话记录里没有这些字节，只有工具结果文本里的引用名 —— 刷新页面就看不到了，属预期。
+ */
+
+const MEDIA_EXT = {
+  'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif',
+  'audio/mpeg': '.mp3', 'audio/mp3': '.mp3', 'audio/wav': '.wav', 'audio/ogg': '.ogg',
+  'video/mp4': '.mp4', 'video/webm': '.webm'
+};
+
+function mediaSrc(m) {
+  if (!m) return '';
+  if (m.encoding === 'url') return m.data || '';
+  const mime = m.mime || (m.kind === 'image' ? 'image/png' : 'application/octet-stream');
+  return 'data:' + mime + ';base64,' + (m.data || '');
+}
+
+function openLightbox(src) {
+  let box = document.getElementById('lightbox');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'lightbox';
+    box.onclick = () => box.classList.remove('show');
+    document.body.appendChild(box);
+  }
+  box.innerHTML = '';
+  const img = document.createElement('img');
+  img.src = src;
+  box.appendChild(img);
+  box.classList.add('show');
+}
+
+function renderMedia(payload) {
+  let m;
+  try { m = JSON.parse(payload || '{}'); } catch (_) { return; }
+  const src = mediaSrc(m);
+  if (!src) return;
+
+  const box = document.createElement('div');
+  box.className = 'gen-media';
+
+  const head = document.createElement('div');
+  head.className = 'gm-head';
+  const idEl = document.createElement('span');
+  idEl.className = 'gm-id';
+  idEl.textContent = m.id || '';
+  head.appendChild(idEl);
+  const dl = document.createElement('a');
+  dl.href = src;
+  dl.download = (m.id || 'media') + (MEDIA_EXT[m.mime] || '');
+  dl.textContent = '下载';
+  head.appendChild(dl);
+  box.appendChild(head);
+
+  if (m.kind === 'audio') {
+    const au = document.createElement('audio');
+    au.src = src; au.controls = true;
+    box.appendChild(au);
+  } else if (m.kind === 'video') {
+    const v = document.createElement('video');
+    v.src = src; v.controls = true;
+    box.appendChild(v);
+  } else {
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = m.id || '生成图片';
+    img.onclick = () => openLightbox(src);
+    box.appendChild(img);
+  }
+
+  ensureBlock().appendChild(box);
+  scroll();
+}
 
 /** 审批中断：列出服务端给出的待授权工具 + 批准/拒绝，点击后回传 resume 并续收事件流 */
 function renderApproval(ev) {
@@ -1293,8 +1570,19 @@ function processRawEvent(raw) {
   let ev;
   try { ev = JSON.parse(jsonLine); }
   catch (e) { appendRaw('[解析失败] ' + jsonLine); return; }
-  appendRaw(JSON.stringify(ev));
+  appendRaw(rawOf(ev));
   renderEvent(ev);
+}
+
+/** 原始事件日志：MEDIA 的字节体不进日志（一份图 base64 上兆，写进去只会把排障面板撑爆） */
+function rawOf(ev) {
+  if (ev.type !== 'MEDIA') return JSON.stringify(ev);
+  let m = {};
+  try { m = JSON.parse(ev.payload || '{}'); } catch (_) { m = {}; }
+  return JSON.stringify({
+    type: 'MEDIA', sessionId: ev.sessionId, id: m.id, kind: m.kind,
+    mime: m.mime, encoding: m.encoding, dataChars: (m.data || '').length
+  });
 }
 
 async function stop() {
@@ -1314,6 +1602,29 @@ function newSession() {
   attached = []; renderAttachments();
 }
 
+/* ---------------- 登录遮罩层 ---------------- */
+function refreshLoginBadge() {
+  const ok = !!getCred();
+  const btn = $('openLoginBtn');
+  if (!btn) return;
+  btn.classList.toggle('logged', ok);
+  $('loginLabel').textContent = ok ? '已登录' : '登录';
+}
+
+function openLogin() {
+  sameOriginHint();
+  const ov = $('loginOverlay');
+  ov.classList.add('show');
+  ov.setAttribute('aria-hidden', 'false');
+  setTimeout(() => { const u = $('username'); if (u) u.focus(); }, 0);
+}
+
+function closeLogin() {
+  const ov = $('loginOverlay');
+  ov.classList.remove('show');
+  ov.setAttribute('aria-hidden', 'true');
+}
+
 /* ---------------- 事件绑定 ---------------- */
 
 let pickAccept = null;
@@ -1325,6 +1636,12 @@ function openPicker(accept) {
 }
 
 $('loginBtn').onclick = login;
+$('openLoginBtn').onclick = openLogin;
+$('loginClose').onclick = closeLogin;
+$('loginMask').onclick = closeLogin;
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLogin(); });
+$('credential').addEventListener('input', refreshLoginBadge);
+refreshLoginBadge();
 $('sendBtn').onclick = send;
 $('stopBtn').onclick = stop;
 $('newBtn').onclick = newSession;
@@ -1398,10 +1715,22 @@ $('message').addEventListener('paste', (e) => {
   }
 });
 
-// 路由说明
-$('routeHint').textContent = '图片走能力路由（主模型可看图则直进上下文，否则 seeImage 委派）；'
-  + '视频 / 音频按原样进主模型消息，需域所绑模型自身支持；'
-  + '文档在前端抽成文本并入 TEXT 块（后端不会解析文档格式）。';
+// 从服务端同源打开时对齐地址：localhost / 127.0.0.1 写法不同也会被判成跨域。
+// 先确认当前 origin 上确实有后端（/admin/session 免鉴权），避免把自建静态服务的
+// origin 误当成 API 地址；只有 baseUrl 还是出厂默认值时才动，手填过的不覆盖。
+(function alignBaseUrl() {
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  const box = $('baseUrl');
+  if (!box || (box.value !== 'http://localhost:9527' && box.value.trim())) return;
+  fetch(location.origin + '/admin/session', { method: 'GET' }).then(function (r) {
+    if (!r.ok) return;
+    box.value = location.origin;
+    sameOriginHint();
+  }).catch(function () { /* 当前 origin 不是后端，保留跨域提示 */ });
+})();
+sameOriginHint();
+$('baseUrl').addEventListener('change', sameOriginHint);
+$('baseUrl').addEventListener('input', sameOriginHint);
 </script>
 </body>
 </html>

@@ -20,9 +20,21 @@
     });
   };
 
-  // src/pages/domains.js
+  // domainplane-server/frontend/src/pages/domains.js
   (function() {
     var esc = Console.escapeHtml;
+    function setText(id, v) {
+      var n = document.getElementById(id);
+      if (n) {
+        n.textContent = v;
+      }
+    }
+    function setHtml(id, v) {
+      var n = document.getElementById(id);
+      if (n) {
+        n.innerHTML = v;
+      }
+    }
     var DATA = null;
     var SELECTED = "";
     var EXPANDED = {};
@@ -184,34 +196,64 @@
       });
       return map;
     }
+    function renderTreePath() {
+      var box = document.getElementById("treePath");
+      if (!box) {
+        return;
+      }
+      if (!SELECTED) {
+        box.innerHTML = '<span class="lead">\u5F53\u524D\u8DEF\u5F84</span><span class="seg">\u2014</span>';
+        return;
+      }
+      var segs = chainOf(SELECTED).map(shortName);
+      box.innerHTML = '<span class="lead">\u5F53\u524D\u8DEF\u5F84</span>' + segs.map(function(s, i) {
+        return (i ? '<span class="sep">\u203A</span>' : "") + '<span class="seg">' + esc(s) + "</span>";
+      }).join("");
+    }
     function renderTree() {
       var box = document.getElementById("treeList");
       var domains = DATA && DATA.domains || [];
       if (!box) {
         return;
       }
-      document.getElementById("domainCount").textContent = domains.length + " \u4E2A\u57DF";
+      setText("domainCount", domains.length + " \u4E2A\u57DF");
+      renderTreePath();
       if (!domains.length) {
         box.innerHTML = '<div class="dp-domain-empty">\u5F53\u524D\u6CA1\u6709\u4EFB\u4F55\u57DF\u3002\u6839\u57DF <span class="mono">default</span> \u7531\u670D\u52A1\u7AEF\u81EA\u5EFA\uFF0C\u5176\u4F59\u57DF\u7528\u4E0A\u65B9\u8F93\u5165\u6846\u65B0\u5EFA\uFF0C\u6807\u8BC6\u987B\u4E3A\u4ECE\u6839\u57DF\u51FA\u53D1\u7684\u5B8C\u6574\u8DEF\u5F84\u3002</div>';
         return;
       }
       var map = childrenMap();
-      box.innerHTML = treeLevel(map[""] || [], map, 0);
+      box.innerHTML = '<div class="dp-tree">' + treeLevel(map[""] || [], map, 0, []) + "</div>";
       bindTreeEvents(box);
     }
-    function treeLevel(list, map, depth) {
-      return list.map(function(d) {
+    function treeLevel(list, map, depth, prefix) {
+      var out = "";
+      list.forEach(function(d, i) {
         var kids = map[d.name] || [];
-        var expanded = !!EXPANDED[d.name] || depth === 0;
         var hasKids = kids.length > 0;
+        var expanded = EXPANDED[d.name] !== false;
+        var isLast = i === list.length - 1;
+        var rails = prefix.map(function(cont) {
+          return '<i class="' + (cont ? "line" : "blank") + '"></i>';
+        }).join("");
+        if (depth > 0) {
+          rails += '<i class="elbow ' + (isLast ? "last" : "more") + '"></i>';
+        }
         var tagCls = SOURCE_TAG_CLS[String(d.source || "").toUpperCase()] || "src-derived";
         var srcLabel = d.source === "BUILTIN" ? "\u6839\u57DF" : d.source === "MANUAL" ? "\u4EBA\u5DE5" : "\u6D3E\u751F";
-        var html = '<div class="dp-tree-row' + (d.name === SELECTED ? " on" : "") + '" data-domain="' + esc(d.name) + '">' + (hasKids ? '<button class="dp-tree-chev" data-chev="' + esc(d.name) + '" title="' + (expanded ? "\u6298\u53E0" : "\u5C55\u5F00") + '">' + (expanded ? "\u25BE" : "\u25B8") + "</button>" : '<span class="dp-tree-chev leaf"></span>') + '<span class="dp-tree-dot ' + (d.callable ? "on" : "off") + '" title="' + (d.callable ? "\u53EF\u8C03\u7528\u5355\u5143" : "\u88C5\u914D\u8282\u70B9") + '"></span><span class="dp-tree-name" title="' + esc(d.name) + (d.pendingDelete ? "\uFF08\u5F85\u5220\u9664\uFF09" : "") + '">' + esc(shortName(d.name)) + (d.pendingDelete ? ' <span class="tag destructive">\u5F85\u5220\u9664</span>' : "") + '</span><span class="dp-tree-tag ' + tagCls + '">' + srcLabel + '</span><span class="dp-tree-count">' + num(d.toolCount) + "</span></div>";
+        var pending = d.pendingDelete ? ' <span class="tag destructive">\u5F85\u5220\u9664</span>' : "";
+        var chev = hasKids ? '<button class="dp-tree-chev" data-chev="' + esc(d.name) + '" data-open="' + (expanded ? "1" : "0") + '" title="' + (expanded ? "\u6298\u53E0" : "\u5C55\u5F00") + '">' + (expanded ? "\u25BE" : "\u25B8") + "</button>" : '<span class="dp-tree-chev leaf"></span>';
+        out += '<div class="dp-tree-line"><div class="dp-tree-rail">' + rails + '</div><div class="dp-tree-row' + (d.name === SELECTED ? " on" : "") + '" data-domain="' + esc(d.name) + '">' + chev + '<span class="dp-tree-joint ' + (d.callable ? "on" : "off") + '" title="' + (d.callable ? "\u53EF\u8C03\u7528\u5355\u5143" : "\u88C5\u914D\u8282\u70B9") + '"></span><span class="dp-tree-name" title="' + esc(d.name) + (d.pendingDelete ? "\uFF08\u5F85\u5220\u9664\uFF09" : "") + '">' + esc(shortName(d.name)) + pending + '</span><span class="dp-tree-tag ' + tagCls + '">' + srcLabel + '</span><span class="dp-tree-count">' + num(d.toolCount) + "</span></div></div>";
         if (hasKids && expanded) {
-          html += '<div class="dp-tree-kids">' + treeLevel(kids, map, depth + 1) + "</div>";
+          out += treeLevel(
+            kids,
+            map,
+            depth + 1,
+            depth > 0 ? prefix.concat([!isLast]) : prefix.slice()
+          );
         }
-        return html;
-      }).join("");
+      });
+      return out;
     }
     function bindTreeEvents(box) {
       box.querySelectorAll(".dp-tree-row").forEach(function(row) {
@@ -222,8 +264,7 @@
       box.querySelectorAll(".dp-tree-chev[data-chev]").forEach(function(btn) {
         btn.addEventListener("click", function(e) {
           e.stopPropagation();
-          var name = btn.getAttribute("data-chev");
-          EXPANDED[name] = !EXPANDED[name];
+          EXPANDED[btn.getAttribute("data-chev")] = btn.getAttribute("data-open") !== "1";
           renderTree();
         });
       });
@@ -254,7 +295,7 @@
       }
       var d = currentDomain();
       if (!d) {
-        box.innerHTML = '<div class="card dp-panel"><div class="card-body"><div class="dp-editor-empty">\u4ECE\u5DE6\u4FA7\u9009\u4E00\u4E2A\u57DF\u67E5\u770B\u4E0E\u914D\u7F6E\u3002</div></div></div>';
+        box.innerHTML = '<section class="card dp-panel"><div class="dp-panel-body"><div class="dp-editor-empty"><span class="ee-icon">' + DOM_ICON + "</span><span>\u4ECE\u5DE6\u4FA7\u9009\u4E00\u4E2A\u57DF\u67E5\u770B\u4E0E\u914D\u7F6E\u3002</span></div></div></section>";
         return;
       }
       var resolved = resolveAlong(d.name, "chat");
@@ -274,19 +315,21 @@
         return '<span class="tag public mono">' + esc(label) + "</span>" + marks;
       }).join(" ") + (resolved.source === d.name ? "" : '<span class="card-note">\u7EE7\u627F\u81EA ' + esc(resolved.source) + "</span>") : '<span class="tag write">\u65E0\u53EF\u8C03\u7528\u6A21\u578B</span>';
       var tools = (d.tools || []).map(toolTag).join("");
-      var toolLine = tools ? '<div class="tool-tags">' + tools + "</div>" : '<span class="perm-none">\u8BE5\u57DF\u6CA1\u6709\u53EF\u89C1\u5DE5\u5177</span>';
+      var toolLine = tools || '<span class="perm-none">\u8BE5\u57DF\u6CA1\u6709\u53EF\u89C1\u5DE5\u5177</span>';
       var mcpConns = d.mcp && d.mcp.connections || [];
       var mcpInherited = d.mcp && d.mcp.inheritedFrom;
-      var mcpLine = mcpConns.length || mcpInherited ? '<div><span class="k">MCP \u8FDE\u63A5</span>' + mcpConns.map(function(c) {
+      var mcpLine = mcpConns.length || mcpInherited ? '<div class="dp-meta-row"><span class="k">MCP \u8FDE\u63A5</span><div class="v">' + mcpConns.map(function(c) {
         return '<span class="tag public mono">' + esc(c) + "</span>";
-      }).join(" ") + (mcpInherited ? ' <span class="card-note">\u7EE7\u627F\u81EA ' + esc(mcpInherited) + "</span>" : "") + "</div>" : "";
+      }).join(" ") + (mcpInherited ? ' <span class="card-note">\u7EE7\u627F\u81EA ' + esc(mcpInherited) + "</span>" : "") + "</div></div>" : "";
       var kb = d.knowledge || {};
       var stat = kb.body ? kbRetrievableOf(d.name) : null;
       var bodyStat = kb.body ? kbStatOf(kb.body) : null;
       var statNote = !kb.body ? "" : !KB_STATS ? '<span class="card-note">\u7EDF\u8BA1\u52A0\u8F7D\u4E2D\u2026</span>' : KB_STATS.failed ? '<span class="card-note">\u7EDF\u8BA1\u4E0D\u53EF\u7528</span>' : '<span class="card-note">\u6587\u6863 ' + num(stat && stat.documents) + " \xB7 \u5207\u7247 " + num(stat && stat.chunks) + (KB_STATS.stale ? "\uFF08\u65E7\u6570\u636E\uFF09" : "") + "</span>" + (bodyStat && bodyStat.domainCount > 1 ? ' <span class="card-note">\u4F53\u5171 ' + num(bodyStat.documents) + " \xB7 " + bodyStat.domainCount + " \u57DF\u5171\u7528</span>" : "");
-      var kbLine = '<div><span class="k">\u77E5\u8BC6\u4F53</span>' + kbSelect(d.name, kb) + statNote + (kb.bodyMissing ? ' <span class="tag destructive" title="\u8FD9\u4E2A\u57DF\u7ED1\u7684\u77E5\u8BC6\u4F53\u5DF2\u88AB\u5220\uFF0C\u672C\u7AD9\u6CA1\u6709\u77E5\u8BC6\u5E93">\u77E5\u8BC6\u4F53\u5DF2\u5931\u6548</span>' : "") + (kb.bodyDead ? ' <span class="tag destructive" title="\u77E5\u8BC6\u4F53\u7684\u8FDE\u63A5\u5168\u90FD\u4E0D\u53EF\u7528\uFF0C\u68C0\u7D22\u5DE5\u5177\u5DF2\u4ECE\u8FD9\u4E2A\u57DF\u4E0B\u7EBF">\u77E5\u8BC6\u4F53\u8FDE\u63A5\u4E0D\u53EF\u7528</span>' : "") + (d.runningSessions ? ' <span class="tag approval">\u5728\u98DE\u4F1A\u8BDD ' + num(d.runningSessions) + "</span>" : "") + "</div>";
-      var parentLine = d.parentId ? '<div><span class="k">\u4E0A\u7EA7\u57DF</span><button class="dp-jump" data-jump="' + esc(d.parentId) + '">' + esc(d.parentId) + "</button></div>" : "";
-      box.innerHTML = '<section class="card dp-panel dp-detail-card"><div class="card-body"><header class="card-head">' + DOM_ICON + '<h2 class="mono">' + esc(d.name) + "</h2>" + sourceTag(d) + (d.pendingDelete ? '<span class="tag destructive" title="\u5904\u4E8E\u8F6F\u5220\u9664\u5BBD\u9650\u671F\uFF0C\u5230\u671F\u540E\u5F7B\u5E95\u6E05\u7406">\u5F85\u5220\u9664</span>' : "") + (d.callable ? '<span class="tag read" title="\u53EF\u8C03\u7528\u5355\u5143\uFF1A\u80FD\u4F5C\u4E3A\u5165\u53E3\u88AB\u8C03\u7528">\u53EF\u8C03\u7528</span>' : '<span class="tag approval" title="\u88C5\u914D\u8282\u70B9\uFF1A\u53EA\u628A\u5DE5\u5177 / \u63D0\u793A\u8BCD / \u6A21\u578B / \u77E5\u8BC6\u4F20\u7ED9\u540E\u4EE3\uFF0C\u4E0D\u80FD\u76F4\u63A5\u5F53\u5165\u53E3">\u88C5\u914D\u8282\u70B9</span>') + '<span class="spacer"></span>' + (d.callable ? echoSwitch(d) + planSwitch(d) : "") + '<span class="card-note">\u5DE5\u5177 ' + num(d.toolCount) + " \xB7 \u9700\u786E\u8BA4 " + num(d.approvalCount) + "</span>" + (d.hasChildren ? "" : '<button class="btn btn-sm btn-outline-secondary" data-callable="' + esc(d.name) + '" data-to="' + (d.callable ? "false" : "true") + '">' + (d.callable ? "\u8BBE\u4E3A\u88C5\u914D\u8282\u70B9" : "\u8BBE\u4E3A\u53EF\u8C03\u7528") + "</button>") + '<button class="btn btn-sm btn-outline-secondary" data-cfg="' + esc(d.name) + '">\u914D\u7F6E\u6A21\u578B</button><button class="btn btn-sm btn-outline-secondary" data-mcpcfg="' + esc(d.name) + '">\u914D\u7F6E MCP</button>' + (d.deletable && !d.pendingDelete ? '<button class="btn btn-sm btn-outline-danger" data-del="' + esc(d.name) + '">\u5220\u9664</button>' : "") + "</header>" + (d.pendingDelete ? pendingDeleteBox(d) : "") + (d.hasChildren ? '<p class="dp-kb-note">\u8BE5\u57DF\u6709 ' + num(d.directChildCount) + " \u4E2A\u76F4\u63A5\u5B50\u57DF\uFF08\u5168\u90E8\u540E\u4EE3 " + num(d.childrenCount) + ' \u4E2A\uFF09\uFF0C\u6309"\u53EA\u6709\u53F6\u5B50\u57DF\u53EF\u4F5C\u4E3A\u53EF\u8C03\u7528\u5355\u5143"\u7684\u89C4\u5219\uFF0C\u5B83\u53EA\u80FD\u4F5C\u88C5\u914D\u8282\u70B9\uFF0C\u4E0D\u80FD\u5F53\u5165\u53E3\u3002\u9700\u8981\u8FD9\u4E00\u5C42\u5165\u53E3\u8BF7\u53E6\u5EFA\u65E0\u5B50\u57DF\u7684\u57DF\u3002</p>' : "") + '<div class="model-meta">' + parentLine + '<div><span class="k">\u53EF\u8C03\u7528\u6A21\u578B</span>' + boundTags + "</div>" + capabilityLineOf(d.name) + mcpLine + kbLine + "</div><h3>\u53EF\u89C1\u5DE5\u5177\uFF08\u542B\u6CBF\u94FE\u7EE7\u627F\uFF09</h3>" + toolLine + "</div></section>";
+      var kbLine = '<div class="dp-meta-row"><span class="k">\u77E5\u8BC6\u4F53</span><div class="v">' + kbSelect(d.name, kb) + statNote + (kb.bodyMissing ? ' <span class="tag destructive" title="\u8FD9\u4E2A\u57DF\u7ED1\u7684\u77E5\u8BC6\u4F53\u5DF2\u88AB\u5220\uFF0C\u672C\u7AD9\u6CA1\u6709\u77E5\u8BC6\u5E93">\u77E5\u8BC6\u4F53\u5DF2\u5931\u6548</span>' : "") + (kb.bodyDead ? ' <span class="tag destructive" title="\u77E5\u8BC6\u4F53\u7684\u8FDE\u63A5\u5168\u90FD\u4E0D\u53EF\u7528\uFF0C\u68C0\u7D22\u5DE5\u5177\u5DF2\u4ECE\u8FD9\u4E2A\u57DF\u4E0B\u7EBF">\u77E5\u8BC6\u4F53\u8FDE\u63A5\u4E0D\u53EF\u7528</span>' : "") + (d.runningSessions ? ' <span class="tag approval">\u5728\u98DE\u4F1A\u8BDD ' + num(d.runningSessions) + "</span>" : "") + "</div></div>";
+      var parentLine = d.parentId ? '<div class="dp-meta-row"><span class="k">\u4E0A\u7EA7\u57DF</span><div class="v"><button class="dp-jump" data-jump="' + esc(d.parentId) + '">' + esc(d.parentId) + "</button></div></div>" : "";
+      var switches = d.callable ? echoSwitch(d) + planSwitch(d) : '<span class="card-note">\u88C5\u914D\u8282\u70B9\u4E0D\u8BBE\u5165\u53E3\u5F00\u5173</span>';
+      var buttons = (d.hasChildren ? "" : '<button class="btn btn-sm btn-outline-secondary" data-callable="' + esc(d.name) + '" data-to="' + (d.callable ? "false" : "true") + '">' + (d.callable ? "\u8BBE\u4E3A\u88C5\u914D\u8282\u70B9" : "\u8BBE\u4E3A\u53EF\u8C03\u7528") + "</button>") + '<button class="btn btn-sm btn-outline-secondary" data-cfg="' + esc(d.name) + '">\u914D\u7F6E\u6A21\u578B</button><button class="btn btn-sm btn-outline-secondary" data-mcpcfg="' + esc(d.name) + '">\u914D\u7F6E MCP</button>' + (d.deletable && !d.pendingDelete ? '<button class="btn btn-sm btn-outline-danger" data-del="' + esc(d.name) + '">\u5220\u9664</button>' : "");
+      box.innerHTML = '<section class="card dp-panel dp-detail-card"><div class="dp-panel-head"><span class="dp-panel-icon">' + DOM_ICON + '</span><div class="dp-panel-title"><h3 class="mono">' + esc(d.name) + '</h3><div class="dp-panel-tags">' + sourceTag(d) + (d.pendingDelete ? '<span class="tag destructive" title="\u5904\u4E8E\u8F6F\u5220\u9664\u5BBD\u9650\u671F\uFF0C\u5230\u671F\u540E\u5F7B\u5E95\u6E05\u7406">\u5F85\u5220\u9664</span>' : "") + (d.callable ? '<span class="tag read" title="\u53EF\u8C03\u7528\u5355\u5143\uFF1A\u80FD\u4F5C\u4E3A\u5165\u53E3\u88AB\u8C03\u7528">\u53EF\u8C03\u7528</span>' : '<span class="tag approval" title="\u88C5\u914D\u8282\u70B9\uFF1A\u53EA\u628A\u5DE5\u5177 / \u63D0\u793A\u8BCD / \u6A21\u578B / \u77E5\u8BC6\u4F20\u7ED9\u540E\u4EE3\uFF0C\u4E0D\u80FD\u76F4\u63A5\u5F53\u5165\u53E3">\u88C5\u914D\u8282\u70B9</span>') + '</div></div><span class="spacer"></span><div class="dp-head-actions">' + buttons + '</div></div><div class="dp-panel-body">' + (d.pendingDelete ? pendingDeleteBox(d) : "") + (d.hasChildren ? '<p class="dp-kb-note">\u8BE5\u57DF\u6709 ' + num(d.directChildCount) + " \u4E2A\u76F4\u63A5\u5B50\u57DF\uFF08\u5168\u90E8\u540E\u4EE3 " + num(d.childrenCount) + ' \u4E2A\uFF09\uFF0C\u6309"\u53EA\u6709\u53F6\u5B50\u57DF\u53EF\u4F5C\u4E3A\u53EF\u8C03\u7528\u5355\u5143"\u7684\u89C4\u5219\uFF0C\u5B83\u53EA\u80FD\u4F5C\u88C5\u914D\u8282\u70B9\uFF0C\u4E0D\u80FD\u5F53\u5165\u53E3\u3002\u9700\u8981\u8FD9\u4E00\u5C42\u5165\u53E3\u8BF7\u53E6\u5EFA\u65E0\u5B50\u57DF\u7684\u57DF\u3002</p>' : "") + '<div class="dp-detail-strip">' + switches + '<span class="spacer"></span><span class="card-note">\u5DE5\u5177 ' + num(d.toolCount) + " \xB7 \u9700\u786E\u8BA4 " + num(d.approvalCount) + '</span></div><div class="dp-meta-grid">' + parentLine + '<div class="dp-meta-row"><span class="k">\u53EF\u8C03\u7528\u6A21\u578B</span><div class="v">' + boundTags + "</div></div>" + capabilityLineOf(d.name) + mcpLine + kbLine + '</div><div class="dp-detail-section"><div class="dp-detail-section-head">\u53EF\u89C1\u5DE5\u5177 <span class="sub">\u542B\u6CBF\u94FE\u7EE7\u627F</span></div><div class="tool-tags">' + toolLine + "</div></div></div></section>";
       bindDetailEvents(box);
     }
     function capabilityLineOf(domain) {
@@ -304,7 +347,7 @@
         }).join(" ");
         parts.push('<span class="k">' + esc(FAMILY_LABEL[family]) + "</span> " + names + (resolved.source === domain ? "" : ' <span class="card-note">\u7EE7\u627F\u81EA ' + esc(resolved.source) + "</span>"));
       });
-      return parts.length ? '<div><span class="k">\u80FD\u529B\u6A21\u578B</span>' + parts.join(" \xB7 ") + "</div>" : "";
+      return parts.length ? '<div class="dp-meta-row"><span class="k">\u80FD\u529B\u6A21\u578B</span><div class="v">' + parts.join(" \xB7 ") + "</div></div>" : "";
     }
     function bindDetailEvents(box) {
       box.querySelectorAll("button[data-cfg]").forEach(function(b) {
@@ -405,7 +448,7 @@
         }
         options += '<option value="' + esc(b.id) + '"' + (b.id === bound ? " selected" : "") + ">" + esc(b.name || b.id) + "\uFF08" + esc(tail) + "\uFF09</option>";
       });
-      return '<select class="form-select" style="width:auto;min-width:12rem;display:inline-block;vertical-align:middle;" data-kb="' + esc(domain) + '" title="' + esc(boundBodyTitle()) + '">' + options + "</select>";
+      return '<select class="form-select dp-kb-select" data-kb="' + esc(domain) + '" title="' + esc(boundBodyTitle()) + '">' + options + "</select>";
     }
     function boundBodyTitle() {
       return KNOWLEDGE_BODIES.map(function(b) {
@@ -811,7 +854,9 @@
       renderTree();
     });
     document.getElementById("treeCollapseBtn").addEventListener("click", function() {
-      EXPANDED = {};
+      (DATA && DATA.domains || []).forEach(function(d) {
+        EXPANDED[d.name] = false;
+      });
       renderTree();
     });
     document.getElementById("bindModalClose").addEventListener("click", closeBind);

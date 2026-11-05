@@ -99,6 +99,6 @@
   <!-- SSE -->
   <rect class="box" x="40" y="552" width="1020" height="66" rx="10"/>
   <text class="t" x="60" y="578" font-size="13" font-weight="600">SSE 事件流</text>
-  <text class="m mono" x="60" y="600" font-size="11">TOKEN · THINKING · PLAN · TOOL_CALL · TOOL_RESULT · INTERRUPT · STOPPED · ERROR · DONE</text>
+  <text class="m mono" x="60" y="600" font-size="11">TOKEN · THINKING · PLAN · TOOL_CALL · TOOL_RESULT · MEDIA · INTERRUPT · STOPPED · ERROR · DONE</text>
   <text class="m" x="820" y="600" font-size="10">终止事件只有三个：DONE / STOPPED / ERROR</text>
 </svg>

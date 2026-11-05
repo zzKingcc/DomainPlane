@@ -263,6 +263,7 @@
             : snap.strategy === 'KEYWORD' ? '仅关键字召回' : '仅向量召回');
         setValue('statBodies', fmt(p.bodies) + ' 个', (p.bodiesInUse || 0) ? '' : 'warn');
         setNote('statBodiesNote', (p.bodiesInUse || 0) + ' 个在用 · ' + (p.bodiesUnbound || 0) + ' 个没绑定域');
+        setNote('bodyCount', fmt((snap.bodies || []).length) + ' 个');
 
         var noteEl = document.getElementById('snapshotNote');
         if (noteEl) {
@@ -1080,25 +1081,18 @@
     };
 
     /**
-     * 运维区默认收起：展开才诊断。
+     * 运维区常开：不再折叠，进页面即诊断，标题栏留一个「重新诊断」手动刷新。
      *
-     * 诊断要逐台枚举集合、问维度与切片数，全部是远程调用；放进首屏等于每次打开知识库
-     * 都多等几秒。事件只在这里绑一次（内容会整体重绘，委托给容器）。
+     * 诊断要逐台枚举集合、问维度与切片数，全是远程调用；但常开区域不能是空的，
+     * 所以由 loadSnapshot 之后再触发（见 Console.ready），首屏先画知识体卡片，
+     * 运维区自己显示「正在诊断…」再补上，不阻塞首屏。事件只在这里绑一次
+     * （内容会整体重绘，委托给容器）。
      */
     function initOps() {
-        var btn = document.getElementById('opsToggleBtn');
+        var refresh = document.getElementById('opsRefreshBtn');
+        if (refresh) { refresh.addEventListener('click', loadOps); }
         var box = document.getElementById('opsBody');
-        if (!btn || !box) { return; }
-        btn.addEventListener('click', function () {
-            if (!box.hidden) {
-                box.hidden = true;
-                btn.textContent = '展开';
-                return;
-            }
-            box.hidden = false;
-            btn.textContent = '收起';
-            loadOps();
-        });
+        if (!box) { return; }
         box.addEventListener('click', onOpsClick);
     }
 
@@ -1115,7 +1109,7 @@
 
     function opsHtml(d) {
         var s = d.summary || {};
-        var head = '<div class="dp-kb-note">' + fmt(s.collections) + ' 个集合 · ' + fmt(s.chunks)
+        var head = '<div class="dp-ops-summary">' + fmt(s.collections) + ' 个集合 · ' + fmt(s.chunks)
             + ' 条切片 · 无主 ' + fmt(s.orphans) + ' · 遗留 ' + fmt(s.legacy) + '</div>';
         var blocks = (d.backends || []).map(function (b) {
             var rows = (b.collections || []).map(function (c) {
@@ -1345,13 +1339,14 @@
     initOps();
     document.getElementById('createBodyBtn').addEventListener('click', openCreate);
     document.getElementById('refreshBtn').addEventListener('click', function () {
-        loadSnapshot();
+        loadSnapshot().then(loadOps);
     });
 
     Console.ready(function () {
         loadEmbedding();
         loadConnections();
         loadDomains();
-        loadSnapshot();
+        // 运维区常开：快照回来后再触发诊断，mergeHtml 要用 state.snap.bodies 填下拉
+        loadSnapshot().then(loadOps);
     });
 })();
