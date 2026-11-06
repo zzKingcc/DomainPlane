@@ -193,11 +193,12 @@ public class ToolExecutorService implements AutoCloseable {
      * {@link RetrievalScope} 丢了会让检索从"本轮域 + 祖先链"退化成全库检索（越权读）；
      * {@link TraceId} 丢了会让工具侧日志与服务端这次调用对不上，排障线索断掉；
      * sessionId 丢了历史检索工具就不知道该读哪个会话的档（跨会话读是越权口子）；
-     * {@link RoundSearchBudget} 必须按引用搬运：一轮里多次工具调用要扣同一个桶，
-     * 在工具线程上新建一个等于每调用一次重置一次，"每轮限次"形同虚设。
+     * 两个预算（{@link RoundSearchBudget} / {@link ImageGenBudget}）必须按引用搬运：
+     * 一轮里多次工具调用要扣同一个桶，在工具线程上新建一个等于每调用一次重置一次，
+     * "每轮限次"形同虚设。
      */
     record ContextSnapshot(String traceId, String domain, String sessionId,
-                           RoundSearchBudget searchBudget) {
+                           RoundSearchBudget searchBudget, ImageGenBudget imageGenBudget) {
 
         static ContextSnapshot capture() {
             // traceId 有两个来源，且**不等价**：编排层 bind 进来的是本次调用的 traceId（权威），
@@ -209,7 +210,8 @@ public class ToolExecutorService implements AutoCloseable {
                 traceId = TraceId.current();
             }
             return new ContextSnapshot(traceId, RetrievalScope.current(),
-                    ToolInvocationContext.sessionId(), ToolInvocationContext.searchBudget());
+                    ToolInvocationContext.sessionId(), ToolInvocationContext.searchBudget(),
+                    ToolInvocationContext.imageGenBudget());
         }
 
         /** 在隔离线程上复原。复原不完整比不复原更危险，所以逐项显式设置 */
@@ -219,10 +221,8 @@ public class ToolExecutorService implements AutoCloseable {
             if (traceId != null) {
                 ToolInvocationContext.bind(traceId);
             }
-            if (sessionId != null) {
-                ToolInvocationContext.bind(traceId, sessionId, searchBudget);
-            } else if (searchBudget != null) {
-                ToolInvocationContext.bind(traceId, null, searchBudget);
+            if (sessionId != null || searchBudget != null || imageGenBudget != null) {
+                ToolInvocationContext.bind(traceId, sessionId, searchBudget, imageGenBudget);
             }
             if (domain != null) {
                 RetrievalScope.bind(domain);

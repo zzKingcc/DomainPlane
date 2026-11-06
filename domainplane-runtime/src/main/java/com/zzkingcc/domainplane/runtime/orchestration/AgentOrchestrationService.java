@@ -907,26 +907,25 @@ public class AgentOrchestrationService implements AgentService {
         }
         turnLifecycle.releaseCheckpointQuietly(key, pending ? "视为拒绝" : "入口清理");
 
-        /* ④ 本轮带图时先定"图走哪条路"，定不下来就在写记忆前拒绝。
-           图片是这一轮能不能跑的前置条件，不是跑到模型那一步才知道的结果：
-           把它留到后面，被拒的那一轮已经在记忆里留下一条永远没有回答的提问，
-           下一轮模型会顺着它答非所问，而用户看不出发生过什么。 */
+        /* ④ 非文本内容块统一走附件通道：字节全部存进暂存区，主模型消息里只留
+           用户文字 + 一份按类型分组的引用名清单。图 / 音 / 视不再分别决定"直发还是委派"，
+           服务商是否支持某种 input_* 部件与本轮能不能跑无关。 */
         String domainId = context == null ? null : context.domainId();
-        List<MessageContent> effectiveContents = contents;
         String notice = null;
-        // 本轮全部媒体（图 / 音 / 视）暂存后的引用名：按媒体块顺序，失败处为 null，无媒体轮为空。
+        // 本轮全部媒体暂存后的引用名：按媒体块顺序，失败处为 null，无媒体轮为空。
         // 声明在分支之外：归档开轮要用它把"可按名取回"写进 UserInput.media（M4-R4）
         List<String> attachmentIds = List.of();
         int imageTotal = turnInput.imageCount(contents);
-        /* ① 先定"图走哪条路"。只以"这一轮带图"为前提：
-           音视频不参与视觉路由（没有 seeImage 那样的承接方），但它们同样要进暂存区，见 ②。 */
-        TurnInputFactory.VisionRoute route = imageTotal > 0 ? turnInput.resolveVisionRoute(domainId) : null;
-        if (route == TurnInputFactory.VisionRoute.UNAVAILABLE) {
+        int mediaTotal = turnInput.mediaCount(contents);
+
+        /* 带图时先确认域链上有能承接 seeImage 的视觉模型。定不下来就在写记忆前拒绝：
+           被拒的那一轮不该在记忆里留下一条永远没有回答的提问，
+           下一轮模型会顺着它答非所问。 */
+        if (imageTotal > 0 && !turnInput.visionAvailable(domainId)) {
             log.warn("[Agent编排] 会话[{}] 域 {} 本轮带 {} 张图，但域链上没有可承接的视觉模型，拒绝本轮",
                     sessionId, domainId, imageTotal);
             // 文案走码的对外文案，不在这里拼运维指引：AgentEvent.error 的四参工厂是
-            // "传入文案优先"，拼什么就原样发给终端用户，上一版把「去管控台绑模型」
-            // 拼进去，用户够不着管控台，看到只剩茫然。排障信息上面的 warn 日志已有
+            // "传入文案优先"，拼什么就原样发给终端用户。排障信息上面的 warn 日志已有
             // （域、图数），码的 action 字段也写着完整处置步骤，三者不缺。
             context.emit(AgentEvent.error(sessionId,
                     ErrorCode.MODEL_NO_VISION, TraceId.currentOrNew()));
@@ -934,46 +933,17 @@ public class AgentOrchestrationService implements AgentService {
             return;
         }
 
-        /* ② 把本轮全部媒体存进暂存区。无图轮也走这一步：音视频的暂存与视觉路由无关，
-           它服务的是归档侧的引用，不留引用，档里只剩一句"曾经有过一段音频"，
-           字节永远拿不回来。失败处置见 storeAttachments。 */
-        TurnInputFactory.StoredAttachments stored = turnInput.storeAttachments(contents);
-        attachmentIds = stored.ids();
-
-        if (route == TurnInputFactory.VisionRoute.INLINE) {
-            /* 主模型自己就能看图（effectiveContents 原样保留，图随消息进上下文），
-               但图**同时**要进暂存区，否则 seeImage 在"域里只有一个视觉模型"这种最常见
-               配置下永远取不到图，模型调它只会得到"找不到图片"，用户看到的是
-               "图片引用无效或已过期"（2026-10-16 实测复现）。
-
-               与委派路径的关键差别：这里存图是**额外能力**（自主委派 + 历史回看），
-               不是"本轮能不能跑"的前提，所以失败只告警、绝不阻断，主模型本来
-               就能自己看图，不该因为一次 Redis 抖动把一轮正常对话拖垮。
-
-               失败时通知一律不写：通知里的"本轮附带 N 张图片"是按成功暂存的那几张报的数，
-               而模型看到的图比这多，两个数对不上会让它以为还有图没给它。不写没有损失：
-               图本来就在它的消息里。 */
-            if (stored.imageFailure() != null) {
-                log.warn("[Agent编排] 会话[{}] 域 {} 本轮 {} 张图暂存失败（不影响本轮，"
-                        + "主模型直接看图即可）：{}", sessionId, domainId, imageTotal,
-                        stored.imageFailure());
-            } else if (!stored.imageIds().isEmpty()) {
-                notice = turnInput.optionalDelegateNotice(stored.imageIds());
-                log.info("[Agent编排] 会话[{}] 域 {} 主模型自带视觉，本轮 {} 张图既直接入消息"
-                        + "也已暂存为附件：{}", sessionId, domainId, imageTotal, stored.imageIds());
+        if (mediaTotal > 0) {
+            TurnInputFactory.StoredAttachments stored = turnInput.storeAttachments(contents);
+            attachmentIds = stored.ids();
+            /* 字节已不在消息里，少一个引用名就是少一份附件，而模型无从知道原本有几个。
+               所以任一暂存失败都必须让本轮失败，不能降级成"只告警、字节反正还在"。 */
+            if (stored.failure() != null) {
+                throw new IllegalStateException("本轮附件暂存失败，内容无法交给模型：" + stored.failure());
             }
-        }
-        if (route == TurnInputFactory.VisionRoute.DELEGATE) {
-            /* 存不进去要让本轮失败：图已被剥出消息，主模型手上只剩引用名清单，
-               少一个名字就是少一张图，而它无从知道原本有几张。 */
-            if (stored.imageFailure() != null) {
-                throw new IllegalStateException("本轮图片暂存失败，无法交由 seeImage 委派："
-                        + stored.imageFailure());
-            }
-            effectiveContents = turnInput.withoutImages(contents);
-            notice = turnInput.attachmentNotice(stored.imageIds());
-            log.info("[Agent编排] 会话[{}] 域 {} 主模型非视觉，本轮 {} 张图转为附件交由 seeImage 委派：{}",
-                    sessionId, domainId, stored.imageIds().size(), stored.imageIds());
+            notice = turnInput.attachmentNotice(stored);
+            log.info("[Agent编排] 会话[{}] 域 {} 本轮 {} 个附件走独立通道：{}",
+                    sessionId, domainId, mediaTotal, attachmentIds);
         }
 
         TokenUsageRecorder.begin();
@@ -990,11 +960,10 @@ public class AgentOrchestrationService implements AgentService {
            否则"没有长度"就不再等于"本轮没写过记忆"，回滚会少截一条。 */
         state.memorySizeBefore = TurnContextFactory.memorySize(memory);
         List<ChatMessage> window = turnContext.windowOf(memory);
-        /* 本轮的提问消息只构造一次，记忆与请求体共用同一份。
-           多模态下这不再是"省一次构造"：分两次构造就有两条 UserMessage，
-           一条进记忆、一条进模型，两份内容块列表是否一致全凭调用方自觉：
-           一旦不一致，模型看到的是另一张图，而排查时两边都"看起来正常"。 */
-        UserMessage userMessage = turnInput.buildUserMessage(message, effectiveContents, notice);
+        /* 本轮的提问消息只构造一次，记忆与请求体共用同一份：一条纯文本 UserMessage
+           （用户原话 + 附件清单）。非文本字节已全部进暂存区，不再有"两份内容块列表
+           是否一致"这个隐患；分两次构造仍会让记忆与请求体说的不一样。 */
+        UserMessage userMessage = turnInput.buildUserMessage(message, notice);
         memory.add(userMessage);
 
         /* 归档开轮：用户输入即刻落盘，回答慢慢跑（RPUSH 的返回值即 turnId）。
@@ -1002,8 +971,8 @@ public class AgentOrchestrationService implements AgentService {
            二是此时"这一轮能不能跑"的前置判定（封顶、视觉路由）都已通过，
            不会给注定被拒的轮留一条永远没人回答的开放轮。
 
-           媒体引用取<b>原始</b> contents 而不是 effectiveContents：委派路径下后者
-           已把图片剥掉，若用它开轮，归档里就再也看不出"这一轮带过图"（M1 的旧口径）。
+           媒体引用取<b>原始</b> contents：统一通道下主模型消息里只有文字，
+           归档是唯一记着"这一轮用户到底发过哪些附件"的地方，不能从模型消息反推。
            引用名来自刚刚暂存的 attachmentIds，与<b>媒体块</b>按序对齐（M4-R4）：
            图 / 音 / 视都占号，三种媒体的引用名都能落进档案。
 
@@ -1022,7 +991,7 @@ public class AgentOrchestrationService implements AgentService {
         turnLifecycle.renewActiveAttachments(key);
 
         /* ⑤ 请求装配：系统提示 + 早期摘要 + 相关轮卡片 + 近况窗口 + 本轮提问。
-           窗口只取最近若干轮的原文（消息块原样带，图片因此不会丢），
+           窗口只取最近若干轮的原文（消息块原样带，老会话里残留的媒体块因此不会丢），
            更老的轮次以摘要/卡片形态出现，装配与降级全部在 ContextAssembler 里。
            窗口在上面的"读尾部窗口"一步就已备好（不含本轮提问，提问单列）。 */
         String summary = turnContext.buildSummarySegment(key, contextAssembler.windowTurns());

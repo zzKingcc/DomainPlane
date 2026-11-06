@@ -171,4 +171,15 @@ public final class AgentEvent implements Serializable {
     public static AgentEvent done(String sessionId) {
         return new AgentEvent(AgentEventType.DONE, sessionId, null, null);
     }
+
+    /**
+     * 本轮执行正常结束，并带上生成媒体的交付清单。
+     *
+     * <p>{@code payload} 形如 {@code {"delivery":["img_xxx"],"attempts":6}}：本轮产生过
+     * {@code attempts} 份候选，最终只交付 {@code delivery} 里那几张。由 SSE 出口的
+     * 交付单变换填入，只放引用名，不含字节、地址或候选名单。</p>
+     */
+    public static AgentEvent done(String sessionId, String manifestJson) {
+        return new AgentEvent(AgentEventType.DONE, sessionId, null, manifestJson);
+    }
 }

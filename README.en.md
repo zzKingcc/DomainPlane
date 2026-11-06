@@ -122,7 +122,7 @@ Redis, keyword (Elasticsearch), vector (Qdrant) and raw (S3-compatible) connecti
 
 A body card carries every action for one dataset: upload, documents, health, rebuild, change landing spot, bind domains, delete. A collapsed operations section at the bottom handles diagnostics, adopting orphaned collections, cleaning up leftovers and merging bodies.
 
-> Screenshots from `v1.0-beta.2` with an empty library; the pages have since been rebuilt around knowledge bodies. Data is demo data.
+> Screenshots of an early empty-library state; the pages have since been rebuilt around knowledge bodies. Data is demo data.
 
 The other pages: overview (quality and tool risk mix), prompts (edit per domain chain segment), MCP connections (credentials only echoed as `hasHeaders`), tool instances (live list, circuit-break, force offline), session archive (memory, archive, assembly report, copy export), account (changing the password invalidates every credential).
 
@@ -156,12 +156,12 @@ DomainPlane solves a different problem: **one agent runtime shared by many busin
 ## Three steps to run it
 
 ```bash
-# 1. Build (output: domainplane-server/target/domainplane-v1.0-beta.2.jar)
+# 1. Build (output: domainplane-server/target/domainplane-v1.0.jar)
 mvn clean package
 
 # 2. Run (override the config directory for local development)
 java -DDOMAINPLANE_SETTINGS_PATH="$PWD/.dev/config" \
-     -jar domainplane-server/target/domainplane-v1.0-beta.2.jar
+     -jar domainplane-server/target/domainplane-v1.0.jar
 
 # 3. Verify
 curl http://localhost:9527/health

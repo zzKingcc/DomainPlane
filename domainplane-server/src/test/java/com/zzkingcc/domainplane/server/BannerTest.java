@@ -37,18 +37,27 @@ class BannerTest {
     }
 
     @Test
-    @DisplayName("渲染出的是 DOMAINPLANE 字形，不再有 Spring 默认 banner")
+    @DisplayName("渲染出紧凑的 DP 徽标与品牌名，不再有 Spring 默认 banner")
     void rendersProjectName() {
         String text = render();
-        assertTrue(text.contains("|_____|"), "应包含 DOMAINPLANE 的字形片段，实际：\n" + text);
+        assertTrue(text.contains("D O M A I N P L A N E"), "应包含品牌字样，实际：\n" + text);
+        assertTrue(text.contains("/_____/"), "应包含 DP 徽标片段，实际：\n" + text);
         assertFalse(text.contains("Spring"), "不应再出现 Spring 默认 banner，实际：\n" + text);
     }
 
     @Test
-    @DisplayName("版本占位符被解析（取不到 build.version 时回落 dev，而不是原样输出 ${…}）")
+    @DisplayName("banner 保持窄排版：任何一行不超过 48 列")
+    void staysCompact() {
+        String text = render();
+        int widest = text.lines().mapToInt(String::length).max().orElse(0);
+        assertTrue(widest <= 48, "全拼 ASCII 字画太宽，应改用紧凑徽标，最宽 " + widest + " 列，实际：\n" + text);
+    }
+
+    @Test
+    @DisplayName("版本占位符被解析（取不到 build.version 时回落 v1.0，而不是原样输出 ${…}）")
     void resolvesVersionPlaceholder() {
         String text = render();
         assertFalse(text.contains("${"), "占位符未被解析，会原样打到控制台，实际：\n" + text);
-        assertTrue(text.contains("vdev"), "无构建信息时应回落为 vdev，实际：\n" + text);
+        assertTrue(text.contains("v1.0"), "无构建信息时应回落为 v1.0，实际：\n" + text);
     }
 }

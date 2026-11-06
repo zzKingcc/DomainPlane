@@ -3,6 +3,8 @@ package com.zzkingcc.domainplane.server.capability;
 import com.zzkingcc.domainplane.api.annotation.Tool;
 import com.zzkingcc.domainplane.api.annotation.ToolParam;
 import com.zzkingcc.domainplane.api.tool.ToolDescriptor;
+import com.zzkingcc.domainplane.runtime.tool.ImageGenBudget;
+import com.zzkingcc.domainplane.runtime.tool.ToolInvocationContext;
 import com.zzkingcc.domainplane.runtime.vision.MediaAttachmentStore.Kind;
 import com.zzkingcc.domainplane.server.model.DefaultModelResolver;
 import com.zzkingcc.domainplane.server.model.ModelEndpointClient;
@@ -42,6 +44,8 @@ import java.util.List;
 @Component
 public class ImageGenTool extends CapabilityToolSupport {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ImageGenTool.class);
+
     /** 工具名（模型看到的函数名）。{@code ModelCapabilityToolBinder} 按它改可用域 */
     public static final String TOOL_NAME = "generateImage";
 
@@ -77,7 +81,9 @@ public class ImageGenTool extends CapabilityToolSupport {
             desc = "根据文字描述生成一张或多张图片。"
                     + "当用户要求画图、作图、生成图片 / 插画 / 海报 / 配图，或需要一张图来回答时调用。"
                     + "参数 prompt 填图片内容描述（越具体越好：主体、风格、构图、色调）。"
-                    + "生成结果会以图片编号返回，你可以在回答里直接提到这张图，或用 seeImage 复核。"
+                    + "本轮调用次数有限，prompt 尽量一次写准；生成结果以图片编号返回。"
+                    + "需要确认画面内容时可用 seeImage 查看对应编号，但不要反复重画。"
+                    + "最终答复里请写明你采用的那张图片编号。"
                     + "本工具依赖当前域已绑定的生图模型；没有时会明确告知，此时不要凭空描述图片内容。",
             effect = Tool.Effect.WRITE,
             domains = ToolDescriptor.UNBOUND_DOMAIN)
@@ -88,6 +94,17 @@ public class ImageGenTool extends CapabilityToolSupport {
 
         if (isBlank(prompt)) {
             return "没有说明要画什么。请把图片内容描述写在 prompt 参数里。";
+        }
+
+        // 闸门放在解析模型档案之前：额度用尽时连档案解析与远程请求都不该发生。
+        // 预算为 null（单测直调工具、或没走编排层的调用）时按不限制处理，保持旧行为。
+        ImageGenBudget budget = ToolInvocationContext.imageGenBudget();
+        if (budget != null && !budget.tryAcquire()) {
+            log.info("[生图] 本轮额度已用尽（上限 {} 次），要求模型从已有候选里收敛",
+                    ImageGenBudget.MAX_CALLS);
+            return "本轮生成图片已达上限（最多 " + ImageGenBudget.MAX_CALLS + " 次），不要再调用本工具。"
+                    + "请从本轮已生成的图片编号里选一张作为最终结果，并在给用户的回答里明确写出它的编号；"
+                    + "若都不合适，就如实告知用户本次没能得到满意的结果。";
         }
         String trimmedSize = isBlank(size) ? null : size.trim();
 

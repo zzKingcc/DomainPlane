@@ -7,11 +7,11 @@ package com.zzkingcc.domainplane.api.model;
  * 类型放在 {@code api} 模块，因为 SDK（{@code chat-client}）与服务端要共用同一份契约，
  * 各自拷一份必然分叉。</p>
  *
- * <p>音频 / 视频为什么从"留位不实现"转为实现：langchain4j 1.18.1 的 OpenAI 适配层
- * 已原生把 {@code AudioContent} 映射为 {@code input_audio} 部件、
- * {@code VideoContent} 映射为 {@code video_url} 部件（base64 自动拼 data URL），
- * 平台侧只差契约放行。服务商是否真的收，由域上绑的模型决定：不支持的服务商
- * 会在请求阶段返回明确错误，由调用方处置。</p>
+ * <p><b>这只是上行契约，不是发给上游 LLM 的部件</b>：所有非文本块在编排入口
+ * 统一存进媒体暂存区换成引用名，主模型消息里只有用户文字 + 一份附件清单，
+ * 由域上绑定的能力工具按引用名按需取回。因此新增一种媒体类型时，这里加枚举、
+ * 暂存区加 {@code Kind} 即可，不必等适配层支持对应的 {@code input_*} 部件；
+ * 上游静默丢部件也不会再造成"文件明明发了、模型说没收到"。</p>
  *
  * @author zzkingcc
  */

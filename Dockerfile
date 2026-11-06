@@ -1,13 +1,13 @@
 # DomainPlane 服务端镜像构建流程
 #
-# 1. 可执行 jar：domainplane-server/target/domainplane-v1.0-beta.2.jar
+# 1. 可执行 jar：domainplane-server/target/domainplane-v1.0.jar
 # 2. 把该 jar 与本 Dockerfile 放在同一目录，构建镜像：
-#      docker build -t domainplane-server:v1.0-beta.2 .
+#      docker build -t domainplane-server:v1.0 .
 # 3. 运行：
 #      docker run -d --name domainplane -p 9527:9527 \
 #        -v domainplane-config:/var/lib/domainplane/config \
 #        -v domainplane-chunks:/var/lib/domainplane/chunks \
-#        domainplane-server:v1.0-beta.2
+#        domainplane-server:v1.0
 #
 # 约定：
 #   1. 默认端口 9527，可用 SERVER_PORT 环境变量或 --server.port= 覆盖；
@@ -26,7 +26,7 @@ RUN groupadd -r domainplane \
  && chown -R domainplane:domainplane /opt/domainplane /var/lib/domainplane /var/log/domainplane
 
 WORKDIR /opt/domainplane
-COPY --chown=domainplane:domainplane domainplane-v1.0-beta.2.jar app.jar
+COPY --chown=domainplane:domainplane domainplane-v1.0.jar app.jar
 
 USER domainplane
 EXPOSE 9527

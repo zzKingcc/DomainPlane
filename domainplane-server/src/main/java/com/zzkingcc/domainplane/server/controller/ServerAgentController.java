@@ -5,6 +5,7 @@ import com.zzkingcc.domainplane.api.agent.AgentService;
 import com.zzkingcc.domainplane.api.event.AgentEvent;
 import com.zzkingcc.domainplane.common.util.InputSanitizer;
 import com.zzkingcc.domainplane.server.ServerInfo;
+import com.zzkingcc.domainplane.server.vision.MediaDeliveryManifest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -138,7 +139,12 @@ public class ServerAgentController {
      * 编排层一旦持有字节，它就会跟着图状态一起被检查点与归档带走。</p>
      */
     private Flux<AgentEvent> relayMedia(Flux<AgentEvent> stream, String sessionId) {
-        return mediaRelay == null ? stream : mediaRelay.attach(stream, sessionId);
+        if (mediaRelay == null) {
+            return stream;
+        }
+        // 顺序不能反：先插字节，交付单才看得见 MEDIA 事件并数清候选。
+        // 按需模式在这一层扣住 base64，只把选中那张的完整字节放给调用方。
+        return MediaDeliveryManifest.attachSelective(mediaRelay.attach(stream, sessionId));
     }
 
     /**

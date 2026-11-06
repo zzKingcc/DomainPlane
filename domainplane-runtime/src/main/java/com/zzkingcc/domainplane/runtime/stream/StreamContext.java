@@ -2,6 +2,7 @@ package com.zzkingcc.domainplane.runtime.stream;
 
 import com.zzkingcc.domainplane.api.event.AgentEvent;
 import com.zzkingcc.domainplane.api.support.TraceId;
+import com.zzkingcc.domainplane.runtime.tool.ImageGenBudget;
 import com.zzkingcc.domainplane.runtime.tool.RoundSearchBudget;
 
 import java.util.Objects;
@@ -29,6 +30,9 @@ public final class StreamContext {
      * 它随本轮上下文一起生灭，天然就是一轮一个。</p>
      */
     private final RoundSearchBudget searchBudget = new RoundSearchBudget();
+
+    /** 本轮生图预算：与检索预算同一生命周期，一轮一个，跨 agent→tools 循环共享 */
+    private final ImageGenBudget imageGenBudget = new ImageGenBudget();
 
     public StreamContext(String sessionId, reactor.core.publisher.FluxSink<AgentEvent> sink,
                          String domain) {
@@ -78,6 +82,11 @@ public final class StreamContext {
     /** 本轮的历史检索预算；执行工具前由编排层绑给工具上下文 */
     public RoundSearchBudget searchBudget() {
         return searchBudget;
+    }
+
+    /** 本轮的生图预算；与检索预算在同一个绑定点交给工具上下文 */
+    public ImageGenBudget imageGenBudget() {
+        return imageGenBudget;
     }
 
     /** 结束事件流(不抛异常) */

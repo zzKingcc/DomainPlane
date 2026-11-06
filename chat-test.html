@@ -277,6 +277,18 @@
   .gen-media img, .gen-media video { max-width: 100%; max-height: 240px; border-radius: 6px; display: block; cursor: zoom-in; }
   .gen-media video { cursor: default; }
   .gen-media audio { width: 100%; display: block; }
+  .media-attempts {
+    margin: 8px 0 2px; padding: 8px 10px; border: 1px solid #f0e2bd;
+    border-radius: 8px; background: #fffbf0; font-size: 12px; color: #7a5b00;
+  }
+  .media-attempts summary { cursor: pointer; list-style: none; }
+  .media-attempts summary::-webkit-details-marker { display: none; }
+  .media-attempts summary::before { content: '\25B8 '; }
+  .media-attempts[open] summary::before { content: '\25BE '; }
+  .ma-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .ma-grid .gen-media { margin: 0; max-width: 132px; padding: 5px; }
+  .ma-grid .gen-media img, .ma-grid .gen-media video { max-height: 92px; }
+  .ma-grid .gen-media .gm-head { font-size: 10px; margin-bottom: 4px; }
   #lightbox {
     display: none; position: fixed; inset: 0; z-index: 200;
     background: rgba(12, 15, 20, .82); align-items: center; justify-content: center; padding: 24px;
@@ -416,6 +428,12 @@ $('sidLabel').textContent = sessionId;
 let streaming = false;
 /** 本轮流是否见过终止事件（DONE/STOPPED/ERROR/INTERRUPT）——没有它就是被掐断的半截答案 */
 let sawTerminal = false;
+/** 本轮候选池：MEDIA 只入池，轮次真正结束才结算出交付的那一张 */
+let pendingMedia = [];
+/** 审批中断只是暂停，不是轮次结束，这一轮流不结算（resume 后继续同一轮） */
+let pausedForApproval = false;
+/** DONE 事件里的平台交付单；老服务端没有时退回本地按答复文本判定 */
+let mediaDelivery = null;
 
 function toast(text) {
   const t = $('toast');
@@ -1237,6 +1255,8 @@ let curBlock = null;
 let curThink = null;
 let curThinkText = null;
 let curTool = null;
+/** 只累积 TOKEN 文本：工具结果里也带 img_xxx，混进去会把「第一张」误当成「选中的那张」 */
+let curReplyText = '';
 
 function ensureBlock() {
   if (!curBlock) curBlock = addAssistantBlock();
@@ -1246,6 +1266,7 @@ function ensureBlock() {
 function renderEvent(ev) {
   const type = ev.type;
   if (type === 'TOKEN') {
+    curReplyText += ev.content || '';
     const b = ensureBlock();
     b.appendChild(document.createTextNode(ev.content || ''));
     scroll();
@@ -1295,7 +1316,7 @@ function renderEvent(ev) {
     curTool.appendChild(tag); curTool.appendChild(body); scroll();
     curTool = null;
   } else if (type === 'MEDIA') {
-    renderMedia(ev.payload);
+    cacheMedia(ev.payload);
   } else if (type === 'ERROR') {
     sawTerminal = true;
     const d = document.createElement('div');
@@ -1305,6 +1326,7 @@ function renderEvent(ev) {
     ensureBlock().appendChild(d); scroll();
   } else if (type === 'INTERRUPT') {
     sawTerminal = true;
+    pausedForApproval = true;
     renderApproval(ev);
   } else if (type === 'STOPPED') {
     sawTerminal = true;
@@ -1313,13 +1335,20 @@ function renderEvent(ev) {
     $('chat').appendChild(d); scroll();
   } else if (type === 'DONE') {
     sawTerminal = true;
+    try {
+      const m = JSON.parse(ev.payload || 'null');
+      if (m && Array.isArray(m.delivery) && m.delivery.length) mediaDelivery = m.delivery;
+    } catch (_) { /* 老服务端不带交付单，走本地判定 */ }
     const d = document.createElement('div');
     d.className = 'done'; d.textContent = '— 本轮结束 —';
     $('chat').appendChild(d); scroll();
   }
 }
 
-function resetBlock() { curBlock = null; curThink = null; curThinkText = null; curTool = null; }
+function resetBlock() {
+  curBlock = null; curThink = null; curThinkText = null; curTool = null;
+  curReplyText = ''; pendingMedia = []; mediaDelivery = null;
+}
 
 /* ---------------- 生成媒体渲染（MEDIA 事件） ----------------
  * 服务端把工具产出的字节原样推下来（encoding=base64），或只给一个地址（encoding=url）。
@@ -1354,12 +1383,25 @@ function openLightbox(src) {
   box.classList.add('show');
 }
 
-function renderMedia(payload) {
+/* 候选池 / 交付清单分离：MEDIA 只入池不进 DOM；轮次真正结束时 settleMedia() 才挑一张展开，
+ * 其余收进思考折叠区。模型侧的全部候选始终可用，这里只决定「给人看哪张」。 */
+
+/** MEDIA 事件只入池：同 id 覆盖、保序 */
+function cacheMedia(payload) {
   let m;
   try { m = JSON.parse(payload || '{}'); } catch (_) { return; }
-  const src = mediaSrc(m);
-  if (!src) return;
+  const lazy = m.encoding === 'lazy';
+  if (!lazy && !mediaSrc(m)) return;
+  if (lazy) m.data = '';
+  const id = m.id || ('media-' + pendingMedia.length);
+  const at = pendingMedia.findIndex(x => x.id === id);
+  if (at >= 0) pendingMedia[at] = { id, m };
+  else pendingMedia.push({ id, m });
+}
 
+function buildMediaBox(m) {
+  const src = mediaSrc(m);
+  const usable = m.encoding !== 'lazy' && !!src;
   const box = document.createElement('div');
   box.className = 'gen-media';
 
@@ -1369,12 +1411,17 @@ function renderMedia(payload) {
   idEl.className = 'gm-id';
   idEl.textContent = m.id || '';
   head.appendChild(idEl);
-  const dl = document.createElement('a');
-  dl.href = src;
-  dl.download = (m.id || 'media') + (MEDIA_EXT[m.mime] || '');
-  dl.textContent = '下载';
-  head.appendChild(dl);
+  if (usable) {
+    const dl = document.createElement('a');
+    dl.href = src;
+    dl.download = (m.id || 'media') + (MEDIA_EXT[m.mime] || '');
+    dl.textContent = '下载';
+    head.appendChild(dl);
+  }
   box.appendChild(head);
+
+  // 候选占位：只有引用名，没有字节（P3 按需下发），不创建 img 以免破图
+  if (!usable) return box;
 
   if (m.kind === 'audio') {
     const au = document.createElement('audio');
@@ -1391,9 +1438,59 @@ function renderMedia(payload) {
     img.onclick = () => openLightbox(src);
     box.appendChild(img);
   }
+  return box;
+}
 
-  ensureBlock().appendChild(box);
+/** P3 占位事件只有引用名，没有可渲染的字节 */
+function hasMediaBytes(item) {
+  return !!item && item.m.encoding !== 'lazy' && !!mediaSrc(item.m);
+}
+
+/** 选中的引用名只认最终回复文本（curReplyText 只含 TOKEN，不含工具结果） */
+function chosenMediaId() {
+  const ids = pendingMedia.map(x => x.id);
+  const re = /img_[A-Za-z0-9_-]+/g;
+  let hit;
+  while ((hit = re.exec(curReplyText)) !== null) {
+    const item = pendingMedia.find(x => x.id === hit[0]);
+    if (hasMediaBytes(item)) return hit[0];
+  }
+  // 候选里混着占位时，兜底必须优先挑有字节的那张：否则最终展开的是一个空编号框，
+  // 真正有图的反而被折进思考区。全都没有字节时才退到最后一个占位（至少不留白）。
+  for (let i = pendingMedia.length - 1; i >= 0; i--) {
+    if (hasMediaBytes(pendingMedia[i])) return pendingMedia[i].id;
+  }
+  return ids.length ? ids[ids.length - 1] : null;
+}
+
+/** 轮次结算：展开交付的一张，其余折叠进思考区。幂等，可重复调用 */
+function settleMedia() {
+  if (!pendingMedia.length) return;
+  const pool = pendingMedia.slice();
+  const declared = mediaDelivery && mediaDelivery.find(id => pool.some(x => x.id === id));
+  // 交付单指向的那张若没有字节（跨流丢了 / 只是占位），宁可退回本地兜底也要给出能看的图
+  const platformId = declared && hasMediaBytes(pool.find(x => x.id === declared)) ? declared : null;
+  const chosenId = platformId || chosenMediaId();
+  pendingMedia = [];
+  const chosen = pool.find(x => x.id === chosenId);
+  const rest = pool.filter(x => x !== chosen);
+  const b = ensureBlock();
+  if (chosen) b.appendChild(buildMediaBox(chosen.m));
+  if (rest.length) {
+    const det = document.createElement('details');
+    det.className = 'media-attempts';
+    const sum = document.createElement('summary');
+    sum.textContent = '本轮尝试 ' + pool.length + ' 张';
+    det.appendChild(sum);
+    const grid = document.createElement('div');
+    grid.className = 'ma-grid';
+    rest.forEach(x => grid.appendChild(buildMediaBox(x.m)));
+    det.appendChild(grid);
+    b.appendChild(det);
+  }
   scroll();
+  appendRaw('[媒体结算] 候选 ' + pool.length + ' 张，交付 ' + (chosen ? chosenId : '0')
+    + ' 张，折叠 ' + rest.length + ' 张，依据=' + (platformId ? 'DONE交付单' : '本地兜底'));
 }
 
 /** 审批中断：列出服务端给出的待授权工具 + 批准/拒绝，点击后回传 resume 并续收事件流 */
@@ -1497,6 +1594,7 @@ async function send() {
 
   addUserBubble(msg, usable);
   resetBlock();
+  pausedForApproval = false;
   $('message').value = '';
   streaming = true;
   $('sendBtn').disabled = true;
@@ -1527,6 +1625,7 @@ async function send() {
   } catch (e) {
     showNetworkFailure();
   } finally {
+    if (!pausedForApproval) settleMedia();
     streaming = false;
     $('sendBtn').disabled = false;
     $('stopBtn').disabled = true;
@@ -1538,6 +1637,7 @@ async function send() {
 async function resumeSession(approved) {
   if (streaming) return;
   const domain = ($('domain').value || 'default').trim();
+  pausedForApproval = false;
   streaming = true;
   $('sendBtn').disabled = true;
   $('stopBtn').disabled = false;
@@ -1556,6 +1656,7 @@ async function resumeSession(approved) {
   } catch (e) {
     showNetworkFailure();
   } finally {
+    if (!pausedForApproval) settleMedia();
     streaming = false;
     $('sendBtn').disabled = false;
     $('stopBtn').disabled = true;
@@ -1595,6 +1696,7 @@ async function stop() {
 }
 
 function newSession() {
+  pausedForApproval = false;
   sessionId = 'dp-test-' + Math.random().toString(36).slice(2, 10);
   $('sidLabel').textContent = sessionId;
   $('chat').innerHTML = '';

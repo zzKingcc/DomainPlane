@@ -482,13 +482,15 @@ final class AgentGraphFactory {
                         displayArguments.apply(request.name(), request.arguments())));
             }
 
-            // 三样一起绑（同绑定点、同解除点，不会泄漏到同线程的下一轮）：
+            // 四样一起绑（同绑定点、同解除点，不会泄漏到同线程的下一轮）：
             //   • traceId  —— 工具侧日志要能对上这次调用；
             //   • sessionId —— 历史检索工具只能读"本会话"的档，工具签名里不带它，
             //                  给了模型就等于给它一个"指定别的会话"的口子；
-            //   • searchBudget —— 一轮内多次历史检索扣同一个桶（本轮新建，跨 agent→tools 循环共享）。
+            //   • searchBudget   —— 一轮内多次历史检索扣同一个桶（本轮新建，跨 agent→tools 循环共享）；
+            //   • imageGenBudget —— 同上，管住"画了又复核、复核了又重画"的无限循环。
             ToolInvocationContext.bind(context == null ? null : context.traceId(),
-                    sessionId, context == null ? null : context.searchBudget());
+                    sessionId, context == null ? null : context.searchBudget(),
+                    context == null ? null : context.imageGenBudget());
             // 知识库检索要按本轮域过滤，而工具签名里没有域参数：在这里把域绑给检索层。
             // 与 ToolInvocationContext 同绑定点、同解除点，不会泄漏到同线程的下一轮。
             RetrievalScope.bind(domainId);

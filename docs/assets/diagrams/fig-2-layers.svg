@@ -24,7 +24,7 @@
   <rect class="server" x="40" y="96" width="680" height="84" rx="10"/>
   <text class="t" x="60" y="124" font-size="14" font-weight="600">domainplane-server　156 类</text>
   <text class="m" x="60" y="148" font-size="11">装配 · 16 Controller / 94 端点 · 鉴权 · 模型层 · MCP · 管控台静态资源 · 7 个定时任务</text>
-  <text class="m" x="60" y="166" font-size="11">唯一可执行产物：domainplane-v1.0-beta.2.jar</text>
+  <text class="m" x="60" y="166" font-size="11">唯一可执行产物：domainplane-v1.0.jar</text>
 
   <!-- runtime / infra -->
   <rect class="box" x="40" y="204" width="330" height="84" rx="10"/>

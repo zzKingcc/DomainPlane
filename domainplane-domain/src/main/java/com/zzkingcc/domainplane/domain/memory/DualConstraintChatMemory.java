@@ -501,7 +501,8 @@ public class DualConstraintChatMemory implements ChatMemory {
      *
      * 与 {@link #extractText} 分工明确：那边只管文本，媒体一律在这里计，
      * 混在一起写就会有人只改一处，增量值与全量重算值从此分叉。
-     * 写记忆的消息就是 {@code buildUserMessage} 的产物，媒体块形态与之对齐。
+     * 统一附件通道后新写入的消息都是纯文本，这一段只为老会话里残留的媒体块保留：
+     * 升级前的历史消息不能因为改了装配方式就算错预算。
      */
     private int mediaTokensOf(ChatMessage message) {
         if (!(message instanceof UserMessage user)) {

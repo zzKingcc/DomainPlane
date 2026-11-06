@@ -122,7 +122,7 @@ Redis、关键字（ES）、向量（Qdrant）、原文（s3 兼容）四类连�
 
 知识体卡片承载一份数据的全部动作：上传文档、看文档、健康对照、重建索引、换落点、绑域、删除。页面底部另有折叠运维区，处理诊断、无主集合认领、遗留清理与合并知识体。
 
-> 截图为 `v1.0-beta.2` 空库初始状态，页面此后已按知识体重做，数据为演示数据。
+> 截图为早期空库状态，页面此后已按知识体重做，数据为演示数据。
 
 其余页面：总览（运行质量与工具风险构成）、提示词设定（沿域链逐段编辑）、MCP 连接（凭据只回显 `hasHeaders`）、工具实例（在线清单 / 熔断 / 强制下线）、会话档案（记忆、归档、装配清单、副本导出）、账号（改密即全端失效）。
 
@@ -156,12 +156,12 @@ DomainPlane 解决的是另一件事：**多个业务场景共用一个 Agent �
 ## 跑起来要几步
 
 ```bash
-# 1. 构建（产物：domainplane-server/target/domainplane-v1.0-beta.2.jar）
+# 1. 构建（产物：domainplane-server/target/domainplane-v1.0.jar）
 mvn clean package
 
 # 2. 启动（本机开发务必覆盖配置目录）
 java -DDOMAINPLANE_SETTINGS_PATH="$PWD/.dev/config" \
-     -jar domainplane-server/target/domainplane-v1.0-beta.2.jar
+     -jar domainplane-server/target/domainplane-v1.0.jar
 
 # 3. 验证
 curl http://localhost:9527/health
