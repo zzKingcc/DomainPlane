@@ -58,13 +58,13 @@ public class ModelProfileStore {
                 return new ModelProfileSettings();
             }
             loadFailed = false;
-            /* 旧布局把纯向量档案也放在 profiles 里，只靠 endpoints 区分。读盘时归一，
-               并把新布局写回文件，否则"分开了没有"在文件里看不出来。
-               落盘失败只告警：启动不该因为一次迁移写盘失败而失败（内存里已经分好了）。 */
-            boolean mutated = settings.splitVectorProfiles();
+            /* 旧布局把纯向量档案单独放在 embeddingProfiles 里。读盘时合回唯一一张表，
+               并把新布局写回文件，否则"合桶了没有"在文件里看不出来。
+               落盘失败只告警：启动不该因为一次迁移写盘失败而失败（内存里已经合好了）。 */
+            boolean mutated = settings.mergeLegacyProfiles();
             if (mutated) {
-                log.info("[模型档案] 已将 {} 个纯向量档案从 profiles 分离到 embeddingProfiles：{}",
-                        settings.getEmbeddingProfiles().size(), settings.getEmbeddingProfiles().keySet());
+                log.info("[模型档案] 已把旧 embeddingProfiles 里的档案合回 profiles：当前共 {} 个",
+                        settings.getProfiles().size());
             }
             /* 对话 schema 下架后，注入前的 key→wire 翻译没了，存量键必须就地归一，
                否则 reasoningEffort 会被原样发给上游、被静默忽略（见 ChatParamMigration）。 */
@@ -101,10 +101,10 @@ public class ModelProfileStore {
         }
         try {
             AtomicFiles.write(settingsFile, MAPPER.writeValueAsBytes(settings));
-            log.info("[模型档案] 已保存：模型档案 {} 个、向量档案 {} 个、域绑定 {} 条",
+            log.info("[模型档案] 已保存：档案 {} 个、域绑定 {} 条、向量槽位 {}",
                     settings.getProfiles().size(),
-                    settings.getEmbeddingProfiles().size(),
-                    settings.getDomainBindings().size());
+                    settings.getDomainBindings().size(),
+                    settings.getEmbeddingAlias() == null ? "未配置" : settings.getEmbeddingAlias());
         } catch (IOException e) {
             throw new IllegalStateException("模型档案保存失败：" + settingsFile.toAbsolutePath(), e);
         }

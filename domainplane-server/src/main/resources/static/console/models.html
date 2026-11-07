@@ -22,40 +22,39 @@
         </div>
         <div class="page-body">
 
-            <!-- ============ 分段一：向量模型（全局唯一一个，全部域共享） ============ -->
+            <!-- ============ 分段一：用途分配 ============
+                 一份档案可以声明多个能力；「它现在被用来干什么」不再由它落在哪个列表里决定，
+                 而是由这里的槽位决定。全局单选的只有一个：向量槽（灌库与向量检索都走它）。
+                 对话 / 生图 / 语音等能力按域绑定，在「域空间」页操作，不在本页占槽位。 -->
             <div class="seg">
-                <h3>向量模型</h3>
-                <span class="seg-note">全局只能启用一个，所有域共用；知识库的灌库与向量检索都走它</span>
+                <h3>用途分配</h3>
                 <span class="spacer"></span>
-                <span class="count-badge" id="embeddingCount"
-                      title="已登记的向量档案数（含尚未选用的，它们在下方的选择框里）">—</span>
             </div>
-            <div id="embeddingList">
-                <div class="dp-card perm-none">加载中…</div>
+            <div class="dp-card" style="padding: 0;">
+                <div class="slot">
+                    <span class="slot-k">向量模型</span>
+                    <select class="form-select slot-v" id="embeddingSlot"><option value="">加载中…</option></select>
+                    <span class="slot-h" id="embeddingSlotState">—</span>
+                </div>
             </div>
 
-            <!-- ============ 分段二：模型（除当前向量模型外的全部档案） ============
-                 刻意不叫「对话模型」：识别把档案分成 chat / embedding / images / tts / rerank …
-                 好几类，只列 chat 会让生图、语音这类档案存进去之后在页面上彻底消失
-                 （看不到、测不了、也删不掉）。这里除当前占着向量槽位的那一个之外全部列出，
-                 对话模型在其中按域绑定使用。 -->
+            <!-- ============ 分段二：全部档案 ============
+                 一张表列完全部档案，不再按"是不是向量"拆成两段、也不把当前向量档案从列表里去掉。
+                 向量档案仍然带绿框（向量维度）、「启用」按钮与「已启用」徽标，只是它和别的档案
+                 长在同一张卡片里：用途看端点族小签，占用看槽位。 -->
             <div class="seg">
-                <h3>模型</h3>
-                <span class="seg-note">除向量模型外的全部档案；对话模型要在「域空间」页绑给域才能被调用</span>
+                <h3>全部档案</h3>
                 <span class="spacer"></span>
-                <span class="count-badge" id="modelCount"
-                      title="本段列出的档案数（不参与域绑定的生图 / 语音等类型也计在内）">—</span>
+                <span class="count-badge" id="modelCount">—</span>
             </div>
             <div id="modelList">
                 <div class="dp-card perm-none">加载中…</div>
             </div>
 
             <!-- ============ 添加模型：遮罩层弹窗 ============
-                 只有一种表单：登记一份新档案。类型不由用户声明（下拉已移除），
-                 保存时由服务端读提供商的模型清单（GET /models，不发推理请求、不花 token）：
-                 读到的端点族决定它归入「模型」段还是「向量模型」段，读到的模态就是卡片上那两行；
-                 清单不给这些字段（OpenAI / DeepSeek 官方都是标准规范形态）时如实留空，
-                 卡片标「未声明类型」。向量模型不是独立表单，它是「被选中的那份 embedding 档案」。
+                 只有一种表单：登记一份新档案。用途由用户在「用途」里勾选，随请求体提交，
+                 保存是纯登记（零上游请求、不猜类型）。「识别用途」是用户主动点的按钮，
+                 先查本地适配文件、未命中才读服务商清单，结果只用来预勾，用户可以改。
 
                  弹窗只负责"建"：建好之后，温度 / 单次最大输出 / 自定义参数都在卡片上就地改，
                  「是否回写思考内容」是卡片头部的开关（见 thinkSwitch），都不必再弹这个窗。
@@ -116,28 +115,45 @@
                     </div>
                 </div>
 
-                <!-- ── 调优参数（对话档案）──
+                <!-- ── 用途：用户声明的能力 ──
+                     勾选的端点族随保存请求原样提交，服务端零上游请求、不自动识别。
+                     「识别用途」只给一组预勾初值（本地适配优先，未命中才读 GET /models），
+                     不改用户已经勾好的状态以外的任何东西，结果不参与保存判定。
+                     不勾也能保存（档案标「未声明类型」），但绑域前要先声明或探测。 -->
+                <div class="field">
+                    <label>用途</label>
+                    <div class="chips" id="pfEndpoints"></div>
+                    <div class="btn-row" style="margin-top: 10px;">
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                id="pfSuggestBtn">识别用途</button>
+                    </div>
+                    <div class="help" id="pfSuggestResult" style="white-space: pre-wrap;"></div>
+                </div>
+
+                <!-- ── 调优参数（只在勾选「对话」用途时出现）──
                      标准字段（温度 / 单次最大输出）落在档案的老字段上，注入走 builder 的 setter；
                      自定义参数是一个 JSON 对象，键名用服务商文档里的字段名，键值原样拼进请求体。
                      两者都可留空：留空 = 不发送，由服务商默认决定。
                      服务端复核走 CustomParamsGate（黑名单 / 形状 / 量 / 标准键冲突），
                      它拒的只有"归平台管的键"，不判断厂商取值域对不对。 -->
-                <div class="field">
-                    <label>温度</label>
-                    <input id="pfTemperature" type="number" class="mono form-control"
-                           min="0" max="2" step="0.1" placeholder="服务商默认">
-                </div>
+                <div id="pfChatTune" hidden>
+                    <div class="field">
+                        <label>温度</label>
+                        <input id="pfTemperature" type="number" class="mono form-control"
+                               min="0" max="2" step="0.1" placeholder="服务商默认">
+                    </div>
 
-                <div class="field">
-                    <label>单次最大输出（token）</label>
-                    <input id="pfMaxTokens" type="number" class="mono form-control"
-                           min="1" step="1" placeholder="不限">
-                </div>
+                    <div class="field">
+                        <label>单次最大输出（token）</label>
+                        <input id="pfMaxTokens" type="number" class="mono form-control"
+                               min="1" step="1" placeholder="不限">
+                    </div>
 
-                <div class="field">
-                    <label>自定义参数（JSON）</label>
-                    <textarea id="pfParamsJson" class="mono form-control" rows="3" spellcheck="false"
-                              placeholder='{"reasoning_effort": "high"}'></textarea>
+                    <div class="field">
+                        <label>自定义参数（JSON）</label>
+                        <textarea id="pfParamsJson" class="mono form-control" rows="3" spellcheck="false"
+                                  placeholder='{"reasoning_effort": "high"}'></textarea>
+                    </div>
                 </div>
 
                 <div id="profileResult" class="result"></div>

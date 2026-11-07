@@ -35,22 +35,16 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * 保存时的端点族 / 模态识别 —— 表单上的类型下拉已删除，改由服务端读服务商元数据（零 token）。
+ * 「识别」按钮（{@code POST /admin/model-profiles/suggest}）的四种元数据形态与边界。
  *
- * 桩掉上游的 {@code GET /v1/models}，覆盖四种元数据形态 + 两条边界：
- *   • OpenRouter 风格（清单带 architecture）→ 端点族与输入 / 输出模态都按元数据填；
- *   • 过滤式（靠 ?sub_type= 反推）→ 端点族按命中的子类型，模态填该端点的基线值；
- *   • 标准 OpenAI 规范（只有 id/object/created/owned_by）→ 全读不到，但**仍允许保存**
- *     （否则 OpenAI / DeepSeek 官方这类服务商一个档案都建不出来），由卡片标「未声明类型」；
- *   • 清单里没有该模型 → 照样保存，原因随响应回给接口调用方；
- *   • 显式声明 endpoints → 根本不发那次读取请求；
- *   • 鉴权被拒 → 拒绝保存（用户能改的错，不该被静默存成一份连不上的档案）。
+ * <p>历史上这组用例挂在 {@code save()} 上：保存时服务端读服务商清单，猜端点族与模态。
+ * 那套流程已经拆掉 —— 保存只是登记凭据，识别是用户主动点的一次只读请求，
+ * 结果只用于预勾表单。所以这里全部改成打 suggest，并额外钉住一条
+ * <b>「连清单接口 500 了，save 照样成功」</b>：save 路径上一次上游请求都不该有。</p>
  *
- * 全程只桩 GET：本类存在的意义就是"不发推理请求"，因此不存在 chat / embeddings 桩。
- *
- * @author zzkingcc
+ * <p>桩只接 {@code GET /v1/models}，不存在 chat / embeddings 桩：识别不跑推理、不花 token。</p>
  */
-class AdminModelProfileDetectTest {
+class AdminModelProfileSuggestTest {
 
     /** OpenRouter 风格：清单每项自带 architecture，模态是完整枚举 */
     private static final String OPENROUTER_LIST = """
@@ -71,7 +65,7 @@ class AdminModelProfileDetectTest {
             "speech-to-text", "{\"data\":[{\"id\":\"m-asr\"}]}",
             "text-to-video", "{\"data\":[{\"id\":\"m-t2v\"}]}");
 
-    /** 全量清单：除七个子类型各一个之外，还有一个不属于任何已知子类型的模型（服务商加了新区分类） */
+    /** 全量清单：除七个子类型各一个之外，还有一个不属于任何已知子类型的模型 */
     private static final String SUB_TYPE_FULL_LIST = """
             {"data":[{"id":"m-chat"},{"id":"m-embed"},{"id":"m-rerank"},{"id":"m-t2i"},
                      {"id":"m-i2i"},{"id":"m-asr"},{"id":"m-t2v"},{"id":"m-new"}]}""";
@@ -82,11 +76,8 @@ class AdminModelProfileDetectTest {
     private HttpServer server;
     private int port;
 
-    /** 不带 sub_type 的清单响应体 */
     private String listBody = PLAIN_LIST;
-    /** 不带 sub_type 的清单状态码（用来造"鉴权被拒"与"若真去读就会失败"两种情形） */
     private int listStatus = 200;
-    /** 子类型 → 清单响应体；不含 sub_type 参数时忽略 */
     private Map<String, String> subTypeLists = Map.of();
 
     @BeforeEach
@@ -104,7 +95,6 @@ class AdminModelProfileDetectTest {
         }
     }
 
-    /** 只有一个 models 桩：不带 sub_type 用 listBody，带 sub_type 用子类型清单（缺省回子类型全量） */
     private void handleModels(HttpExchange ex) throws IOException {
         drain(ex);
         String query = ex.getRequestURI().getQuery();
@@ -134,7 +124,6 @@ class AdminModelProfileDetectTest {
         }
     }
 
-    /** 内存版设置存储：holder 自身"未配置"，用不到网络 */
     static final class StubStore extends LlmSettingsStore {
         private LlmSettings current = new LlmSettings();
 
@@ -172,7 +161,6 @@ class AdminModelProfileDetectTest {
         return registry;
     }
 
-    /** 不带 endpoints 的请求体 —— 与管控台表单实际发出的形状一致 */
     private AdminModelProfileController.ProfileBody body(String alias, String modelName) {
         AdminModelProfileController.ProfileBody b = new AdminModelProfileController.ProfileBody();
         b.setAlias(alias);
@@ -184,21 +172,22 @@ class AdminModelProfileDetectTest {
         return b;
     }
 
+    // ==================== 按需识别 ====================
+
     @Test
     void 清单带architecture时端点族与输入输出模态都按元数据填() {
         listBody = OPENROUTER_LIST;
         AdminModelProfileController[] holder = new AdminModelProfileController[1];
-        ModelProfileRegistry registry = registry(holder);
+        registry(holder);
 
-        holder[0].save(body("p", "mm-vl"));
+        Map<String, Object> out = holder[0].suggest(body("p", "mm-vl"));
 
-        ModelProfile saved = registry.profile("p").orElseThrow();
-        assertEquals(List.of(ModelProfile.EP_CHAT), saved.endpoints(),
-                "输出模态含文本 → 判定为对话端点");
-        assertEquals(List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE), saved.input(),
-                "architecture 是完整枚举，输入模态应原样落档（含 image）");
-        assertEquals(List.of(ModelProfile.MOD_TEXT), saved.output(),
-                "输出模态应原样落档");
+        assertEquals("provider", out.get("source"));
+        assertEquals(List.of(ModelProfile.EP_CHAT), out.get("endpoints"),
+                "输出模态含文本 → 建议对话端点");
+        assertEquals(List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE), out.get("input"),
+                "architecture 是完整枚举，输入模态原样回给表单（含 image）");
+        assertEquals(List.of(ModelProfile.MOD_TEXT), out.get("output"));
     }
 
     @Test
@@ -206,36 +195,33 @@ class AdminModelProfileDetectTest {
         listBody = SUB_TYPE_FULL_LIST;
         subTypeLists = SUB_TYPE_LISTS;
         AdminModelProfileController[] holder = new AdminModelProfileController[1];
-        ModelProfileRegistry registry = registry(holder);
+        registry(holder);
 
-        holder[0].save(body("e", "m-embed"));
-        ModelProfile embedding = registry.profile("e").orElseThrow();
-        assertEquals(List.of(ModelProfile.EP_EMBEDDING), embedding.endpoints(),
-                "只出现在 embedding 子类型清单里 → 向量档案");
-        assertEquals(List.of(ModelProfile.MOD_TEXT), embedding.input(), "向量端点入参是文本");
-        assertEquals(List.of(ModelProfile.MOD_EMBEDDING), embedding.output(), "向量端点产出是向量");
+        Map<String, Object> embedding = holder[0].suggest(body("e", "m-embed"));
+        assertEquals(List.of(ModelProfile.EP_EMBEDDING), embedding.get("endpoints"),
+                "只出现在 embedding 子类型清单里 → 建议向量端点");
+        assertEquals(List.of(ModelProfile.MOD_TEXT), embedding.get("input"));
+        assertEquals(List.of(ModelProfile.MOD_EMBEDDING), embedding.get("output"));
 
-        holder[0].save(body("r", "m-rerank"));
-        ModelProfile rerank = registry.profile("r").orElseThrow();
-        assertEquals(List.of(ModelProfile.EP_RERANK), rerank.endpoints(), "重排档案");
-        assertEquals(List.of(ModelProfile.MOD_SCORE), rerank.output(),
-                "重排产出相关性分数 —— 这一格空着会让卡片看着像识别失败");
+        Map<String, Object> rerank = holder[0].suggest(body("r", "m-rerank"));
+        assertEquals(List.of(ModelProfile.EP_RERANK), rerank.get("endpoints"));
+        assertEquals(List.of(ModelProfile.MOD_SCORE), rerank.get("output"),
+                "重排产出相关性分数 —— 这一格空着会让用途看着像没识别出来");
     }
 
     @Test
-    void 标准OpenAI规范读不出类型时仍允许保存且如实留空() {
+    void 标准OpenAI规范读不出类型时如实留空并把原因说清() {
         listBody = PLAIN_LIST;
         AdminModelProfileController[] holder = new AdminModelProfileController[1];
-        ModelProfileRegistry registry = registry(holder);
+        registry(holder);
 
-        Map<String, Object> out = holder[0].save(body("p", "gpt-x"));
+        Map<String, Object> out = holder[0].suggest(body("p", "gpt-x"));
 
-        ModelProfile saved = registry.profile("p").orElseThrow();
-        assertTrue(saved.endpoints().isEmpty(),
-                "清单不给类型就不猜 —— 猜成 chat 会让向量 / 生图模型能被绑到域却用不了");
-        assertTrue(saved.input().isEmpty(), "模态同样未声明，卡片两行显示 —");
-        assertTrue(saved.output().isEmpty());
-        assertNotNull(out.get("note"), "读不到的原因要回给接口调用方，别静默");
+        assertEquals(List.of(), out.get("endpoints"),
+                "清单不给类型就不猜 —— 猜成 chat 会让向量 / 生图模型能绑域却用不了");
+        assertEquals(List.of(), out.get("input"));
+        assertEquals(List.of(), out.get("output"));
+        assertNotNull(out.get("note"), "读不到的原因要回给表单，别静默");
     }
 
     @Test
@@ -243,77 +229,68 @@ class AdminModelProfileDetectTest {
         listBody = SUB_TYPE_FULL_LIST;
         subTypeLists = SUB_TYPE_LISTS;
         AdminModelProfileController[] holder = new AdminModelProfileController[1];
-        ModelProfileRegistry registry = registry(holder);
+        registry(holder);
 
-        Map<String, Object> out = holder[0].save(body("p", "m-new"));
+        String note = String.valueOf(holder[0].suggest(body("p", "m-new")).get("note"));
 
-        assertTrue(registry.profile("p").orElseThrow().endpoints().isEmpty(), "判不出来就不猜");
-        String note = String.valueOf(out.get("note"));
         assertTrue(note.contains("已知子类型"),
                 "要说清是「服务商加了新区分类」，而不是误报成「清单是标准 OpenAI 规范」，实际：" + note);
         assertFalse(note.contains("标准 OpenAI 规范"), "两件事不能混成一句");
     }
 
     @Test
-    void 清单里没有该模型时照样保存并把原因回给调用方() {
+    void 清单里没有该模型时返回原因() {
         listBody = PLAIN_LIST;
         AdminModelProfileController[] holder = new AdminModelProfileController[1];
-        ModelProfileRegistry registry = registry(holder);
+        registry(holder);
 
-        Map<String, Object> out = holder[0].save(body("p", "typo-model"));
+        Map<String, Object> out = holder[0].suggest(body("p", "typo-model"));
 
-        assertTrue(registry.profile("p").isPresent(), "别为一次读不到就把档案挡在门外");
         assertTrue(String.valueOf(out.get("note")).contains("清单里没有"),
                 "要指出是「清单里没有这个模型」，实际：" + out.get("note"));
     }
 
     @Test
     void 适配文件登记过的模型直接取声明不发任何上游请求() {
-        /* 让清单接口直接 500：适配文件命中就不该去读元数据，能存下来即证明零请求 */
+        /* 让清单接口直接 500：适配文件命中就不该去读元数据 */
         listStatus = 500;
         AdminModelProfileController[] holder = new AdminModelProfileController[1];
-        ModelProfileRegistry registry = registry(holder);
+        registry(holder);
 
-        holder[0].save(body("p", "deepseek-flash"));
+        Map<String, Object> out = holder[0].suggest(body("p", "deepseek-flash"));
 
-        ModelProfile saved = registry.profile("p").orElseThrow();
-        assertEquals(List.of(ModelProfile.EP_CHAT), saved.endpoints(),
-                "适配文件登记了 chat 参数 ⇒ 端点族就是 chat，不必问服务商");
-        /* 样板适配（DeepSeek Flash）登记的是 text + image：它是多模态档位，
-           这里断言"取自适配文件"而不是断言"是 text"，就是为了让这份声明改了以后测试跟着走 ——
-           归档其余 29 份之后，按模型名命中的只有这一份样板。 */
-        assertEquals(List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE), saved.input(),
-                "输入模态取自适配文件");
-        assertEquals(List.of(ModelProfile.MOD_TEXT), saved.output(), "输出模态取自适配文件");
+        assertEquals("adapter", out.get("source"));
+        assertEquals(List.of(ModelProfile.EP_CHAT), out.get("endpoints"),
+                "适配文件登记了 chat 族 ⇒ 端点族就是 chat，不必问服务商");
+        assertEquals(List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE), out.get("input"));
+        assertEquals(List.of(ModelProfile.MOD_TEXT), out.get("output"));
     }
 
     @Test
-    void 显式声明端点时不触发元数据读取() {
-        /* 让清单接口直接 500：若还去读就会抛错，能存下来即证明没走读取 */
-        listStatus = 500;
-        AdminModelProfileController[] holder = new AdminModelProfileController[1];
-        ModelProfileRegistry registry = registry(holder);
-
-        AdminModelProfileController.ProfileBody b = body("p", "m");
-        b.setEndpoints(List.of(ModelProfile.EP_CHAT));
-
-        holder[0].save(b);
-
-        assertEquals(List.of(ModelProfile.EP_CHAT),
-                registry.profile("p").orElseThrow().endpoints(),
-                "显式传了端点族就按传的存（脚本 / 集成方的直接声明路径）");
-    }
-
-    @Test
-    void 鉴权被拒时拒绝保存并把原因说清() {
+    void 鉴权被拒时识别失败并说清原因() {
         listStatus = 401;
         AdminModelProfileController[] holder = new AdminModelProfileController[1];
-        ModelProfileRegistry registry = registry(holder);
+        registry(holder);
 
-        BaseException e = assertThrows(BaseException.class, () -> holder[0].save(body("p", "m")));
+        BaseException e = assertThrows(BaseException.class,
+                () -> holder[0].suggest(body("p", "m")));
         assertEquals(ErrorCode.INVALID_PARAMETER, e.getErrorCode());
         assertTrue(e.getMessage().contains("API Key"),
                 "Key 失效是用户能改的错，要说清，实际：" + e.getMessage());
-        assertTrue(registry.profile("p").isEmpty(), "读失败就不该落盘");
+    }
+
+    // ==================== 保存与识别彻底解耦 ====================
+
+    @Test
+    void 清单接口挂了也不影响保存_保存路径零上游请求() {
+        listStatus = 500;
+        AdminModelProfileController[] holder = new AdminModelProfileController[1];
+        ModelProfileRegistry registry = registry(holder);
+
+        holder[0].save(body("p", "m"));
+
+        ModelProfile saved = registry.profile("p").orElseThrow();
+        assertTrue(saved.endpoints().isEmpty(), "用户没勾用途就是没声明，不需要问服务商");
+        assertEquals("m", saved.modelName());
     }
 }

@@ -25,8 +25,9 @@
     Console.renderSidebar("models");
     var PROFILES = [];
     var EMBEDDING = { alias: null };
-    var VECTOR_PROFILES = [];
     var SETTINGS = null;
+    var PICKED_ENDPOINTS = [];
+    var EP_FAMILIES = ["chat", "embedding", "rerank", "images", "tts", "asr", "video"];
     var EP_LABEL = {
       chat: "\u5BF9\u8BDD",
       embedding: "\u5411\u91CF",
@@ -70,12 +71,16 @@
     function loadProfiles() {
       return Console.api.get("/admin/model-profiles").then(function(r) {
         PROFILES = r && r.profiles || [];
-        EMBEDDING = { alias: r && r.embeddingAlias || null };
-        VECTOR_PROFILES = r && r.embeddingProfiles || [];
+        var asg = r && r.assignments || {};
+        EMBEDDING = { alias: asg.embedding || r && r.embeddingAlias || null };
         setHint("settingsFileHint", r && r.settingsFile);
         renderProfiles();
       }).catch(function(e) {
         pfEl("modelList").innerHTML = '<div class="dp-card" style="color:var(--red);">\u52A0\u8F7D\u5931\u8D25\uFF1A' + Console.escapeHtml(e.message) + "</div>";
+        var sel = pfEl("embeddingSlot");
+        sel.innerHTML = '<option value="">\u52A0\u8F7D\u5931\u8D25</option>';
+        sel.disabled = true;
+        setHint("embeddingSlotState", "\u2014");
       });
     }
     function kv(k, v) {
@@ -133,8 +138,6 @@
       }
       return PROFILES.filter(function(p) {
         return p.alias === alias;
-      })[0] || VECTOR_PROFILES.filter(function(p) {
-        return p.alias === alias;
       })[0] || null;
     }
     function isEmbeddingProfile(p) {
@@ -150,43 +153,51 @@
       var v = p.contextWindow == null ? "" : String(p.contextWindow);
       return '<input type="number" class="mono model-ctx form-control" data-ctx="' + Console.escapeHtml(p.alias) + '" min="1" step="1" value="' + Console.escapeHtml(v) + '" placeholder="\u672A\u58F0\u660E"><span class="ctx-unit">token</span>';
     }
-    function embeddingEmptyBox() {
-      return '<div class="empty-box"><div class="empty-title">\u5C1A\u672A\u914D\u7F6E\u5411\u91CF\u6A21\u578B</div><div class="empty-sub">\u77E5\u8BC6\u5E93\u7684\u6587\u6863\u5411\u91CF\u5316\u4E0E\u5411\u91CF\u68C0\u7D22\u90FD\u4F9D\u8D56\u5B83\uFF1B<br>BM25 \u5173\u952E\u8BCD\u68C0\u7D22\u4E0D\u4F9D\u8D56\u5411\u91CF\u6A21\u578B\uFF0C\u672A\u914D\u7F6E\u65F6\u90A3\u6761\u901A\u9053\u4ECD\u53EF\u7528\u3002</div></div>';
-    }
-    function vectorCard(p, active, prefix) {
-      var actions = (active ? "" : '<button class="btn btn-sm btn-outline-primary" data-enable="' + Console.escapeHtml(p.alias) + '"' + (p.usable ? "" : " disabled") + ">\u542F\u7528</button>") + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">\u63A2\u6D4B</button><button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">\u5220\u9664</button>';
+    function modelCard(p, prefix) {
+      var active = p.alias === EMBEDDING.alias;
+      var chat = isChatProfile(p);
+      var isEmb = isEmbeddingProfile(p);
+      var tuneable = !!(p.customParams && p.customParams.applies);
+      var enableBtn = isEmb && !active ? '<button class="btn btn-sm btn-outline-primary" data-enable="' + Console.escapeHtml(p.alias) + '"' + (p.usable ? "" : " disabled") + ">\u542F\u7528</button>" : "";
       var adapterBadge = p.adapter ? '<span class="mbadge">\u5DF2\u9002\u914D</span>' : "";
       var hasTune = !!(p.adapter && (p.adapter.params || []).length);
       var tuneBox = hasTune ? adapterTuneBox(p, prefix) : "";
       var tuneCtl = hasTune ? '<span class="tune-status"></span><button type="button" class="btn btn-sm btn-outline-primary tune-save" disabled>\u66F4\u65B0</button>' : "";
-      return '<section class="dp-card model-card emb"><header class="card-head"><span class="model-dot"></span><h2>' + modelTitle(p.modelName || p.alias) + "</h2>" + cardTags(p) + (active ? '<span class="mbadge ok">\u5DF2\u542F\u7528</span>' : "") + (p.usable ? "" : '<span class="mbadge off">\u4E0D\u53EF\u7528</span>') + adapterBadge + '<span class="spacer"></span>' + tuneCtl + actions + '</header><div class="dp-card-body"><div class="model-meta">' + kv("\u5411\u91CF\u7EF4\u5EA6", p.dimensions == null ? '<span class="perm-none">\u6309\u6A21\u578B\u9ED8\u8BA4</span>' : p.dimensions + "") + kv("\u670D\u52A1\u5546\u5730\u5740", '<span class="mono">' + Console.escapeHtml(p.baseUrl || "-") + "</span>") + (p.apiKeyMasked ? kv("API Key", '<span class="mono">' + Console.escapeHtml(p.apiKeyMasked) + "</span>") : "") + "</div>" + tuneBox + "</div></section>";
-    }
-    function renderEmbedding() {
-      var box = pfEl("embeddingList");
-      if (!VECTOR_PROFILES.length) {
-        box.innerHTML = embeddingEmptyBox();
-        return;
+      var noType = !(p.endpoints || []).length ? '<span class="mbadge off">\u672A\u58F0\u660E\u7C7B\u578B</span>' : "";
+      var used;
+      if ((p.usedByDomains || []).length) {
+        used = p.usedByDomains.map(function(d) {
+          return '<span class="tag perm">' + Console.escapeHtml(d) + "</span>";
+        }).join("");
+      } else if ((p.bindableFamilies || []).length) {
+        used = '<span class="perm-none">\u672A\u7ED1\u5B9A\u4EFB\u4F55\u57DF</span>';
+      } else {
+        used = '<span class="perm-none">\u4E0D\u53C2\u4E0E\u57DF\u7ED1\u5B9A</span>';
       }
-      var tuneSeq = 0;
-      box.innerHTML = VECTOR_PROFILES.map(function(p) {
-        return vectorCard(p, p.alias === EMBEDDING.alias, "eb" + tuneSeq++);
+      var thinkCtl = chat ? thinkSwitch(p) : "";
+      var stdTune = tuneable ? stdTuneBox(p) : "";
+      var paramsBox = tuneable ? customParamsBox(p) : "";
+      return '<section class="dp-card model-card' + (isEmb ? " emb" : "") + '"><header class="card-head"><span class="model-dot"></span><h2>' + modelTitle(p.modelName || p.alias) + "</h2>" + dupBadge(p) + noType + visionBadge(p) + cardTags(p) + (active ? '<span class="mbadge ok">\u5DF2\u542F\u7528</span>' : "") + (p.usable ? "" : '<span class="mbadge off">\u4E0D\u53EF\u7528</span>') + adapterBadge + '<span class="spacer"></span>' + thinkCtl + tuneCtl + enableBtn + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">\u63A2\u6D4B</button><button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">\u5220\u9664</button></header><div class="dp-card-body"><div class="model-meta"><div><span class="k">\u8F93\u5165\u6A21\u6001</span>' + modalityCell(p, p.input) + '</div><div><span class="k">\u8F93\u51FA\u6A21\u6001</span>' + modalityCell(p, p.output) + "</div>" + (isEmb ? kv("\u5411\u91CF\u7EF4\u5EA6", p.dimensions == null ? '<span class="perm-none">\u6309\u6A21\u578B\u9ED8\u8BA4</span>' : p.dimensions + "") : "") + kv("\u670D\u52A1\u5546\u5730\u5740", '<span class="mono">' + Console.escapeHtml(p.baseUrl || "-") + "</span>") + (p.apiKeyMasked ? kv("API Key", '<span class="mono">' + Console.escapeHtml(p.apiKeyMasked) + "</span>") : "") + '<div><span class="k">\u88AB\u54EA\u4E9B\u57DF\u4F7F\u7528</span>' + used + "</div>" + (chat ? '<div class="ctx-row"><span class="k">\u4E0A\u4E0B\u6587\u957F\u5EA6</span>' + ctxCell(p) + "</div>" : "") + "</div>" + tuneBox + stdTune + paramsBox + "</div></section>";
+    }
+    function renderSlots() {
+      var sel = pfEl("embeddingSlot");
+      var choices = PROFILES.filter(isEmbeddingProfile);
+      var lead = EMBEDDING.alias ? "" : '<option value="" disabled>\u672A\u542F\u7528</option>';
+      sel.innerHTML = lead + choices.map(function(p) {
+        return '<option value="' + Console.escapeHtml(p.alias) + '"' + (p.usable ? "" : " disabled") + ">" + Console.escapeHtml(p.modelName || p.alias) + "</option>";
       }).join("");
-      box.querySelectorAll("button[data-enable]").forEach(function(b) {
-        b.addEventListener("click", function() {
-          applyEmbedding(b.getAttribute("data-enable"));
-        });
-      });
-      box.querySelectorAll("button[data-del]").forEach(function(b) {
-        b.addEventListener("click", function() {
-          deleteProfile(b.getAttribute("data-del"));
-        });
-      });
-      box.querySelectorAll("button[data-probe]").forEach(function(b) {
-        b.addEventListener("click", function() {
-          probeProfile(b.getAttribute("data-probe"), b);
-        });
-      });
-      box.querySelectorAll(".dp-card.model-card").forEach(bindTuneBox);
+      sel.value = EMBEDDING.alias || "";
+      sel.disabled = !choices.length;
+      var state;
+      if (!choices.length) {
+        state = "\u8FD8\u6CA1\u6709\u58F0\u660E\u300C\u5411\u91CF\u300D\u7528\u9014\u7684\u6863\u6848";
+      } else if (!EMBEDDING.alias) {
+        state = "\u672A\u542F\u7528 \xB7 \u53EF\u9009 " + choices.length + " \u4E2A";
+      } else {
+        var cur = findProfile(EMBEDDING.alias);
+        state = "\u5DF2\u542F\u7528 \xB7 " + (cur && cur.modelName || EMBEDDING.alias);
+      }
+      setHint("embeddingSlotState", state);
     }
     function askRebuildOrPurge(message) {
       return __async(this, null, function* () {
@@ -228,40 +239,28 @@
         loadSettings();
       }).catch(function(e) {
         Console.toast("\u5207\u6362\u5931\u8D25\uFF1A" + e.message, { type: "error" });
+        loadProfiles();
       });
     }
     function renderProfiles() {
       var box = pfEl("modelList");
-      renderEmbedding();
-      var models = PROFILES.filter(function(p) {
-        return p.alias !== EMBEDDING.alias;
-      });
-      if (!models.length) {
-        box.innerHTML = '<div class="empty-box"><div class="empty-title">\u8FD8\u6CA1\u6709\u914D\u7F6E\u4EFB\u4F55\u6A21\u578B</div><div class="empty-sub">\u70B9\u53F3\u4E0A\u89D2\u300C\u6DFB\u52A0\u6A21\u578B\u300D\u767B\u8BB0\u4E00\u4E2A\u8FDE\u63A5\uFF1B\u6A21\u578B\u8981\u7ED1\u5230\u57DF\u624D\u80FD\u88AB\u8C03\u7528\uFF08\u5728\u300C\u57DF\u7A7A\u95F4\u300D\u9875\u64CD\u4F5C\uFF09\u3002</div></div>';
+      renderSlots();
+      if (!PROFILES.length) {
+        box.innerHTML = '<div class="empty-box"><div class="empty-title">\u8FD8\u6CA1\u6709\u914D\u7F6E\u4EFB\u4F55\u6A21\u578B</div><div class="empty-sub">\u70B9\u53F3\u4E0A\u89D2\u300C\u6DFB\u52A0\u6A21\u578B\u300D\u767B\u8BB0\u4E00\u4E2A\u8FDE\u63A5\u5E76\u52FE\u9009\u7528\u9014\uFF1B\u5BF9\u8BDD\u6A21\u578B\u8981\u7ED1\u5230\u57DF\u624D\u80FD\u88AB\u8C03\u7528\uFF08\u5728\u300C\u57DF\u7A7A\u95F4\u300D\u9875\u64CD\u4F5C\uFF09\u3002</div></div>';
       } else {
-        box.innerHTML = models.map(function(p) {
-          var chat = isChatProfile(p);
-          var noType = !(p.endpoints || []).length ? '<span class="mbadge off">\u672A\u58F0\u660E\u7C7B\u578B</span>' : "";
-          var used;
-          if ((p.usedByDomains || []).length) {
-            used = p.usedByDomains.map(function(d) {
-              return '<span class="tag perm">' + Console.escapeHtml(d) + "</span>";
-            }).join("");
-          } else if ((p.bindableFamilies || []).length) {
-            used = '<span class="perm-none">\u672A\u7ED1\u5B9A\u4EFB\u4F55\u57DF</span>';
-          } else {
-            used = '<span class="perm-none">\u4E0D\u53C2\u4E0E\u57DF\u7ED1\u5B9A</span>';
-          }
-          var thinkCtl = chat ? thinkSwitch(p) : "";
-          var tuneable = !!(p.customParams && p.customParams.applies);
-          var stdTune = tuneable ? stdTuneBox(p) : "";
-          var paramsBox = tuneable ? customParamsBox(p) : "";
-          return '<section class="dp-card model-card"><header class="card-head"><span class="model-dot"></span><h2>' + modelTitle(p.modelName || p.alias) + "</h2>" + dupBadge(p) + noType + visionBadge(p) + cardTags(p) + '<span class="spacer"></span>' + thinkCtl + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">\u63A2\u6D4B</button><button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">\u5220\u9664</button></header><div class="dp-card-body"><div class="model-meta"><div><span class="k">\u8F93\u5165\u6A21\u6001</span>' + modalityCell(p, p.input) + '</div><div><span class="k">\u8F93\u51FA\u6A21\u6001</span>' + modalityCell(p, p.output) + '</div><div><span class="k">\u670D\u52A1\u5546\u5730\u5740</span><span class="mono">' + Console.escapeHtml(p.baseUrl || "-") + '</span></div><div><span class="k">\u88AB\u54EA\u4E9B\u57DF\u4F7F\u7528</span>' + used + "</div>" + (chat ? '<div class="ctx-row"><span class="k">\u4E0A\u4E0B\u6587\u957F\u5EA6</span>' + ctxCell(p) + "</div>" : "") + "</div>" + stdTune + paramsBox + "</div></section>";
+        var tuneSeq = 0;
+        box.innerHTML = PROFILES.map(function(p) {
+          return modelCard(p, "tb" + tuneSeq++);
         }).join("");
       }
       box.querySelectorAll("button[data-del]").forEach(function(b) {
         b.addEventListener("click", function() {
           deleteProfile(b.getAttribute("data-del"));
+        });
+      });
+      box.querySelectorAll("button[data-enable]").forEach(function(b) {
+        b.addEventListener("click", function() {
+          applyEmbedding(b.getAttribute("data-enable"));
         });
       });
       box.querySelectorAll("button[data-probe]").forEach(function(b) {
@@ -282,8 +281,8 @@
       });
       box.querySelectorAll(".std-tune").forEach(bindStdTune);
       box.querySelectorAll(".dp-params").forEach(bindParamsBox);
-      pfEl("embeddingCount").textContent = VECTOR_PROFILES.length + " \u4E2A";
-      pfEl("modelCount").textContent = models.length + " \u4E2A";
+      box.querySelectorAll(".dp-card.model-card").forEach(bindTuneBox);
+      pfEl("modelCount").textContent = PROFILES.length + " \u4E2A";
     }
     function openModal(title) {
       pfEl("profileModalTitle").textContent = title;
@@ -409,6 +408,7 @@
       ["pfBaseUrl", "pfApiKey", "pfModelName", "pfPreset", "pfTemperature", "pfMaxTokens", "pfParamsJson"].forEach(function(id) {
         pfEl(id).value = "";
       });
+      setPickedEndpoints([]);
       var box = pfEl("profileResult");
       box.textContent = "";
       box.className = "result";
@@ -416,6 +416,62 @@
       var readBox = pfEl("readResult");
       readBox.textContent = "";
       readBox.style.color = "";
+      var suggestBox = pfEl("pfSuggestResult");
+      suggestBox.textContent = "";
+      suggestBox.style.color = "";
+    }
+    function renderEndpointChips() {
+      pfEl("pfEndpoints").innerHTML = EP_FAMILIES.map(function(f) {
+        return '<button type="button" class="chip' + (PICKED_ENDPOINTS.indexOf(f) >= 0 ? " on" : "") + '" data-ep="' + Console.escapeHtml(f) + '">' + Console.escapeHtml(EP_LABEL[f] || f) + "</button>";
+      }).join("");
+    }
+    function setPickedEndpoints(list) {
+      PICKED_ENDPOINTS = (list || []).filter(function(f) {
+        return EP_FAMILIES.indexOf(f) >= 0;
+      });
+      renderEndpointChips();
+      pfEl("pfChatTune").hidden = PICKED_ENDPOINTS.indexOf("chat") < 0;
+    }
+    function toggleEndpoint(f) {
+      var i = PICKED_ENDPOINTS.indexOf(f);
+      var next = PICKED_ENDPOINTS.slice();
+      if (i >= 0) {
+        next.splice(i, 1);
+      } else {
+        next.push(f);
+      }
+      setPickedEndpoints(next);
+    }
+    function suggestEndpoints() {
+      var modelName = pfEl("pfModelName").value.trim();
+      var out = pfEl("pfSuggestResult");
+      if (!modelName) {
+        out.textContent = "\u8BF7\u5148\u586B\u5199\u6A21\u578B\u540D";
+        out.style.color = "var(--red)";
+        return;
+      }
+      var btn = pfEl("pfSuggestBtn");
+      btn.disabled = true;
+      btn.classList.add("btn-loading");
+      out.textContent = "\u8BC6\u522B\u4E2D\u2026";
+      out.style.color = "";
+      Console.api.post("/admin/model-profiles/suggest", {
+        baseUrl: pfEl("pfBaseUrl").value.trim() || null,
+        apiKey: pfEl("pfApiKey").value || null,
+        modelName
+      }).then(function(r) {
+        var eps = r && r.endpoints || [];
+        setPickedEndpoints(eps);
+        var note = Console.sanitizeError(r && r.note || "");
+        out.textContent = eps.length ? "\u5DF2\u6309\u8BC6\u522B\u7ED3\u679C\u9884\u52FE\uFF0C\u53EF\u81EA\u884C\u4FEE\u6539" + (note ? "\uFF08" + note + "\uFF09" : "") : note || "\u6E05\u5355\u6CA1\u6709\u58F0\u660E\u7528\u9014\uFF0C\u8BF7\u81EA\u5DF1\u52FE\u9009";
+        out.style.color = "";
+      }).catch(function(e) {
+        out.textContent = "\u8BC6\u522B\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message);
+        out.style.color = "var(--red)";
+      }).then(function() {
+        btn.disabled = false;
+        btn.classList.remove("btn-loading");
+      });
     }
     var combo = { items: [], visible: [], loading: false, active: -1 };
     function comboMenu() {
@@ -1096,8 +1152,9 @@
       var alias = deriveAlias(modelName);
       var body = {
         alias,
-        input: [],
-        output: [],
+        /* 用户声明的能力。空数组是允许的（未声明类型），不是错误；
+           识别结果只影响勾选，不在这里补第二份"更权威"的判定。 */
+        endpoints: PICKED_ENDPOINTS.slice(),
         baseUrl: pfEl("pfBaseUrl").value.trim(),
         apiKey: pfEl("pfApiKey").value,
         modelName,
@@ -1105,38 +1162,41 @@
            （见 thinkSwitch / saveReturnThinking） */
         returnThinking: false
       };
-      var rawTemp = (pfEl("pfTemperature").value || "").trim();
-      if (rawTemp !== "") {
-        var temp = Number(rawTemp);
-        if (!isFinite(temp) || temp < 0 || temp > 2) {
-          showResult(false, "\u6E29\u5EA6\u53D6\u503C 0\u20132\uFF1B\u7559\u7A7A\u8868\u793A\u7528\u670D\u52A1\u5546\u9ED8\u8BA4");
-          return;
+      var chatPicked = PICKED_ENDPOINTS.indexOf("chat") >= 0;
+      if (chatPicked) {
+        var rawTemp = (pfEl("pfTemperature").value || "").trim();
+        if (rawTemp !== "") {
+          var temp = Number(rawTemp);
+          if (!isFinite(temp) || temp < 0 || temp > 2) {
+            showResult(false, "\u6E29\u5EA6\u53D6\u503C 0\u20132\uFF1B\u7559\u7A7A\u8868\u793A\u7528\u670D\u52A1\u5546\u9ED8\u8BA4");
+            return;
+          }
+          body.temperature = temp;
         }
-        body.temperature = temp;
-      }
-      var rawMax = (pfEl("pfMaxTokens").value || "").trim();
-      if (rawMax !== "") {
-        var maxTok = Number(rawMax);
-        if (!isFinite(maxTok) || Math.floor(maxTok) !== maxTok || maxTok <= 0) {
-          showResult(false, "\u5355\u6B21\u6700\u5927\u8F93\u51FA\u5FC5\u987B\u662F\u6B63\u6574\u6570\uFF1B\u7559\u7A7A\u8868\u793A\u4E0D\u9650\u5236");
-          return;
+        var rawMax = (pfEl("pfMaxTokens").value || "").trim();
+        if (rawMax !== "") {
+          var maxTok = Number(rawMax);
+          if (!isFinite(maxTok) || Math.floor(maxTok) !== maxTok || maxTok <= 0) {
+            showResult(false, "\u5355\u6B21\u6700\u5927\u8F93\u51FA\u5FC5\u987B\u662F\u6B63\u6574\u6570\uFF1B\u7559\u7A7A\u8868\u793A\u4E0D\u9650\u5236");
+            return;
+          }
+          body.maxTokens = maxTok;
         }
-        body.maxTokens = maxTok;
-      }
-      var rawParams = (pfEl("pfParamsJson").value || "").trim();
-      if (rawParams !== "") {
-        var parsed;
-        try {
-          parsed = JSON.parse(rawParams);
-        } catch (err) {
-          showResult(false, "\u81EA\u5B9A\u4E49\u53C2\u6570\u4E0D\u662F\u5408\u6CD5 JSON\uFF1A" + err.message);
-          return;
+        var rawParams = (pfEl("pfParamsJson").value || "").trim();
+        if (rawParams !== "") {
+          var parsed;
+          try {
+            parsed = JSON.parse(rawParams);
+          } catch (err) {
+            showResult(false, "\u81EA\u5B9A\u4E49\u53C2\u6570\u4E0D\u662F\u5408\u6CD5 JSON\uFF1A" + err.message);
+            return;
+          }
+          if (!parsed || typeof parsed !== "object" || Object.prototype.toString.call(parsed) === "[object Array]") {
+            showResult(false, '\u81EA\u5B9A\u4E49\u53C2\u6570\u8981\u662F\u4E00\u4E2A JSON \u5BF9\u8C61\uFF0C\u5982 {"enable_thinking": false}');
+            return;
+          }
+          body.params = parsed;
         }
-        if (!parsed || typeof parsed !== "object" || Object.prototype.toString.call(parsed) === "[object Array]") {
-          showResult(false, '\u81EA\u5B9A\u4E49\u53C2\u6570\u8981\u662F\u4E00\u4E2A JSON \u5BF9\u8C61\uFF0C\u5982 {"enable_thinking": false}');
-          return;
-        }
-        body.params = parsed;
       }
       var btn = pfEl("saveProfileBtn");
       btn.disabled = true;
@@ -1372,6 +1432,18 @@
         barPick(bar, seg.getAttribute("data-bar-val"));
       }
     });
+    pfEl("embeddingSlot").addEventListener("change", function() {
+      var v = pfEl("embeddingSlot").value;
+      applyEmbedding(v || null);
+    });
+    pfEl("pfEndpoints").addEventListener("click", function(e) {
+      var chip = e.target && e.target.closest ? e.target.closest("[data-ep]") : null;
+      if (chip) {
+        toggleEndpoint(chip.getAttribute("data-ep"));
+      }
+    });
+    pfEl("pfSuggestBtn").addEventListener("click", suggestEndpoints);
+    setPickedEndpoints([]);
     pfEl("addModelBtn").addEventListener("click", openAdd);
     pfEl("saveProfileBtn").addEventListener("click", save);
     pfEl("resetProfileFormBtn").addEventListener("click", resetForm);

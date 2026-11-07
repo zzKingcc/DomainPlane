@@ -1,6 +1,7 @@
 package com.zzkingcc.domainplane.server.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonValue;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
@@ -27,9 +28,16 @@ import java.util.Map;
  *   • 一个域绑一组模型，<b>按族分桶</b>，{@code domainBindings} 是
  *       {@code 域 → {族 → 别名列表}} 的有序映射，整体覆盖；每个族内的列表首个是当前使用的，
  *       其余留给多 agent / 降级；某族空列表即该族解绑；
- *   • 向量模型全局只有一个，{@link #embeddingAlias} 是单选，不参与域绑定
+ *   • 向量模型全局只有一个，{@link #embeddingAlias} 是单选槽位，不参与域绑定
  *       （{@code domainBindings} 管对话与四个能力族）。向量检索是"全树共用一套向量空间"，
  *       让它按域切换会导致同一索引里混入不同模型的向量，维度对不上、检索结果无意义。
+ *
+ * <p><b>档案只有一张表</b>：早期按「是不是纯向量」把档案分到 {@code profiles} 与
+ * {@code embeddingProfiles} 两个 Map，但消费侧又按 {@code isEmbedding()} 从全量重新过滤，
+ * 分桶依据与实际使用依据不是同一个东西 —— 双类型档案两边都出现、前端还得再过滤一次。
+ * 现在 {@link #profiles} 是唯一真相，"这份档案用来干什么"由用户声明的 {@code endpoints}
+ * 和消费侧的槽位决定，不再由它存在哪个 Map 决定。旧文件里那个键读盘时合回来，见
+ * {@link #mergeLegacyProfiles()}。</p>
  *
  * <p><b>族的划分</b>：{@code chat} 是主模型（本轮由它回答），其余四个
  * （{@code images} / {@code tts} / {@code asr} / {@code video}，见
@@ -53,95 +61,77 @@ public class ModelProfileSettings {
      */
     private Map<String, DomainModels> domainBindings = new LinkedHashMap<>();
 
-    /** 别名 → 档案（不含纯向量档案，那批在 {@link #embeddingProfiles} 里单独存放） */
+    /** 别名 → 档案。全平台唯一一张表，向量 / 对话 / 生图档案都在这里 */
     private Map<String, ProfileData> profiles = new LinkedHashMap<>();
 
     /**
-     * 别名 → 纯向量档案，与 {@link #profiles} 分开存放。
+     * 旧格式的纯向量档案桶，<b>只为读兼容保留</b>。
      *
-     * 分开是刻意的：向量模型是全局唯一单选、不参与域绑定，与"可以绑到域上按需调用"
-     * 的对话 / 生图 / 语音那类档案根本是两种东西。混在一个 map 里时，管控台的「模型」段只能
-     * 靠 endpoints 过滤才不至于把向量模型画进去，漏掉一处就会冒出"怎么还有一个向量模型"。
+     * <p>{@code WRITE_ONLY} = Jackson 反序列化时收这个键、序列化时不再输出。
+     * 少了这个注解，旧 {@code models.json} 里那批档案会在读盘时被静默丢弃；
+     * 让它照常输出，则"合桶"永远完成不了，文件里会一直留着两份真相。</p>
+     *
+     * <p>{@link ModelProfileStore#load()} 读入后立刻调 {@link #mergeLegacyProfiles()}
+     * 把内容并回 {@link #profiles} 并清空这里，内存态里它恒为空。</p>
      */
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private Map<String, ProfileData> embeddingProfiles = new LinkedHashMap<>();
 
     /**
-     * 当前启用的向量模型档案别名（全局唯一，不参与域绑定）。
+     * 当前启用的向量模型档案别名（全局唯一槽位，不参与域绑定）。
      *
      * 为空 = 未配置向量模型，知识库的灌库与向量检索不可用（BM25 通道仍可用）。
      * 换向量模型会让已灌库的向量全部失效，必须先做二次确认（见管理面接口）。
      */
     private String embeddingAlias;
 
+    /** 在唯一一张表里按别名取档案 */
+    public ProfileData find(String alias) {
+        return alias == null ? null : profiles.get(alias);
+    }
+
+    /** 全量档案的副本（诊断 / 全量统计用） */
+    public Map<String, ProfileData> allProfiles() {
+        return new LinkedHashMap<>(profiles);
+    }
+
+    /** 新建或整体覆盖一份档案 */
+    public void put(String alias, ProfileData data) {
+        profiles.put(alias, data);
+    }
+
+    /** 摘掉该别名 */
+    public boolean remove(String alias) {
+        return profiles.remove(alias) != null;
+    }
+
     /**
-     * 是不是「纯向量」档案 —— 只做向量、不接对话。
+     * 把旧格式 {@code embeddingProfiles} 里的档案并回唯一一张表。
      *
-     * 同时具备 chat 与 embedding 的档案不算：它要能被绑到域上当对话模型用。
-     * 若一律按 {@code isEmbedding} 分出去，这种档案会从「模型」段消失、且再也没法绑域。
+     * <p>同名以 {@link #profiles} 里的为准：旧布局曾允许同一别名在两个桶里各留一份，
+     * 而"普通桶"是后写的那份，保留它更接近用户最后一次编辑的结果。</p>
+     *
+     * <p>调用方（{@code ModelProfileStore.load()}）据返回值决定是否把新布局写回文件，
+     * 与 {@link #normalizeChatParams()} 同一套"改了才写回"的约定。</p>
+     *
+     * @return 是否真的合并过条目
      */
-    private static boolean isVectorOnly(ProfileData data, String alias) {
-        if (data == null) {
+    public boolean mergeLegacyProfiles() {
+        if (embeddingProfiles == null || embeddingProfiles.isEmpty()) {
             return false;
         }
-        ModelProfile profile = data.toProfile(alias);
-        return profile.isEmbedding() && !profile.isChat();
-    }
-
-    /** 在两类档案里查同一个别名（写操作请分别走 {@link #put} / {@link #remove}） */
-    public ProfileData find(String alias) {
-        if (alias == null) {
-            return null;
+        if (profiles == null) {
+            profiles = new LinkedHashMap<>();
         }
-        ProfileData data = profiles.get(alias);
-        return data != null ? data : embeddingProfiles.get(alias);
-    }
-
-    /** 两类档案合并后的视图（全量统计 / 诊断用），顺序为「先普通、后向量」 */
-    public Map<String, ProfileData> allProfiles() {
-        Map<String, ProfileData> all = new LinkedHashMap<>(profiles);
-        all.putAll(embeddingProfiles);
-        return all;
-    }
-
-    /**
-     * 把一份档案放进对应的桶，并确保它不会同时留在另一个桶里。
-     *
-     * 必须清另一侧：档案类型会被重新探测改写，一个纯向量模型换个模型名重探可能变成
-     * 对话模型，此时若不从向量桶摘掉，它会在两个桶里各留一份，语义直接矛盾。
-     */
-    public void put(String alias, ProfileData data) {
-        if (isVectorOnly(data, alias)) {
-            profiles.remove(alias);
-            embeddingProfiles.put(alias, data);
-        } else {
-            embeddingProfiles.remove(alias);
-            profiles.put(alias, data);
-        }
-    }
-
-    /** 从两类档案里都摘掉该别名 */
-    public boolean remove(String alias) {
-        boolean removed = profiles.remove(alias) != null;
-        return embeddingProfiles.remove(alias) != null || removed;
-    }
-
-    /**
-     * 把历史上混在 {@link #profiles} 里的纯向量档案挪到 {@link #embeddingProfiles}。
-     *
-     * 旧布局是"一个 profiles 装所有档案"、只靠 endpoints 区分。读盘时做一次归一，
-     * 返回值表示是否真有改动，调用方据此决定要不要把新布局写回文件。
-     */
-    public boolean splitVectorProfiles() {
         boolean moved = false;
-        java.util.Iterator<Map.Entry<String, ProfileData>> it = profiles.entrySet().iterator();
-        while (it.hasNext()) {
-            Map.Entry<String, ProfileData> entry = it.next();
-            if (isVectorOnly(entry.getValue(), entry.getKey())) {
-                it.remove();
-                embeddingProfiles.putIfAbsent(entry.getKey(), entry.getValue());
+        for (Map.Entry<String, ProfileData> entry : embeddingProfiles.entrySet()) {
+            if (entry.getValue() != null && profiles.putIfAbsent(entry.getKey(), entry.getValue()) == null) {
                 moved = true;
             }
         }
+        /* 清空而不是置 null：copyOf / 序列化都按"这是个可读字段"处理，null 会让 @Data 的
+           getter 到处要空判。WRITE_ONLY 保证它不会回到磁盘上。 */
+        embeddingProfiles = new LinkedHashMap<>();
         return moved;
     }
 
@@ -150,10 +140,11 @@ public class ModelProfileSettings {
      *
      * <p>对话的适配 schema 下架后，注入前那一步「key → wire」翻译没了（见
      * {@link ChatParamMigration}）；不归一就会把 {@code reasoningEffort} 原样发出去，
-     * 上游静默忽略而界面显示"已配置"。读盘时做一次，与 {@link #splitVectorProfiles()}
+     * 上游静默忽略而界面显示"已配置"。读盘时做一次，与 {@link #mergeLegacyProfiles()}
      * 同一位置、同一套"改了才写回"的约定。</p>
      *
-     * <p>只扫 {@link #profiles}：纯向量档案的 {@code params} 里不可能有对话的键。</p>
+     * <p>合桶后扫的是全量表：向量档案的 {@code params} 里没有对话的 UI 键，
+     * {@code ChatParamMigration.migrate} 对无旧键的 map 返回 null，不会误伤。</p>
      *
      * @return 是否真的改写过（调用方据此决定要不要落盘）
      */

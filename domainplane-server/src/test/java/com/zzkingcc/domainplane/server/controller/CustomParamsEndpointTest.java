@@ -160,10 +160,10 @@ class CustomParamsEndpointTest {
     }
 
     /**
-     * 「端点族没识别出来」那一档不在本测试里造：{@code save} 会去读服务商元数据补端点族，
-     * 本测试的控制器没接 {@code metadataReader}。判据本身由
+     * 「端点族没声明」那一档不在本测试里造：判据本身由
      * {@code ModelProfileUnspecifiedTypeTest} 钉住（未声明 → {@code mayBeChat()} 为真），
      * 而 {@code applies} 只是它的转发，不该各算一套。
+     * 保存不再自动识别后，未声明是用户主动留空的结果，不是识别失败。
      *
      * <p>{@code schemaDriven} 与 {@code applies} 是两件事：前者问"这一族还有没有 schema 编控件"，
      * 后者问"该不该出 JSON 框"。对话族已无 schema，若这里为真，框会被判成"另有入口"而藏起来，

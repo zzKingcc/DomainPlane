@@ -61,10 +61,30 @@ public class AdminModelProfileController {
 
     private static final Logger log = LoggerFactory.getLogger(AdminModelProfileController.class);
 
+    /** 用户声明能力时的输入模态基线（纯本地映射，不发请求） */
+    private static final Map<String, String> BASELINE_INPUT = Map.of(
+            ModelProfile.EP_CHAT, ModelProfile.MOD_TEXT,
+            ModelProfile.EP_EMBEDDING, ModelProfile.MOD_TEXT,
+            ModelProfile.EP_RERANK, ModelProfile.MOD_TEXT,
+            ModelProfile.EP_IMAGES, ModelProfile.MOD_TEXT,
+            ModelProfile.EP_TTS, ModelProfile.MOD_TEXT,
+            ModelProfile.EP_ASR, ModelProfile.MOD_AUDIO,
+            ModelProfile.EP_VIDEO, ModelProfile.MOD_TEXT);
+
+    /** 用户声明能力时的输出模态基线；与 {@link #BASELINE_INPUT} 成对使用 */
+    private static final Map<String, String> BASELINE_OUTPUT = Map.of(
+            ModelProfile.EP_CHAT, ModelProfile.MOD_TEXT,
+            ModelProfile.EP_EMBEDDING, ModelProfile.MOD_EMBEDDING,
+            ModelProfile.EP_RERANK, ModelProfile.MOD_SCORE,
+            ModelProfile.EP_IMAGES, ModelProfile.MOD_IMAGE,
+            ModelProfile.EP_TTS, ModelProfile.MOD_AUDIO,
+            ModelProfile.EP_ASR, ModelProfile.MOD_TEXT,
+            ModelProfile.EP_VIDEO, ModelProfile.MOD_VIDEO);
+
     private final ModelProfileRegistry registry;
     private final ModelProfileStore store;
     private final LlmModelHolder holder;
-    /** 元数据读取器：端点族与输入 / 输出模态的唯一来源（读服务商清单，不发推理请求） */
+    /** 元数据读取器：只服务「识别」按钮的按需预勾（读服务商清单，不发推理请求），不在保存路径上 */
     private final ModelMetadataReader metadataReader;
     /** 能力探测器：元数据读不出类型时，用手动「探测」实测端点族与模态（花少量 token） */
     private final ModelCapabilityProbe capabilityProbe;
@@ -94,7 +114,11 @@ public class AdminModelProfileController {
     }
 
     /**
-     * 档案全貌：档案列表（Key 脱敏）+ 域绑定 + 落盘位置。
+     * 档案全貌：档案列表（Key 脱敏）+ 域绑定 + 槽位 + 落盘位置。
+     *
+     * <p>{@code profiles} 是<b>全量一张表</b>，向量 / 对话 / 生图档案都在里面，
+     * 由前端按 {@code endpoints} 渲染能力标签。「这份档案用来干什么」不再由它
+     * 落在哪个列表里决定，而是由 {@code assignments} 里的槽位决定。</p>
      */
     @GetMapping("/model-profiles")
     public Map<String, Object> list() {
@@ -102,46 +126,33 @@ public class AdminModelProfileController {
         for (ModelProfile profile : registry.profiles()) {
             profiles.add(profileView(profile));
         }
+        Map<String, Object> assignments = new LinkedHashMap<>();
+        assignments.put("embedding", registry.embeddingAlias());
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("code", 0);
         body.put("profiles", profiles);
         body.put("domainBindings", registry.domainBindings());
-        /* 向量模型：当前启用的是哪一个（alias），以及全部向量档案。
-           向量模型不参与域绑定、全局只启用一个，所以它单独成段并列展示：
-           每张卡片自己带「启用」，而不是"新建即占用槽位"。 */
+        /* 兼容保留：预览桩与既有脚本读的是这个字段，语义与 assignments.embedding 相同 */
         body.put("embeddingAlias", registry.embeddingAlias());
-        body.put("embeddingProfiles", embeddingProfiles());
+        body.put("assignments", assignments);
         body.put("settingsFile", store.filePath());
         return body;
     }
 
     /**
-     * 全部向量档案，供向量段逐张成卡。
-     *
-     * 遍历的是全部档案而非 {@code registry.profiles()}：纯向量档案已单独存放，
-     * 不在那一侧；只看 profiles 会让向量段一张卡片都出不来。
-     *
-     * 刻意不按"可用"过滤：不可用的向量档案也要能被看到并删除，
-     * 过滤掉等于留下一份谁也管不着的档案。能不能启用由卡片上的按钮把关。
-     */
-    private List<Map<String, Object>> embeddingProfiles() {
-        List<Map<String, Object>> out = new ArrayList<>();
-        for (ModelProfile p : registry.allProfiles()) {
-            if (p.isEmbedding()) {
-                out.add(profileView(p));
-            }
-        }
-        return out;
-    }
-
-    /**
      * 新建或整体覆盖一个档案（同名即覆盖）。
      *
-     * {@code apiKey} 必填：管控台只回填脱敏后的 Key，所以编辑时也必须重新填写。
+     * <p>{@code apiKey} 必填：管控台只回填脱敏后的 Key，所以编辑时也必须重新填写。</p>
      *
-     * 请求体不带 {@code endpoints} 时由服务端读服务商元数据补上（见 {@link #readMetadata(ModelProfile)}）：
-     * 管控台表单不再让用户选类型，识别结果决定这份档案归入哪一段、卡片上的模态两行显示什么。
+     * <p><b>保存只是登记一份连接凭据</b>：端点族由用户在表单里勾选并随请求体提交，
+     * 服务端不再读服务商清单、不再探测、不再测量或校验向量维度 —— 整条路径零上游请求。
+     * 识别能力是弹窗上一个用户主动点的按钮（{@link #suggest(ProfileBody)}），不在保存里；
+     * 能不能真的调通由运行期的请求负责，声明错了会拿到明确的 404 / 400，
+     * 而不是在配置期造出一个「未声明类型」的第三种状态。</p>
+     *
+     * <p>唯一保留的复核是 {@link #checkAdapterTuning}：它管的是"参数能不能到达请求体"，
+     * 属于本机契约，与服务商能力无关。</p>
      */
     @PostMapping("/model-profiles")
     public Map<String, Object> save(@RequestBody ProfileBody body) {
@@ -161,64 +172,106 @@ public class AdminModelProfileController {
                 body.getThinking(), body.getReturnThinking(),
                 body.getDimensions(), body.getFallbacks(), body.getParams(), body.getProtocol());
 
-        /* 服务商适配复核：命中了才允许 params，且必须过 schema；没命中则 params 必须为空。
-           前端可被绕过（直接调 API），"未适配不能调优"在这里强制成立 */
         String adapterError = checkAdapterTuning(profile);
         if (adapterError != null) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, adapterError);
         }
 
-        /* 端点族与输入 / 输出模态：表单都不采集（用户不选类型）。空值按两级取：
-           ① **先看适配文件** —— 登记过这个模型（按模型名命中）就以它为准：端点族是登记了参数的
-              族名、模态是同一个文件里写明的。内置模型因此一次上游请求都不用发；
-           ② 没登记才去读服务商的模型清单（GET /models，只发 GET，零 token）。
-           放在上面那道门禁之后：参数不合规的请求不该先花掉一次上游往返 */
-        ModelMetadataReader.MetadataResult metadata = null;
-        if (profile.endpoints().isEmpty()) {
-            ModelAdapterRegistry.Declaration declared =
-                    adapterRegistry.declaration(profile.baseUrl(), profile.modelName()).orElse(null);
-            if (declared != null) {
-                profile = profile.withDetected(declared.endpoints(), declared.input(), declared.output(), true);
-                log.info("[模型档案] 端点族与模态取自适配文件：model={} adapter={} endpoints={} input={} output={}",
-                        profile.modelName(), declared.adapterId(), declared.endpoints(),
-                        declared.input(), declared.output());
-            } else {
-                metadata = readMetadata(profile);
-                profile = profile.withDetected(metadata.endpoints(), metadata.input(), metadata.output(),
-                        metadata.authoritative());
-            }
-        }
+        /* 声明了能力却没填模态时补一组基线值（纯本地映射，零上游请求）。
+           不补的话 ModelProfileRegistry#validateForFamily 的「输入 / 输出模态未知」
+           会把这份档案挡在域绑定之外 —— 而用户看到的是「保存成功」，
+           错误要等到去域空间页绑定时才冒出来。 */
+        profile = withBaselineModalities(profile);
 
-        /* 向量档案没填维度时，用模型**原生维度**回填，卡片不再显示"按模型默认"，
-           而是显示模型实际会产出的维度（如 bge-m3 的 1024），用户一眼看得见要拿什么去配 ES。
-           尽力而为：探测失败（网络 / Key / 服务商不认）保留 null，语义回落到"按模型默认"，
-           不因为一次可选回填失败就拒绝整次保存。 */
-        if (profile.isEmbedding() && profile.dimensions() == null) {
-            Integer nativeDim = measureNativeDimension(profile);
-            if (nativeDim != null) {
-                profile = profile.withDimensions(nativeDim);
-                log.info("[模型档案] 向量维度未指定，按模型原生维度回填：model={} dimensions={}",
-                        profile.modelName(), nativeDim);
-            }
-        }
-
-        /* 建档案时若填了向量维度，校验它是否等于模型原生维度（维度是索引契约，不随请求下发） */
-        String dimError = validateDimension(null, profile);
-        if (dimError != null) {
-            throw new BaseException(ErrorCode.INVALID_PARAMETER, dimError);
-        }
-
+        /* 覆盖的是当前启用的向量档案吗？写盘后必须重装配，否则内存里仍是旧实例。 */
+        boolean wasEmbedding = alias.equals(registry.embeddingAlias());
         String failure = registry.save(profile);
         if (failure != null) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, failure);
         }
-        Map<String, Object> out = result("saved", alias);
-        /* 类型没读到时把原因回给接口调用方（脚本 / 集成方排障用）。
-           界面不展示这段：卡片上的「未声明类型」徽标与模态行的「—」已经是给用户看的信号，
-           同一件事不必说两遍。 */
-        if (metadata != null && profile.endpoints().isEmpty()) {
-            out.put("note", metadata.note());
+        if (wasEmbedding) {
+            /* 落盘已经成功：重装配失败不能把这次保存报成失败，否则用户会重复提交。
+               连接信息 / Key 的改动就此立即生效。维度或模型名真的换了，
+               应当走「切换向量模型」入口（那里带重灌确认），不是这里。 */
+            try {
+                holder.refreshEmbedding();
+            } catch (RuntimeException e) {
+                log.warn("[模型档案] 档案 {} 已保存，但向量模型重装配失败（下次切换或重启会重试）：{}",
+                        alias, e.getMessage());
+            }
         }
+        return result("saved", alias);
+    }
+
+    /**
+     * 用户勾了能力但没填模态时，按族补一组基线值。
+     *
+     * <p>端点族与模态是两件事：族决定"怎么调它"，模态决定"能吃什么"。
+     * 表单只让用户勾族，若不同时补模态，{@code ModelProfileRegistry#validateForFamily}
+     * 会以「输入 / 输出模态未知」拒绝绑域 —— 用户看到的是"保存成功"，
+     * 直到去域空间页才撞墙。补齐是纯本地映射，不读服务商清单、不发请求，
+     * 也不是在猜能力：它只是端点规范自带的最低描述。</p>
+     *
+     * <p>显式传了模态的请求原样采用（脚本 / 集成方常手填更准的模态，如 image+text 输入）；
+     * 只有一侧为空时补那一侧，另一侧保持用户填的值。</p>
+     */
+    private static ModelProfile withBaselineModalities(ModelProfile profile) {
+        if (profile.endpoints().isEmpty()
+                || (!profile.input().isEmpty() && !profile.output().isEmpty())) {
+            return profile;
+        }
+        List<String> input = new ArrayList<>(profile.input());
+        List<String> output = new ArrayList<>(profile.output());
+        for (String family : profile.endpoints()) {
+            String in = BASELINE_INPUT.get(family);
+            if (in != null && !input.contains(in)) {
+                input.add(in);
+            }
+            String out = BASELINE_OUTPUT.get(family);
+            if (out != null && !output.contains(out)) {
+                output.add(out);
+            }
+        }
+        return profile.withDetected(profile.endpoints(), input, output, false);
+    }
+
+    /**
+     * 按需识别端点族与模态，供添加弹窗的「识别」按钮预勾用途。
+     *
+     * <p><b>不在保存路径上</b>：只有用户主动点才会调。两级取数 ——
+     * ① 本地适配文件按模型名命中就直接用，一次上游请求都不发；
+     * ② 没命中才读服务商 {@code GET /models} 清单（零 token，不跑推理）。
+     * 结果只是给表单一个初值，用户可以改，保存以用户提交为准。</p>
+     *
+     * <p>清单不给类型（标准 OpenAI / DeepSeek 官方都是这种形态）时如实返回空数组 +
+     * {@code note}，由用户自己勾，绝不猜一个 chat 出来。</p>
+     */
+    @PostMapping("/model-profiles/suggest")
+    public Map<String, Object> suggest(@RequestBody(required = false) ProfileBody body) {
+        if (body == null || body.getModelName() == null || body.getModelName().isBlank()) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "模型名不能为空");
+        }
+        String modelName = body.getModelName().trim();
+        Map<String, Object> out = result("suggested", modelName);
+
+        ModelAdapterRegistry.Declaration declared =
+                adapterRegistry.declaration(body.getBaseUrl(), modelName).orElse(null);
+        if (declared != null && !declared.endpoints().isEmpty()) {
+            out.put("endpoints", declared.endpoints());
+            out.put("input", declared.input());
+            out.put("output", declared.output());
+            out.put("source", "adapter");
+            out.put("note", "取自本地适配声明");
+            return out;
+        }
+
+        ModelMetadataReader.MetadataResult meta =
+                readMetadata(body.getBaseUrl(), body.getApiKey(), modelName);
+        out.put("endpoints", meta.endpoints());
+        out.put("input", meta.input());
+        out.put("output", meta.output());
+        out.put("source", "provider");
+        out.put("note", meta.note());
         return out;
     }
 
@@ -231,8 +284,8 @@ public class AdminModelProfileController {
      *     而卡片上只有脱敏值 —— 为改一个温度就得让用户把 Key 再输一遍，既麻烦又把
      *     密钥多暴露一次。本接口从既有档案带过连接信息与端点族 / 模态，
      *     客户端**根本没有**改它们的字段，而不是"前端不发、后端信任"。
-     *   • 调优是高频微调动作。走老接口会连 `endpoints` 一起重算 —— 端点族为空时还会
-     *     触发一次元数据读取（最多 1 + 7 条上游 GET），改个温度不该付这个代价。
+     *   • 调优是高频微调动作。走老接口会连 `endpoints` 一起提交 —— 那是"建档案"的语义，
+     *       为了改一个温度让用户重填整个表单（含明文 Key）既麻烦又多余。
      *
      * <b>门禁是"能不能当对话模型用"（{@link ModelProfile#mayBeChat()}）或向量档案，不再看适配。</b>
      * 对话族的 schema 下架后，命中与未命中已经没有区别 —— 每张对话卡片都有标准字段与 JSON 框，
@@ -537,39 +590,32 @@ public class AdminModelProfileController {
     }
 
     /**
-     * 读服务商元数据，拿到端点族与输入 / 输出模态：表单不再让用户选类型。
+     * 读服务商清单，只为「识别」按钮提供预勾建议。
      *
-     * 为什么读清单而不是发试探请求：试探要花 token（一条 chat + 一条 embeddings），成败还受配额 /
-     * 限流 / 网络抖动影响；而**输出模态根本试不出来**（试探只能回答"这个端点通不通"）。
-     * 清单是提供商的声明，{@code GET /models} 不计费，成本上真正是零。
+     * <p><b>已从保存路径上撤下</b>：保存不再依赖它，用户不点「识别」就一次都不会调。
+     * {@code GET /models} 不计费、不跑推理；但清单只是服务商的声明，
+     * 标准 OpenAI 规范形态只有 id / object / owned_by，读不到类型时如实返回空，
+     * 由用户自己勾用途，绝不猜一个 chat 出来。</p>
      *
-     * "读不到"与"读失败"必须分开，两者后果完全相反：
+     * <p>读失败（连不上 / 鉴权被拒 / 响应不是 JSON）会把原因回给用户 ——
+     * 那是用户能改的错（地址、Key），而且只影响"要不要预勾"，不影响保存。</p>
      *
-     *   • 读不到（清单里没这个模型 / 清单是标准 OpenAI 规范只有四个字段 / 服务商不提供
-     *     {@code /models}）→ 如实留空存下来，管控台标「未声明类型」。若为此拒绝保存，
-     *     OpenAI 与 DeepSeek 官方这类标准规范的服务商一个档案都建不出来：
-     *     而这恰恰是内置预设里那两家。
-     *   • 读失败（连不上 / 鉴权被拒 / 响应不是 JSON）→ 拒绝保存并把原因回给用户。
-     *     那是用户能改的错（地址、Key），不该被静默存成一份连不上的档案。
-     *
-     * @throws BaseException 读失败；原因原样带上，用户据此判断是地址写错还是 Key 失效
+     * @throws BaseException 读失败；原因原样带上
      */
-    private ModelMetadataReader.MetadataResult readMetadata(ModelProfile candidate) {
+    private ModelMetadataReader.MetadataResult readMetadata(String baseUrl, String apiKey, String modelName) {
         try {
-            ModelMetadataReader.MetadataResult meta =
-                    metadataReader.read(candidate.baseUrl(), candidate.apiKey(), candidate.modelName());
+            ModelMetadataReader.MetadataResult meta = metadataReader.read(baseUrl, apiKey, modelName);
             if (meta.endpoints().isEmpty()) {
                 log.info("[模型档案] 元数据未声明模型类型：model={} baseUrl={} —— {}",
-                        candidate.modelName(), candidate.baseUrl(), meta.note());
+                        modelName, baseUrl, meta.note());
             } else {
                 log.info("[模型档案] 元数据识别：model={} endpoints={} input={} output={}（模态权威={}）",
-                        candidate.modelName(), meta.endpoints(), meta.input(), meta.output(),
-                        meta.authoritative());
+                        modelName, meta.endpoints(), meta.input(), meta.output(), meta.authoritative());
             }
             return meta;
         } catch (ModelMetadataReader.MetadataException e) {
             log.warn("[模型档案] 读取模型元数据失败：model={} baseUrl={} 原因={}",
-                    candidate.modelName(), candidate.baseUrl(), e.getMessage());
+                    modelName, baseUrl, e.getMessage());
             throw new BaseException(ErrorCode.INVALID_PARAMETER,
                     "无法读取模型元数据：" + e.getMessage());
         }
@@ -960,7 +1006,11 @@ public class AdminModelProfileController {
                 // 撤销刚才的单选：没有用户确认就不该留下"已切换"的状态
                 registry.setEmbeddingAlias(previousAlias);
                 Map<String, Object> ask = new LinkedHashMap<>();
-                ask.put("code", ErrorCode.INVALID_PARAMETER.getCode());
+                /* 这是「成功但需要用户再表态」，不是错误：code 必须为 0。
+                   前端 Console.api.put 的 normalize 见到非零 code 会直接 reject，
+                   下面的 requiresConfirmation 分支根本走不到，用户只会看到「切换失败」。 */
+                ask.put("code", 0);
+                ask.put("success", true);
                 ask.put("requiresConfirmation", true);
                 ask.put("previousAlias", previousAlias);
                 ask.put("previousModelName", previous == null ? null : previous.modelName());
@@ -1290,11 +1340,11 @@ public class AdminModelProfileController {
     public static class ProfileBody {
         private String alias;
         /**
-         * 端点族。
+         * 端点族（用户声明的能力，可多选）。
          *
-         * 管制台表单不再采集（用户不选类型）：留空即由服务端读服务商模型清单补上，
-         * 识别结果决定这份档案归入「模型」段还是「向量模型」段；
-         * 显式传值则原样采用（供脚本 / 集成方直接声明）。
+         * <p>管控台弹窗里的「用途」勾选框提交到这里，服务端原样采用、不再自动识别。
+         * 留空 = 未声明，档案仍会保存（{@code mayBeChat()} 把它当可对话用），
+         * 但绑域时会被 {@code validateForFamily} 要求先识别或补声明。</p>
          */
         private List<String> endpoints;
         /** 输入模态 */

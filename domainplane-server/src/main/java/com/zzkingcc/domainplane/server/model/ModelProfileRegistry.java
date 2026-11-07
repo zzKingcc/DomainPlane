@@ -54,10 +54,9 @@ public class ModelProfileRegistry {
     public ModelProfileRegistry(ModelProfileStore store) {
         this.store = store;
         this.settings = store.load();
-        log.info("[模型档案] 初始化：模型档案 {} 个 {}，向量档案 {} 个 {}，域绑定 {} 条",
+        log.info("[模型档案] 初始化：档案 {} 个 {}，向量槽位 {}，域绑定 {} 条",
                 settings.getProfiles().size(), settings.getProfiles().keySet(),
-                settings.getEmbeddingProfiles().size(), settings.getEmbeddingProfiles().keySet(),
-                settings.getDomainBindings().size());
+                settings.getEmbeddingAlias(), settings.getDomainBindings().size());
     }
 
     // ==================== 解析 ====================
@@ -73,10 +72,9 @@ public class ModelProfileRegistry {
     }
 
     /**
-     * 取档案（两类里都找）。
+     * 取档案（唯一一张表，按别名）。
      *
-     * 全部档案都存于本注册表，没有"内置 default"那一类了；向量档案单独存放，
-     * 但按别名取用时调用方不该关心它存在哪个桶里。
+     * 全部档案都存于本注册表，没有"内置 default"那一类了，也没有第二个桶要找。
      */
     public Optional<ModelProfile> profile(String alias) {
         if (!hasText(alias)) {
@@ -87,27 +85,26 @@ public class ModelProfileRegistry {
     }
 
     /**
-     * 非向量档案（对话 / 生图 / 语音…），按别名排序。
+     * 全部档案（对话 / 向量 / 生图 / 语音…），按别名排序。
      *
-     * 纯向量档案不在此列，它们单独存放，见 {@link #embeddingProfiles()}。
-     * 管控台「模型」段直接渲染这个列表，因此不会冒出向量模型。
+     * <p>合桶后这就是唯一的列表。管控台按 {@code endpoints} 渲染能力标签，
+     * 不再靠"档案在哪个桶里"决定它出现在哪一段。</p>
      */
     public List<ModelProfile> profiles() {
-        List<ModelProfile> list = new ArrayList<>();
-        settings.getProfiles().forEach((alias, data) -> list.add(data.toProfile(alias)));
-        list.sort(java.util.Comparator.comparing(ModelProfile::alias));
-        return List.copyOf(list);
+        return allProfiles();
     }
 
-    /** 纯向量档案（单独存放的那一批），按别名排序 */
+    /**
+     * 声明了 embedding 端点族的档案，按别名排序。
+     *
+     * <p>保留这个方法只是为了不让调用方大面积改签名；它现在是全量表上的一个视图，
+     * 不再是独立存储。双类型档案也会出现在这里 —— 它本来就能当向量模型用。</p>
+     */
     public List<ModelProfile> embeddingProfiles() {
-        List<ModelProfile> list = new ArrayList<>();
-        settings.getEmbeddingProfiles().forEach((alias, data) -> list.add(data.toProfile(alias)));
-        list.sort(java.util.Comparator.comparing(ModelProfile::alias));
-        return List.copyOf(list);
+        return allProfiles().stream().filter(ModelProfile::isEmbedding).toList();
     }
 
-    /** 两类档案的合并视图（全量统计 / 诊断用），按别名排序 */
+    /** 全量档案（诊断 / 全量统计用），按别名排序 */
     public List<ModelProfile> allProfiles() {
         List<ModelProfile> list = new ArrayList<>();
         settings.allProfiles().forEach((alias, data) -> list.add(data.toProfile(alias)));
@@ -132,11 +129,10 @@ public class ModelProfileRegistry {
     }
 
     /**
-     * 可当向量模型用的档案数（两个桶通吃，双类型档案也计在内）。
+     * 可当向量模型用的档案数（全量表上按端点族过滤，双类型档案也计在内）。
      *
-     * 口径与「模型设置」向量段的数据源一致（见 {@code AdminModelProfileController#embeddingProfiles}），
-     * 供概览区分「未配置」（一个档案都没有）与「未启用」（有档案但没启用），两处数不一致，
-     * 会让人以为登记过的档案丢了。
+     * 口径与「向量槽位」的可选列表一致，供概览区分「未配置」（一个档案都没有）
+     * 与「未启用」（有档案但没设槽位），两处数不一致会让人以为登记过的档案丢了。
      */
     public long embeddingProfileCount() {
         return allProfiles().stream().filter(ModelProfile::isEmbedding).count();
@@ -255,7 +251,7 @@ public class ModelProfileRegistry {
             return new ProfileDeleteResult(false, "别名不能为空", List.of(), false);
         }
         String key = alias.trim();
-        /* 两类档案里都查：纯向量档案不在 profiles 里，只查一处会删不掉它 */
+        /* 唯一一张表里查 */
         if (settings.find(key) == null) {
             return new ProfileDeleteResult(false, "档案不存在：" + key, List.of(), false);
         }
@@ -416,7 +412,7 @@ public class ModelProfileRegistry {
         if (Domains.DEFAULT.equals(target)) {
             return "default 已不再作为可绑定的模型别名，请选择自建模型档案";
         }
-        /* 两类档案里都查：同时支持 chat 与 embedding 的档案留在 profiles，纯向量档案在另一桶 */
+        /* 唯一一张表里查 */
         ModelProfileSettings.ProfileData data = settings.find(target);
         if (data == null) {
             return "档案不存在：" + target + "（请先到「模型设置」创建该档案）";
@@ -556,10 +552,9 @@ public class ModelProfileRegistry {
         source.getDomainBindings().forEach((domain, models) ->
                 bindings.put(domain, models.copy()));
         copy.setDomainBindings(bindings);
-        /* 两个桶都要深拷贝：漏掉向量桶的话，任何一次写入（改绑定、加档案）
-           都会把分离出去的向量档案整个丢掉。 */
+        /* 单表深拷贝：写失败时内存态保持原样。embeddingProfiles 是只写兼容字段，
+           内存态里恒为空，不参与拷贝也不参与写盘。 */
         copy.setProfiles(copyProfiles(source.getProfiles()));
-        copy.setEmbeddingProfiles(copyProfiles(source.getEmbeddingProfiles()));
         copy.setEmbeddingAlias(source.getEmbeddingAlias());
         return copy;
     }

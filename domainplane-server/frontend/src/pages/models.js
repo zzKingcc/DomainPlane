@@ -4,13 +4,12 @@
    ========================================================================== */
 (function () {
 /* ============ 模型设置 ============
-   分两段：
-     · 向量模型 —— 全局只能选一个，所有域共用；没有配置时显示空状态，只给一个添加按钮
-     · 模型 —— 除当前向量模型外的全部档案（含对话 / 生图 / 语音等所有类型）。
-       不按"对话"命名，是因为探测会把档案分成好几类，只列 chat 会让其余类型
-       存进去之后在页面上彻底消失；对话模型在其中按域绑定使用。
-   添加模型统一走页面右上角的「+ 添加模型」按钮，保存时由服务端识别它属于哪一段（对话 / 向量）。
-   域 → 对话模型的绑定在「域空间」页操作。 */
+   一张统一档案表 + 一个槽位区：
+     · 用途分配 —— 全局单选的向量槽，下拉列出所有声明了 embedding 的档案
+     · 全部档案 —— 一张表列完，能力看端点族小签，占用看槽位与「已启用」徽标
+   添加模型时由用户勾选用途并随请求体提交，保存零上游请求、不猜类型；
+   「识别用途」是弹窗上用户主动点的按钮，结果只用来预勾。
+   域 → 对话 / 能力族的绑定在「域空间」页操作。 */
 Console.renderSidebar('models');
 
     var PROFILES = [];
@@ -18,9 +17,11 @@ Console.renderSidebar('models');
        调 renderProfiles，而它会读 EMBEDDING.alias。置 null 时先到的那个请求会抛 TypeError，
        又因 loadSettings 的 catch 只打 console.debug 而被静默吞掉，表现为整段渲染不出来。 */
     var EMBEDDING = { alias: null };   /* 当前启用的向量档案别名；null = 一个都没启用 */
-    var VECTOR_PROFILES = [];          /* 全部向量档案：向量段逐张列出，各带「启用」 */
     var SETTINGS = null;               /* /admin/settings：对话 / 向量 两组部署配置（yaml 兜底） */
+    /* 弹窗「用途」当前勾选的端点族。空数组 = 未声明，允许保存（档案标「未声明类型」）。 */
+    var PICKED_ENDPOINTS = [];
 
+    var EP_FAMILIES = ['chat', 'embedding', 'rerank', 'images', 'tts', 'asr', 'video'];
     var EP_LABEL = { chat: '对话', embedding: '向量', rerank: '重排', images: '生图',
                      tts: '语音合成', asr: '语音识别', video: '视频' };
     var MOD_LABEL = { text: '文本', image: '图片', audio: '音频', video: '视频',
@@ -52,9 +53,11 @@ Console.renderSidebar('models');
 
     function loadProfiles() {
         return Console.api.get('/admin/model-profiles').then(function (r) {
+            /* 全量一张表：向量 / 对话 / 生图档案都在这里，不再有第二段向量列表。
+               槽位读 assignments.embedding（顶层 embeddingAlias 只是给旧预览桩的兼容字段）。 */
             PROFILES = (r && r.profiles) || [];
-            EMBEDDING = { alias: (r && r.embeddingAlias) || null };
-            VECTOR_PROFILES = (r && r.embeddingProfiles) || [];
+            var asg = (r && r.assignments) || {};
+            EMBEDDING = { alias: asg.embedding || (r && r.embeddingAlias) || null };
             /* 「配置文件」提示指向档案真正落盘的文件（models.json）：
                /admin/settings 回的 llm-settings.json 是 yaml 兜底设置，不是档案，
                照它显示会让人去编辑一个本页根本不写的文件。 */
@@ -63,6 +66,11 @@ Console.renderSidebar('models');
         }).catch(function (e) {
             pfEl('modelList').innerHTML = '<div class="dp-card" style="color:var(--red);">'
                 + '加载失败：' + Console.escapeHtml(e.message) + '</div>';
+            /* 下拉不能停在"上次的值"上：加载失败时那份数据已经不可信 */
+            var sel = pfEl('embeddingSlot');
+            sel.innerHTML = '<option value="">加载失败</option>';
+            sel.disabled = true;
+            setHint('embeddingSlotState', '—');
         });
     }
 
@@ -136,15 +144,13 @@ Console.renderSidebar('models');
             : '<span class="perm-none">—</span>';
     }
 
-    /* ============ 分段一：向量模型 ============ */
-    /* 按别名找一份档案：纯向量档案由服务端单独存放，只会出现在 VECTOR_PROFILES 里；
-       其余（对话 / 生图 / 语音，以及同时支持 chat+embedding 的双类型）在 PROFILES 里。
-       两处都查，才不会出现"向量卡片丢了 API Key""删除时不提示它正是向量模型"这类回归。 */
+    /* ============ 槽位与统一卡片 ============ */
+    /* 按别名找一份档案：服务端现在只有一张表（向量 / 对话 / 生图都在 PROFILES 里），
+       不再需要"两处都查"的补丁 —— 那正是物理分桶时代「向量卡片丢了 API Key」
+       「删除时不提示它正是向量模型」这类回归的来源。 */
     function findProfile(alias) {
         if (!alias) { return null; }
-        return PROFILES.filter(function (p) { return p.alias === alias; })[0]
-            || VECTOR_PROFILES.filter(function (p) { return p.alias === alias; })[0]
-            || null;
+        return PROFILES.filter(function (p) { return p.alias === alias; })[0] || null;
     }
     function isEmbeddingProfile(p) {
         return (p.endpoints || []).indexOf('embedding') >= 0;
@@ -191,32 +197,26 @@ Console.renderSidebar('models');
             + ' value="' + Console.escapeHtml(v) + '" placeholder="未声明">'
             + '<span class="ctx-unit">token</span>';
     }
-    /* 真正的空状态：一份向量档案都没有。
-       注意「没有档案」与「有档案但没启用」是两件事，后者会把卡片逐张列出来让你点「启用」，
-       前者才走这里。 */
-    function embeddingEmptyBox() {
-        return '<div class="empty-box">'
-            + '<div class="empty-title">尚未配置向量模型</div>'
-            + '<div class="empty-sub">知识库的文档向量化与向量检索都依赖它；<br>'
-            + 'BM25 关键词检索不依赖向量模型，未配置时那条通道仍可用。</div>'
-            + '</div>';
-    }
+    /* 一张统一档案卡片：所有档案同一套骨架，差异只是「声明了哪些用途」与「占没占槽位」。
+       向量档案多出三样 —— 向量维度行、绿框（dimensions 调优）与「启用」按钮；
+       对话档案多出上下文长度、思考回写开关与标准 / 自定义参数框。
+       两张卡片合成一张后不需要再去重：档案只出现一次，槽位状态用徽标表达。 */
+    function modelCard(p, prefix) {
+        var active = p.alias === EMBEDDING.alias;
+        var chat = isChatProfile(p);
+        var isEmb = isEmbeddingProfile(p);
+        /* 两个参数入口出不出，由服务端给同一个结论（customParams.applies = mayBeChat()）。
+           图像 / 重排 / 向量档案不给框：值根本到不了请求体，渲染了只会在保存时被 /tuning 拒。 */
+        var tuneable = !!(p.customParams && p.customParams.applies);
 
-    /* 一张向量档案卡片。向量段逐张列出全部向量档案，全局只启用一个，
-       所以「启用」是每张卡片上的动作，而不是"新建即占用槽位"。
-       命中适配（如硅基流动 bge-m3）时，右侧带上绿色调优框 + 「更新」按钮，
-       唯一可调项是「向量维度」，默认显示模型原生维度，可就地改。
-       这一段是绿框**唯一**的剩余使用者：对话卡片的 schema 已下架，改成标准字段 + JSON 框。 */
-    function vectorCard(p, active, prefix) {
-        /* 「探测」与对话卡片同款、同一个接口（服务端的 profile(alias) 两类桶通吃）：
-           向量档案同样会停在"未识别"而进不了向量槽位，得靠探测把 embedding 端点与模态实测出来。
-           按钮排在「删除」之前，与对话卡片一致。 */
-        var actions = (active ? ''
-                : '<button class="btn btn-sm btn-outline-primary" data-enable="' + Console.escapeHtml(p.alias) + '"'
-                    + (p.usable ? '' : ' disabled') + '>启用</button>')
-            + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">探测</button>'
-            + '<button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">删除</button>';
-        /* 「已适配」徽标 + 绿框 + 更新按钮（对话卡片已不再有这一套） */
+        /* 「启用」只在声明了 embedding 且当前没占槽位的档案上出现；
+           置灰与槽位下拉同一判据（缺地址 / Key / 模型名）。 */
+        var enableBtn = (isEmb && !active)
+            ? '<button class="btn btn-sm btn-outline-primary" data-enable="' + Console.escapeHtml(p.alias) + '"'
+                + (p.usable ? '' : ' disabled') + '>启用</button>'
+            : '';
+        /* 绿框只剩向量维度这一个消费者：p.adapter 仅对「按模型名命中且 embedding 族有参数」
+           的档案下发，所以对话卡片天然不会长出第二套调优框。 */
         var adapterBadge = p.adapter ? '<span class="mbadge">已适配</span>' : '';
         var hasTune = !!(p.adapter && (p.adapter.params || []).length);
         var tuneBox = hasTune ? adapterTuneBox(p, prefix) : '';
@@ -224,63 +224,98 @@ Console.renderSidebar('models');
             ? '<span class="tune-status"></span>'
               + '<button type="button" class="btn btn-sm btn-outline-primary tune-save" disabled>更新</button>'
             : '';
+        /* 类型未声明要显眼：这种档案绑不了域、也当不了向量模型。
+           以前"空端点族"被默认补成 chat，于是它看着像对话模型却永远调不通。 */
+        var noType = !(p.endpoints || []).length
+            ? '<span class="mbadge off">未声明类型</span>' : '';
+        /* 域绑定对四类档案都成立：主模型绑 chat 桶，生图 / 语音 / 视频绑各自的能力桶，
+           两种绑法都算「在用」。能绑哪几段由服务端下发（bindableFamilies），这里只按它判
+           有没有可绑之处，不自己实现谓词。 */
+        var used;
+        if ((p.usedByDomains || []).length) {
+            used = p.usedByDomains.map(function (d) {
+                return '<span class="tag perm">' + Console.escapeHtml(d) + '</span>';
+            }).join('');
+        } else if ((p.bindableFamilies || []).length) {
+            used = '<span class="perm-none">未绑定任何域</span>';
+        } else {
+            used = '<span class="perm-none">不参与域绑定</span>';
+        }
+        /* 思考回写开关只出现在对话档案上（思考是对话流的概念）。 */
+        var thinkCtl = chat ? thinkSwitch(p) : '';
+        var stdTune = tuneable ? stdTuneBox(p) : '';
+        var paramsBox = tuneable ? customParamsBox(p) : '';
 
-        /* 端点族小签与「模型」段同款，向量段的卡片头部原来是两张卡片里唯一没有类型标识的
-           （标题被统一成「模型：<模型名>」，不再自带类型），"它到底是不是向量模型"
-           只能靠卡片落在哪一段去猜。 */
-        return '<section class="dp-card model-card emb">'
+        return '<section class="dp-card model-card' + (isEmb ? ' emb' : '') + '">'
             + '<header class="card-head">'
             +   '<span class="model-dot"></span>'
             +   '<h2>' + modelTitle(p.modelName || p.alias) + '</h2>'
+            +   dupBadge(p)
+            +   noType
+            +   visionBadge(p)
             +   cardTags(p)
             +   (active ? '<span class="mbadge ok">已启用</span>' : '')
             +   (p.usable ? '' : '<span class="mbadge off">不可用</span>')
             +   adapterBadge
             +   '<span class="spacer"></span>'
+            +   thinkCtl
             +   tuneCtl
-            +   actions
+            +   enableBtn
+            +   '<button class="btn btn-sm btn-outline-secondary" data-probe="'
+            +       Console.escapeHtml(p.alias) + '">探测</button>'
+            +   '<button class="btn btn-sm btn-outline-danger" data-del="'
+            +       Console.escapeHtml(p.alias) + '">删除</button>'
             + '</header>'
             + '<div class="dp-card-body">'
             + '<div class="model-meta">'
-            +   kv('向量维度', p.dimensions == null
-                    ? '<span class="perm-none">按模型默认</span>' : p.dimensions + '')
+            +   '<div><span class="k">输入模态</span>' + modalityCell(p, p.input) + '</div>'
+            +   '<div><span class="k">输出模态</span>' + modalityCell(p, p.output) + '</div>'
+            +   (isEmb ? kv('向量维度', p.dimensions == null
+                    ? '<span class="perm-none">按模型默认</span>' : p.dimensions + '') : '')
             +   kv('服务商地址', '<span class="mono">'
                     + Console.escapeHtml(p.baseUrl || '-') + '</span>')
             +   (p.apiKeyMasked
-                ? kv('API Key', '<span class="mono">' + Console.escapeHtml(p.apiKeyMasked) + '</span>')
-                : '')
+                    ? kv('API Key', '<span class="mono">' + Console.escapeHtml(p.apiKeyMasked) + '</span>')
+                    : '')
+            +   '<div><span class="k">被哪些域使用</span>' + used + '</div>'
+            +   (chat ? '<div class="ctx-row"><span class="k">上下文长度</span>' + ctxCell(p) + '</div>' : '')
             + '</div>'
             +   tuneBox
+            +   stdTune
+            +   paramsBox
             + '</div>'
             + '</section>';
     }
 
-    function renderEmbedding() {
-        var box = pfEl('embeddingList');
-        /* 一份向量档案都没有 → 空状态；有就全部列出来，
-           启用是逐张卡片上的动作，所以"有哪些档案、哪些没启用"都得看得见。 */
-        if (!VECTOR_PROFILES.length) {
-            box.innerHTML = embeddingEmptyBox();
-            return;
-        }
-        /* 卡片内绿色调优框的控件 id 前缀序号，每张卡片一个前缀，与对话卡片（'tb<N>'）不撞 */
-        var tuneSeq = 0;
-        box.innerHTML = VECTOR_PROFILES.map(function (p) {
-            return vectorCard(p, p.alias === EMBEDDING.alias, 'eb' + (tuneSeq++));
+    /* 用途分配：全局唯一的向量槽。
+       下拉只列「声明了 embedding 的档案」——服务端 setEmbeddingAlias 也只认这些，
+       把没声明的摆进去只会让用户点了之后收到一句拒绝。不可用的置灰（缺地址 / Key / 模型名）。
+       「未启用」是一个真实选项，用它即可取消配置，不必再另找清空按钮。 */
+    function renderSlots() {
+        var sel = pfEl('embeddingSlot');
+        var choices = PROFILES.filter(isEmbeddingProfile);
+        /* 「未启用」只是当前状态的占位（不可选）：下拉的职责是"选一个向量档案"。
+           不提供取消入口是刻意的 —— 已灌库时取消会走到 rebuild，而没有模型可算向量，
+           那条路在服务端会失败；本页不引入一个必然踩坑的动作。 */
+        var lead = EMBEDDING.alias ? '' : '<option value="" disabled>未启用</option>';
+        sel.innerHTML = lead + choices.map(function (p) {
+            return '<option value="' + Console.escapeHtml(p.alias) + '"'
+                + (p.usable ? '' : ' disabled') + '>'
+                + Console.escapeHtml(p.modelName || p.alias) + '</option>';
         }).join('');
-
-        box.querySelectorAll('button[data-enable]').forEach(function (b) {
-            b.addEventListener('click', function () { applyEmbedding(b.getAttribute('data-enable')); });
-        });
-        box.querySelectorAll('button[data-del]').forEach(function (b) {
-            b.addEventListener('click', function () { deleteProfile(b.getAttribute('data-del')); });
-        });
-        /* 向量卡片的「探测」：与对话段同一个处理函数（含二次确认） */
-        box.querySelectorAll('button[data-probe]').forEach(function (b) {
-            b.addEventListener('click', function () { probeProfile(b.getAttribute('data-probe'), b); });
-        });
-        /* 向量卡片的绿色调优框：与对话段同款绑定（改动检测 → 更新按钮 → PUT 保存） */
-        box.querySelectorAll('.dp-card.model-card').forEach(bindTuneBox);
+        sel.value = EMBEDDING.alias || '';
+        /* 一个候选都没有时把下拉锁住，别让人点开一个空列表 */
+        sel.disabled = !choices.length;
+        var state;
+        if (!choices.length) {
+            state = '还没有声明「向量」用途的档案';
+        } else if (!EMBEDDING.alias) {
+            state = '未启用 · 可选 ' + choices.length + ' 个';
+        } else {
+            var cur = findProfile(EMBEDDING.alias);
+            state = '已启用 · ' + ((cur && cur.modelName) || EMBEDDING.alias);
+        }
+        setHint('embeddingSlotState', state);
     }
 
     /* 换向量模型共用的二次确认。
@@ -300,7 +335,7 @@ Console.renderSidebar('models');
 
     /* 启用向量模型：有已灌库内容时先要用户表态（重灌 / 丢弃），服务端会再校验一次。
 
-       别名一律由调用方给出，唯一入口是卡片上的「启用」。 */
+       别名一律由调用方给出，两个入口共用这里：顶部槽位下拉与卡片上的「启用」。 */
     function applyEmbedding(alias) {
         /* P2：/admin/embedding-model 是 B 类（code + success 双写）。
            注意 requiresConfirmation 是「成功但需要二次确认」的业务字段，不是信封：
@@ -328,127 +363,70 @@ Console.renderSidebar('models');
                 loadProfiles();
                 loadSettings();
             })
-            .catch(function (e) { Console.toast('切换失败：' + e.message, { type: 'error' }); });
+            .catch(function (e) {
+                Console.toast('切换失败：' + e.message, { type: 'error' });
+                /* 下拉是受控控件：失败或二次确认被撤销时都要拨回服务端当前值，
+                   否则界面上选中的档案与实际槽位不符（loadProfiles 会重渲染下拉）。 */
+                loadProfiles();
+            });
     }
 
     function renderProfiles() {
         var box = pfEl('modelList');
-        renderEmbedding();
+        renderSlots();
 
-        /* 模型段 = 服务端返回的非向量档案，再减去当前占着向量槽位的那一个。
-           纯向量档案在服务端已单独存放，根本不会出现在 PROFILES 里，这里只需处理
-           "同时支持 chat 与 embedding 的双类型档案被选为向量模型"这一种重复。 */
-        var models = PROFILES.filter(function (p) { return p.alias !== EMBEDDING.alias; });
-        if (!models.length) {
+        /* 一张表列完全部档案：不再按"是不是向量"拆两段，也不再把当前向量档案从列表里
+           减掉 —— 那句 filter(alias !== EMBEDDING.alias) 是物理分桶时代的去重补丁，
+           双类型档案本来就会在两段里各出现一次。占用关系改由槽位与「已启用」徽标表达。 */
+        if (!PROFILES.length) {
             box.innerHTML = '<div class="empty-box">'
                 + '<div class="empty-title">还没有配置任何模型</div>'
-                + '<div class="empty-sub">点右上角「添加模型」登记一个连接；'
-                + '模型要绑到域才能被调用（在「域空间」页操作）。</div>'
+                + '<div class="empty-sub">点右上角「添加模型」登记一个连接并勾选用途；'
+                + '对话模型要绑到域才能被调用（在「域空间」页操作）。</div>'
                 + '</div>';
         } else {
-            box.innerHTML = models.map(function (p) {
-                var chat = isChatProfile(p);
-                /* 类型未声明要显眼：这种档案绑不了域、也当不了向量模型。
-                   以前"空端点族"被默认补成 chat，于是它看着像对话模型却永远调不通。 */
-                var noType = !(p.endpoints || []).length
-                    ? '<span class="mbadge off">未声明类型</span>' : '';
-                /* 域绑定对四类档案都成立：主模型绑 chat 桶，生图 / 语音 / 视频绑各自的能力桶，
-                   两种绑法都算「在用」。真正不参与域绑定的只有向量与重排，
-                   所以不能再按"是不是对话模型"一刀切成"不参与域绑定"。
-                   能绑哪几段由服务端下发（bindableFamilies），这里只按它判有没有可绑之处。 */
-                var used;
-                if ((p.usedByDomains || []).length) {
-                    used = p.usedByDomains.map(function (d) {
-                        return '<span class="tag perm">' + Console.escapeHtml(d) + '</span>';
-                    }).join('');
-                } else if ((p.bindableFamilies || []).length) {
-                    used = '<span class="perm-none">未绑定任何域</span>';
-                } else {
-                    used = '<span class="perm-none">不参与域绑定</span>';
-                }
-                /* 参数面 = 标准字段（温度 / 单次最大输出）+ 自定义参数 JSON 框，对话档案一律如此。
-                   适配 schema 对对话族已经下架，「已适配」徽标与绿色调优框一起撤掉：
-                   徽标还留着等于告诉用户"这家有特殊待遇"，而实际行为与其它档案一模一样。 */
-                /* 「是否回写思考内容」开关：只出现在对话档案上（思考是对话流的概念）。
-                   拨动即存，不与调优参数共用同一个保存动作，见 saveReturnThinking。 */
-                var thinkCtl = chat ? thinkSwitch(p) : '';
-                /* 两个参数入口出不出，由服务端给同一个结论（customParams.applies = mayBeChat()）。
-                   前端不再自己拼 "chat || 无 endpoints" —— 那套用的是 bindable（比 mayBeChat 严），
-                   "声明了 chat 但模态未填"的半识别档案会一个框都没有。
-                   温度 / 最大输出也必须跟着这个判据走：图像 / 重排 / TTS 这类档案值根本到不了请求体，
-                   渲染了输入框只会在保存时被 /tuning 拒掉（"不是对话模型，不支持参数调优"）。 */
-                var tuneable = !!(p.customParams && p.customParams.applies);
-                var stdTune = tuneable ? stdTuneBox(p) : '';
-                var paramsBox = tuneable ? customParamsBox(p) : '';
-                return '<section class="dp-card model-card">'
-                    + '<header class="card-head">'
-                    +   '<span class="model-dot"></span>'
-                    +   '<h2>' + modelTitle(p.modelName || p.alias) + '</h2>'
-                    +   dupBadge(p)
-                    +   noType
-                    +   visionBadge(p)
-                    +   cardTags(p)
-                    +   '<span class="spacer"></span>'
-                    +   thinkCtl
-                    +   '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">探测</button>'
-                    +   '<button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">删除</button>'
-                    + '</header>'
-                    + '<div class="dp-card-body">'
-                    + '<div class="model-meta">'
-                    +   '<div><span class="k">输入模态</span>'
-                    +      modalityCell(p, p.input) + '</div>'
-                    +   '<div><span class="k">输出模态</span>'
-                    +      modalityCell(p, p.output) + '</div>'
-                    +   '<div><span class="k">服务商地址</span><span class="mono">'
-                    +      Console.escapeHtml(p.baseUrl || '-') + '</span></div>'
-                    +   '<div><span class="k">被哪些域使用</span>' + used + '</div>'
-                    +   (chat ? '<div class="ctx-row"><span class="k">上下文长度</span>' + ctxCell(p) + '</div>' : '')
-                    + '</div>'
-                    +   stdTune
-                    +   paramsBox
-                    + '</div>'
-                    + '</section>';
+            /* 绿框控件 id 前缀：每张卡片一个，统一表后只此一套序号，不会互相撞 */
+            var tuneSeq = 0;
+            box.innerHTML = PROFILES.map(function (p) {
+                return modelCard(p, 'tb' + (tuneSeq++));
             }).join('');
         }
 
         box.querySelectorAll('button[data-del]').forEach(function (b) {
             b.addEventListener('click', function () { deleteProfile(b.getAttribute('data-del')); });
         });
+        /* 卡片上的「启用」与顶部槽位下拉是同一个动作（换向量模型可能要重灌知识库）。 */
+        box.querySelectorAll('button[data-enable]').forEach(function (b) {
+            b.addEventListener('click', function () { applyEmbedding(b.getAttribute('data-enable')); });
+        });
         /* 「探测」按钮：POST /admin/model-profiles/detect，实测端点族与模态后并回档案。
            绑定放在重建 innerHTML 之后，旧监听随旧节点一起丢掉，不会泄漏。 */
         box.querySelectorAll('button[data-probe]').forEach(function (b) {
             b.addEventListener('click', function () { probeProfile(b.getAttribute('data-probe'), b); });
         });
-        /* 思考回写开关：拨动即存（PUT /admin/model-profiles/return-thinking）。
-           绑定放在重建 innerHTML 之后，旧监听随旧节点一起丢掉，不会泄漏。 */
+        /* 思考回写开关：拨动即存（PUT /admin/model-profiles/return-thinking）。 */
         box.querySelectorAll('input[data-think]').forEach(function (input) {
             input.addEventListener('change', function () {
                 saveReturnThinking(input.getAttribute('data-think'), input.checked, input);
             });
         });
         /* 上下文长度输入框：改动（失焦或回车）即存（PUT /admin/model-profiles/context-window）。
-           与思考开关同一口径：一个字段一个动作，不攒批。data-saved 记着服务端当前值，
-           保存失败时用它把输入框恢复回去（见 saveContextWindow）。
-           绑定放在重建 innerHTML 之后，旧监听随旧节点一起丢掉，不会泄漏。 */
+           data-saved 记着服务端当前值，保存失败时用它把输入框恢复回去。 */
         box.querySelectorAll('input[data-ctx]').forEach(function (input) {
             input.setAttribute('data-saved', input.value || '');
             input.addEventListener('change', function () {
                 saveContextWindow(input.getAttribute('data-ctx'), input);
             });
         });
-        /* 标准字段（温度 / 单次最大输出）：改动即存（PUT /admin/model-profiles/tuning）。
-           与上下文长度同一口径：一个字段一个动作，不攒批。 */
+        /* 标准字段（温度 / 单次最大输出）：改动即存（PUT /admin/model-profiles/tuning）。 */
         box.querySelectorAll('.std-tune').forEach(bindStdTune);
-        /* 自定义参数文本框：改动才让「保存参数」变可点，
-           保存走 PUT /admin/model-profiles/custom-params（收 JSON 文本，解析错误带行列号）。
-           绑定放在重建 innerHTML 之后，旧监听随旧节点一起丢掉，不会泄漏。 */
+        /* 自定义参数文本框：改动才让「保存参数」变可点。 */
         box.querySelectorAll('.dp-params').forEach(bindParamsBox);
+        /* 向量维度绿框：改动检测 → 更新按钮 → PUT /tuning。
+           现在与对话卡片同在一张表里，绑定统一放这里（原向量段另有一份）。 */
+        box.querySelectorAll('.dp-card.model-card').forEach(bindTuneBox);
 
-        /* 各段计数 = 该段实际列出的卡片数。两段之和不再等于"档案总数"：
-           双类型档案两边各出现一次，它本来就有两个角色，计数各归各段。 */
-        pfEl('embeddingCount').textContent = VECTOR_PROFILES.length + ' 个';
-        pfEl('modelCount').textContent = models.length + ' 个';
-
+        pfEl('modelCount').textContent = PROFILES.length + ' 个';
     }
 
     /* ---------- 弹窗：开 / 关 / 重置 ---------- */
@@ -584,6 +562,8 @@ Console.renderSidebar('models');
     function resetForm() {
         ['pfBaseUrl', 'pfApiKey', 'pfModelName', 'pfPreset', 'pfTemperature', 'pfMaxTokens', 'pfParamsJson']
             .forEach(function (id) { pfEl(id).value = ''; });
+        /* 用途回到"一个都没勾"，连带把对话调优分组收起来 */
+        setPickedEndpoints([]);
 
         var box = pfEl('profileResult');
         box.textContent = '';
@@ -592,9 +572,80 @@ Console.renderSidebar('models');
         var readBox = pfEl('readResult');
         readBox.textContent = '';
         readBox.style.color = '';
+        var suggestBox = pfEl('pfSuggestResult');
+        suggestBox.textContent = '';
+        suggestBox.style.color = '';
     }
 
 
+
+    /* ---------- 用途：用户声明的能力 ----------
+       勾选结果就是 save 请求体里的 endpoints，服务端原样采用、不自动识别。
+       chip 用 button 而不是 <label>：.field label 是 block 级样式（权重高于 .chip），
+       套上去会把 chip 撑成整行；button.chip 是 CSS 里预留的结构型按钮。
+       勾选状态只存一份（PICKED_ENDPOINTS），DOM 上的 .on 由它渲染出来，
+       识别预勾与用户手点走同一个 setPickedEndpoints。 */
+    function renderEndpointChips() {
+        pfEl('pfEndpoints').innerHTML = EP_FAMILIES.map(function (f) {
+            return '<button type="button" class="chip'
+                + (PICKED_ENDPOINTS.indexOf(f) >= 0 ? ' on' : '') + '"'
+                + ' data-ep="' + Console.escapeHtml(f) + '">'
+                + Console.escapeHtml(EP_LABEL[f] || f) + '</button>';
+        }).join('');
+    }
+    function setPickedEndpoints(list) {
+        /* 只认白名单里的族：识别结果 / 旧数据里混进来的未知键不该被提交 */
+        PICKED_ENDPOINTS = (list || []).filter(function (f) {
+            return EP_FAMILIES.indexOf(f) >= 0;
+        });
+        renderEndpointChips();
+        /* 调优字段只服务对话用途：没勾 chat 时收起来，也避免把温度发给生图档案 */
+        pfEl('pfChatTune').hidden = PICKED_ENDPOINTS.indexOf('chat') < 0;
+    }
+    function toggleEndpoint(f) {
+        var i = PICKED_ENDPOINTS.indexOf(f);
+        var next = PICKED_ENDPOINTS.slice();
+        if (i >= 0) { next.splice(i, 1); } else { next.push(f); }
+        setPickedEndpoints(next);
+    }
+
+    /* 「识别用途」：用户主动点才发请求，结果只用来预勾，不参与保存。
+       服务端先查本地适配文件（零请求），未命中才读服务商 GET /models（零 token）。
+       清单不给类型（标准 OpenAI / DeepSeek 官方都是这种形态）时如实返回空数组 + note，
+       界面把 note 原样摆出来，由用户自己勾 —— 绝不猜一个 chat 出来。 */
+    function suggestEndpoints() {
+        var modelName = pfEl('pfModelName').value.trim();
+        var out = pfEl('pfSuggestResult');
+        if (!modelName) {
+            out.textContent = '请先填写模型名';
+            out.style.color = 'var(--red)';
+            return;
+        }
+        var btn = pfEl('pfSuggestBtn');
+        btn.disabled = true;
+        btn.classList.add('btn-loading');
+        out.textContent = '识别中…';
+        out.style.color = '';
+        Console.api.post('/admin/model-profiles/suggest', {
+            baseUrl: pfEl('pfBaseUrl').value.trim() || null,
+            apiKey: pfEl('pfApiKey').value || null,
+            modelName: modelName
+        }).then(function (r) {
+            var eps = (r && r.endpoints) || [];
+            setPickedEndpoints(eps);
+            var note = Console.sanitizeError((r && r.note) || '');
+            out.textContent = eps.length
+                ? '已按识别结果预勾，可自行修改' + (note ? '（' + note + '）' : '')
+                : (note || '清单没有声明用途，请自己勾选');
+            out.style.color = '';
+        }).catch(function (e) {
+            out.textContent = '识别失败：' + Console.sanitizeError(e.message);
+            out.style.color = 'var(--red)';
+        }).then(function () {
+            btn.disabled = false;
+            btn.classList.remove('btn-loading');
+        });
+    }
 
     /* ---------- 模型名下拉：从服务商拉候选（POST /admin/models） ---------- */
     var combo = { items: [], visible: [], loading: false, active: -1 };
@@ -729,8 +780,8 @@ Console.renderSidebar('models');
         el.style.color = ok ? '' : 'var(--red)';
     }
 
-    /* 添加：表单里没有类型声明区，端点族与模态由保存时的元数据读取决定。
-       档案建好之后的改动都不走这个弹窗：调优走卡片绿框 + 「更新」，
+    /* 添加：用途由用户在弹窗里勾选，端点族随请求体提交，保存零上游请求。
+       档案建好之后的改动都不走这个弹窗：调优走卡片上的框与「更新」，
        思考回写走卡片头部的开关（thinkSwitch）。 */
     function openAdd() {
         resetForm();
@@ -738,8 +789,8 @@ Console.renderSidebar('models');
         pfEl('pfBaseUrl').focus();
     }
     /* 别名已从表单移除：按模型名自动派生，重名加数字后缀（别名仍是绑定/删除用的键）。
-       查重必须跨两处（findProfile）：纯向量档案不在 PROFILES 里，只看 PROFILES 会派生出
-       一个与已有向量档案同名的别名，保存时把那份向量档案整个覆盖掉。 */
+       现在只有一张表，findProfile 查一次就够；分桶时代「只看 PROFILES 会派生出与向量档案
+       同名的别名、保存时把那份向量档案整个覆盖掉」的坑已随合桶消失。 */
     function deriveAlias(modelName) {
         var base = aliasBase(modelName);
         function taken(a) {
@@ -1378,11 +1429,11 @@ Console.renderSidebar('models');
     }
 
     /* ---------- 保存 ----------
-       向量模型不再是独立表单：它就是「档案里选中了哪一个 embedding 档案」，
-       所以只有一条保存路径：POST /admin/model-profiles（只添加新档案）。
+       只有一条保存路径：POST /admin/model-profiles（只添加新档案）。
+       endpoints 是用户在弹窗里勾的用途，原样提交；服务端纯格式校验 + 写盘，
+       零上游请求、不读清单、不测维度，模态由服务端按族补一组本地基线。
        已存档案的改动不走这里：调优走 PUT /model-profiles/tuning，
-       思考回写走 PUT /model-profiles/return-thinking。
-       llm-settings.json 的 embedding* 仅在「一个都没选」时作 yaml 兜底，不在这里编辑。 */
+       思考回写走 PUT /model-profiles/return-thinking。 */
     function save() {
         if (!val('pfApiKey')) { showResult(false, '请填写 API Key'); return; }
         var modelName = pfEl('pfModelName').value.trim();
@@ -1390,12 +1441,11 @@ Console.renderSidebar('models');
         /* 别名按模型名派生（重名加后缀），弹窗只添加新档案，
            已存档案的改动走卡片（调优 → 「更新」，思考回写 → 卡片头部开关）。 */
         var alias = deriveAlias(modelName);
-        /* 不带 endpoints：类型由服务端读提供商清单识别（用户不用选），
-           读到的端点族决定归入「模型」段还是「向量模型」段，读到的模态填卡片那两行。 */
         var body = {
             alias: alias,
-            input: [],
-            output: [],
+            /* 用户声明的能力。空数组是允许的（未声明类型），不是错误；
+               识别结果只影响勾选，不在这里补第二份"更权威"的判定。 */
+            endpoints: PICKED_ENDPOINTS.slice(),
             baseUrl: pfEl('pfBaseUrl').value.trim(),
             apiKey: pfEl('pfApiKey').value,
             modelName: modelName,
@@ -1403,45 +1453,51 @@ Console.renderSidebar('models');
                （见 thinkSwitch / saveReturnThinking） */
             returnThinking: false
         };
-        /* 标准字段：留空 = 不发送（温度用服务商默认、单次最大输出不限制）。
-           取值范围与卡片上的控件同一口径，服务端不再按 schema 复核（对话族没有 schema 了）。 */
-        var rawTemp = (pfEl('pfTemperature').value || '').trim();
-        if (rawTemp !== '') {
-            var temp = Number(rawTemp);
-            if (!isFinite(temp) || temp < 0 || temp > 2) {
-                showResult(false, '温度取值 0–2；留空表示用服务商默认');
-                return;
+        /* 调优字段只在勾了 chat 时可填（分组也会跟着收起）。取消勾选后输入框里可能还留着
+           上一次的值，这里按当前勾选重新判一次，别把温度发给生图 / 向量档案。 */
+        var chatPicked = PICKED_ENDPOINTS.indexOf('chat') >= 0;
+        if (chatPicked) {
+            /* 标准字段：留空 = 不发送（温度用服务商默认、单次最大输出不限制）。
+               取值范围与卡片上的控件同一口径，服务端不再按 schema 复核（对话族没有 schema 了）。 */
+            var rawTemp = (pfEl('pfTemperature').value || '').trim();
+            if (rawTemp !== '') {
+                var temp = Number(rawTemp);
+                if (!isFinite(temp) || temp < 0 || temp > 2) {
+                    showResult(false, '温度取值 0–2；留空表示用服务商默认');
+                    return;
+                }
+                body.temperature = temp;
             }
-            body.temperature = temp;
+            var rawMax = (pfEl('pfMaxTokens').value || '').trim();
+            if (rawMax !== '') {
+                var maxTok = Number(rawMax);
+                if (!isFinite(maxTok) || Math.floor(maxTok) !== maxTok || maxTok <= 0) {
+                    showResult(false, '单次最大输出必须是正整数；留空表示不限制');
+                    return;
+                }
+                body.maxTokens = maxTok;
+            }
+            /* 自定义参数：JSON 在**这里**解析，写错当场说清是哪一位，别留给服务端只回一句
+               "JSON 格式错误"。顶层必须是对象 —— 数组与标量都不是"一组参数"。 */
+            var rawParams = (pfEl('pfParamsJson').value || '').trim();
+            if (rawParams !== '') {
+                var parsed;
+                try {
+                    parsed = JSON.parse(rawParams);
+                } catch (err) {
+                    showResult(false, '自定义参数不是合法 JSON：' + err.message);
+                    return;
+                }
+                if (!parsed || typeof parsed !== 'object'
+                    || Object.prototype.toString.call(parsed) === '[object Array]') {
+                    showResult(false, '自定义参数要是一个 JSON 对象，如 {"enable_thinking": false}');
+                    return;
+                }
+                body.params = parsed;
+            }
         }
-        var rawMax = (pfEl('pfMaxTokens').value || '').trim();
-        if (rawMax !== '') {
-            var maxTok = Number(rawMax);
-            if (!isFinite(maxTok) || Math.floor(maxTok) !== maxTok || maxTok <= 0) {
-                showResult(false, '单次最大输出必须是正整数；留空表示不限制');
-                return;
-            }
-            body.maxTokens = maxTok;
-        }
-        /* 自定义参数：JSON 在**这里**解析，写错当场说清是哪一位，别留给服务端只回一句
-           "JSON 格式错误"。顶层必须是对象 —— 数组与标量都不是"一组参数"。 */
-        var rawParams = (pfEl('pfParamsJson').value || '').trim();
-        if (rawParams !== '') {
-            var parsed;
-            try {
-                parsed = JSON.parse(rawParams);
-            } catch (err) {
-                showResult(false, '自定义参数不是合法 JSON：' + err.message);
-                return;
-            }
-            if (!parsed || typeof parsed !== 'object'
-                || Object.prototype.toString.call(parsed) === '[object Array]') {
-                showResult(false, '自定义参数要是一个 JSON 对象，如 {"enable_thinking": false}');
-                return;
-            }
-            body.params = parsed;
-        }
-        /* 向量维度不在新建时填：服务端会用模型原生维度回填（见 AdminModelProfileController#save） */
+        /* 向量维度不在新建时填：装配时由 LlmModelHolder 实测；要手改走卡片上的绿框。
+           input / output 也不传：声明了用途却没填模态时，服务端按族补一组本地基线。 */
         var btn = pfEl('saveProfileBtn');
         btn.disabled = true;
         btn.classList.add('btn-loading');
@@ -1458,10 +1514,10 @@ Console.renderSidebar('models');
     }
 
     /* 删除向量档案就是删档案本身（与对话档案同一条路径）；
-       唯一差别是要提示「当前向量模型会被取消」，那段在 deleteProfile 里。 */
+       唯一差别是要提示「当前向量模型会被取消」，那段在下面。 */
     async function deleteProfile(alias) {
-        /* 必须跨两处找：纯向量档案不在 PROFILES 里，只查 PROFILES 会让"它正是当前向量模型"
-           的警告消失，用户删掉正在用的向量模型却只看到一句普通的删除确认。 */
+        /* 一张表查一次就够。合桶之前纯向量档案不在 PROFILES 里，只查 PROFILES 会让
+           「它正是当前向量模型」的警告消失，用户删掉正在用的向量模型却只看到普通确认。 */
         var target = findProfile(alias);
         var isEmb = target && isEmbeddingProfile(target);
         var isCurrentEmbedding = isEmb && EMBEDDING.alias === alias;
@@ -1491,8 +1547,8 @@ Console.renderSidebar('models');
     /* 探测一个档案：POST /admin/model-profiles/detect，服务端用一组最小请求实测端点族与模态，
        并集写回后返回新视图。实测失败（网络 / Key）由服务端回可读原因，这里只负责触发与刷新。
 
-       先二次确认：这是本页唯一会真花钱的按钮（保存只发 GET，零 token）。开销按探针逐条说清，
-       免得用户以为"探测"是个纯本地动作。 */
+       先二次确认：这是本页唯一会真花钱的按钮（保存零请求，「识别用途」只读清单、零 token）。
+       开销按探针逐条说清，免得用户以为"探测"是个纯本地动作。 */
     async function probeProfile(alias, btn) {
         var ok = await Console.confirm('探测「' + alias + '」？\n\n'
             + '会发一组最小请求实测它的端点族与模态，可能消耗少量额度：\n'
@@ -1701,6 +1757,22 @@ Console.renderSidebar('models');
         var bar = seg.closest('.tune-bar');
         if (bar) { barPick(bar, seg.getAttribute('data-bar-val')); }
     });
+
+    /* 向量槽下拉：选中即切换（含「未启用」= 取消配置）。
+       失败 / 二次确认被撤销时由 applyEmbedding 重拉列表复位下拉。 */
+    pfEl('embeddingSlot').addEventListener('change', function () {
+        var v = pfEl('embeddingSlot').value;
+        applyEmbedding(v || null);
+    });
+
+    /* 用途 chips 用委托：renderEndpointChips 每次重画 innerHTML，逐颗绑定会随重画失效 */
+    pfEl('pfEndpoints').addEventListener('click', function (e) {
+        var chip = e.target && e.target.closest ? e.target.closest('[data-ep]') : null;
+        if (chip) { toggleEndpoint(chip.getAttribute('data-ep')); }
+    });
+    pfEl('pfSuggestBtn').addEventListener('click', suggestEndpoints);
+    /* 首屏先把用途 chips 与对话调优分组的初始状态画出来（弹窗还没打开也要是确定的） */
+    setPickedEndpoints([]);
 
     pfEl('addModelBtn').addEventListener('click', openAdd);
     pfEl('saveProfileBtn').addEventListener('click', save);
