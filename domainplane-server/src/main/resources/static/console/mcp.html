@@ -5,37 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MCP 连接 · DomainPlane 管控台</title>
     <link rel="stylesheet" href="assets/console.css">
-    <style>
-        .mcp-icon { width: 18px; height: 18px; flex: 0 0 18px; color: var(--primary); }
-        .kv { display: grid; grid-template-columns: 84px 1fr; gap: 6px 10px; font-size: 12.5px; }
-        .kv .k { color: var(--muted); }
-        .kv .v { word-break: break-all; font-family: ui-monospace, Consolas, monospace; }
-        /* 绑定域行：标签可能多个，label 与 tag 流同行、自然换行 */
-        .mcp-bound { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 10px; font-size: 12.5px; }
-        .mcp-bound .k { color: var(--muted); flex: 0 0 auto; }
-        /* 卡片底部操作行：一个连接有 6~7 个操作（编辑/绑定域/工具/测试/授权/停启用/删除），
-           全堆在标题行会横向溢出、换行后也更难扫读；收拢成底部 flex-wrap 行，
-           主操作（编辑）在左起、破坏性操作（删除）收尾，与卡宽自适应换行。 */
-        .mcp-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
-        .pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
-        .pick-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; cursor: pointer; background: var(--card); }
-        .pick-card:hover { border-color: var(--primary); }
-        .pick-card.on { border-color: var(--primary); background: var(--primary-dim); }
-        .pick-card .pc-name { font-size: 13px; font-weight: 600; font-family: ui-monospace, Consolas, monospace; }
-        .pick-card .pc-note { font-size: 12px; color: var(--muted); margin-top: 2px; }
-        .form-row { margin-bottom: 12px; }
-        .form-row label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 5px; }
-        .form-row input, .form-row select, .form-row textarea {
-            width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px;
-            background: var(--bg); color: var(--text); font-size: 13px; box-sizing: border-box;
-            font-family: ui-monospace, Consolas, monospace;
-        }
-        .form-row textarea { min-height: 64px; resize: vertical; }
-        .form-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .tag.ready { color: #16a34a; border-color: #16a34a; }
-        .tag.failed { color: var(--red); border-color: var(--red); }
-        .tag.off { color: var(--muted); }
-    </style>
 </head>
 <body>
 <div class="layout">
@@ -45,107 +14,150 @@
         <div class="page-header">
             <div class="page-head">
                 <div class="head-line">
-                    <div>
-                        <h2>MCP 连接</h2>
-                    </div>
+                    <div><h2>MCP 连接</h2></div>
                 </div>
                 <div class="actions">
-                    <button class="btn btn-sm btn-outline-primary" id="createBtn">新增连接</button>
+                    <label class="dp-mcp-auto"><input type="checkbox" id="autoRefresh" checked>自动刷新</label>
                     <button class="btn btn-sm btn-outline-secondary" id="refreshBtn">重新读取</button>
+                    <button class="btn btn-sm btn-outline-primary" id="createBtn">新增连接</button>
                 </div>
             </div>
         </div>
         <div class="page-body dp-mcp">
 
-            <!-- 总览行：四个治理指标，全部由 /admin/mcp-connections 的返回现场算，零新请求。
-                 就绪/需授权/失败是这页最常被问的三个状态；「需授权」要点授权按钮，
-                 「失败」意味着该连接的工具对绑定域不可用。 -->
-            <div class="row row-cards row-deck">
-                <div class="col-6 col-lg-3">
-                    <div class="card card-sm dp-stat">
-                        <div class="card-body dp-stat-body">
-                            <div class="dp-stat-icon dp-stat-icon-blue">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-                            </div>
-                            <div class="dp-stat-info">
-                                <div class="dp-stat-label">连接总数</div>
-                                <div class="dp-stat-value" id="statConns">—</div>
-                            </div>
+            <div class="dp-mcp-stats">
+                <div class="card card-sm dp-stat">
+                    <div class="card-body dp-stat-body">
+                        <div class="dp-stat-info">
+                            <div class="dp-stat-label">连接总数</div>
+                            <div class="dp-stat-value" id="statConns">—</div>
                         </div>
                     </div>
                 </div>
-                <div class="col-6 col-lg-3">
-                    <div class="card card-sm dp-stat">
-                        <div class="card-body dp-stat-body">
-                            <div class="dp-stat-icon dp-stat-icon-green">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>
-                            </div>
-                            <div class="dp-stat-info">
-                                <div class="dp-stat-label">已就绪</div>
-                                <div class="dp-stat-value" id="statReady">—</div>
-                            </div>
+                <div class="card card-sm dp-stat">
+                    <div class="card-body dp-stat-body">
+                        <div class="dp-stat-info">
+                            <div class="dp-stat-label">已就绪</div>
+                            <div class="dp-stat-value" id="statReady">—</div>
                         </div>
                     </div>
                 </div>
-                <div class="col-6 col-lg-3">
-                    <div class="card card-sm dp-stat">
-                        <div class="card-body dp-stat-body">
-                            <div class="dp-stat-icon dp-stat-icon-purple">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-                            </div>
-                            <div class="dp-stat-info">
-                                <div class="dp-stat-label">需授权</div>
-                                <div class="dp-stat-value" id="statNeedsAuth">—</div>
-                            </div>
+                <div class="card card-sm dp-stat">
+                    <div class="card-body dp-stat-body">
+                        <div class="dp-stat-info">
+                            <div class="dp-stat-label">需授权</div>
+                            <div class="dp-stat-value" id="statNeedsAuth">—</div>
                         </div>
                     </div>
                 </div>
-                <div class="col-6 col-lg-3">
-                    <div class="card card-sm dp-stat">
-                        <div class="card-body dp-stat-body">
-                            <div class="dp-stat-icon dp-stat-icon-pink">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
-                            </div>
-                            <div class="dp-stat-info">
-                                <div class="dp-stat-label">连接失败</div>
-                                <div class="dp-stat-value" id="statFailed">—</div>
-                            </div>
+                <div class="card card-sm dp-stat">
+                    <div class="card-body dp-stat-body">
+                        <div class="dp-stat-info">
+                            <div class="dp-stat-label">连接失败</div>
+                            <div class="dp-stat-value" id="statFailed">—</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card card-sm dp-stat">
+                    <div class="card-body dp-stat-body">
+                        <div class="dp-stat-info">
+                            <div class="dp-stat-label">已暴露工具</div>
+                            <div class="dp-stat-value" id="statTools">—</div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div id="connList" class="dp-list"></div>
+            <div class="dp-mcp-workbench">
+                <section class="card dp-mcp-list">
+                    <div class="dp-mcp-list-head">
+                        <input class="form-control" id="connSearch" placeholder="搜索连接名 / 地址">
+                        <select class="form-select" id="statusFilter">
+                            <option value="">全部状态</option>
+                            <option value="READY">已就绪</option>
+                            <option value="NEEDS_AUTH">需授权</option>
+                            <option value="FAILED">连接失败</option>
+                            <option value="DISCONNECTED">未连接</option>
+                            <option value="OFF">已禁用</option>
+                        </select>
+                    </div>
+                    <div id="connList" class="dp-mcp-items"></div>
+                    <div class="dp-mcp-sync" id="syncHint"></div>
+                </section>
+
+                <section class="card dp-mcp-detail">
+                    <div id="detailEmpty" class="dp-mcp-empty" hidden>还没有任何 MCP 连接。点「新增连接」接入一个外部 MCP server。</div>
+                    <div id="detailBody" hidden>
+                        <div class="dp-mcp-statusbar" id="statusBar"></div>
+                        <div class="dp-mcp-tabs" id="tabBar">
+                            <button class="dp-mcp-tab on" type="button" data-tab="overview">概览</button>
+                            <button class="dp-mcp-tab" type="button" data-tab="tools">工具</button>
+                            <button class="dp-mcp-tab" type="button" data-tab="auth">授权</button>
+                            <button class="dp-mcp-tab" type="button" data-tab="bind">绑定</button>
+                        </div>
+                        <div class="dp-mcp-pane" id="paneOverview"></div>
+                        <div class="dp-mcp-pane" id="paneTools" hidden></div>
+                        <div class="dp-mcp-pane" id="paneAuth" hidden></div>
+                        <div class="dp-mcp-pane" id="paneBind" hidden></div>
+                    </div>
+                </section>
+            </div>
         </div>
     </main>
 </div>
 
-<!-- ===== 新增 / 编辑 遮罩层 ===== -->
 <div class="modal-mask" id="editModal" hidden>
-    <div class="modal-panel" role="dialog" aria-modal="true" style="max-width:620px;">
+    <div class="modal-panel dp-mcp-drawer" role="dialog" aria-modal="true">
         <div class="modal-head">
             <h3 id="editTitle">新增 MCP 连接</h3>
             <span class="spacer"></span>
             <button class="btn btn-outline-secondary" id="editClose">关闭</button>
         </div>
-        <div class="modal-body" style="padding:6px 2px;">
-            <div class="form-row">
-                <label>连接名（唯一，工具命名空间前缀；禁止连续双下划线）</label>
-                <input class="form-control" id="f_name" placeholder="如 qqmail">
-            </div>
-            <div class="form-row">
-                <label>MCP server 地址（Streamable HTTP 端点）</label>
-                <input class="form-control" id="f_url" placeholder="https://api.mail.qq.com/mcp">
-            </div>
-            <div class="form-2">
-                <div class="form-row">
-                    <label>传输类型</label>
-                    <select class="form-select" id="f_transport">
-                        <option value="STREAMABLE_HTTP">STREAMABLE_HTTP（2025-03-26，已实装）</option>
-                        <option value="LEGACY_SSE">LEGACY_SSE（2024-11-05，预留）</option>
-                    </select>
+        <div class="modal-body">
+            <div class="dp-mcp-group">
+                <h4>基础</h4>
+                <div class="f-row">
+                    <label>连接名（唯一，工具命名空间前缀；禁止连续双下划线）</label>
+                    <input class="form-control" id="f_name" placeholder="如 qqmail">
                 </div>
-                <div class="form-row">
+                <div class="f-row">
+                    <label>MCP server 地址（Streamable HTTP 端点）</label>
+                    <input class="form-control" id="f_url" placeholder="https://api.mail.qq.com/mcp">
+                </div>
+                <div class="f-row">
+                    <label>备注</label>
+                    <input class="form-control" id="f_remark" placeholder="可选">
+                </div>
+                <div class="f-row">
+                    <label><input type="checkbox" id="f_enabled" checked>启用</label>
+                </div>
+            </div>
+
+            <div class="dp-mcp-group">
+                <h4>传输与鉴权</h4>
+                <div class="f-2">
+                    <div class="f-row">
+                        <label>传输类型</label>
+                        <select class="form-select" id="f_transport">
+                            <option value="STREAMABLE_HTTP">STREAMABLE_HTTP（2025-03-26，已实装）</option>
+                            <option value="LEGACY_SSE">LEGACY_SSE（2024-11-05，已实装）</option>
+                        </select>
+                    </div>
+                    <div class="f-row">
+                        <label>单次调用超时（毫秒）</label>
+                        <input class="form-control" id="f_timeout" type="number" placeholder="30000">
+                    </div>
+                </div>
+                <div class="f-row">
+                    <label>自定义请求头（JSON 对象；留空 = 保持不变）</label>
+                    <textarea class="form-control" id="f_headers" placeholder='{"Authorization":"Bearer xxxx"}'></textarea>
+                </div>
+                <div class="dp-mcp-keystate" id="headerState"></div>
+            </div>
+
+            <div class="dp-mcp-group">
+                <h4>治理</h4>
+                <div class="f-row">
                     <label>审批策略</label>
                     <select class="form-select" id="f_approval">
                         <option value="ALL">ALL（全部需人工批准，推荐默认）</option>
@@ -154,84 +166,42 @@
                         <option value="NONE">NONE（全部免批准，仅内网可信）</option>
                     </select>
                 </div>
-            </div>
-            <div class="form-row">
-                <label>自定义请求头（JSON 对象，如鉴权；不回显，留空=保持不变）</label>
-                <textarea class="form-control" id="f_headers" placeholder='{"Authorization":"Bearer xxxx"}'></textarea>
-            </div>
-            <div class="form-row">
-                <label>OAuth 客户端（服务器要求授权时才需要；动态注册被拒时填预登记的 client_id）</label>
-                <input class="form-control" id="f_oauth_cid" placeholder="client_id（留空=动态注册）">
-            </div>
-            <div class="form-row">
-                <label>client_secret（不回显，留空=保持不变；公共客户端可留空）</label>
-                <input class="form-control" id="f_oauth_secret" type="password" placeholder="••••••（已配置则留空保持不变）">
-            </div>
-            <div class="form-2">
-                <div class="form-row">
-                    <label>注册用 client 名称（留空=WorkBuddy）</label>
-                    <input class="form-control" id="f_oauth_cname" placeholder="WorkBuddy">
-                </div>
-                <div class="form-row">
-                    <label>授权范围 scope（留空=服务器默认）</label>
-                    <input class="form-control" id="f_oauth_scope" placeholder="如 mail.read">
+                <div class="f-row">
+                    <label>工具白名单（留空 = 全部开放）</label>
+                    <div id="allowTools" class="dp-mcp-allow"></div>
                 </div>
             </div>
-            <div class="form-row">
-                <label>固定回调地址 redirect_uri（留空=用当前管控台地址；服务商只认固定回调时才填）</label>
-                <input class="form-control" id="f_oauth_redirect" placeholder="https://你的域名/admin/mcp-connections/xxx/oauth/callback">
-            </div>
-            <div class="form-2">
-                <div class="form-row">
-                    <label>单次调用超时（毫秒，默认 30000）</label>
-                    <input class="form-control" id="f_timeout" type="number" placeholder="30000">
+
+            <details class="dp-mcp-group dp-mcp-advanced">
+                <summary>高级 · OAuth 客户端</summary>
+                <div class="f-row">
+                    <label>client_id（留空 = 动态注册）</label>
+                    <input class="form-control" id="f_oauth_cid" placeholder="client_id">
                 </div>
-                <div class="form-row">
-                    <label>工具白名单（逗号分隔原始工具名；留空=全部）</label>
-                    <input class="form-control" id="f_allow" placeholder="GetMe,ListMessages">
+                <div class="f-row">
+                    <label>client_secret（留空 = 保持不变）</label>
+                    <input class="form-control" id="f_oauth_secret" type="password" placeholder="••••••">
                 </div>
-            </div>
-            <div class="form-row">
-                <label>备注</label>
-                <input class="form-control" id="f_remark" placeholder="可选">
-            </div>
-            <div class="form-row">
-                <label><input type="checkbox" id="f_enabled" checked style="width:auto;margin-right:6px;">启用（关=不连、不注册）</label>
-            </div>
+                <div class="f-2">
+                    <div class="f-row">
+                        <label>注册用 client 名称</label>
+                        <input class="form-control" id="f_oauth_cname" placeholder="WorkBuddy">
+                    </div>
+                    <div class="f-row">
+                        <label>授权范围 scope</label>
+                        <input class="form-control" id="f_oauth_scope" placeholder="如 mail.read">
+                    </div>
+                </div>
+                <div class="f-row">
+                    <label>固定回调地址 redirect_uri</label>
+                    <input class="form-control" id="f_oauth_redirect" placeholder="https://你的域名/admin/mcp-connections/xxx/oauth/callback">
+                </div>
+            </details>
         </div>
         <footer class="card-foot">
             <button class="btn btn-outline-primary" id="editSaveBtn">保存</button>
             <button class="btn btn-outline-secondary" id="editClearBtn">重置</button>
         </footer>
-    </div>
-</div>
-
-<!-- ===== 绑定域 遮罩层 ===== -->
-<div class="modal-mask" id="bindModal" hidden>
-    <div class="modal-panel" role="dialog" aria-modal="true" style="max-width:680px;">
-        <div class="modal-head">
-            <h3>配置 <span class="mono" id="bindConnName"></span> 的域绑定</h3>
-            <span class="spacer"></span>
-            <button class="btn btn-outline-secondary" id="bindClose">关闭</button>
-        </div>
-        <div id="bindCardList" class="pick-grid" style="margin-top:10px;"></div>
-        <div id="bindEmpty" class="perm-none" style="margin-top:10px; display:none;"></div>
-        <footer class="card-foot">
-            <button class="btn btn-outline-primary" id="bindSaveBtn">保存绑定</button>
-            <button class="btn btn-outline-secondary" id="bindClearBtn">全部解绑</button>
-        </footer>
-    </div>
-</div>
-
-<!-- ===== 工具目录 遮罩层 ===== -->
-<div class="modal-mask" id="toolsModal" hidden>
-    <div class="modal-panel" role="dialog" aria-modal="true" style="max-width:720px;">
-        <div class="modal-head">
-            <h3><span class="mono" id="toolsConnName"></span> 的工具目录</h3>
-            <span class="spacer"></span>
-            <button class="btn btn-outline-secondary" id="toolsClose">关闭</button>
-        </div>
-        <div id="toolsBody" style="margin-top:10px;"></div>
     </div>
 </div>
 

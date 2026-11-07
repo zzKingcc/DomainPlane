@@ -1,54 +1,146 @@
 (() => {
-  var __async = (__this, __arguments, generator) => {
-    return new Promise((resolve, reject) => {
-      var fulfilled = (value) => {
-        try {
-          step(generator.next(value));
-        } catch (e) {
-          reject(e);
-        }
-      };
-      var rejected = (value) => {
-        try {
-          step(generator.throw(value));
-        } catch (e) {
-          reject(e);
-        }
-      };
-      var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
-      step((generator = generator.apply(__this, __arguments)).next());
-    });
-  };
-
-  // src/pages/mcp.js
+  // domainplane-server/frontend/src/pages/mcp.js
   (function() {
     var esc = Console.escapeHtml;
-    var CONNS = [];
-    var BINDINGS = { domainBindings: {}, connectionBindings: {} };
-    var DOMAINS = [];
+    var PROTOCOL = "2025-03-26";
+    var POLL_MS = 15e3;
     var EP = { STREAMABLE_HTTP: "Streamable HTTP", LEGACY_SSE: "Legacy SSE" };
-    var MCP_ICON = '<svg class="mcp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>';
-    function setValue(id, v, tone) {
-      var el = document.getElementById(id);
-      if (el) {
-        el.textContent = v;
-        el.className = "dp-stat-value" + (tone ? " " + tone : "");
+    var ST = {
+      READY: { label: "\u5DF2\u5C31\u7EEA", cls: "ready" },
+      CONNECTING: { label: "\u8FDE\u63A5\u4E2D", cls: "connecting" },
+      NEEDS_AUTH: { label: "\u9700\u6388\u6743", cls: "needs" },
+      FAILED: { label: "\u8FDE\u63A5\u5931\u8D25", cls: "failed" },
+      DISCONNECTED: { label: "\u672A\u8FDE\u63A5", cls: "disc" },
+      OFF: { label: "\u5DF2\u7981\u7528", cls: "off" }
+    };
+    var PANES = { overview: "paneOverview", tools: "paneTools", auth: "paneAuth", bind: "paneBind" };
+    var state = {
+      conns: [],
+      settingsFile: "",
+      bindings: { domainBindings: {}, connectionBindings: {} },
+      domains: [],
+      selected: "",
+      tab: "overview",
+      tools: [],
+      toolsFor: "",
+      toolsError: "",
+      allowPick: [],
+      bindPick: [],
+      bindFor: "",
+      bindTouched: false,
+      editing: false,
+      editName: "",
+      lastSync: 0,
+      listSig: ""
+    };
+    function el(id) {
+      return document.getElementById(id);
+    }
+    function setText(id, v) {
+      var n = el(id);
+      if (n) {
+        n.textContent = v;
       }
     }
-    function statusTag(c) {
-      if (!c.enabled) {
-        return '<span class="tag off">\u5DF2\u7981\u7528</span>';
+    function setHtml(id, v) {
+      var n = el(id);
+      if (n) {
+        n.innerHTML = v;
+      }
+    }
+    function setHidden(id, h) {
+      var n = el(id);
+      if (n) {
+        n.hidden = !!h;
+      }
+    }
+    function val(id) {
+      var n = el(id);
+      return n ? String(n.value || "").trim() : "";
+    }
+    function setVal(id, v) {
+      var n = el(id);
+      if (n) {
+        n.value = v == null ? "" : String(v);
+      }
+    }
+    function checked(id) {
+      var n = el(id);
+      return !!(n && n.checked);
+    }
+    function setChecked(id, v) {
+      var n = el(id);
+      if (n) {
+        n.checked = !!v;
+      }
+    }
+    function disable(id, on) {
+      var n = el(id);
+      if (n) {
+        n.disabled = !!on;
+      }
+    }
+    function num(v) {
+      return v === void 0 || v === null || v === "" ? "\u2014" : String(v);
+    }
+    function errText(e) {
+      return e && e.message ? String(e.message) : "\u672A\u77E5\u9519\u8BEF";
+    }
+    function shortErr(s, n) {
+      s = String(s || "");
+      return s.length > n ? s.slice(0, n) + "\u2026" : s;
+    }
+    function timeOf(ms) {
+      if (!ms) {
+        return "\u2014";
+      }
+      var d = new Date(ms);
+      function p(x) {
+        return ("0" + x).slice(-2);
+      }
+      return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+    }
+    function kv(k, v) {
+      return '<div class="k">' + esc(k) + '</div><div class="v">' + v + "</div>";
+    }
+    function findConn(name) {
+      for (var i = 0; i < state.conns.length; i++) {
+        if (state.conns[i].name === name) {
+          return state.conns[i];
+        }
+      }
+      return null;
+    }
+    function boundOf(name) {
+      return (state.bindings.connectionBindings || {})[name] || [];
+    }
+    function statusOf(c) {
+      if (!c) {
+        return "DISCONNECTED";
+      }
+      if (c.enabled === false) {
+        return "OFF";
       }
       if (c.ready) {
-        return '<span class="tag ready">\u5DF2\u5C31\u7EEA</span>';
+        return "READY";
       }
       if (c.needsAuth) {
-        return '<span class="tag approval" title="' + esc(c.lastError || "") + '">\u9700\u6388\u6743</span>';
+        return "NEEDS_AUTH";
       }
       if (c.status === "FAILED") {
-        return '<span class="tag failed" title="' + esc(c.lastError || "") + '">\u8FDE\u63A5\u5931\u8D25</span>';
+        return "FAILED";
       }
-      return '<span class="tag off">\u672A\u8FDE\u63A5</span>';
+      if (c.status === "CONNECTING") {
+        return "CONNECTING";
+      }
+      return "DISCONNECTED";
+    }
+    function chip(c) {
+      var m = ST[statusOf(c)] || ST.DISCONNECTED;
+      return '<span class="dp-mcp-s ' + m.cls + '"><i></i>' + m.label + "</span>";
+    }
+    function noteOf(c) {
+      return "\u5DE5\u5177 " + (c.ready ? num(c.toolCount) : "0") + " \xB7 \u57DF " + boundOf(c.name).length + " \xB7 " + (EP[c.transport] || c.transport || "\u2014");
     }
     function sideEffectTag(se) {
       var cls = "perm";
@@ -59,375 +151,752 @@
       } else if (se === "DESTRUCTIVE") {
         cls = "destructive";
       }
-      return '<span class="tag ' + cls + '">' + esc(se) + "</span>";
+      return '<span class="tag ' + cls + '">' + esc(se || "\u2014") + "</span>";
+    }
+    function setStat(id, v, tone) {
+      var n = el(id);
+      if (n) {
+        n.textContent = v;
+        n.className = "dp-stat-value" + (tone ? " " + tone : "");
+      }
     }
     function renderStats() {
-      var ready = 0, needsAuth = 0, failed = 0;
-      CONNS.forEach(function(c) {
-        if (c.enabled && c.ready) {
+      var ready = 0, needs = 0, failed = 0, tools = 0;
+      state.conns.forEach(function(c) {
+        var s = statusOf(c);
+        if (s === "READY") {
           ready++;
-        } else if (c.enabled && c.needsAuth) {
-          needsAuth++;
-        } else if (c.enabled && c.status === "FAILED") {
+          tools += Number(c.toolCount) || 0;
+        } else if (s === "NEEDS_AUTH") {
+          needs++;
+        } else if (s === "FAILED") {
           failed++;
         }
       });
-      setValue("statConns", String(CONNS.length));
-      setValue("statReady", String(ready));
-      setValue("statNeedsAuth", String(needsAuth), needsAuth ? "warn" : "");
-      setValue("statFailed", String(failed), failed ? "err" : "");
+      setStat("statConns", String(state.conns.length));
+      setStat("statReady", String(ready));
+      setStat("statNeedsAuth", String(needs), needs ? "warn" : "");
+      setStat("statFailed", String(failed), failed ? "err" : "");
+      setStat("statTools", String(tools));
     }
-    function render() {
-      var box = document.getElementById("connList");
-      renderStats();
-      if (!CONNS.length) {
-        box.innerHTML = '<div class="dp-card"><span class="perm-none">\u8FD8\u6CA1\u6709\u4EFB\u4F55 MCP \u8FDE\u63A5\u3002\u70B9\u300C\u65B0\u589E\u8FDE\u63A5\u300D\u63A5\u5165\u4E00\u4E2A\u5916\u90E8 MCP server\u3002</span></div>';
+    function visibleConns() {
+      var q = val("connSearch").toLowerCase(), f = val("statusFilter");
+      return state.conns.filter(function(c) {
+        if (f && statusOf(c) !== f) {
+          return false;
+        }
+        if (!q) {
+          return true;
+        }
+        return (String(c.name || "") + " " + String(c.url || "")).toLowerCase().indexOf(q) >= 0;
+      });
+    }
+    function itemHtml(c) {
+      var s = statusOf(c);
+      var bad = c.lastError && (s === "FAILED" || s === "NEEDS_AUTH");
+      return '<div class="dp-mcp-item' + (c.name === state.selected ? " on" : "") + '" data-name="' + esc(c.name) + '"><div class="dp-mcp-item-top"><span class="dp-mcp-item-name mono">' + esc(c.name) + '</span><span class="dp-mcp-item-status">' + chip(c) + '</span></div><div class="dp-mcp-item-note">' + esc(noteOf(c)) + "</div>" + (bad ? '<div class="dp-mcp-item-err">' + esc(shortErr(c.lastError, 60)) + "</div>" : "") + "</div>";
+    }
+    function renderList() {
+      var list = visibleConns();
+      if (!list.length) {
+        setHtml("connList", '<div class="dp-mcp-none">\u6CA1\u6709\u5339\u914D\u7684\u8FDE\u63A5</div>');
         return;
       }
-      box.innerHTML = CONNS.map(function(c) {
-        var bound = BINDINGS.connectionBindings[c.name] || [];
-        var boundTags = bound.length ? bound.map(function(d) {
-          return '<span class="tag public mono">' + esc(d) + "</span>";
-        }).join(" ") : '<span class="perm-none">\u672A\u7ED1\u5B9A\u4EFB\u4F55\u57DF\uFF08\u5DE5\u5177\u5BF9\u8C01\u90FD\u4E0D\u53EF\u89C1\uFF09</span>';
-        var actions = (c.enabled ? '<button class="btn btn-sm btn-outline-secondary" data-toggle="' + esc(c.name) + '" data-to="false">\u505C\u7528</button>' : '<button class="btn btn-sm btn-outline-primary" data-toggle="' + esc(c.name) + '" data-to="true">\u542F\u7528</button>') + '<button class="btn btn-sm btn-outline-secondary" data-test="' + esc(c.name) + '">\u6D4B\u8BD5</button><button class="btn btn-sm btn-outline-secondary" data-tools="' + esc(c.name) + '">\u5DE5\u5177</button>' + (c.needsAuth ? '<button class="btn btn-sm btn-outline-secondary" data-oauth="' + esc(c.name) + '">\u6388\u6743</button>' : "") + '<button class="btn btn-sm btn-outline-secondary" data-bind="' + esc(c.name) + '">\u7ED1\u5B9A\u57DF</button><button class="btn btn-sm btn-outline-secondary" data-edit="' + esc(c.name) + '">\u7F16\u8F91</button><button class="btn btn-sm btn-outline-danger" data-del="' + esc(c.name) + '">\u5220\u9664</button>';
-        return '<section class="dp-card model-card"><header class="card-head">' + MCP_ICON + '<h2 class="mono">' + esc(c.name) + "</h2>" + statusTag(c) + '<span class="spacer"></span><span class="card-note">\u5DE5\u5177 ' + (c.ready ? c.toolCount : 0) + " \xB7 \u7B56\u7565 " + esc(c.approvalPolicy) + '</span></header><div class="kv"><span class="k">\u5730\u5740</span><span class="v">' + esc(c.url) + '</span><span class="k">\u4F20\u8F93</span><span class="v">' + esc(EP[c.transport] || c.transport) + "</span>" + (c.hasHeaders ? '<span class="k">\u9274\u6743</span><span class="v">\u5DF2\u914D\u7F6E\uFF08\u660E\u6587\u4E0D\u56DE\u663E\uFF09</span>' : "") + (c.oauthClientId ? '<span class="k">OAuth</span><span class="v">client_id ' + esc(c.oauthClientId) + (c.hasOauthClientSecret ? " + secret" : "") + "\uFF08\u624B\u5DE5\u767B\u8BB0\uFF09</span>" : '<span class="k">OAuth</span><span class="v">\u672A\u767B\u8BB0\uFF08\u9700\u8981\u65F6\u8D70\u52A8\u6001\u6CE8\u518C\uFF09</span>') + (c.callTimeoutMs ? '<span class="k">\u8D85\u65F6</span><span class="v">' + esc(c.callTimeoutMs) + " ms</span>" : "") + ((c.toolAllowlist || []).length ? '<span class="k">\u767D\u540D\u5355</span><span class="v">' + esc(c.toolAllowlist.join(", ")) + "</span>" : "") + (c.remark ? '<span class="k">\u5907\u6CE8</span><span class="v">' + esc(c.remark) + "</span>" : "") + '</div><div class="mcp-bound"><span class="k">\u7ED1\u5B9A\u57DF</span>' + boundTags + '</div><div class="mcp-actions">' + actions + "</div></section>";
-      }).join("");
-      box.querySelectorAll("button[data-toggle]").forEach(function(b) {
-        b.addEventListener("click", function() {
-          toggle(b.getAttribute("data-toggle"), b.getAttribute("data-to") === "true", b);
-        });
+      setHtml("connList", list.map(itemHtml).join(""));
+    }
+    function patchList() {
+      var box = el("connList");
+      if (!box) {
+        return;
+      }
+      var byName = {};
+      state.conns.forEach(function(c) {
+        byName[c.name] = c;
       });
-      box.querySelectorAll("button[data-test]").forEach(function(b) {
-        b.addEventListener("click", function() {
-          testConn(b.getAttribute("data-test"), b);
-        });
-      });
-      box.querySelectorAll("button[data-oauth]").forEach(function(b) {
-        b.addEventListener("click", function() {
-          startOAuth(b.getAttribute("data-oauth"));
-        });
-      });
-      box.querySelectorAll("button[data-tools]").forEach(function(b) {
-        b.addEventListener("click", function() {
-          showTools(b.getAttribute("data-tools"));
-        });
-      });
-      box.querySelectorAll("button[data-bind]").forEach(function(b) {
-        b.addEventListener("click", function() {
-          openBind(b.getAttribute("data-bind"));
-        });
-      });
-      box.querySelectorAll("button[data-edit]").forEach(function(b) {
-        b.addEventListener("click", function() {
-          openEdit(b.getAttribute("data-edit"));
-        });
-      });
-      box.querySelectorAll("button[data-del]").forEach(function(b) {
-        b.addEventListener("click", function() {
-          delConn(b.getAttribute("data-del"));
-        });
+      box.querySelectorAll(".dp-mcp-item").forEach(function(row) {
+        var c = byName[row.getAttribute("data-name")];
+        if (!c) {
+          return;
+        }
+        var s = row.querySelector(".dp-mcp-item-status");
+        if (s) {
+          s.innerHTML = chip(c);
+        }
+        var n = row.querySelector(".dp-mcp-item-note");
+        if (n) {
+          n.textContent = noteOf(c);
+        }
+        var old = row.querySelector(".dp-mcp-item-err");
+        if (old) {
+          old.remove();
+        }
+        var st = statusOf(c);
+        if (c.lastError && (st === "FAILED" || st === "NEEDS_AUTH")) {
+          row.insertAdjacentHTML("beforeend", '<div class="dp-mcp-item-err">' + esc(shortErr(c.lastError, 60)) + "</div>");
+        }
       });
     }
-    function loadBindings() {
-      return Console.api.get("/admin/mcp-bindings").then(function(r) {
-        BINDINGS = r || { domainBindings: {}, connectionBindings: {} };
+    function patchStatus() {
+      renderStats();
+      var sig = state.conns.map(function(c2) {
+        return c2.name;
+      }).join("");
+      if (sig !== state.listSig) {
+        state.listSig = sig;
+        renderList();
+      } else {
+        patchList();
+      }
+      setText("syncHint", "\u4E0A\u6B21\u540C\u6B65 " + timeOf(state.lastSync));
+      var c = findConn(state.selected);
+      if (c && !state.editing) {
+        renderStatusBar(c);
+        if (state.tab === "overview") {
+          renderDiag(c);
+        }
+        if (state.tab === "auth") {
+          renderAuth(c);
+        }
+      }
+    }
+    function renderStatusBar(c) {
+      var s = statusOf(c);
+      var meta = "\u4F20\u8F93 " + (EP[c.transport] || c.transport || "\u2014") + " \xB7 \u534F\u8BAE " + PROTOCOL + " \xB7 \u5DE5\u5177 " + (c.ready ? num(c.toolCount) : "0") + " \xB7 \u4E0A\u6B21\u540C\u6B65 " + timeOf(state.lastSync);
+      var err = (s === "FAILED" || s === "NEEDS_AUTH") && c.lastError ? '<div class="dp-mcp-sb-err">' + esc(shortErr(c.lastError, 120)) + (s === "NEEDS_AUTH" ? '<button class="btn btn-sm" type="button" data-act="oauth">\u53BB\u6388\u6743</button>' : '<button class="btn btn-sm" type="button" data-act="test">\u91CD\u8BD5\u6D4B\u8BD5</button>') + "</div>" : "";
+      setHtml(
+        "statusBar",
+        '<div class="dp-mcp-sb-top"><div class="dp-mcp-sb-state">' + chip(c) + '<span class="dp-mcp-sb-name mono">' + esc(c.name) + '</span></div><div class="dp-mcp-sb-actions"><button class="btn btn-sm btn-outline-primary" type="button" data-act="test">\u6D4B\u8BD5\u8FDE\u63A5</button><button class="btn btn-sm btn-outline-secondary" type="button" data-act="edit">\u7F16\u8F91</button><details class="dp-mcp-more"><summary class="btn btn-sm btn-outline-secondary">\u66F4\u591A</summary><div class="dp-mcp-menu"><button type="button" data-act="toggle">' + (c.enabled === false ? "\u542F\u7528" : "\u505C\u7528") + '</button><button type="button" data-act="oauth">\u53D1\u8D77\u6388\u6743</button><button type="button" data-act="delete">\u5220\u9664</button></div></details></div></div><div class="dp-mcp-sb-meta">' + esc(meta) + "</div>" + err
+      );
+    }
+    function selectTab(tab) {
+      state.tab = tab;
+      var bar = el("tabBar");
+      if (bar) {
+        bar.querySelectorAll(".dp-mcp-tab").forEach(function(b) {
+          b.classList.toggle("on", b.getAttribute("data-tab") === tab);
+        });
+      }
+      Object.keys(PANES).forEach(function(t) {
+        setHidden(PANES[t], t !== tab);
       });
+      var c = findConn(state.selected);
+      if (c) {
+        renderTab(c);
+      }
     }
-    function loadDomains() {
-      return Console.api.get("/admin/domains").then(function(r) {
-        DOMAINS = r && r.domains || [];
-      }).catch(function() {
-        DOMAINS = [];
-      });
+    function renderTab(c) {
+      if (state.tab === "overview") {
+        renderOverview(c);
+      } else if (state.tab === "tools") {
+        renderTools(c);
+      } else if (state.tab === "auth") {
+        renderAuth(c);
+      } else {
+        renderBind(c);
+      }
     }
-    function load() {
-      document.getElementById("connList").innerHTML = Console.loadingHtml("\u6B63\u5728\u52A0\u8F7D MCP \u8FDE\u63A5\u2026");
-      Console.api.get("/admin/mcp-connections").then(function(r) {
-        CONNS = r && r.connections || [];
-        return loadBindings();
-      }).then(render).catch(function(e) {
-        document.getElementById("connList").innerHTML = '<div class="dp-card" style="color:var(--red);">\u8BFB\u53D6\u5931\u8D25\uFF1A' + esc(e.message) + "</div>";
-      });
-    }
-    function openCreate() {
-      document.getElementById("editTitle").textContent = "\u65B0\u589E MCP \u8FDE\u63A5";
-      document.getElementById("f_name").value = "";
-      document.getElementById("f_name").disabled = false;
-      document.getElementById("f_url").value = "";
-      document.getElementById("f_transport").value = "STREAMABLE_HTTP";
-      document.getElementById("f_approval").value = "ALL";
-      document.getElementById("f_headers").value = "";
-      document.getElementById("f_oauth_cid").value = "";
-      document.getElementById("f_oauth_secret").value = "";
-      document.getElementById("f_oauth_cname").value = "";
-      document.getElementById("f_oauth_scope").value = "";
-      document.getElementById("f_oauth_redirect").value = "";
-      document.getElementById("f_timeout").value = "30000";
-      document.getElementById("f_allow").value = "";
-      document.getElementById("f_remark").value = "";
-      document.getElementById("f_enabled").checked = true;
-      document.getElementById("editModal").hidden = false;
-      document.body.style.overflow = "hidden";
-    }
-    function openEdit(name) {
-      var c = CONNS.filter(function(x) {
-        return x.name === name;
-      })[0];
+    function renderDetail() {
+      var c = findConn(state.selected);
+      setHidden("detailEmpty", !!c);
+      setHidden("detailBody", !c);
       if (!c) {
         return;
       }
-      document.getElementById("editTitle").textContent = "\u7F16\u8F91 MCP \u8FDE\u63A5";
-      document.getElementById("f_name").value = c.name;
-      document.getElementById("f_name").disabled = true;
-      document.getElementById("f_url").value = c.url || "";
-      document.getElementById("f_transport").value = c.transport || "STREAMABLE_HTTP";
-      document.getElementById("f_approval").value = c.approvalPolicy || "ALL";
-      document.getElementById("f_headers").value = "";
-      document.getElementById("f_oauth_cid").value = c.oauthClientId || "";
-      document.getElementById("f_oauth_secret").value = "";
-      document.getElementById("f_oauth_cname").value = c.oauthClientName || "";
-      document.getElementById("f_oauth_scope").value = c.oauthScope || "";
-      document.getElementById("f_oauth_redirect").value = c.oauthRedirectUri || "";
-      document.getElementById("f_timeout").value = c.callTimeoutMs || 3e4;
-      document.getElementById("f_allow").value = (c.toolAllowlist || []).join(", ");
-      document.getElementById("f_remark").value = c.remark || "";
-      document.getElementById("f_enabled").checked = c.enabled !== false;
-      document.getElementById("editModal").hidden = false;
+      renderStatusBar(c);
+      selectTab(state.tab);
+    }
+    function renderOverview(c) {
+      var bound = boundOf(c.name);
+      var allow = c.toolAllowlist || [];
+      setHtml(
+        "paneOverview",
+        '<div id="diagCard"></div><div class="dp-mcp-kv">' + kv("\u5730\u5740", esc(c.url || "\u2014")) + kv("\u4F20\u8F93", esc(EP[c.transport] || c.transport || "\u2014")) + kv("\u534F\u8BAE\u57FA\u7EBF", esc(PROTOCOL)) + kv("\u8C03\u7528\u8D85\u65F6", c.callTimeoutMs ? esc(String(c.callTimeoutMs)) + " ms" : "\u9ED8\u8BA4 30000 ms") + kv("\u5BA1\u6279\u7B56\u7565", esc(c.approvalPolicy || "\u2014")) + kv("\u8BF7\u6C42\u5934", c.hasHeaders ? "\u5DF2\u914D\u7F6E\uFF08\u4E0D\u56DE\u663E\uFF09" : "\u672A\u914D\u7F6E") + kv("\u5DE5\u5177\u767D\u540D\u5355", allow.length ? esc(allow.join(", ")) : "\u5168\u90E8\u5F00\u653E") + kv("\u7ED1\u5B9A\u57DF", bound.length ? bound.map(function(d) {
+          return '<span class="tag public mono">' + esc(d) + "</span>";
+        }).join(" ") : "\u672A\u7ED1\u5B9A") + kv("\u5907\u6CE8", esc(c.remark || "\u2014")) + kv("\u914D\u7F6E\u6587\u4EF6", esc(state.settingsFile || "\u2014")) + "</div>"
+      );
+      renderDiag(c);
+    }
+    function renderDiag(c) {
+      var s = statusOf(c);
+      var has = !!c.lastError;
+      var card = el("diagCard");
+      var wasOpen = !!(card && card.querySelector(".dp-mcp-diag-raw[open]"));
+      setHtml(
+        "diagCard",
+        '<div class="dp-mcp-diag"><div class="dp-mcp-diag-head">\u8BCA\u65AD</div><div class="dp-mcp-diag-row"><span>\u8FD0\u884C\u72B6\u6001</span><strong>' + esc(ST[s].label) + '</strong></div><div class="dp-mcp-diag-row"><span>\u6700\u8FD1\u9519\u8BEF</span>' + (has ? '<strong class="err">' + esc(shortErr(c.lastError, 100)) + "</strong>" : "<strong>\u65E0</strong>") + '</div><div class="dp-mcp-diag-row"><span>\u4E0A\u6B21\u540C\u6B65</span><strong>' + esc(timeOf(state.lastSync)) + "</strong></div>" + (has ? '<details class="dp-mcp-diag-raw"' + (wasOpen ? " open" : "") + "><summary>\u5C55\u5F00\u9519\u8BEF\u539F\u6587</summary><pre>" + esc(c.lastError) + "</pre></details>" : "") + "</div>"
+      );
+    }
+    function loadTools(name) {
+      return Console.api.get("/admin/mcp-connections/" + encodeURIComponent(name) + "/tools").then(function(r) {
+        state.tools = r && r.tools || [];
+        state.toolsFor = name;
+        state.toolsError = "";
+        afterTools(name);
+      }).catch(function(e) {
+        state.tools = [];
+        state.toolsFor = name;
+        state.toolsError = errText(e);
+        afterTools(name);
+      });
+    }
+    function afterTools(name) {
+      var c = findConn(state.selected);
+      if (c && c.name === name && state.tab === "tools") {
+        renderTools(c);
+      }
+      if (state.editing && state.editName === name) {
+        renderAllowTools();
+      }
+    }
+    function renderTools(c) {
+      if (state.toolsFor !== c.name) {
+        setHtml("paneTools", Console.loadingHtml("\u6B63\u5728\u8BFB\u53D6\u5DE5\u5177\u76EE\u5F55\u2026"));
+        loadTools(c.name);
+        return;
+      }
+      var retry = '<button class="btn btn-sm" type="button" data-act="reloadTools">\u91CD\u65B0\u8BFB\u53D6</button>';
+      if (state.toolsError) {
+        setHtml("paneTools", '<div class="dp-mcp-err">\u8BFB\u53D6\u5DE5\u5177\u76EE\u5F55\u5931\u8D25\uFF1A' + esc(state.toolsError) + "</div>" + retry);
+        return;
+      }
+      if (!state.tools.length) {
+        setHtml("paneTools", '<div class="dp-mcp-none">\u8BE5\u8FDE\u63A5\u6CA1\u6709\u5DE5\u5177</div>' + retry);
+        return;
+      }
+      setHtml(
+        "paneTools",
+        '<div class="dp-mcp-tools-head"><span>' + state.tools.length + ' \u4E2A\u5DE5\u5177</span><span class="spacer"></span>' + retry + '<button class="btn btn-sm btn-outline-primary" type="button" data-act="editAllow">\u7F16\u8F91\u767D\u540D\u5355</button></div><div class="dp-mcp-table-wrap"><table class="table dp-mcp-table"><thead><tr><th>\u72B6\u6001</th><th>\u539F\u59CB\u540D</th><th>\u6620\u5C04\u540D</th><th>\u526F\u4F5C\u7528</th><th>\u8BF4\u660E</th></tr></thead><tbody>' + state.tools.map(function(t) {
+          return "<tr><td>" + (t.allowed ? '<span class="tag public">\u5DF2\u5F00\u653E</span>' : '<span class="tag off">\u5DF2\u88C1\u526A</span>') + '</td><td class="mono">' + esc(t.originalName || "\u2014") + '</td><td class="mono">' + esc(t.mappedName || "\u2014") + "</td><td>" + sideEffectTag(t.sideEffect) + "</td><td>" + esc(shortErr(t.description || "\u2014", 90)) + "</td></tr>";
+        }).join("") + "</tbody></table></div>"
+      );
+    }
+    function renderAuth(c) {
+      var need = statusOf(c) === "NEEDS_AUTH";
+      setHtml(
+        "paneAuth",
+        '<div class="dp-mcp-kv">' + kv("\u5F53\u524D\u72B6\u6001", chip(c)) + kv("client_id", esc(c.oauthClientId || "\u672A\u767B\u8BB0\uFF08\u8D70\u52A8\u6001\u6CE8\u518C\uFF09")) + kv("client_secret", c.hasOauthClientSecret ? "\u5DF2\u914D\u7F6E\uFF08\u4E0D\u56DE\u663E\uFF09" : "\u672A\u914D\u7F6E") + kv("client \u540D\u79F0", esc(c.oauthClientName || "\u2014")) + kv("scope", esc(c.oauthScope || "\u670D\u52A1\u5668\u9ED8\u8BA4")) + kv("\u56DE\u8C03\u5730\u5740", esc(c.oauthRedirectUri || "\u5F53\u524D\u7BA1\u63A7\u53F0\u5730\u5740")) + '</div><div class="dp-mcp-pane-actions"><button class="btn btn-sm btn-outline-primary" type="button" data-act="oauth">' + (need ? "\u53D1\u8D77\u6388\u6743" : "\u91CD\u65B0\u6388\u6743") + "</button></div>"
+      );
+    }
+    function renderBind(c) {
+      if (state.bindFor !== c.name || !state.bindTouched) {
+        state.bindPick = boundOf(c.name).slice();
+        state.bindFor = c.name;
+      }
+      if (!state.domains.length) {
+        setHtml("paneBind", '<div class="dp-mcp-none">\u8FD8\u6CA1\u6709\u4EFB\u4F55\u57DF</div>');
+        return;
+      }
+      var current = boundOf(c.name);
+      var adds = state.bindPick.filter(function(d) {
+        return current.indexOf(d) < 0;
+      });
+      var removes = current.filter(function(d) {
+        return state.bindPick.indexOf(d) < 0;
+      });
+      var diff = adds.length || removes.length ? "\u65B0\u589E " + (adds.length ? esc(adds.join("\u3001")) : "\u65E0") + " \xB7 \u79FB\u9664 " + (removes.length ? esc(removes.join("\u3001")) : "\u65E0") : "\u672A\u6539\u52A8";
+      setHtml(
+        "paneBind",
+        '<div class="dp-mcp-bind-grid">' + state.domains.map(function(d) {
+          var on = state.bindPick.indexOf(d.name) >= 0;
+          return '<div class="dp-mcp-bind-card' + (on ? " on" : "") + '" data-pick="' + esc(d.name) + '"><span class="mono">' + esc(d.name) + "</span>" + (d.callable ? "" : '<span class="tag approval">\u88C5\u914D</span>') + "</div>";
+        }).join("") + '</div><div class="dp-mcp-diff">' + diff + '</div><div class="dp-mcp-pane-actions"><button class="btn btn-sm btn-outline-primary" type="button" data-act="saveBind">\u4FDD\u5B58\u7ED1\u5B9A</button><button class="btn btn-sm btn-outline-secondary" type="button" data-act="bindClear">\u5168\u90E8\u89E3\u7ED1</button></div>'
+      );
+    }
+    function showFieldError(id, msg) {
+      var n = el(id);
+      if (!n || !n.closest) {
+        return;
+      }
+      var row = n.closest(".f-row");
+      if (!row) {
+        return;
+      }
+      var old = row.querySelector(".dp-mcp-ferr");
+      if (old) {
+        old.remove();
+      }
+      if (msg) {
+        row.insertAdjacentHTML("beforeend", '<div class="dp-mcp-ferr">' + esc(msg) + "</div>");
+      }
+    }
+    function clearFieldErrors() {
+      var box = el("editModal");
+      if (box) {
+        box.querySelectorAll(".dp-mcp-ferr").forEach(function(n) {
+          n.remove();
+        });
+      }
+    }
+    function renderAllowTools() {
+      if (state.toolsError) {
+        setHtml("allowTools", '<div class="dp-mcp-none">\u5DE5\u5177\u76EE\u5F55\u8BFB\u53D6\u5931\u8D25\uFF0C\u4FDD\u5B58\u540E\u53EF\u91CD\u8BD5</div>');
+        return;
+      }
+      if (!state.tools.length) {
+        setHtml("allowTools", '<div class="dp-mcp-none">\u8BE5\u8FDE\u63A5\u6682\u65E0\u5DE5\u5177\u76EE\u5F55</div>');
+        return;
+      }
+      setHtml("allowTools", state.tools.map(function(t) {
+        var on = state.allowPick.indexOf(t.originalName) >= 0;
+        return '<label class="dp-mcp-allow-item"><input type="checkbox" data-allow="' + esc(t.originalName) + '"' + (on ? " checked" : "") + '><span class="mono">' + esc(t.originalName) + "</span>" + sideEffectTag(t.sideEffect) + "</label>";
+      }).join(""));
+    }
+    function openCreate() {
+      state.editName = "";
+      state.editing = true;
+      setText("editTitle", "\u65B0\u589E MCP \u8FDE\u63A5");
+      setVal("f_name", "");
+      disable("f_name", false);
+      setVal("f_url", "");
+      setVal("f_remark", "");
+      setChecked("f_enabled", true);
+      setVal("f_transport", "STREAMABLE_HTTP");
+      setVal("f_timeout", "30000");
+      setVal("f_headers", "");
+      setHtml("headerState", "");
+      setVal("f_approval", "ALL");
+      setVal("f_oauth_cid", "");
+      setVal("f_oauth_secret", "");
+      setVal("f_oauth_cname", "");
+      setVal("f_oauth_scope", "");
+      setVal("f_oauth_redirect", "");
+      state.allowPick = [];
+      state.tools = [];
+      state.toolsFor = "";
+      state.toolsError = "";
+      setHtml("allowTools", '<div class="dp-mcp-none">\u4FDD\u5B58\u540E\u53EF\u8BFB\u53D6\u5DE5\u5177\u76EE\u5F55\u5E76\u52FE\u9009\u767D\u540D\u5355</div>');
+      clearFieldErrors();
+      setHidden("editModal", false);
       document.body.style.overflow = "hidden";
     }
+    function openEdit(name) {
+      var c = findConn(name);
+      if (!c) {
+        return;
+      }
+      state.editName = name;
+      state.editing = true;
+      setText("editTitle", "\u7F16\u8F91 MCP \u8FDE\u63A5");
+      setVal("f_name", c.name);
+      disable("f_name", true);
+      setVal("f_url", c.url || "");
+      setVal("f_remark", c.remark || "");
+      setChecked("f_enabled", c.enabled !== false);
+      setVal("f_transport", c.transport || "STREAMABLE_HTTP");
+      setVal("f_timeout", c.callTimeoutMs || 3e4);
+      setVal("f_headers", "");
+      setHtml("headerState", c.hasHeaders ? "<span>\u5DF2\u914D\u7F6E\u8BF7\u6C42\u5934\uFF08\u4E0D\u56DE\u663E\uFF09</span>" : "");
+      setVal("f_approval", c.approvalPolicy || "ALL");
+      setVal("f_oauth_cid", c.oauthClientId || "");
+      setVal("f_oauth_secret", "");
+      setVal("f_oauth_cname", c.oauthClientName || "");
+      setVal("f_oauth_scope", c.oauthScope || "");
+      setVal("f_oauth_redirect", c.oauthRedirectUri || "");
+      state.allowPick = (c.toolAllowlist || []).slice();
+      clearFieldErrors();
+      setHidden("editModal", false);
+      document.body.style.overflow = "hidden";
+      setHtml("allowTools", Console.loadingHtml("\u6B63\u5728\u8BFB\u53D6\u5DE5\u5177\u76EE\u5F55\u2026"));
+      loadTools(name);
+    }
     function closeEdit() {
-      document.getElementById("editModal").hidden = true;
+      state.editing = false;
+      setHidden("editModal", true);
       document.body.style.overflow = "";
     }
+    function validate() {
+      clearFieldErrors();
+      var name = val("f_name"), url = val("f_url"), t = val("f_timeout");
+      var ok = true;
+      if (!name) {
+        showFieldError("f_name", "\u8FDE\u63A5\u540D\u4E0D\u80FD\u4E3A\u7A7A");
+        ok = false;
+      } else if (name.indexOf("__") >= 0) {
+        showFieldError("f_name", "\u4E0D\u80FD\u5305\u542B\u8FDE\u7EED\u53CC\u4E0B\u5212\u7EBF");
+        ok = false;
+      }
+      if (!/^https?:\/\//i.test(url)) {
+        showFieldError("f_url", "\u8BF7\u586B\u5199 http(s) \u5730\u5740");
+        ok = false;
+      }
+      if (t && (!/^\d+$/.test(t) || Number(t) <= 0)) {
+        showFieldError("f_timeout", "\u8D85\u65F6\u5FC5\u987B\u662F\u6B63\u6574\u6570\u6BEB\u79D2");
+        ok = false;
+      }
+      return ok;
+    }
     function saveEdit() {
-      var name = document.getElementById("f_name").value.trim();
-      var url = document.getElementById("f_url").value.trim();
-      var headersRaw = document.getElementById("f_headers").value.trim();
+      if (!validate()) {
+        return Promise.resolve();
+      }
+      var raw = val("f_headers");
       var headers = {};
-      if (headersRaw) {
+      if (raw) {
         try {
-          headers = JSON.parse(headersRaw);
+          headers = JSON.parse(raw);
+          if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+            throw new Error("\u9700\u8981 JSON \u5BF9\u8C61");
+          }
         } catch (e) {
-          Console.toast("\u81EA\u5B9A\u4E49\u8BF7\u6C42\u5934\u4E0D\u662F\u5408\u6CD5 JSON\uFF1A" + e.message, { type: "error" });
-          return;
+          showFieldError("f_headers", "\u4E0D\u662F\u5408\u6CD5 JSON \u5BF9\u8C61\uFF1A" + e.message);
+          return Promise.resolve();
         }
       }
-      var allowRaw = document.getElementById("f_allow").value.trim();
-      var allow = allowRaw ? allowRaw.split(/[,\s]+/).filter(Boolean) : [];
-      var timeout = parseInt(document.getElementById("f_timeout").value, 10);
+      var t = parseInt(val("f_timeout"), 10);
       var body = {
-        name,
-        url,
-        transport: document.getElementById("f_transport").value,
-        approvalPolicy: document.getElementById("f_approval").value,
+        name: val("f_name"),
+        url: val("f_url"),
+        transport: val("f_transport"),
+        approvalPolicy: val("f_approval"),
         headers,
-        callTimeoutMs: isNaN(timeout) ? 3e4 : timeout,
-        enabled: document.getElementById("f_enabled").checked,
-        toolAllowlist: allow,
-        remark: document.getElementById("f_remark").value.trim(),
-        oauthClientId: document.getElementById("f_oauth_cid").value.trim(),
-        oauthClientSecret: document.getElementById("f_oauth_secret").value,
-        oauthClientName: document.getElementById("f_oauth_cname").value.trim(),
-        oauthScope: document.getElementById("f_oauth_scope").value.trim(),
-        oauthRedirectUri: document.getElementById("f_oauth_redirect").value.trim()
+        callTimeoutMs: isNaN(t) ? 3e4 : t,
+        enabled: checked("f_enabled"),
+        toolAllowlist: state.allowPick.slice(),
+        remark: val("f_remark"),
+        oauthClientId: val("f_oauth_cid"),
+        oauthClientSecret: val("f_oauth_secret"),
+        oauthClientName: val("f_oauth_cname"),
+        oauthScope: val("f_oauth_scope"),
+        oauthRedirectUri: val("f_oauth_redirect")
       };
       return Console.api.post("/admin/mcp-connections", body).then(function(r) {
-        Console.toast(r && r.message ? r.message : "\u5DF2\u4FDD\u5B58", { type: "success" });
         closeEdit();
+        var msg;
+        if (r && r.ready) {
+          msg = "\u5DF2\u4FDD\u5B58\u5E76\u8FDE\u63A5\u5C31\u7EEA\uFF0C\u5DE5\u5177 " + num(r.toolCount) + " \u4E2A";
+        } else if (r && r.needsAuth) {
+          msg = "\u5DF2\u4FDD\u5B58\uFF0C\u9700\u8981\u6388\u6743";
+        } else if (r && r.lastError) {
+          msg = "\u5DF2\u4FDD\u5B58\uFF0C\u8FDE\u63A5\u672A\u5C31\u7EEA\uFF1A" + shortErr(r.lastError, 90);
+        } else {
+          msg = r && r.message || "\u5DF2\u4FDD\u5B58";
+        }
+        Console.toast(msg, { type: "success", wide: true });
         load();
       }).catch(function(e) {
-        Console.toast("\u4FDD\u5B58\u5931\u8D25\uFF1A" + e.message, { type: "error" });
+        Console.toast("\u4FDD\u5B58\u5931\u8D25\uFF1A" + errText(e), { type: "error", wide: true });
       });
     }
-    function toggle(name, enabled, btn) {
-      Console.busy(btn, function() {
-        return Console.api.post("/admin/mcp-connections/" + encodeURIComponent(name) + "/toggle", { enabled }).then(function() {
-          load();
-        }).catch(function(e) {
-          Console.toast("\u64CD\u4F5C\u5931\u8D25\uFF1A" + e.message, { type: "error" });
-        });
-      }, enabled ? "\u542F\u7528\u4E2D\u2026" : "\u505C\u7528\u4E2D\u2026");
+    function toggleConn(c) {
+      var to = c.enabled === false;
+      return Console.api.post(
+        "/admin/mcp-connections/" + encodeURIComponent(c.name) + "/toggle",
+        { enabled: to }
+      ).then(function() {
+        Console.toast(to ? "\u5DF2\u542F\u7528" : "\u5DF2\u505C\u7528", { type: "success" });
+        load();
+      }).catch(function(e) {
+        Console.toast("\u64CD\u4F5C\u5931\u8D25\uFF1A" + errText(e), { type: "error" });
+      });
     }
-    function delConn(name) {
-      return __async(this, null, function* () {
-        var ok = yield Console.confirm(
-          "\u786E\u8BA4\u5220\u9664 MCP \u8FDE\u63A5 " + name + "\uFF1F\n\n\u5176\u5DE5\u5177\u4F1A\u88AB\u6458\u9664\u3001\u7ED1\u5B9A\u4F1A\u89E3\u7ED1\uFF08\u4E0D\u5220\u57DF\uFF09\u3002",
-          { title: "\u5220\u9664 MCP \u8FDE\u63A5", okText: "\u5220\u9664", danger: true }
-        );
+    function testConn(c) {
+      return Console.api.post("/admin/mcp-connections/" + encodeURIComponent(c.name) + "/test", null).then(function(r) {
+        var lines = [r && r.message || "\u6D4B\u8BD5\u5B8C\u6210"];
+        if (r && r.tools && r.tools.length) {
+          lines.push("\u5DE5\u5177\uFF1A" + r.tools.join(", "));
+        }
+        if (r && r.lastError && !r.ready) {
+          lines.push("\u9519\u8BEF\uFF1A" + r.lastError);
+        }
+        Console.toast(lines.join("\n"), { type: r && r.ready ? "success" : "error", wide: true });
+        load();
+      }).catch(function(e) {
+        Console.toast("\u6D4B\u8BD5\u5931\u8D25\uFF1A" + errText(e), { type: "error", wide: true });
+      });
+    }
+    function delConn(c) {
+      return Console.confirm(
+        "\u786E\u8BA4\u5220\u9664 MCP \u8FDE\u63A5 " + c.name + "\uFF1F\n\n\u5176\u5DE5\u5177\u4F1A\u88AB\u6458\u9664\u3001\u7ED1\u5B9A\u4F1A\u89E3\u7ED1\uFF08\u4E0D\u5220\u57DF\uFF09\u3002",
+        { title: "\u5220\u9664 MCP \u8FDE\u63A5", okText: "\u5220\u9664", danger: true }
+      ).then(function(ok) {
         if (!ok) {
           return;
         }
-        Console.api.del("/admin/mcp-connections?name=" + encodeURIComponent(name)).then(function() {
+        return Console.api.del("/admin/mcp-connections?name=" + encodeURIComponent(c.name)).then(function() {
+          state.selected = "";
           load();
         }).catch(function(e) {
-          Console.toast("\u5220\u9664\u5931\u8D25\uFF1A" + e.message, { type: "error" });
+          Console.toast("\u5220\u9664\u5931\u8D25\uFF1A" + errText(e), { type: "error" });
         });
-      });
-    }
-    function testConn(name, btn) {
-      return __async(this, null, function* () {
-        var ok = yield Console.confirm(
-          "\u5BF9 " + name + " \u53D1\u8D77\u8FDE\u901A\u6027\u6D4B\u8BD5\uFF08initialize + tools/list\uFF09\uFF1F",
-          { title: "\u8FDE\u901A\u6027\u6D4B\u8BD5", okText: "\u5F00\u59CB\u6D4B\u8BD5", danger: false }
-        );
-        if (!ok) {
-          return;
-        }
-        Console.busy(btn, function() {
-          return Console.api.post("/admin/mcp-connections/" + encodeURIComponent(name) + "/test", null).then(function(r) {
-            Console.toast(
-              (r && r.message) + (r && r.tools ? "\n\u5DE5\u5177\uFF1A" + r.tools.join(", ") : ""),
-              { type: "success", wide: true }
-            );
-            load();
-          }).catch(function(e) {
-            Console.toast("\u6D4B\u8BD5\u5931\u8D25\uFF1A" + e.message, { type: "error", wide: true });
-          });
-        }, "\u6D4B\u8BD5\u4E2D\u2026");
       });
     }
     function startOAuth(name) {
-      Console.api.post("/admin/mcp-connections/" + encodeURIComponent(name) + "/oauth/start", null).then(function(r) {
+      return Console.api.post("/admin/mcp-connections/" + encodeURIComponent(name) + "/oauth/start", null).then(function(r) {
         if (r && r.authorizeUrl) {
           location.href = r.authorizeUrl;
           return;
         }
         throw new Error("\u6388\u6743\u7AEF\u70B9\u672A\u8FD4\u56DE\u6388\u6743\u94FE\u63A5");
       }).catch(function(e) {
-        Console.toast("\u53D1\u8D77\u6388\u6743\u5931\u8D25\uFF1A" + e.message, { type: "error" });
-      });
-    }
-    function showTools(name) {
-      document.getElementById("toolsConnName").textContent = name;
-      document.getElementById("toolsBody").innerHTML = Console.loadingHtml("\u6B63\u5728\u8BFB\u53D6\u5DE5\u5177\u76EE\u5F55\u2026");
-      document.getElementById("toolsModal").hidden = false;
-      document.body.style.overflow = "hidden";
-      Console.api.get("/admin/mcp-connections/" + encodeURIComponent(name) + "/tools").then(function(r) {
-        var tools = r && r.tools || [];
-        if (!tools.length) {
-          document.getElementById("toolsBody").innerHTML = '<div class="perm-none">' + (r && r.ready ? "\u8BE5\u8FDE\u63A5\u6CA1\u6709\u5DE5\u5177" : "\u8FDE\u63A5\u672A\u5C31\u7EEA\uFF0C\u65E0\u6CD5\u8BFB\u53D6\u5DE5\u5177\u76EE\u5F55") + "</div>";
-          return;
-        }
-        document.getElementById("toolsBody").innerHTML = tools.map(function(t) {
-          return '<div class="dp-card" style="margin-bottom:8px;padding:10px 12px;"><div style="display:flex;gap:8px;align-items:center;"><span class="mono" style="font-weight:600;">' + esc(t.originalName) + "</span>" + (t.allowed ? "" : '<span class="tag off" title="\u88AB\u5DE5\u5177\u767D\u540D\u5355\u88C1\u526A">\u5DF2\u88C1\u526A</span>') + sideEffectTag(t.sideEffect) + '<span class="spacer"></span><span class="card-note mono">\u2192 ' + esc(t.mappedName) + "</span></div>" + (t.description ? '<div class="card-note" style="margin-top:4px;">' + esc(t.description) + "</div>" : "") + "</div>";
-        }).join("");
-      }).catch(function(e) {
-        document.getElementById("toolsBody").innerHTML = '<div class="dp-card" style="color:var(--red);">\u8BFB\u53D6\u5931\u8D25\uFF1A' + esc(e.message) + "</div>";
-      });
-    }
-    var BIND_CONN = "";
-    var BIND_PICK = [];
-    function openBind(name) {
-      BIND_CONN = name;
-      var currently = BINDINGS.connectionBindings[name] || [];
-      BIND_PICK = currently.slice();
-      document.getElementById("bindConnName").textContent = name;
-      renderBindCards();
-      document.getElementById("bindModal").hidden = false;
-      document.body.style.overflow = "hidden";
-    }
-    function closeBind() {
-      document.getElementById("bindModal").hidden = true;
-      document.body.style.overflow = "";
-    }
-    function renderBindCards() {
-      var box = document.getElementById("bindCardList");
-      var empty = document.getElementById("bindEmpty");
-      if (!DOMAINS.length) {
-        box.innerHTML = "";
-        empty.style.display = "block";
-        empty.textContent = "\u8FD8\u6CA1\u6709\u4EFB\u4F55\u57DF\uFF0C\u8BF7\u5148\u5230\u300C\u57DF\u7A7A\u95F4\u300D\u521B\u5EFA\u3002";
-        return;
-      }
-      empty.style.display = "none";
-      box.innerHTML = DOMAINS.map(function(d) {
-        var on = BIND_PICK.indexOf(d.name) >= 0;
-        return '<div class="pick-card' + (on ? " on" : "") + '" data-pick="' + esc(d.name) + '"><div class="pc-name">' + esc(d.name) + (on ? " \u2713" : "") + (d.callable ? "" : ' <span class="tag approval" title="\u88C5\u914D\u8282\u70B9\uFF1A\u53EA\u628A\u5DE5\u5177\u4F20\u7ED9\u540E\u4EE3">\u88C5\u914D</span>') + '</div><div class="pc-note">\u6765\u6E90 ' + esc(d.sourceLabel || d.source || "") + "</div></div>";
-      }).join("");
-      box.querySelectorAll("div[data-pick]").forEach(function(card) {
-        card.addEventListener("click", function() {
-          var d = card.getAttribute("data-pick");
-          var i = BIND_PICK.indexOf(d);
-          if (i >= 0) {
-            BIND_PICK.splice(i, 1);
-          } else {
-            BIND_PICK.push(d);
-          }
-          renderBindCards();
-        });
+        Console.toast("\u53D1\u8D77\u6388\u6743\u5931\u8D25\uFF1A" + errText(e), { type: "error" });
       });
     }
     function saveBind() {
-      var promises = [];
-      DOMAINS.forEach(function(d) {
-        var current = (BINDINGS.domainBindings[d.name] || []).slice();
-        var want = BIND_PICK.indexOf(d.name) >= 0;
-        var has = current.indexOf(BIND_CONN) >= 0;
+      var c = findConn(state.selected);
+      if (!c) {
+        return;
+      }
+      var name = c.name;
+      var calls = [];
+      state.domains.forEach(function(d) {
+        var cur = (state.bindings.domainBindings[d.name] || []).slice();
+        var want = state.bindPick.indexOf(d.name) >= 0;
+        var has = cur.indexOf(name) >= 0;
         if (want === has) {
           return;
         }
-        var next = want ? current.concat([BIND_CONN]) : current.filter(function(x) {
-          return x !== BIND_CONN;
+        var next = want ? cur.concat([name]) : cur.filter(function(x) {
+          return x !== name;
         });
-        promises.push(Console.api.put("/admin/mcp-bindings/" + encodeURIComponent(d.name), { connections: next }));
+        calls.push({
+          domain: d.name,
+          p: Console.api.put("/admin/mcp-bindings/" + encodeURIComponent(d.name), { connections: next })
+        });
       });
-      Promise.all(promises.map(function(p) {
-        return p.catch(function(e) {
-          return { __error: e.message };
+      if (!calls.length) {
+        Console.toast("\u6CA1\u6709\u9700\u8981\u4FDD\u5B58\u7684\u6539\u52A8", { type: "success" });
+        return;
+      }
+      Promise.all(calls.map(function(x) {
+        return x.p.then(function() {
+          return null;
+        }).catch(function(e) {
+          return x.domain + "\uFF1A" + errText(e);
         });
-      })).then(function(results) {
-        var err = results.filter(function(r) {
-          return r && r.__error;
-        })[0];
-        if (err) {
-          Console.toast("\u90E8\u5206\u7ED1\u5B9A\u4FDD\u5B58\u5931\u8D25\uFF1A" + err.__error, { type: "error" });
-        } else {
-          Console.toast("\u7ED1\u5B9A\u5DF2\u4FDD\u5B58", { type: "success" });
-        }
-        closeBind();
+      })).then(function(errs) {
+        var bad = errs.filter(Boolean);
+        Console.toast(
+          bad.length ? "\u90E8\u5206\u57DF\u4FDD\u5B58\u5931\u8D25\uFF1A\n" + bad.join("\n") : "\u7ED1\u5B9A\u5DF2\u4FDD\u5B58",
+          { type: bad.length ? "error" : "success", wide: true }
+        );
+        state.bindTouched = false;
         load();
       });
     }
-    document.getElementById("createBtn").addEventListener("click", openCreate);
-    document.getElementById("refreshBtn").addEventListener("click", load);
-    document.getElementById("editClose").addEventListener("click", closeEdit);
-    document.getElementById("editSaveBtn").addEventListener("click", function() {
-      Console.busy(this, saveEdit, "\u4FDD\u5B58\u4E2D\u2026");
-    });
-    document.getElementById("editClearBtn").addEventListener("click", openCreate);
-    document.getElementById("bindClose").addEventListener("click", closeBind);
-    document.getElementById("bindSaveBtn").addEventListener("click", saveBind);
-    document.getElementById("bindClearBtn").addEventListener("click", function() {
-      BIND_PICK = [];
-      renderBindCards();
-    });
-    document.getElementById("toolsClose").addEventListener("click", function() {
-      document.getElementById("toolsModal").hidden = true;
-      document.body.style.overflow = "";
-    });
-    document.getElementById("editModal").addEventListener("click", function(e) {
-      if (e.target === document.getElementById("editModal")) {
-        closeEdit();
+    function onAct(act, btn) {
+      var c = findConn(state.selected);
+      if (!c) {
+        return;
       }
-    });
-    document.getElementById("bindModal").addEventListener("click", function(e) {
-      if (e.target === document.getElementById("bindModal")) {
-        closeBind();
+      if (act === "test") {
+        Console.busy(btn, function() {
+          return testConn(c);
+        }, "\u6D4B\u8BD5\u4E2D\u2026");
+      } else if (act === "edit") {
+        openEdit(c.name);
+      } else if (act === "toggle") {
+        Console.busy(btn, function() {
+          return toggleConn(c);
+        }, "\u5904\u7406\u4E2D\u2026");
+      } else if (act === "delete") {
+        delConn(c);
+      } else if (act === "oauth") {
+        startOAuth(c.name);
+      } else if (act === "reloadTools") {
+        state.toolsFor = "";
+        loadTools(c.name);
+      } else if (act === "editAllow") {
+        openEdit(c.name);
+      } else if (act === "saveBind") {
+        Console.busy(btn, function() {
+          saveBind();
+          return Promise.resolve();
+        }, "\u4FDD\u5B58\u4E2D\u2026");
+      } else if (act === "bindClear") {
+        state.bindTouched = true;
+        state.bindPick = [];
+        renderBind(c);
       }
-    });
+    }
+    function actTarget(e) {
+      var t = e.target;
+      return t && t.closest ? t.closest("[data-act]") : null;
+    }
+    function bindActions() {
+      var create = el("createBtn");
+      if (create) {
+        create.addEventListener("click", openCreate);
+      }
+      var refresh = el("refreshBtn");
+      if (refresh) {
+        refresh.addEventListener("click", function() {
+          load();
+        });
+      }
+      var search = el("connSearch");
+      if (search) {
+        search.addEventListener("input", renderList);
+      }
+      var filter = el("statusFilter");
+      if (filter) {
+        filter.addEventListener("change", renderList);
+      }
+      var list = el("connList");
+      if (list) {
+        list.addEventListener("click", function(e) {
+          var t = e.target;
+          var row = t && t.closest ? t.closest(".dp-mcp-item") : null;
+          if (!row) {
+            return;
+          }
+          state.selected = row.getAttribute("data-name");
+          list.querySelectorAll(".dp-mcp-item").forEach(function(r) {
+            r.classList.toggle("on", r === row);
+          });
+          state.bindTouched = false;
+          state.toolsFor = "";
+          renderDetail();
+        });
+      }
+      var tabs = el("tabBar");
+      if (tabs) {
+        tabs.addEventListener("click", function(e) {
+          var t = e.target;
+          var b = t && t.closest ? t.closest("[data-tab]") : null;
+          if (b) {
+            selectTab(b.getAttribute("data-tab"));
+          }
+        });
+      }
+      ["statusBar", "paneOverview", "paneTools", "paneAuth", "paneBind"].forEach(function(id) {
+        var box = el(id);
+        if (!box) {
+          return;
+        }
+        box.addEventListener("click", function(e) {
+          var b = actTarget(e);
+          if (b) {
+            onAct(b.getAttribute("data-act"), b);
+          }
+        });
+      });
+      var bindPane = el("paneBind");
+      if (bindPane) {
+        bindPane.addEventListener("click", function(e) {
+          var t = e.target;
+          var card = t && t.closest ? t.closest("[data-pick]") : null;
+          if (!card) {
+            return;
+          }
+          var d = card.getAttribute("data-pick");
+          var i = state.bindPick.indexOf(d);
+          if (i >= 0) {
+            state.bindPick.splice(i, 1);
+          } else {
+            state.bindPick.push(d);
+          }
+          state.bindTouched = true;
+          var c = findConn(state.selected);
+          if (c) {
+            renderBind(c);
+          }
+        });
+      }
+      var allow = el("allowTools");
+      if (allow) {
+        allow.addEventListener("change", function(e) {
+          var t = e.target;
+          if (!t || !t.getAttribute("data-allow")) {
+            return;
+          }
+          var name = t.getAttribute("data-allow");
+          var i = state.allowPick.indexOf(name);
+          if (t.checked && i < 0) {
+            state.allowPick.push(name);
+          }
+          if (!t.checked && i >= 0) {
+            state.allowPick.splice(i, 1);
+          }
+        });
+      }
+      var editClose = el("editClose");
+      if (editClose) {
+        editClose.addEventListener("click", closeEdit);
+      }
+      var editSave = el("editSaveBtn");
+      if (editSave) {
+        editSave.addEventListener("click", function() {
+          Console.busy(this, saveEdit, "\u4FDD\u5B58\u4E2D\u2026");
+        });
+      }
+      var editClear = el("editClearBtn");
+      if (editClear) {
+        editClear.addEventListener("click", openCreate);
+      }
+      var editModal = el("editModal");
+      if (editModal) {
+        editModal.addEventListener("click", function(e) {
+          if (e.target === editModal) {
+            closeEdit();
+          }
+        });
+      }
+    }
+    function load() {
+      setHtml("connList", Console.loadingHtml("\u6B63\u5728\u52A0\u8F7D MCP \u8FDE\u63A5\u2026"));
+      return Promise.all([
+        Console.api.get("/admin/mcp-connections").catch(function(e) {
+          return { __error: e };
+        }),
+        Console.api.get("/admin/mcp-bindings").catch(function() {
+          return { domainBindings: {}, connectionBindings: {} };
+        }),
+        Console.api.get("/admin/domains").catch(function() {
+          return { domains: [] };
+        })
+      ]).then(function(rs) {
+        if (rs[0] && rs[0].__error) {
+          setHtml("connList", '<div class="dp-mcp-err">\u8BFB\u53D6\u5931\u8D25\uFF1A' + esc(errText(rs[0].__error)) + "</div>");
+          return;
+        }
+        state.conns = rs[0] && rs[0].connections || [];
+        state.settingsFile = rs[0] && rs[0].settingsFile || "";
+        state.bindings = rs[1] || { domainBindings: {}, connectionBindings: {} };
+        state.domains = rs[2] && rs[2].domains || [];
+        state.lastSync = Date.now();
+        if (!findConn(state.selected)) {
+          state.selected = state.conns.length ? state.conns[0].name : "";
+        }
+        state.bindTouched = false;
+        state.listSig = state.conns.map(function(c) {
+          return c.name;
+        }).join("");
+        renderStats();
+        renderList();
+        setText("syncHint", "\u4E0A\u6B21\u540C\u6B65 " + timeOf(state.lastSync));
+        renderDetail();
+      });
+    }
+    function poll() {
+      if (!checked("autoRefresh") || state.editing) {
+        return;
+      }
+      return Console.api.get("/admin/mcp-connections").then(function(r) {
+        state.conns = r && r.connections || [];
+        state.lastSync = Date.now();
+        patchStatus();
+      }).catch(function() {
+      });
+    }
     Console.renderSidebar("mcp");
     Console.ready(function() {
       var q = new URLSearchParams(location.search);
       var auth = q.get("auth");
       if (auth === "ok") {
-        Console.toast("\u6388\u6743\u6210\u529F\uFF1A\u8FDE\u63A5 " + (q.get("name") || "") + " \u5DF2\u5C31\u7EEA\uFF0C\u5DE5\u5177\u5BF9\u7ED1\u5B9A\u57DF\u53EF\u89C1", { type: "success" });
+        Console.toast(
+          "\u6388\u6743\u6210\u529F\uFF1A\u8FDE\u63A5 " + (q.get("name") || "") + " \u5DF2\u5C31\u7EEA\uFF0C\u5DE5\u5177\u5BF9\u7ED1\u5B9A\u57DF\u53EF\u89C1",
+          { type: "success" }
+        );
       } else if (auth === "fail") {
         Console.toast("\u6388\u6743\u5931\u8D25\uFF1A" + (q.get("reason") || "\u672A\u77E5\u539F\u56E0"), { type: "error" });
       }
       if (auth) {
         history.replaceState(null, "", location.pathname);
       }
-      loadDomains().then(load);
+      bindActions();
+      load().then(function() {
+        setInterval(poll, POLL_MS);
+      });
     });
   })();
 })();
