@@ -223,7 +223,7 @@ public class AdminModelProfileController {
     }
 
     /**
-     * 只改调优参数（卡片右侧绿色调优框的保存口）。
+     * 只改调优参数（卡片上"温度 / 单次最大输出"与"自定义参数"两个保存口共用）。
      *
      * 与 {@link #save(ProfileBody)} 分开的原因有两条，都是产品口径而非偷懒：
      *
@@ -234,11 +234,10 @@ public class AdminModelProfileController {
      *   • 调优是高频微调动作。走老接口会连 `endpoints` 一起重算 —— 端点族为空时还会
      *     触发一次元数据读取（最多 1 + 7 条上游 GET），改个温度不该付这个代价。
      *
-     * 只**按模型名命中适配**的档案可调（绿框也只在这些档案上出现，见 {@link #profileView}）：
-     * 未适配 / 仅 host 兜底一律拒绝，门槛与绿框下发完全同一口径（{@code byModelName()}）。
-     *
-     * 注：{@link #checkAdapterTuning} 保存复核用的是更宽松的 {@code matched()} —— 见那里的说明，
-     * 两者**刻意不同**：复核宽松只为不把存量已存参数卡死，本接口收紧是因为"能改"必须与"有绿框"对齐。
+     * <b>门禁是"能不能当对话模型用"（{@link ModelProfile#mayBeChat()}）或向量档案，不再看适配。</b>
+     * 对话族的 schema 下架后，命中与未命中已经没有区别 —— 每张对话卡片都有标准字段与 JSON 框，
+     * 接口若还按 {@code byModelName()} 拦，最标准的 OpenAI / DeepSeek 档案反而改不了温度。
+     * 生图 / 语音 / 重排 / 视频仍然拒绝：那些族没有注入点，收了也只是存下来不生效。
      */
     @PutMapping("/model-profiles/tuning")
     public Map<String, Object> updateTuning(@RequestBody(required = false) TuningBody body) {
@@ -249,14 +248,10 @@ public class AdminModelProfileController {
         ModelProfile existing = registry.profile(alias)
                 .orElseThrow(() -> new BaseException(ErrorCode.INVALID_PARAMETER, "档案不存在：" + alias));
 
-        /* 未适配就没有可调的键：给一份没有 schema 的档案放行，等于把任意参数字典塞进请求体。
-           判据是 byModelName()（不是 matched()）—— host 兜底不算适配，卡片上也没有绿框，
-           界面既然不给改，接口就不该收（"能改"与"有绿框"必须同一口径）。 */
-        ModelAdapterRegistry.MatchResult matched =
-                adapterRegistry.match(existing.baseUrl(), existing.modelName());
-        if (!matched.byModelName()) {
+        /* 没有注入点的档案不给存：参数存下来却发不出去，等于让用户以为配了 */
+        if (!existing.mayBeChat() && !existing.isEmbedding()) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER,
-                    "服务商 / 模型「" + existing.modelName() + "」未做适配，不支持参数调优");
+                    "档案「" + alias + "」不是对话模型，不支持参数调优");
         }
 
         /* 只换调优字段：其余字段原样带走（见 ModelProfile#withTuning）。
@@ -331,11 +326,10 @@ public class AdminModelProfileController {
      *   <li>它不属于"调优"：上下文长度是平台自己消费的一个上限，不是发给服务商的参数
      *       （OpenAI 兼容端点没有这个入参）。塞进 {@code params} 会让它被当成"要发给上游的键"，
      *       而 {@code params} 还要过适配 schema 的关，那套 schema 里没有、也不该有这一项。</li>
-     *   <li>{@link #updateTuning} 也搭不上：那个接口按 {@code byModelName()}（是否<b>按模型名</b>命中适配）
-     *       放行，而标准 OpenAI / DeepSeek 这类最常见的档案恰恰不命中，从那里根本改不到。
-     *       卡片上的绿色调优框同理，只在命中适配且该族真有参数的档案上渲染
-     *       （见 {@link #profileView} 的条件），未适配的卡片上压根没有那个框。
-     *       故本接口对<b>任何</b>可用档案开放，不设适配门禁。</li>
+     *   <li>{@link #updateTuning} 也搭不上：那个接口是<b>全量替换</b>语义（temperature / max_tokens /
+     *       dimensions / params 一起落），从卡片上单改一个上下文长度却要把另外四项原样重发一遍，
+     *       漏带任何一个都会被清空。而上下文长度本身又不属于"要发给上游的参数"，
+     *       混进同一个报文只会让两件事互相牵制。故本接口对<b>任何</b>可用档案开放，不设门禁。</li>
      * </ul>
      *
      * <p><b>除正数外不做取值校验</b>：这个数只影响"这一轮给模型看多少"，填错只波及填它的人，
@@ -384,10 +378,11 @@ public class AdminModelProfileController {
      * 实际没验证过"的声明，不如把参数面交回给用户。<b>未命中适配的档案恰恰最需要这条路</b>，
      * 而现在 30 个模型里 29 个走它。</p>
      *
-     * <p>与 {@link #updateTuning} 并列而非合并：调优框是按适配 schema 渲染控件的，
-     * 只出现在按模型名命中适配的档案上；本接口不需要 schema，适用面正好互补。
-     * 两者都改 {@code params} 这一个字段，但判据不同 —— 合在一起就得在接口内部再判一次
-     * "这份档案走哪条路"，而那个判据前后端各存一份就会漂移。</p>
+     * <p>与 {@link #updateTuning} 并列而非合并：那个接口是<b>全量替换</b>（温度、单次最大输出、
+     * 向量维度、params 四项一起写），卡片上标准字段改动即存时需要带上另外三项防止被清空；
+     * 本接口<b>只</b>写 {@code params}，其余字段原样带走，正好服务"只改 JSON 框"这一个动作。
+     * 两者都改 {@code params}，但一个要求调用方把别的字段也搬一遍，一个不需要 ——
+     * 合并就得在接口内部再判一次"这次到底是哪种改动"，而那个判据前后端各存一份就会漂移。</p>
      *
      * <p>收**文本**而不是收 map：文本框里填的是 JSON，用户写错一个逗号时 Jackson 的
      * 反序列化错误发生在参数绑定阶段，拿不到原始文本，也就没法回一句"第几行多了个逗号"。
@@ -586,34 +581,28 @@ public class AdminModelProfileController {
     }
 
     /**
-     * 服务商适配复核（保存前的最后一道关）。
+     * 保存前的最后一道关：调优值该怎么复核。
      *
-     * 命中适配 → 全部调优值必须过 schema（未知键 / 类型 / 越界一律拒绝，文案带合法键）；
-     * 未命中 → 走**用户自助填参**的四道闸门（{@link CustomParamsGate}）。直接调 API 的请求也在这里被挡住。
-     *
-     * <p>未命中这条分支的口径在 2026-10-26 被改掉了：原先是"params 必须为空"，
-     * 现在 30 个模型里 29 个走这条路 —— <b>它从此是常态，不再是异常</b>。
-     * 服务的路线是"用户声明、我透传"：厂商参数面一直在变，而我们既没有足够的人逐个实测，
-     * 也没有办法保证写进去的 min / max / step 是对的，与其给出一堆"看起来配了、实际没验证过"
-     * 的声明，不如把参数面交回给用户，平台只守住不能交出去的那部分（模型名 / 地址 / 协议 / 凭证）。</p>
-     *
-     * <p>两条路的判据统一在 {@code byModelName()}（是否<b>按模型名</b>命中适配），
-     * 与绿框下发、{@link #updateTuning} 完全同一口径：</p>
+     * <p>判据不是"有没有命中适配"，而是<b>该档案对应族还有没有 schema</b>：</p>
      * <ul>
-     *   <li>命中 → 按厂商 schema 复核（键 / 类型 / min / max / 条件参数），schema 比闸门精确；</li>
-     *   <li>未命中（含 host 兜底）→ 走四道闸门。<b>host 兜底走闸门是有意的</b>：它只说明
-     *       "这家服务商登记过"，把同 host 下另一模型的参数 schema 摆上来复核就是张冠李戴
-     *       （OpenRouter 这种聚合站上尤其明显）。旧口径在这里用 {@code matched()} 复核，
-     *       理由是"不然存量已存参数的档案会被任何一次保存拒死" —— 现在那条死局由闸门化解：
-     *       这些档案的自定义参数不再被 schema 拒，而是过闸门放行。</li>
+     *   <li>有 → 全部调优值过 schema（未知键 / 类型 / 越界一律拒绝，文案带合法键）。
+     *       当前只剩向量的 {@code dimensions} 走这条；</li>
+     *   <li>没有 → 走**用户自助填参**的四道闸门（{@link CustomParamsGate}）。
+     *       对话族全体（含命中 deepseek-flash 的档案）走这条。直接调 API 的请求也在这里被挡住。</li>
      * </ul>
+     *
+     * <p>对话族下架 schema 后，这条分支从"30 个模型里 29 个"变成"全部对话模型"——
+     * 它是常态而非异常。服务的路线是"用户声明、我透传"：厂商参数面一直在变，而我们既没有
+     * 足够的人逐个实测，也没有办法保证写进去的 min / max / step 是对的，与其给出一堆
+     * "看起来配了、实际没验证过"的声明，不如把参数面交回给用户，平台只守住不能交出去的
+     * 那部分（模型名 / 地址 / 协议 / 凭证 / 与标准字段重名的键）。</p>
      *
      * @return {@code null} = 通过；否则为可直接展示给用户的拒绝原因
      */
     private String checkAdapterTuning(ModelProfile profile) {
         ModelAdapterRegistry.MatchResult matched =
                 adapterRegistry.match(profile.baseUrl(), profile.modelName());
-        if (matched.byModelName()) {
+        if (matched.byModelName() && !matched.tuningParams(profile).isEmpty()) {
             return adapterRegistry.validateParams(matched, tuningValues(matched, profile));
         }
         return CustomParamsGate.validate(profile.params());
@@ -1139,34 +1128,25 @@ public class AdminModelProfileController {
         item.put("protocols", List.of(ModelProfile.PROTOCOL_OPENAI, ModelProfile.PROTOCOL_ANTHROPIC));
         /* 适配摘要：命中适配就下发 id / label 与当前生效的调优值（供卡片渲染绿色工具框）。
            
-           门槛是 {@link ModelProfile#mayBeChat()} ——「**有可能**走对话端点」，不是「已确认是对话模型」：
-             • 已确认 chat → 下发；
-             • 端点族未声明 → **也下发**。标准 OpenAI 规范的服务商（OpenAI / DeepSeek 官方、各类中转）
-               的模型清单读不出类型，档案就停在"未声明"；而这两家恰恰是内置预设里唯一有适配的：
-               因为"读不出类型"就把工具框收走，等于把最有用的两家用户挡在门外，卡片上还只留下一句
-               「未声明类型」，看不出"框本来该有"；
-             • 已声明为**向量** → 下发，但下的是 embedding 族的参数（目前只有 dimensions）：
-               向量卡片要的就是"维度可就地改"，与 chat 档案的绿框同款交互、不同族参数；
-             • 已声明为生图 / 语音 / 重排 / 视频 → 不下发：那些族的调优语义各不相同且尚未登记，
-               把别的族的参数摆在它们上是张冠李戴。 */
+           **只给向量档案下发**。对话族的 schema 已经下架（参数面改成"标准字段 + 用户自填 JSON"），
+           对话卡片上不该再出现绿框，也就不该再有「已适配」这个徽标 —— 一个没有任何行为差异的
+           徽标只会让人以为"这家服务商有特殊待遇"。适配文件对对话档案仍然有用，但那个用处
+           （{@code declaration()}：不发上游就能定端点族 / 模态）发生在保存时，不在卡片上。 */
         ModelAdapterRegistry.MatchResult matched =
                 adapterRegistry.match(profile.baseUrl(), profile.modelName());
-        if (profile.mayBeChat() || profile.isEmbedding()) {
-            /* 两个条件都要满足才下发（卡片上才有绿框）：
-               ① 按**模型名**命中（{@link ModelAdapterRegistry.MatchResult#byModelName()}）——
-                  host 兜底只说明"这家服务商登记过"，把同 host 下 id 字典序最小的那条适配
-                  摆到任意未登记模型上就是张冠李戴（OpenRouter 上尤其明显），故不作为依据。
-                  与 {@code POST /admin/model-adapters/match} 下发绿框的口径一致；
-               ② 该档案对应族**真有参数** —— 如 api.deepseek.com 上的 deepseek-embedding 的
-                  embedding 族为空，自然不给摘要、卡片上也就没有绿框。 */
-            if (matched.byModelName() && !matched.tuningParams(profile).isEmpty()) {
+        if (profile.isEmbedding()) {
+            /* 两个条件都要满足才下发：① 按**模型名**命中（host 兜底只说明"这家服务商登记过"，
+               把同 host 下 id 字典序最小的那条适配摆到任意未登记模型上就是张冠李戴）；
+               ② embedding 族**真有参数** —— 如 api.deepseek.com 上的 deepseek-embedding
+               该族为空，自然不给摘要、卡片上也就没有绿框。 */
+            if (matched.byModelName() && !matched.embeddingParams().isEmpty()) {
                 item.put("adapter", adapterSummary(matched, profile));
             }
         }
-        /* 自定义参数（用户自助填参）的卡片入口：与 {@link #checkAdapterTuning} 同一份判据 ——
-           按模型名命中 → 走 schema 驱动的绿框，这里不给文本框（两条路都改 params，
+        /* 自定义参数（用户自助填参）的卡片入口：判据与保存复核同一个来源 ——
+           该族有 schema（当前只有向量的 dimensions）→ 走绿框，不给文本框（两条路都改 params，
            同时给就是两个入口改一个字段，用户不知道哪个生效）；
-           未命中 → 给文本框 + 上限与提示，前端照着渲染，不自己另存一份判据。 */
+           其余（全部对话档案）→ 给文本框 + 上限与提示，前端照着渲染，不自己另存一份判据。 */
         item.put("customParams", customParamsView(profile, matched));
         item.put("usedByDomains", registry.domainsUsing(profile.alias()));
         /* 能不能绑到域上：服务端算好下发，前端只读，避免前端二次实现谓词再漂移
@@ -1250,13 +1230,22 @@ public class AdminModelProfileController {
      * <p>把上限与提示一并下发，而不是让前端各写一份常量：闸门改一个数，卡片上的提示
      * 必须跟着变，两处各存一份必然漂移（漂移的表现是"提示说 32 个，后端拒了 30 个"）。</p>
      *
-     * @param schemaDriven 命中适配的档案走 schema 驱动的绿框，文本框不出现（两个入口改同一个
-     *                     字段时，用户无从判断哪个生效 —— 所以只留一条）
+     * <p>{@code applies} 是"这张卡片该不该出这个框"的**唯一判据**，由服务端算好下发
+     * （{@link ModelProfile#mayBeChat()}）：前端原先自己拼 {@code chat || 无 endpoints}，
+     * 用的是 {@code bindable}（= {@code domainBindable()}，比 {@code mayBeChat()} 严），
+     * 于是"声明了 chat 但模态未填"的半识别档案一个框都没有。</p>
+     *
+     * @param schemaDriven 该档案对应族仍然**真有 schema** 时走绿框、文本框不出现（两个入口改同一个
+     *                     字段时，用户无从判断哪个生效 —— 所以只留一条）。对话族的 schema 已下架，
+     *                     因此对话档案恒为 {@code false}；当前只有向量的 {@code dimensions}
+     *                     还让它为真
      */
     private Map<String, Object> customParamsView(ModelProfile profile,
                                                  ModelAdapterRegistry.MatchResult matched) {
         Map<String, Object> view = new LinkedHashMap<>();
-        view.put("schemaDriven", matched.byModelName());
+        view.put("schemaDriven", profile.isEmbedding() && matched.byModelName()
+                && !matched.embeddingParams().isEmpty());
+        view.put("applies", profile.mayBeChat());
         view.put("paramsJson", toPrettyJson(profile.params()));
         Map<String, Object> limits = new LinkedHashMap<>();
         limits.put("maxKeys", CustomParamsGate.MAX_KEYS);
@@ -1337,10 +1326,11 @@ public class AdminModelProfileController {
         private Integer dimensions;
         private List<String> fallbacks;
         /**
-         * 自定义参数（如 {@code enable_thinking}）。
+         * 自定义参数（如 {@code reasoning_effort}、{@code enable_thinking}）。
          *
-         * 命中适配时按适配 schema 复核；未命中时由用户自助填写、原样透传
-         * （过 {@link CustomParamsGate} 的四道闸门）。
+         * 对话档案一律由用户自助填写、原样透传（过 {@link CustomParamsGate} 的四道闸门）；
+         * 向量档案在该族仍有 schema 时按 schema 复核（当前只有 {@code dimensions}）。
+         * 键名必须是**服务商文档里的线上字段名**，平台不再做任何翻译。
          */
         private Map<String, Object> params;
         /**

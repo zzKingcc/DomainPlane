@@ -146,6 +146,34 @@ public class ModelProfileSettings {
     }
 
     /**
+     * 把存量对话档案的 {@code params} 键从适配 UI 名归一成线上字段名。
+     *
+     * <p>对话的适配 schema 下架后，注入前那一步「key → wire」翻译没了（见
+     * {@link ChatParamMigration}）；不归一就会把 {@code reasoningEffort} 原样发出去，
+     * 上游静默忽略而界面显示"已配置"。读盘时做一次，与 {@link #splitVectorProfiles()}
+     * 同一位置、同一套"改了才写回"的约定。</p>
+     *
+     * <p>只扫 {@link #profiles}：纯向量档案的 {@code params} 里不可能有对话的键。</p>
+     *
+     * @return 是否真的改写过（调用方据此决定要不要落盘）
+     */
+    public boolean normalizeChatParams() {
+        boolean changed = false;
+        for (ProfileData data : profiles.values()) {
+            if (data == null) {
+                continue;
+            }
+            Map<String, Object> migrated = ChatParamMigration.migrate(data.getParams());
+            if (migrated == null) {
+                continue;
+            }
+            data.setParams(migrated.isEmpty() ? null : migrated);
+            changed = true;
+        }
+        return changed;
+    }
+
+    /**
      * 主模型（对话）的沿链解析结果
      *
      * @param aliases      生效的别名列表；空 = 整条链都没有绑定

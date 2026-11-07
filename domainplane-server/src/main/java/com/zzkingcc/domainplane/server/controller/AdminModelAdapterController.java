@@ -15,7 +15,13 @@ import java.util.Map;
  * 管理面：服务商适配的匹配查询。
  *
  * 两个接口都**只读**：匹配不落盘、不依赖已存档案，纯粹回答「这个 baseUrl + 模型名
- * 有没有适配、适配的调优 schema 是什么」。管控台据此决定参数调优工具栏的显隐与渲染。
+ * 有没有适配、适配的参数 schema 是什么」。
+ *
+ * <p>管控台已经不再调用 {@code /model-adapters/match}：对话族的适配 schema 下架后，
+ * 卡片改由 {@code GET /admin/model-profiles} 的 {@code params} 字段直接拿到向量族的 schema
+ * （见 {@code AdminModelProfileController#profileView}），新建表单也不再边填边问。
+ * 留着是因为它是排查「这条档案到底命中了哪份适配」最直接的入口，删除会把这个动作
+ * 变成只能读日志。</p>
  *
  * 「未适配就不能调优」的强制点在档案保存时的复核（{@code AdminModelProfileController#save}），
  * 不在这里：本接口被绕过不影响任何状态。

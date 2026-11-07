@@ -128,21 +128,117 @@ class CustomParamsEndpointTest {
         assertEquals(before.temperature(), after.temperature());
     }
 
+    // ==================== 卡片可见性 ====================
+
+    /**
+     * {@code customParams.applies} 是「这张卡片该不该出参数框」的唯一判据。
+     *
+     * <p>它曾经等价于"命中了适配"，后来前端改成自己拼 {@code chat || 无 endpoints}，
+     * 用的是 {@code bindable}（比 {@code mayBeChat()} 严）：于是"声明了 chat 但输入模态没填"
+     * 的半识别档案一条框都没有 —— 卡片上看着正常，就是没有地方填参数。</p>
+     *
+     * <p>现在结论只在服务端算一次。两类档案必须分开：对话 / 未识别 → 有框；
+     * 图像 / 重排 / TTS 这些值根本到不了请求体的族 → 没有框（给了框才是骗人）。</p>
+     */
+    @Test
+    @DisplayName("applies 只对可能对话的档案为真：对话有框，图像与重排没有")
+    void appliesFollowsMayBeChat() {
+        AdminModelProfileController c = controller();
+
+        seedWith(c, "chat", List.of(ModelProfile.EP_CHAT));
+        seedWith(c, "img", List.of(ModelProfile.EP_IMAGES));
+        seedWith(c, "rr", List.of(ModelProfile.EP_RERANK));
+
+        Map<String, Object> out = c.list();
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> profiles = (List<Map<String, Object>>) out.get("profiles");
+
+        assertEquals(Boolean.TRUE, customParams(profiles, "chat").get("applies"));
+        assertEquals(Boolean.FALSE, customParams(profiles, "img").get("applies"),
+                "生图档案的值不进请求体，给框等于骗人");
+        assertEquals(Boolean.FALSE, customParams(profiles, "rr").get("applies"));
+    }
+
+    /**
+     * 「端点族没识别出来」那一档不在本测试里造：{@code save} 会去读服务商元数据补端点族，
+     * 本测试的控制器没接 {@code metadataReader}。判据本身由
+     * {@code ModelProfileUnspecifiedTypeTest} 钉住（未声明 → {@code mayBeChat()} 为真），
+     * 而 {@code applies} 只是它的转发，不该各算一套。
+     *
+     * <p>{@code schemaDriven} 与 {@code applies} 是两件事：前者问"这一族还有没有 schema 编控件"，
+     * 后者问"该不该出 JSON 框"。对话族已无 schema，若这里为真，框会被判成"另有入口"而藏起来，
+     * 结果是一张卡片上一个参数入口都没有。</p>
+     */
+    @Test
+    @DisplayName("schemaDriven 只剩向量族：对话档案永远是 false，别被适配挡掉框")
+    void schemaDrivenOnlyForEmbedding() {
+        AdminModelProfileController c = controller();
+        seedWith(c, "chat", List.of(ModelProfile.EP_CHAT));
+
+        Map<String, Object> out = c.list();
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> profiles = (List<Map<String, Object>>) out.get("profiles");
+
+        assertEquals(Boolean.FALSE, customParams(profiles, "chat").get("schemaDriven"),
+                "对话族已无 schema；这里为真会把 JSON 框藏起来，等于没地方填");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> customParams(List<Map<String, Object>> profiles, String alias) {
+        for (Map<String, Object> p : profiles) {
+            if (alias.equals(p.get("alias"))) {
+                return (Map<String, Object>) p.get("customParams");
+            }
+        }
+        return fail("档案清单里没有 " + alias);
+    }
+
+    private void seedWith(AdminModelProfileController c, String alias, List<String> endpoints) {
+        AdminModelProfileController.ProfileBody b = new AdminModelProfileController.ProfileBody();
+        b.setAlias(alias);
+        b.setApiKey("sk-test");
+        b.setBaseUrl("https://api.example.com/v1");
+        b.setModelName("m-" + alias);
+        b.setEndpoints(endpoints);
+        c.save(b);
+    }
+
     // ==================== 标准键冲突 ====================
 
     @Test
-    @DisplayName("填 temperature / max_tokens 被拒，且文案指向标准字段")
+    @DisplayName("填 temperature / max_tokens / dimensions 被拒，且文案指向标准字段")
     void stdKeyConflictRejectedWithGuidance() {
         AdminModelProfileController c = controller();
         seed(c);
 
-        for (String key : List.of("temperature", "max_tokens", "top_p", "response_format")) {
+        for (String key : List.of("temperature", "max_tokens", "dimensions")) {
             String json = "{\"" + key + "\": 1}";
             BaseException e = assertThrows(BaseException.class, () -> save(c, json),
                     "标准键「" + key + "」必须被拒");
             assertTrue(e.getMessage().contains(key), "文案要点出是哪个键：" + e.getMessage());
             assertTrue(e.getMessage().contains("标准"),
                     "文案必须指向标准字段，否则用户不知道该去哪填：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 对话族摘掉适配 schema 之后，这些键**没有第二个入口**：以前它们被拒是因为
+     * 「命中适配时还能从滑杆走到 builder」，那条路已经不存在了。继续拒等于纯丢参数 ——
+     * 用户在 JSON 框里填 top_p 被拒、卡片上又找不到地方填，只能以为平台不支持。
+     */
+    @Test
+    @DisplayName("原先因适配滑杆被拒的键，现在必须放行")
+    void previouslyStdOnlyKeysNowAccepted() {
+        AdminModelProfileController c = controller();
+        seed(c);
+
+        for (String key : List.of("top_p", "top_logprobs", "seed", "stop",
+                "frequency_penalty", "presence_penalty", "response_format")) {
+            String json = "{\"" + key + "\": 1}";
+            assertDoesNotThrow(() -> save(c, json),
+                    "「" + key + "」已无第二个入口，不应再被闸门拒绝");
+            assertEquals(1, lastRegistry.profile("p").orElseThrow().params().get(key),
+                    "「" + key + "」要真的落进 params");
         }
     }
 

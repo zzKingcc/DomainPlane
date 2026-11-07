@@ -239,7 +239,6 @@
       if (!models.length) {
         box.innerHTML = '<div class="empty-box"><div class="empty-title">\u8FD8\u6CA1\u6709\u914D\u7F6E\u4EFB\u4F55\u6A21\u578B</div><div class="empty-sub">\u70B9\u53F3\u4E0A\u89D2\u300C\u6DFB\u52A0\u6A21\u578B\u300D\u767B\u8BB0\u4E00\u4E2A\u8FDE\u63A5\uFF1B\u6A21\u578B\u8981\u7ED1\u5230\u57DF\u624D\u80FD\u88AB\u8C03\u7528\uFF08\u5728\u300C\u57DF\u7A7A\u95F4\u300D\u9875\u64CD\u4F5C\uFF09\u3002</div></div>';
       } else {
-        var tuneSeq = 0;
         box.innerHTML = models.map(function(p) {
           var chat = isChatProfile(p);
           var noType = !(p.endpoints || []).length ? '<span class="mbadge off">\u672A\u58F0\u660E\u7C7B\u578B</span>' : "";
@@ -253,13 +252,11 @@
           } else {
             used = '<span class="perm-none">\u4E0D\u53C2\u4E0E\u57DF\u7ED1\u5B9A</span>';
           }
-          var adapterBadge = p.adapter ? '<span class="mbadge">\u5DF2\u9002\u914D</span>' : "";
-          var hasTune = !!(p.adapter && (p.adapter.params || []).length);
-          var tuneBox = hasTune ? adapterTuneBox(p, "tb" + tuneSeq++) : "";
-          var tuneCtl = hasTune ? '<span class="tune-status"></span><button type="button" class="btn btn-sm btn-outline-primary tune-save" disabled>\u66F4\u65B0</button>' : "";
           var thinkCtl = chat ? thinkSwitch(p) : "";
-          var paramsBox = !p.customParams || p.customParams.schemaDriven ? "" : chat || !(p.endpoints || []).length ? customParamsBox(p) : "";
-          return '<section class="dp-card model-card"><header class="card-head"><span class="model-dot"></span><h2>' + modelTitle(p.modelName || p.alias) + "</h2>" + dupBadge(p) + noType + visionBadge(p) + cardTags(p) + adapterBadge + '<span class="spacer"></span>' + thinkCtl + tuneCtl + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">\u63A2\u6D4B</button><button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">\u5220\u9664</button></header><div class="dp-card-body"><div class="model-meta"><div><span class="k">\u8F93\u5165\u6A21\u6001</span>' + modalityCell(p, p.input) + '</div><div><span class="k">\u8F93\u51FA\u6A21\u6001</span>' + modalityCell(p, p.output) + '</div><div><span class="k">\u670D\u52A1\u5546\u5730\u5740</span><span class="mono">' + Console.escapeHtml(p.baseUrl || "-") + '</span></div><div><span class="k">\u88AB\u54EA\u4E9B\u57DF\u4F7F\u7528</span>' + used + "</div>" + (chat ? '<div class="ctx-row"><span class="k">\u4E0A\u4E0B\u6587\u957F\u5EA6</span>' + ctxCell(p) + "</div>" : "") + "</div>" + tuneBox + paramsBox + "</div></section>";
+          var tuneable = !!(p.customParams && p.customParams.applies);
+          var stdTune = tuneable ? stdTuneBox(p) : "";
+          var paramsBox = tuneable ? customParamsBox(p) : "";
+          return '<section class="dp-card model-card"><header class="card-head"><span class="model-dot"></span><h2>' + modelTitle(p.modelName || p.alias) + "</h2>" + dupBadge(p) + noType + visionBadge(p) + cardTags(p) + '<span class="spacer"></span>' + thinkCtl + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">\u63A2\u6D4B</button><button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">\u5220\u9664</button></header><div class="dp-card-body"><div class="model-meta"><div><span class="k">\u8F93\u5165\u6A21\u6001</span>' + modalityCell(p, p.input) + '</div><div><span class="k">\u8F93\u51FA\u6A21\u6001</span>' + modalityCell(p, p.output) + '</div><div><span class="k">\u670D\u52A1\u5546\u5730\u5740</span><span class="mono">' + Console.escapeHtml(p.baseUrl || "-") + '</span></div><div><span class="k">\u88AB\u54EA\u4E9B\u57DF\u4F7F\u7528</span>' + used + "</div>" + (chat ? '<div class="ctx-row"><span class="k">\u4E0A\u4E0B\u6587\u957F\u5EA6</span>' + ctxCell(p) + "</div>" : "") + "</div>" + stdTune + paramsBox + "</div></section>";
         }).join("");
       }
       box.querySelectorAll("button[data-del]").forEach(function(b) {
@@ -283,7 +280,7 @@
           saveContextWindow(input.getAttribute("data-ctx"), input);
         });
       });
-      box.querySelectorAll(".dp-card.model-card").forEach(bindTuneBox);
+      box.querySelectorAll(".std-tune").forEach(bindStdTune);
       box.querySelectorAll(".dp-params").forEach(bindParamsBox);
       pfEl("embeddingCount").textContent = VECTOR_PROFILES.length + " \u4E2A";
       pfEl("modelCount").textContent = models.length + " \u4E2A";
@@ -371,7 +368,6 @@
           throw new Error(Console.sanitizeError(r && (r.detail || r.error) || "\u53D6\u914D\u7F6E\u5931\u8D25"));
         }
         pfEl("pfBaseUrl").value = r.baseUrl;
-        scheduleMatch();
         var msg = "\u5DF2\u9009\u4E2D\u914D\u7F6E\u300C" + name + "\u300D\uFF0C\u5730\u5740\u5DF2\u586B\u5165\uFF08" + r.baseUrl + "\uFF09";
         if (r.hasApiKey && r.apiKey) {
           pfEl("pfApiKey").value = r.apiKey;
@@ -392,7 +388,6 @@
       }
       if (p.baseUrl) {
         pfEl("pfBaseUrl").value = p.baseUrl;
-        scheduleMatch();
       }
       var msg = "\u5DF2\u9009\u4E2D\u9884\u8BBE\u300C" + p.label + "\u300D";
       if (p.baseUrl) {
@@ -411,10 +406,9 @@
       readSay(true, msg);
     }
     function resetForm() {
-      ["pfBaseUrl", "pfApiKey", "pfModelName", "pfPreset"].forEach(function(id) {
+      ["pfBaseUrl", "pfApiKey", "pfModelName", "pfPreset", "pfTemperature", "pfMaxTokens", "pfParamsJson"].forEach(function(id) {
         pfEl(id).value = "";
       });
-      applyAdapter(null);
       var box = pfEl("profileResult");
       box.textContent = "";
       box.className = "result";
@@ -455,7 +449,6 @@
     function comboPick(id) {
       pfEl("pfModelName").value = id;
       comboClose();
-      scheduleMatch();
     }
     function catalogPayload() {
       return { chatBaseUrl: val("pfBaseUrl"), chatApiKey: val("pfApiKey") };
@@ -571,53 +564,6 @@
       var box = pfEl("profileResult");
       box.className = message ? "result show " + (ok ? "ok" : "err") : "result";
       box.textContent = message || "";
-    }
-    var ADAPTER = null;
-    var ADAPTER_SPECS = [];
-    var matchTimer = null;
-    function scheduleMatch() {
-      if (matchTimer) {
-        clearTimeout(matchTimer);
-      }
-      matchTimer = setTimeout(runMatch, 500);
-    }
-    function runMatch() {
-      if (matchTimer) {
-        clearTimeout(matchTimer);
-        matchTimer = null;
-      }
-      var baseUrl = pfEl("pfBaseUrl").value.trim();
-      var modelName = pfEl("pfModelName").value.trim();
-      if (!baseUrl && !modelName) {
-        applyAdapter(null);
-        return;
-      }
-      Console.api.post("/admin/model-adapters/match", { baseUrl, modelName }).then(function(r) {
-        applyAdapter(r && r.matched ? r.adapter : null);
-      }).catch(function() {
-        applyAdapter(null);
-      });
-    }
-    function tuneFieldsReady() {
-      return !!(val("pfBaseUrl") && val("pfApiKey") && val("pfModelName"));
-    }
-    function refreshTuneBox() {
-      pfEl("adapterBar").hidden = !(ADAPTER && ADAPTER_SPECS.length && tuneFieldsReady());
-    }
-    function applyAdapter(adapter) {
-      ADAPTER = adapter || null;
-      if (!ADAPTER) {
-        ADAPTER_SPECS = [];
-        pfEl("adapterParams").innerHTML = "";
-        refreshTuneBox();
-        return;
-      }
-      ADAPTER_SPECS = ADAPTER.params || [];
-      var cur = specDefaults(ADAPTER_SPECS);
-      pfEl("adapterParams").innerHTML = ADAPTER_SPECS.map(function(spec, i) {
-        return renderParamRow("ap", spec, i, cur[spec.key], cur);
-      }).join("");
-      refreshTuneBox();
     }
     function tuneParamEnabled(spec, values) {
       var w = spec.enabledWhen;
@@ -976,16 +922,81 @@
         }
       });
     }
+    function stdTuneBox(p) {
+      var tmp = p.temperature == null ? "" : String(p.temperature);
+      var mtx = p.maxTokens == null ? "" : String(p.maxTokens);
+      return '<div class="std-tune" data-std-alias="' + Console.escapeHtml(p.alias) + '"><div class="ctx-row"><span class="k">\u6E29\u5EA6</span><input type="number" class="mono model-temp form-control" min="0" max="2" step="0.1" data-saved="' + Console.escapeHtml(tmp) + '" value="' + Console.escapeHtml(tmp) + '" placeholder="\u670D\u52A1\u5546\u9ED8\u8BA4"></div><div class="ctx-row"><span class="k">\u5355\u6B21\u6700\u5927\u8F93\u51FA</span><input type="number" class="mono model-maxtok form-control" min="1" step="1" data-saved="' + Console.escapeHtml(mtx) + '" value="' + Console.escapeHtml(mtx) + '" placeholder="\u4E0D\u9650"><span class="ctx-unit">token</span></div></div>';
+    }
+    function bindStdTune(boxEl) {
+      var alias = boxEl.getAttribute("data-std-alias");
+      var temp = boxEl.querySelector(".model-temp");
+      var maxTok = boxEl.querySelector(".model-maxtok");
+      if (!alias || !temp || !maxTok) {
+        return;
+      }
+      [temp, maxTok].forEach(function(input) {
+        input.addEventListener("change", function() {
+          saveStdTune(alias, temp, maxTok);
+        });
+      });
+    }
+    function saveStdTune(alias, tempInput, maxTokInput) {
+      var temperature = null;
+      var rawTemp = (tempInput.value || "").trim();
+      if (rawTemp !== "") {
+        temperature = Number(rawTemp);
+        if (!isFinite(temperature) || temperature < 0 || temperature > 2) {
+          Console.toast("\u6E29\u5EA6\u53D6\u503C 0\u20132\uFF1B\u7559\u7A7A\u8868\u793A\u7528\u670D\u52A1\u5546\u9ED8\u8BA4", { type: "warning" });
+          tempInput.value = tempInput.getAttribute("data-saved") || "";
+          return;
+        }
+      }
+      var maxTokens = null;
+      var rawMax = (maxTokInput.value || "").trim();
+      if (rawMax !== "") {
+        maxTokens = Number(rawMax);
+        if (!isFinite(maxTokens) || Math.floor(maxTokens) !== maxTokens || maxTokens <= 0) {
+          Console.toast("\u5355\u6B21\u6700\u5927\u8F93\u51FA\u5FC5\u987B\u662F\u6B63\u6574\u6570\uFF1B\u7559\u7A7A\u8868\u793A\u4E0D\u9650\u5236", { type: "warning" });
+          maxTokInput.value = maxTokInput.getAttribute("data-saved") || "";
+          return;
+        }
+      }
+      var p = findProfile(alias);
+      var payload = {
+        alias,
+        params: p && p.params || {},
+        temperature,
+        maxTokens,
+        dimensions: p ? p.dimensions : null
+      };
+      tempInput.disabled = true;
+      maxTokInput.disabled = true;
+      Console.api.put("/admin/model-profiles/tuning", payload).then(function() {
+        if (p) {
+          p.temperature = temperature;
+          p.maxTokens = maxTokens;
+        }
+        tempInput.setAttribute("data-saved", tempInput.value || "");
+        maxTokInput.setAttribute("data-saved", maxTokInput.value || "");
+      }).catch(function(e) {
+        tempInput.value = tempInput.getAttribute("data-saved") || "";
+        maxTokInput.value = maxTokInput.getAttribute("data-saved") || "";
+        Console.toast("\u4FDD\u5B58\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message), { type: "error" });
+      }).then(function() {
+        tempInput.disabled = false;
+        maxTokInput.disabled = false;
+      });
+    }
     function customParamsBox(p) {
       var cp = p.customParams || {};
       var lim = cp.limits || {};
       var stdList = cp.stdKeys || [];
-      var hint = "\u6CA1\u547D\u4E2D\u5185\u7F6E\u9002\u914D\uFF0C\u53C2\u6570\u53EA\u80FD\u81EA\u5DF1\u586B\uFF1AJSON \u5BF9\u8C61\uFF0C\u952E\u503C\u539F\u6837\u900F\u4F20\u5230\u8BF7\u6C42\u4F53\u3002\u7559\u7A7A = \u4E00\u4E2A\u90FD\u4E0D\u53D1\u9001\u3002";
+      var hint = "JSON \u5BF9\u8C61\uFF0C\u952E\u540D\u7528\u670D\u52A1\u5546\u6587\u6863\u91CC\u7684\u5B57\u6BB5\u540D\uFF1B\u952E\u503C\u539F\u6837\u62FC\u8FDB\u8BF7\u6C42\u4F53\u3002\u7559\u7A7A = \u4E00\u4E2A\u90FD\u4E0D\u53D1\u9001\u3002";
       if (lim.maxKeys) {
         hint += "\u4E0A\u9650 " + lim.maxKeys + " \u4E2A\u952E\u3001" + (lim.maxBytes || 0) + " \u5B57\u8282\u3002";
       }
       if (stdList.length) {
-        var prefer = ["temperature", "max_tokens", "top_p", "stop", "response_format", "seed"];
+        var prefer = ["temperature", "max_tokens", "dimensions"];
         var shownList = prefer.filter(function(k) {
           return stdList.indexOf(k) >= 0;
         });
@@ -1094,18 +1105,38 @@
            （见 thinkSwitch / saveReturnThinking） */
         returnThinking: false
       };
-      var tuning = collectTuning("ap", ADAPTER_SPECS);
-      if (Object.keys(tuning.params).length) {
-        body.params = tuning.params;
+      var rawTemp = (pfEl("pfTemperature").value || "").trim();
+      if (rawTemp !== "") {
+        var temp = Number(rawTemp);
+        if (!isFinite(temp) || temp < 0 || temp > 2) {
+          showResult(false, "\u6E29\u5EA6\u53D6\u503C 0\u20132\uFF1B\u7559\u7A7A\u8868\u793A\u7528\u670D\u52A1\u5546\u9ED8\u8BA4");
+          return;
+        }
+        body.temperature = temp;
       }
-      if (tuning.temperature != null) {
-        body.temperature = tuning.temperature;
+      var rawMax = (pfEl("pfMaxTokens").value || "").trim();
+      if (rawMax !== "") {
+        var maxTok = Number(rawMax);
+        if (!isFinite(maxTok) || Math.floor(maxTok) !== maxTok || maxTok <= 0) {
+          showResult(false, "\u5355\u6B21\u6700\u5927\u8F93\u51FA\u5FC5\u987B\u662F\u6B63\u6574\u6570\uFF1B\u7559\u7A7A\u8868\u793A\u4E0D\u9650\u5236");
+          return;
+        }
+        body.maxTokens = maxTok;
       }
-      if (tuning.maxTokens != null) {
-        body.maxTokens = tuning.maxTokens;
-      }
-      if (tuning.dimensions != null) {
-        body.dimensions = tuning.dimensions;
+      var rawParams = (pfEl("pfParamsJson").value || "").trim();
+      if (rawParams !== "") {
+        var parsed;
+        try {
+          parsed = JSON.parse(rawParams);
+        } catch (err) {
+          showResult(false, "\u81EA\u5B9A\u4E49\u53C2\u6570\u4E0D\u662F\u5408\u6CD5 JSON\uFF1A" + err.message);
+          return;
+        }
+        if (!parsed || typeof parsed !== "object" || Object.prototype.toString.call(parsed) === "[object Array]") {
+          showResult(false, '\u81EA\u5B9A\u4E49\u53C2\u6570\u8981\u662F\u4E00\u4E2A JSON \u5BF9\u8C61\uFF0C\u5982 {"enable_thinking": false}');
+          return;
+        }
+        body.params = parsed;
       }
       var btn = pfEl("saveProfileBtn");
       btn.disabled = true;
@@ -1330,16 +1361,6 @@
       if (btn) {
         deleteConnection(btn.getAttribute("data-cn-del"));
       }
-    });
-    pfEl("pfBaseUrl").addEventListener("input", scheduleMatch);
-    pfEl("pfModelName").addEventListener("input", scheduleMatch);
-    pfEl("pfBaseUrl").addEventListener("blur", runMatch);
-    pfEl("pfModelName").addEventListener("blur", runMatch);
-    pfEl("pfApiKey").addEventListener("input", refreshTuneBox);
-    ["input", "change"].forEach(function(ev) {
-      pfEl("adapterBar").addEventListener(ev, function() {
-        syncTuneEnabled("ap", ADAPTER_SPECS);
-      });
     });
     document.addEventListener("click", function(e) {
       var seg = e.target && e.target.closest ? e.target.closest(".tune-bar-seg") : null;

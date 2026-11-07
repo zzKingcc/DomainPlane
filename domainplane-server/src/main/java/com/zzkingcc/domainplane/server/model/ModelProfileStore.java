@@ -61,13 +61,23 @@ public class ModelProfileStore {
             /* 旧布局把纯向量档案也放在 profiles 里，只靠 endpoints 区分。读盘时归一，
                并把新布局写回文件，否则"分开了没有"在文件里看不出来。
                落盘失败只告警：启动不该因为一次迁移写盘失败而失败（内存里已经分好了）。 */
-            if (settings.splitVectorProfiles()) {
+            boolean mutated = settings.splitVectorProfiles();
+            if (mutated) {
                 log.info("[模型档案] 已将 {} 个纯向量档案从 profiles 分离到 embeddingProfiles：{}",
                         settings.getEmbeddingProfiles().size(), settings.getEmbeddingProfiles().keySet());
+            }
+            /* 对话 schema 下架后，注入前的 key→wire 翻译没了，存量键必须就地归一，
+               否则 reasoningEffort 会被原样发给上游、被静默忽略（见 ChatParamMigration）。 */
+            if (settings.normalizeChatParams()) {
+                log.info("[模型档案] 已把存量对话档案的 params 键归一为线上字段名"
+                        + "（如 reasoning_effort / top_p），适配 schema 下架后不再有注入前的翻译步骤");
+                mutated = true;
+            }
+            if (mutated) {
                 try {
                     save(settings);
                 } catch (Exception e) {
-                    log.warn("[模型档案] 分离后的布局落盘失败（内存已生效，下次写入会重试）: {}", e.getMessage());
+                    log.warn("[模型档案] 归一后的布局落盘失败（内存已生效，下次写入会重试）: {}", e.getMessage());
                 }
             }
             return settings;

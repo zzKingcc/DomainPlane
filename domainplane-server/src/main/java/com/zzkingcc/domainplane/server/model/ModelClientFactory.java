@@ -8,10 +8,8 @@ import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -109,9 +107,8 @@ public class ModelClientFactory {
                     .baseUrl(profile.baseUrl())
                     .apiKey(profile.apiKey())
                     .modelName(profile.modelName());
-            Set<String> stdWires = allowedStdWires(profile);
-            applyTemperature(b::temperature, profile, stdWires);
-            applyMaxTokens(b::maxTokens, profile, stdWires);
+            applyTemperature(b::temperature, profile);
+            applyMaxTokens(b::maxTokens, profile);
             applyReturnThinking(b::returnThinking, profile);
             applyCustomParameters(b::customParameters, profile);
             return b.build();
@@ -120,9 +117,8 @@ public class ModelClientFactory {
                 .baseUrl(profile.baseUrl())
                 .apiKey(profile.apiKey())
                 .modelName(profile.modelName());
-        Set<String> stdWires = allowedStdWires(profile);
-        applyTemperature(b::temperature, profile, stdWires);
-        applyMaxTokens(b::maxTokens, profile, stdWires);
+        applyTemperature(b::temperature, profile);
+        applyMaxTokens(b::maxTokens, profile);
         applyReturnThinking(b::returnThinking, profile);
         applyCustomParameters(b::customParameters, profile);
         return b.build();
@@ -134,9 +130,8 @@ public class ModelClientFactory {
                     .baseUrl(profile.baseUrl())
                     .apiKey(profile.apiKey())
                     .modelName(profile.modelName());
-            Set<String> stdWires = allowedStdWires(profile);
-            applyTemperature(b::temperature, profile, stdWires);
-            applyMaxTokens(b::maxTokens, profile, stdWires);
+            applyTemperature(b::temperature, profile);
+            applyMaxTokens(b::maxTokens, profile);
             applyReturnThinking(b::returnThinking, profile);
             applyCustomParameters(b::customParameters, profile);
             return b.build();
@@ -145,9 +140,8 @@ public class ModelClientFactory {
                 .baseUrl(profile.baseUrl())
                 .apiKey(profile.apiKey())
                 .modelName(profile.modelName());
-        Set<String> stdWires = allowedStdWires(profile);
-        applyTemperature(b::temperature, profile, stdWires);
-        applyMaxTokens(b::maxTokens, profile, stdWires);
+        applyTemperature(b::temperature, profile);
+        applyMaxTokens(b::maxTokens, profile);
         applyReturnThinking(b::returnThinking, profile);
         applyCustomParameters(b::customParameters, profile);
         return b.build();
@@ -156,38 +150,16 @@ public class ModelClientFactory {
     // ==================== 参数施加 ====================
 
     /**
-     * 此刻允许下发的**标准参数** wire 集合。
-     *
-     * 私有参数的过滤在 {@link #effectiveParams} 里做；标准参数走的是框架 setter，不经那条路，
-     * 所以单独算一遍，两处都读同一份 enabledWhen，口径不会分叉。
-     *
-     * 口径是"默认放行、条件不成立才拦"：没登记条件的标准参数一律放行，未命中适配也一律放行
-     * （与 {@code effectiveParams} 的"原样下发"一致），于是新逻辑只可能收窄条件参数这一个点，
-     * 老档案的行为分毫不动。
-     */
-    private Set<String> allowedStdWires(ModelProfile profile) {
-        Set<String> out = new HashSet<>();
-        out.add("temperature");
-        out.add("max_tokens");
-        ModelAdapterRegistry.MatchResult matched = adapterRegistry.match(profile.baseUrl(), profile.modelName());
-        for (ModelAdapterRegistry.ParamSpec spec : matched.chatParams()) {
-            if (spec.std() && spec.enabledWhen() != null
-                    && !ModelAdapterRegistry.enabled(spec, profile.params())) {
-                out.remove(spec.wire());
-            }
-        }
-        return out;
-    }
-
-    /**
      * 温度：留空就不发送，由服务商默认决定。
      *
      * 不再注入平台自造的默认值，那会让"没填"实际等于"被平台改成了某个数"，
      * 而用户界面上看不到这个数；换个服务商，行为还会跟着变。
+     *
+     * <p>曾经这里还要先过一道"适配 schema 的 enabledWhen"（如推理模式下温度不生效）；
+     * 对话 schema 下架后那道条件没有了，卡片上的标准字段始终可填、始终下发。</p>
      */
-    private static void applyTemperature(java.util.function.Consumer<Double> setter, ModelProfile profile,
-                                         Set<String> stdWires) {
-        if (profile.temperature() != null && stdWires.contains("temperature")) {
+    private static void applyTemperature(java.util.function.Consumer<Double> setter, ModelProfile profile) {
+        if (profile.temperature() != null) {
             setter.accept(profile.temperature());
         }
     }
@@ -197,10 +169,9 @@ public class ModelClientFactory {
      *
      * "不限制"是刻意保留的默认而不是遗漏，只有显式填了值才会设限。
      */
-    private static void applyMaxTokens(java.util.function.Consumer<Integer> setter, ModelProfile profile,
-                                       Set<String> stdWires) {
+    private static void applyMaxTokens(java.util.function.Consumer<Integer> setter, ModelProfile profile) {
         Integer value = profile.effectiveMaxTokens();
-        if (value != null && stdWires.contains("max_tokens")) {
+        if (value != null) {
             setter.accept(value);
         }
     }
@@ -227,8 +198,8 @@ public class ModelClientFactory {
      *
      * 补缺规则：适配 schema 声明了 {@code default} 而用户没填的键，在此填上，
      * "没填"对用户是不发送，对适配是"按适配登记的默认走"，两者在 default 存在时重合。
-     * 未命中适配的档案原样下发 —— 那是用户自助填参的主路径，保存时由
-     * {@link CustomParamsGate} 把关，到这里已是"准许下发"的值。
+     * 未命中适配、或对话族没有 schema 的档案**原样下发** —— 那是用户自助填参的主路径，
+     * 保存时由 {@link CustomParamsGate} 把关，到这里已是"准许下发"的值。
      */
     private void applyCustomParameters(java.util.function.Consumer<Map<String, Object>> setter,
                                        ModelProfile profile) {
@@ -239,37 +210,31 @@ public class ModelClientFactory {
     }
 
     /**
-     * 档案 params → 请求体字段：适配 default 补缺 + 档案键翻译成线上字段名（key → wire）。
+     * 档案 params → 请求体字段：有 schema 时按 schema 翻译，没有就**原样下发**。
      *
-     * 档案 params 的键是适配 {@code key}（UI 侧标识，如 {@code reasoningEffort}），
-     * 请求体要的是 {@code wire}（OpenAI 字段名，如 {@code reasoning_effort}）。
-     * 翻译只此一处：存储 / 校验 / 视图全用 key，注入前才换成 wire。
+     * <p>对话族的 schema 已经下架（适配文件里 {@code families.chat.params} 为空），
+     * 所以对话档案走的永远是"原样下发"这条分支：档案里存的键就是线上字段名
+     * （存量档案由 {@code ModelProfileStore} 读盘时归一，见 {@link ChatParamMigration}）。
+     * 剩下的 schema 分支只服务仍带参数的族（当前是向量的 {@code dimensions}，
+     * 而它压根不经过本方法）。</p>
      *
-     * 补缺规则：适配 schema 声明了 {@code default} 而用户没填的键，在此填上，
-     * "没填"对用户是不发送，对适配是"按适配登记的默认走"，两者在 default 存在时重合。
-     * 条件参数也参与补缺，但补出来的值**同样要过下面那道条件门**：条件不成立时连默认值
-     * 都不发射。
+     * <p>刻意保留而不是整段删掉：schema 机制还有 {@code validateParams} 与向量那一份消费者，
+     * 删掉翻译逻辑会让"哪天某个族重新登记参数"变成一次静默的键名错配。</p>
      *
-     * 标准参数（{@code std=true}）**不走这里**：它的值在 {@link ModelProfile} 的老字段上，
-     * 由 {@link #allowedStdWires} + setter 那条路专管（见 {@link #applyTemperature} /
-     * {@link #applyMaxTokens}）。default 对标准参数只用于界面空态提示，不参与注入，
-     * 否则同一个 {@code temperature} 会既进 customParameters、又进 builder setter，发两遍。
-     *
-     * 过滤规则：条件不成立的值不发射，正常路径下这种值在保存时就被
-     * {@code validateParams} 拒了，这里只兜住绕过控制器写入的档案（改配置文件、旧版本残留）。
-     * 发给服务商一个它不看的字段，比不发更糟：看起来配了，实际没生效。
-     *
-     * 包装规则：{@code wireWrap} 非空的值包一层单键对象（{@code {wireWrap: value}}），
-     * 用于厂商把标量塞进子对象的标准写法，如 {@code response_format: {type: "json_object"}}。
-     * 未命中适配的档案**原样下发** —— 这是"用户声明、我透传"的落点，不是异常分支。
+     * <p>标准参数（{@code std=true}）**不走这里**：它的值在 {@link ModelProfile} 的老字段上，
+     * 由 {@link #applyTemperature} / {@link #applyMaxTokens} 那条路专管，
+     * 否则同一个 {@code temperature} 会既进 customParameters、又进 builder setter，发两遍。</p>
      *
      * <p>包级可见是为了让测试直接钉住"原样下发"这四个字：这条分支以前被注释成
-     * "正常应为空"，因为控制器那时拒绝非空；现在 30 个模型里 29 个走它，
-     * 它<b>从"没有测试"变成"必须有测试"</b>。</p>
+     * "正常应为空"，因为控制器那时拒绝非空；现在它是**唯一**路径，
+     * 从"没有测试"变成"必须有测试"。</p>
      */
     Map<String, Object> effectiveParams(ModelProfile profile) {
         ModelAdapterRegistry.MatchResult matched = adapterRegistry.match(profile.baseUrl(), profile.modelName());
-        if (!matched.matched()) {
+        /* 没有 chat schema → 原样下发。判空必须在这里做：命中适配但该族没有参数是现在的**常态**
+           （适配文件对 chat 只声明端点族），若顺着下面的循环走，params 会被整个丢掉 —— 
+           表现为"填了参数、请求体里一个字都没有" */
+        if (!matched.matched() || matched.chatParams().isEmpty()) {
             return profile.params();
         }
         Map<String, Object> declared = profile.params();

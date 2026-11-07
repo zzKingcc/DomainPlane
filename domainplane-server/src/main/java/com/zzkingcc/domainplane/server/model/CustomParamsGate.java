@@ -28,8 +28,10 @@ import java.util.regex.Pattern;
  *       用户以为在调温度，实际生效的是另一路。与其静默，不如在保存时把话说清楚。</li>
  * </ul>
  *
- * <p>只用于"未命中适配"的档案。命中适配的档案走 {@link ModelAdapterRegistry#validateParams}，
- * 那里有厂商登记过的 min / max / options，比这四道粗闸门精确得多 —— 两套判据不许混用。</p>
+ * <p><b>对话档案一律走这里</b>，包括命中适配的档案：对话的适配 schema 已经下架
+ * （参数面改成「标准字段 + 用户自填 JSON」），只剩下向量的 {@code dimensions} 还留在 schema 上。
+ * 命中但该族没有 schema 的档案也走这里，所以 {@link ModelAdapterRegistry#validateParams}
+ * 与这四道闸门的分界不再是"命中与否"，而是"该族**有没有** schema"。</p>
  */
 public final class CustomParamsGate {
 
@@ -62,13 +64,17 @@ public final class CustomParamsGate {
     /**
      * 标准参数：它们在别处已经有入口（builder setter / 档案老字段），自定义里出现即冲突。
      *
+     * <p>只收真正另有入口的三个键：{@code temperature} / {@code max_tokens} 走档案老字段
+     * 与卡片上的标准字段，{@code dimensions} 走向量维度专用字段（索引契约）。
+     * {@code top_p} / {@code seed} / {@code stop} / {@code response_format} / penalties
+     * 这些**曾经**也在这张表里，但它们的入口是适配 schema —— schema 下架后若继续拒，
+     * 就成了"哪条路都填不了"的能力净损失，故一并放开，与普通私有参数同待遇。</p>
+     *
      * <p>拒绝而不是"后者覆盖前者"：覆盖意味着两条路的优先级成了隐式约定，
      * 而它连在日志里都看不出来 —— 保存时报一句话，比事后查"为什么温度不生效"便宜得多。</p>
      */
     private static final Set<String> STD_CONFLICTS = Set.of(
-            "temperature", "top_p", "max_tokens", "max_completion_tokens",
-            "presence_penalty", "frequency_penalty", "seed", "stop", "response_format",
-            "dimensions");
+            "temperature", "max_tokens", "dimensions");
 
     /** 合法键名：字母或下划线开头，后续允许数字与 . - _（厂商私有参数里点号常见） */
     private static final Pattern KEY_SHAPE = Pattern.compile("^[A-Za-z_][A-Za-z0-9_.-]{0,63}$");
@@ -106,7 +112,8 @@ public final class CustomParamsGate {
             }
             // ④ 标准键冲突
             if (STD_CONFLICTS.contains(key)) {
-                return "自定义参数不允许使用键「" + rawKey + "」：它是标准参数，请用卡片上的标准字段填写"
+                return "自定义参数不允许使用键「" + rawKey + "」：它是标准字段（温度 / 单次最大输出 / 向量维度）"
+                        + "，请用卡片上对应的输入框填写"
                         + "（两处都填会让同一个值发两条路，生效的是哪一路不可见）";
             }
             // ② 形状（键名）

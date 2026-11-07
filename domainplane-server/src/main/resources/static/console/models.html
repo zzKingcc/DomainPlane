@@ -57,7 +57,7 @@
                  清单不给这些字段（OpenAI / DeepSeek 官方都是标准规范形态）时如实留空，
                  卡片标「未声明类型」。向量模型不是独立表单，它是「被选中的那份 embedding 档案」。
 
-                 弹窗只负责"建"：档案建好之后，调优走卡片上的绿色调优框 + 「更新」，
+                 弹窗只负责"建"：建好之后，温度 / 单次最大输出 / 自定义参数都在卡片上就地改，
                  「是否回写思考内容」是卡片头部的开关（见 thinkSwitch），都不必再弹这个窗。
                  新档案的思考回写默认关闭。 -->
         </div>
@@ -116,15 +116,28 @@
                     </div>
                 </div>
 
-                <!-- ── 服务商适配调优框（绿色工具框）──
-                     出现条件 = 地址 / API Key / 模型名 三项都填全 **且** 命中适配。
-                     信息没填完就先不出现，避免"参数填了但保存时才发现没适配"。
-                     未命中 / 不完整时整框 hidden（不是置灰、不是空占位）。
-                     控件由 /admin/model-adapters/match 下发的 schema 驱动，前端不本地复刻匹配规则。
-                     框内不再摆标题行（已适配 + 服务商名 + 官方文档）：框出现即已命中，那行是把
-                     同一件事说两遍；认哪家服务商，看参数本身即可。 -->
-                <div id="adapterBar" class="tune-box" hidden>
-                    <div id="adapterParams"></div>
+                <!-- ── 调优参数（对话档案）──
+                     标准字段（温度 / 单次最大输出）落在档案的老字段上，注入走 builder 的 setter；
+                     自定义参数是一个 JSON 对象，键名用服务商文档里的字段名，键值原样拼进请求体。
+                     两者都可留空：留空 = 不发送，由服务商默认决定。
+                     服务端复核走 CustomParamsGate（黑名单 / 形状 / 量 / 标准键冲突），
+                     它拒的只有"归平台管的键"，不判断厂商取值域对不对。 -->
+                <div class="field">
+                    <label>温度</label>
+                    <input id="pfTemperature" type="number" class="mono form-control"
+                           min="0" max="2" step="0.1" placeholder="服务商默认">
+                </div>
+
+                <div class="field">
+                    <label>单次最大输出（token）</label>
+                    <input id="pfMaxTokens" type="number" class="mono form-control"
+                           min="1" step="1" placeholder="不限">
+                </div>
+
+                <div class="field">
+                    <label>自定义参数（JSON）</label>
+                    <textarea id="pfParamsJson" class="mono form-control" rows="3" spellcheck="false"
+                              placeholder='{"reasoning_effort": "high"}'></textarea>
                 </div>
 
                 <div id="profileResult" class="result"></div>

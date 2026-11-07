@@ -508,11 +508,14 @@ public class ModelAdapterRegistry {
                 throw new IllegalArgumentException(filename + ": 未知端点族「" + family + "」（允许："
                         + String.join("、", FAMILIES) + "）");
             }
-            /* 结构是 families.<族>.params（族名下再套一层 params 数组，见设计文档 §3.2） */
+            /* 结构是 families.<族>.params（族名下再套一层 params 数组，见设计文档 §3.2）。
+               数组**允许为空**：对话族的参数面已经下架（改走"标准字段 + 用户自填 JSON"），
+               适配文件对 chat 退化成"只声明这是对话端点"的登记表；若仍然要求非空，
+               这些文件就只能整份删掉，连带把 declaration() 带来的"不发上游就能定端点族 / 模态"一起丢掉。 */
             JsonNode familyNode = familiesNode.get(family);
             JsonNode paramsNode = familyNode == null ? null : familyNode.get("params");
-            if (paramsNode == null || !paramsNode.isArray() || paramsNode.isEmpty()) {
-                throw new IllegalArgumentException(filename + ": families." + family + ".params 不能为空");
+            if (paramsNode == null || !paramsNode.isArray()) {
+                throw new IllegalArgumentException(filename + ": families." + family + ".params 必须是数组（可为空）");
             }
             List<ParamSpec> specs = new ArrayList<>();
             for (JsonNode pn : paramsNode) {
