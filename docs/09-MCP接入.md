@@ -1,6 +1,6 @@
 # MCP 接入
 
-外部 MCP server 提供的工具，要先变成"平台工具"，才能被域看见、被审批、被模型调用。本文讲这条转换链、连接的生命周期、以及 OAuth 支持到哪一步。
+外部 MCP server 提供的工具，要先变成"平台工具"，才能被域看见、被审批、被模型调用。本文讲协议版本怎么判、这条转换链、连接的生命周期、以及 OAuth 支持到哪一步。
 
 ---
 
@@ -152,6 +152,10 @@ DELETE /admin/mcp-connections/{name}/oauth/token  → 撤销本地凭据并按�
 | 调用报审批但页面没弹 | `approvalPolicy` 是 `ALL`，但前端没处理 INTERRUPT | 前端要渲染待审批清单 |
 | OAuth 回调 400 | 回调地址与 server 侧登记不一致 | 核对 |
 | 工具能列出但调不通 | 参数 schema 不匹配 / 超时太短 | 调 `callTimeoutMs`，看上游错误 |
+| 状态条显示「会话」但 server 自称支持 2026-07-28 | `server/discover` 探测失败（404 / 400 非现代错误体）或 `supportedVersions` 没列这一版 | 看服务端日志里的探测失败原因；确认 server 的 `server/discover` 在鉴权之前可达 |
+| 连接失败，错误里带一串版本号 | 服务端只支持本平台没实现的协议版本（`-32022`，`data.supported`） | 让 server 启用 2026-07-28 或任一会话式版本；不要在客户端猜版本 |
+| 试跑返回 `input_required` | 服务端用了多轮往返（MRTR）要补输入 | 本平台未实现 MRTR，需上游改成单次请求内完成 |
+| 探测阶段 401 | 上游要 OAuth | 走「授权」页；探测不会把认证挑战吞成"旧 server" |
 
 ---
 
@@ -159,5 +163,6 @@ DELETE /admin/mcp-connections/{name}/oauth/token  → 撤销本地凭据并按�
 
 - `LEGACY_SSE` 已实现但**没有对真实旧 server 验证**，生产接入前要自己压一遍。
 - 不支持 MCP 的 resources / prompts / sampling，只接 tools。
+- 未实现多轮往返（MRTR，服务端回 `resultType=input_required`）：这类工具在试跑与模型调用里都会显式失败，不会静默当成功。
 - 工具目录变更会让历史会话里的旧工具名失效（工具名是模型调用与记录的主键）。
 - MCP 侧的凭证由平台保管，但**平台不做凭证轮换提醒**——token 过期表现为调用失败，不是提前告警。

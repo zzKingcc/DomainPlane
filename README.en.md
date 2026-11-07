@@ -90,6 +90,8 @@ Index name = `domainplane_kb_` + the body's unique slug + 8-character hash, deri
 
 The name the model sees, the arguments the approver sees, the call recorded in logs — all come from one `ToolDescriptor`. When an approval interrupts the turn, the arguments are **already masked**: the approver reviews the *action*, not the API key.
 
+MCP connections need no protocol-version setting: on connect the server is probed with `server/discover`. If it supports `2026-07-28`, requests are stateless (version and capabilities declared per request, no session); otherwise the client falls back to the `initialize` handshake. The console shows the negotiated version and era, and lets operators try-run tools — writes require explicit confirmation and are audited.
+
 Within a single turn, `read_history` and `recall_history` share a budget of 3 calls, so the model cannot turn retrieval into a ball game. Knowledge retrieval and capability tools have their own limits (8 chunks / 3,000 characters injected, 60s for vision, 120s for generation).
 
 ---
@@ -124,7 +126,7 @@ A body card carries every action for one dataset: upload, documents, health, reb
 
 > Screenshots of an early empty-library state; the pages have since been rebuilt around knowledge bodies. Data is demo data.
 
-The other pages: overview (quality and tool risk mix), prompts (edit per domain chain segment), MCP connections (credentials only echoed as `hasHeaders`), tool instances (live list, circuit-break, force offline), session archive (paginated turns by session ID, with conversation text, execution steps and per-turn status; a confirmed action clears one session), account (changing the password invalidates every credential).
+The other pages: overview (quality and tool risk mix), prompts (edit per domain chain segment), MCP connections (automatic protocol-era detection, tool try-runs and event log, OAuth authorization and revocation; credentials only echoed as `hasHeaders`), tool instances (live list, circuit-break, force offline), session archive (paginated turns by session ID, with conversation text, execution steps and per-turn status; a confirmed action clears one session), account (changing the password invalidates every credential).
 
 ---
 
@@ -195,7 +197,7 @@ Java 21 · Spring Boot 3.5.7 · LangChain4j 1.18.1 · LangGraph4j 1.8.17 · Elas
 
 ```bash
 mvn clean package   # full build
-mvn -o test         # full test suite (1,348 tests / 2 skipped, measured 2026-11-04)
+mvn -o test         # full test suite (1,422 tests / 2 skipped, measured 2026-11-07)
 ```
 
 Before opening a PR:
@@ -234,7 +236,7 @@ The module docs are currently written in Chinese. One document per module: const
 | 06 | [Tool system](docs/06-工具体系.md) | Four annotations, visibility algorithm, approval and masking, remote instances and heartbeats |
 | 07 | [Knowledge base](docs/07-知识库.md) | Bodies as data entities, three landing spots and route changes, raw archives, operations, retrieval fusion, ingestion and chunking |
 | 08 | [Models and multimodal](docs/08-模型与多模态.md) | Profiles and endpoint families, capability probing, protocol dispatch, parameter passthrough |
-| 09 | [MCP integration](docs/09-MCP接入.md) | Transports, tool bridging and naming, default approval, OAuth |
+| 09 | [MCP integration](docs/09-MCP接入.md) | Protocol-version detection, transports, tool bridging and naming, default approval, try-runs and events, OAuth |
 | 10 | [Admin console](docs/10-管控台.md) | Eleven pages, page-to-endpoint map, how to change the front end |
 | 11 | [Auth and error codes](docs/11-鉴权与错误码.md) | HMAC credentials, two carriers, 60 error codes with dual wording |
 | 12 | [SDK integration](docs/12-SDK接入.md) | Three SDKs: configuration, usage, approval flow, wire contract |
