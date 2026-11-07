@@ -2620,6 +2620,11 @@ pre.preview .mark { color: #93c5fd; }
     justify-content: flex-end; align-items: stretch; padding: 0;
     background: rgba(17, 24, 39, .38);
 }
+/* 试跑抽屉同款定位：只写对齐与背景，绝不写 display（id 权重会盖掉 .modal-mask[hidden]） */
+#callModal {
+    justify-content: flex-end; align-items: stretch; padding: 0;
+    background: rgba(17, 24, 39, .38);
+}
 .dp-mcp-drawer {
     display: flex; flex-direction: column;
     width: min(560px, 100%); max-width: none; height: 100vh;
@@ -2680,6 +2685,51 @@ pre.preview .mark { color: #93c5fd; }
 .dp-mcp-allow-item .mono { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dp-mcp-allow-item .tag { flex: 0 0 auto; font-size: 10.5px; padding: .15rem .35rem; margin: 0; }
 
+/* 多动作链接（参数与来源 / 试跑）横排：两条 block 链接各占一行会把「说明」列撑高 */
+.dp-mcp-links { display: flex; gap: 12px; margin-top: 4px; }
+.dp-mcp-links .dp-mcp-link { display: inline-block; margin-top: 0; }
+
+/* 试跑抽屉：按 inputSchema 生成的参数表单 + 结果区 */
+.dp-mcp-call-meta {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 0 12px;
+}
+.dp-mcp-call-meta .mono { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+.dp-mcp-call-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin-bottom: 12px; }
+.dp-mcp-call-form > .dp-mcp-none { grid-column: 1 / -1; padding: 12px 8px; }
+.dp-mcp-call-field { min-width: 0; }
+.dp-mcp-call-label {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+    font-size: 12px; font-weight: 600; color: var(--text);
+}
+.dp-mcp-req {
+    padding: .1rem .3rem; border-radius: 4px;
+    font-size: 10.5px; font-weight: 500; color: #b45309; background: var(--tblr-warning-lt);
+}
+.dp-mcp-call-type { font-size: 10.5px; font-weight: 400; color: var(--muted); }
+.dp-mcp-call-desc { margin-top: 3px; font-size: 11px; color: var(--muted); line-height: 1.5; }
+.dp-mcp-call-json {
+    font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+    min-height: 130px;
+}
+.dp-mcp-call-result { font-size: 12.5px; }
+.dp-mcp-call-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.dp-mcp-call-dur { font-size: 11.5px; color: var(--muted); }
+.dp-mcp-call-result .mono { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+/* 裸 pre 会被 Tabler 涂成深色代码块：显式压回浅色，并限高内部滚动 */
+.dp-mcp-call-text, .dp-mcp-call-result pre {
+    margin: 0 0 8px; padding: 8px 10px; max-height: 220px; overflow: auto;
+    background: #f8fafc; color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px;
+    font-size: 11.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* 事件表：时间与耗时给固定宽度，摘要吃掉剩余空间 */
+.dp-mcp-events td:nth-child(1) { width: 92px; white-space: nowrap; }
+.dp-mcp-events td:nth-child(2) { width: 66px; }
+.dp-mcp-events td:nth-child(3) { width: 72px; }
+.dp-mcp-events td:nth-child(4) { width: 66px; white-space: nowrap; }
+.dp-mcp-events td:nth-child(5) { min-width: 180px; color: var(--muted); }
+
 @media (max-width: 1100px) {
     .dp-mcp-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
@@ -2691,5 +2741,6 @@ pre.preview .mark { color: #93c5fd; }
     .dp-mcp-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .dp-mcp-drawer .f-2 { grid-template-columns: 1fr; gap: 0; }
     .dp-mcp-allow { grid-template-columns: 1fr; }
+    .dp-mcp-call-form { grid-template-columns: 1fr; }
 }
 .dp-danger-text { color: var(--red); }

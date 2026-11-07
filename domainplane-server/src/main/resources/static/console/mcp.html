@@ -94,11 +94,13 @@
                             <button class="dp-mcp-tab" type="button" data-tab="tools">工具</button>
                             <button class="dp-mcp-tab" type="button" data-tab="auth">授权</button>
                             <button class="dp-mcp-tab" type="button" data-tab="bind">绑定</button>
+                            <button class="dp-mcp-tab" type="button" data-tab="events">事件</button>
                         </div>
                         <div class="dp-mcp-pane" id="paneOverview"></div>
                         <div class="dp-mcp-pane" id="paneTools" hidden></div>
                         <div class="dp-mcp-pane" id="paneAuth" hidden></div>
                         <div class="dp-mcp-pane" id="paneBind" hidden></div>
+                        <div class="dp-mcp-pane" id="paneEvents" hidden></div>
                     </div>
                 </section>
             </div>
@@ -205,7 +207,34 @@
     </div>
 </div>
 
+<div class="modal-mask" id="callModal" hidden>
+    <div class="modal-panel dp-mcp-drawer dp-mcp-call" role="dialog" aria-modal="true">
+        <div class="modal-head">
+            <h3 id="callTitle">试跑工具</h3>
+            <span class="spacer"></span>
+            <button class="btn btn-outline-secondary" id="callClose">关闭</button>
+        </div>
+        <div class="modal-body">
+            <div class="dp-mcp-call-meta" id="callMeta"></div>
+            <div class="dp-mcp-group">
+                <h4>参数</h4>
+                <div class="dp-mcp-call-form" id="callForm"></div>
+                <div class="f-row">
+                    <label>请求参数（JSON 对象，以上表单会同步到这里）</label>
+                    <textarea class="form-control dp-mcp-call-json" id="callArgs" rows="8"></textarea>
+                </div>
+            </div>
+            <div class="dp-mcp-group">
+                <h4>结果</h4>
+                <div class="dp-mcp-call-result" id="callResult"></div>
+            </div>
+        </div>
+        <footer class="card-foot">
+            <button class="btn btn-outline-primary" id="callRunBtn">执行</button>
+        </footer>
+    </div>
+</div>
+
 <script src="assets/console.js"></script>
-<script src="assets/page-mcp.js"></script>
-</body>
+<script src="assets/page-mcp.js"></script></body>
 </html>

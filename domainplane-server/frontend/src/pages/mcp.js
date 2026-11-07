@@ -1,6 +1,6 @@
 /* ==========================================================================
    mcp 页脚本 · 与 mcp.html 一一对应
-   主从工作台：左侧连接列表 + 右侧状态条和四个 Tab（概览 / 工具 / 授权 / 绑定）。
+   主从工作台：左侧连接列表 + 右侧状态条和五个 Tab（概览 / 工具 / 授权 / 绑定 / 事件）。
    编辑走右侧抽屉，字段按 基础 / 传输与鉴权 / 治理 / 高级 OAuth 分组。
 
    两条硬约束：
@@ -20,7 +20,13 @@
         DISCONNECTED: { label: '未连接', cls: 'disc' },
         OFF: { label: '已禁用', cls: 'off' }
     };
-    var PANES = { overview: 'paneOverview', tools: 'paneTools', auth: 'paneAuth', bind: 'paneBind' };
+    var EVT = {
+        CONNECT: '建连', CALL: '调用', AUTH: '授权', REVOKE: '撤销', CONFIG: '配置'
+    };
+    var PANES = {
+        overview: 'paneOverview', tools: 'paneTools', auth: 'paneAuth',
+        bind: 'paneBind', events: 'paneEvents'
+    };
 
     var state = {
         conns: [], settingsFile: '',
@@ -28,6 +34,8 @@
         domains: [],
         selected: '', tab: 'overview',
         tools: [], toolsFor: '', toolsError: '', toolDetail: '',
+        events: [], eventsFor: '', eventsError: '', eventsRetained: 0,
+        call: null,
         allowPick: [], bindPick: [], bindFor: '', bindTouched: false,
         editing: false, editName: '',
         lastSync: 0, listSig: ''
@@ -51,9 +59,21 @@
         function p(x) { return ('0' + x).slice(-2); }
         return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
     }
+    function dateTimeOf(ms) {
+        if (!ms) { return '—'; }
+        var d = new Date(ms);
+        function p(x) { return ('0' + x).slice(-2); }
+        return (d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
     function kv(k, v) { return '<div class="k">' + esc(k) + '</div><div class="v">' + v + '</div>'; }
     function findConn(name) {
         for (var i = 0; i < state.conns.length; i++) { if (state.conns[i].name === name) { return state.conns[i]; } }
+        return null;
+    }
+    function findTool(name) {
+        for (var i = 0; i < state.tools.length; i++) {
+            if (state.tools[i].originalName === name) { return state.tools[i]; }
+        }
         return null;
     }
     function boundOf(name) { return (state.bindings.connectionBindings || {})[name] || []; }
@@ -215,6 +235,7 @@
         if (state.tab === 'overview') { renderOverview(c); }
         else if (state.tab === 'tools') { renderTools(c); }
         else if (state.tab === 'auth') { renderAuth(c); }
+        else if (state.tab === 'events') { renderEvents(c); }
         else { renderBind(c); }
     }
 
@@ -340,8 +361,12 @@
                         ? '<span class="tag approval">需审批</span>'
                         : '<span class="tag off">免审批</span>') + '</td>'
                     + '<td>' + esc(shortErr(t.description || '—', 90))
+                    + '<div class="dp-mcp-links">'
                     + '<button class="dp-mcp-link" type="button" data-act="toolDetail" data-tool="'
-                    + esc(t.originalName) + '">' + (open ? '收起参数' : '参数与来源') + '</button></td></tr>'
+                    + esc(t.originalName) + '">' + (open ? '收起参数' : '参数与来源') + '</button>'
+                    + '<button class="dp-mcp-link" type="button" data-act="callTool" data-tool="'
+                    + esc(t.originalName) + '">试跑</button>'
+                    + '</div></td></tr>'
                     + '<tr class="dp-mcp-tool-detail"' + (open ? '' : ' hidden') + '><td colspan="5">'
                     + '<div class="dp-mcp-tool-meta">'
                     + '<div><b>输入参数</b><pre>' + esc(schema) + '</pre></div>'
@@ -354,10 +379,20 @@
 
     function renderAuth(c) {
         var need = statusOf(c) === 'NEEDS_AUTH';
+        var ti = c.tokenInfo || {};
+        var credState = '无';
+        if (ti.present) {
+            credState = ti.expired ? '已过期' : (ti.expiringSoon ? '即将过期' : '有效');
+        }
         setHtml('paneAuth',
             '<div class="dp-mcp-kv">'
             + kv('当前状态', chip(c))
             + kv('授权挑战', esc(c.authChallenge || '无'))
+            + kv('OAuth 凭据', esc(credState))
+            + kv('过期时间', ti.present ? esc(dateTimeOf(ti.expiresAtMs)) : '—')
+            + kv('已授予 scope', ti.present ? esc(ti.scope || '服务器未返回') : '—')
+            + kv('refresh_token', ti.present ? (ti.hasRefreshToken ? '有' : '无') : '—')
+            + kv('签发 client_id', ti.present ? esc(ti.clientId || '—') : '—')
             + kv('client_id', esc(c.oauthClientId || '未登记（走动态注册）'))
             + kv('client_secret', c.hasOauthClientSecret ? '已配置（不回显）' : '未配置')
             + kv('client 名称', esc(c.oauthClientName || '—'))
@@ -366,7 +401,11 @@
             + '</div>'
             + '<div class="dp-mcp-pane-actions">'
             + '<button class="btn btn-sm btn-outline-primary" type="button" data-act="oauth">'
-            + (need ? '发起授权' : '重新授权') + '</button></div>');
+            + (need ? '发起授权' : '重新授权') + '</button>'
+            + (ti.present
+                ? '<button class="btn btn-sm btn-outline-danger" type="button" data-act="revokeToken">撤销授权</button>'
+                : '')
+            + '</div>');
     }
 
     function renderBind(c) {
@@ -397,6 +436,217 @@
             + '<button class="btn btn-sm btn-outline-primary" type="button" data-act="saveBind">保存绑定</button>'
             + '<button class="btn btn-sm btn-outline-secondary" type="button" data-act="bindClear">全部解绑</button>'
             + '</div>');
+    }
+
+    // ==================== 事件 ====================
+
+    function loadEvents(name) {
+        state.eventsFor = name;
+        return Console.api.get('/admin/mcp-connections/' + encodeURIComponent(name) + '/events?limit=50')
+            .then(function (r) {
+                state.events = (r && r.events) || [];
+                state.eventsRetained = (r && r.retained) || 0;
+                state.eventsError = '';
+                afterEvents(name);
+            }).catch(function (e) {
+                state.events = [];
+                state.eventsError = errText(e);
+                afterEvents(name);
+            });
+    }
+
+    function afterEvents(name) {
+        var c = findConn(state.selected);
+        if (c && c.name === name && state.tab === 'events') { renderEvents(c); }
+    }
+
+    /* 动作之后顺手刷一次事件表：只在事件页可见时刷，别让后台请求白跑 */
+    function reloadEventsIfActive() {
+        if (state.tab === 'events' && state.selected) { loadEvents(state.selected); }
+    }
+
+    function renderEvents(c) {
+        if (state.eventsFor !== c.name) {
+            setHtml('paneEvents', Console.loadingHtml('正在读取事件…'));
+            loadEvents(c.name);
+            return;
+        }
+        var reload = '<button class="btn btn-sm" type="button" data-act="reloadEvents">刷新</button>';
+        if (state.eventsError) {
+            setHtml('paneEvents', '<div class="dp-mcp-err">读取事件失败：'
+                + esc(state.eventsError) + '</div>' + reload);
+            return;
+        }
+        if (!state.events.length) {
+            setHtml('paneEvents', '<div class="dp-mcp-none">本次运行还没有事件</div>' + reload);
+            return;
+        }
+        setHtml('paneEvents',
+            '<div class="dp-mcp-tools-head"><span>本次运行 ' + state.eventsRetained + ' 条</span>'
+            + '<span class="spacer"></span>' + reload + '</div>'
+            + '<div class="dp-mcp-table-wrap"><table class="table dp-mcp-table dp-mcp-events"><thead><tr>'
+            + '<th>时间</th><th>类型</th><th>结果</th><th>耗时</th><th>摘要</th>'
+            + '</tr></thead><tbody>'
+            + state.events.map(function (e) {
+                return '<tr><td class="mono">' + esc(dateTimeOf(e.atMs)) + '</td>'
+                    + '<td>' + esc(EVT[e.type] || e.type || '—') + '</td>'
+                    + '<td>' + (e.ok ? '<span class="tag public">成功</span>'
+                        : '<span class="tag destructive">失败</span>') + '</td>'
+                    + '<td class="mono">' + (e.durationMs ? esc(String(e.durationMs)) + ' ms' : '—') + '</td>'
+                    + '<td>' + esc(e.summary || '—') + '</td></tr>';
+            }).join('') + '</tbody></table></div>');
+    }
+
+    // ==================== 试跑抽屉 ====================
+
+    /** 把 inputSchema 的 properties 摊成字段清单（生成的表单只是快捷输入，JSON 才是权威） */
+    function schemaFields(schema) {
+        var props = (schema && schema.properties) || {};
+        var required = (schema && schema.required) || [];
+        var out = [];
+        Object.keys(props).forEach(function (k) {
+            var p = props[k] || {};
+            var type = p.type || (p.enum ? 'string' : 'string');
+            out.push({
+                key: k, type: type, desc: p.description || '',
+                enums: p.enum || null, required: required.indexOf(k) >= 0,
+                def: p.default
+            });
+        });
+        return out;
+    }
+
+    function callFieldHtml(f) {
+        var name = ' data-arg="' + esc(f.key) + '" data-type="' + esc(f.type) + '"';
+        var head = '<label class="dp-mcp-call-label">' + esc(f.key)
+            + (f.required ? '<span class="dp-mcp-req">必填</span>' : '')
+            + '<span class="dp-mcp-call-type">' + esc(f.type) + '</span></label>';
+        var input;
+        if (f.enums) {
+            input = '<select class="form-select"' + name + '><option value="">（不传）</option>'
+                + f.enums.map(function (v) {
+                    return '<option value="' + esc(String(v)) + '">' + esc(String(v)) + '</option>';
+                }).join('') + '</select>';
+        } else if (f.type === 'boolean') {
+            input = '<select class="form-select"' + name + '><option value="">（不传）</option>'
+                + '<option value="true">true</option><option value="false">false</option></select>';
+        } else if (f.type === 'number' || f.type === 'integer') {
+            input = '<input class="form-control" type="number"' + name + '>';
+        } else if (f.type === 'array' || f.type === 'object') {
+            input = '<textarea class="form-control" rows="3"' + name + ' placeholder="JSON"></textarea>';
+        } else {
+            input = '<input class="form-control" type="text"' + name + '>';
+        }
+        return '<div class="dp-mcp-call-field">' + head + input
+            + (f.desc ? '<div class="dp-mcp-call-desc">' + esc(f.desc) + '</div>' : '') + '</div>';
+    }
+
+    function renderCallForm(t) {
+        var fields = schemaFields(t.inputSchema);
+        if (!fields.length) {
+            setHtml('callForm', '<div class="dp-mcp-none">该工具没有声明参数，直接写 JSON</div>');
+            setVal('callArgs', '{}');
+            return;
+        }
+        setHtml('callForm', fields.map(callFieldHtml).join(''));
+        syncArgsFromForm();
+    }
+
+    /** 表单 → JSON 文本（单向：表单只负责写，提交时以文本为准，避免两份真相打架） */
+    function syncArgsFromForm() {
+        var form = el('callForm');
+        var out = {};
+        if (form) {
+            form.querySelectorAll('[data-arg]').forEach(function (n) {
+                var k = n.getAttribute('data-arg');
+                var type = n.getAttribute('data-type') || 'string';
+                var v = n.value;
+                if (v === '' || v === null || v === undefined) { return; }
+                if (type === 'boolean') { out[k] = (v === 'true'); return; }
+                if (type === 'number' || type === 'integer') {
+                    var num2 = Number(v);
+                    if (!isNaN(num2)) { out[k] = num2; }
+                    return;
+                }
+                if (type === 'array' || type === 'object') {
+                    try { out[k] = JSON.parse(v); } catch (e) { out[k] = v; }
+                    return;
+                }
+                out[k] = v;
+            });
+        }
+        setVal('callArgs', JSON.stringify(out, null, 2));
+    }
+
+    function openCall(t) {
+        state.call = { tool: t };
+        setText('callTitle', '试跑 · ' + (t.originalName || ''));
+        setHtml('callMeta',
+            sideEffectTag(t.sideEffect)
+            + '<span class="tag ' + (t.approvalRequired ? 'approval' : 'off') + '">'
+            + (t.approvalRequired ? '模型调用需审批' : '模型调用免审批') + '</span>'
+            + '<span class="mono">' + esc(t.mappedName || '未开放') + '</span>');
+        renderCallForm(t);
+        setHtml('callResult', '<div class="dp-mcp-none">尚未执行</div>');
+        setHidden('callModal', false);
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeCall() {
+        state.call = null;
+        setHidden('callModal', true);
+        document.body.style.overflow = '';
+    }
+
+    function showCallResult(r) {
+        var ok = !!(r && r.success);
+        var head = '<div class="dp-mcp-call-head">'
+            + '<span class="tag ' + (ok ? 'public' : 'destructive') + '">' + (ok ? '成功' : '失败') + '</span>'
+            + '<span class="dp-mcp-call-dur">' + (r && r.durationMs ? esc(String(r.durationMs)) + ' ms' : '—') + '</span>'
+            + '<span class="mono">' + esc((r && r.tool) || '') + '</span></div>';
+        var text = '<pre class="dp-mcp-call-text">' + esc((r && r.text) || '（无返回文本）') + '</pre>';
+        var req = '<details class="dp-mcp-diag-raw"><summary>请求参数</summary><pre>'
+            + esc(JSON.stringify((r && r.arguments) || {}, null, 2)) + '</pre></details>';
+        var raw = r && r.raw
+            ? '<details class="dp-mcp-diag-raw"><summary>响应原文</summary><pre>' + esc(r.raw) + '</pre></details>'
+            : '';
+        setHtml('callResult', head + text + req + raw);
+    }
+
+    function runCall() {
+        var t = state.call && state.call.tool;
+        if (!t) { return Promise.resolve(); }
+        var raw = val('callArgs');
+        var args;
+        try {
+            args = raw ? JSON.parse(raw) : {};
+            if (!args || typeof args !== 'object' || Array.isArray(args)) {
+                throw new Error('需要 JSON 对象');
+            }
+        } catch (e) {
+            setHtml('callResult', '<div class="dp-mcp-err">参数不是合法 JSON 对象：' + esc(e.message) + '</div>');
+            return Promise.resolve();
+        }
+        var needConfirm = !!t.sideEffect && t.sideEffect !== 'READ';
+        var go = needConfirm
+            ? Console.confirm('工具 ' + t.originalName + ' 是 ' + t.sideEffect
+                + ' 操作，试跑会真实作用到外部系统。\n\n确认继续？',
+                { title: '试跑写操作', okText: '执行', danger: true })
+            : Promise.resolve(true);
+        return go.then(function (ok) {
+            if (!ok) { return; }
+            setHtml('callResult', Console.loadingHtml('正在执行…'));
+            return Console.api.post(
+                '/admin/mcp-connections/' + encodeURIComponent(state.selected) + '/tools/call',
+                { tool: t.originalName, arguments: args, confirm: needConfirm })
+                .then(function (r) {
+                    showCallResult(r);
+                    reloadEventsIfActive();
+                    load();
+                }).catch(function (e) {
+                    setHtml('callResult', '<div class="dp-mcp-err">执行失败：' + esc(errText(e)) + '</div>');
+                });
+        });
     }
 
     // ==================== 编辑抽屉 ====================
@@ -624,6 +874,22 @@
         });
     }
 
+    function revokeToken(c) {
+        return Console.confirm('撤销连接 ' + c.name + ' 的 OAuth 授权？\n\n'
+            + '本地保存的令牌会被删除并立即重连；授权服务器侧的回话可能仍然有效，直到其自身过期。',
+            { title: '撤销授权', okText: '撤销', danger: true }).then(function (ok) {
+                if (!ok) { return; }
+                return Console.api.del('/admin/mcp-connections/' + encodeURIComponent(c.name) + '/oauth/token')
+                    .then(function (r) {
+                        Console.toast((r && r.message) || '已撤销授权', { type: 'success', wide: true });
+                        reloadEventsIfActive();
+                        load();
+                    }).catch(function (e) {
+                        Console.toast('撤销失败：' + errText(e), { type: 'error' });
+                    });
+            });
+    }
+
     function onAct(act, btn) {
         var c = findConn(state.selected);
         if (!c) { return; }
@@ -639,6 +905,12 @@
             renderTools(c);
         }
         else if (act === 'editAllow') { openEdit(c.name); }
+        else if (act === 'callTool') {
+            var t = findTool(btn.getAttribute('data-tool') || '');
+            if (t) { openCall(t); }
+        }
+        else if (act === 'reloadEvents') { loadEvents(c.name); }
+        else if (act === 'revokeToken') { revokeToken(c); }
         else if (act === 'saveBind') { Console.busy(btn, function () { saveBind(); return Promise.resolve(); }, '保存中…'); }
         else if (act === 'bindClear') {
             state.bindTouched = true;
@@ -688,7 +960,7 @@
             });
         }
 
-        ['statusBar', 'paneOverview', 'paneTools', 'paneAuth', 'paneBind'].forEach(function (id) {
+        ['statusBar', 'paneOverview', 'paneTools', 'paneAuth', 'paneBind', 'paneEvents'].forEach(function (id) {
             var box = el(id);
             if (!box) { return; }
             box.addEventListener('click', function (e) {
@@ -738,6 +1010,26 @@
         if (editModal) {
             editModal.addEventListener('click', function (e) {
                 if (e.target === editModal) { closeEdit(); }
+            });
+        }
+
+        var callForm = el('callForm');
+        if (callForm) {
+            callForm.addEventListener('input', syncArgsFromForm);
+            callForm.addEventListener('change', syncArgsFromForm);
+        }
+        var callCloseBtn = el('callClose');
+        if (callCloseBtn) { callCloseBtn.addEventListener('click', closeCall); }
+        var callRun = el('callRunBtn');
+        if (callRun) {
+            callRun.addEventListener('click', function () {
+                Console.busy(this, runCall, '执行中…');
+            });
+        }
+        var callModal = el('callModal');
+        if (callModal) {
+            callModal.addEventListener('click', function (e) {
+                if (e.target === callModal) { closeCall(); }
             });
         }
     }

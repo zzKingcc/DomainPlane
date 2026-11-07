@@ -1,5 +1,5 @@
 (() => {
-  // domainplane-server/frontend/src/pages/mcp.js
+  // src/pages/mcp.js
   (function() {
     var esc = Console.escapeHtml;
     var PROTOCOL = "2025-03-26";
@@ -13,7 +13,20 @@
       DISCONNECTED: { label: "\u672A\u8FDE\u63A5", cls: "disc" },
       OFF: { label: "\u5DF2\u7981\u7528", cls: "off" }
     };
-    var PANES = { overview: "paneOverview", tools: "paneTools", auth: "paneAuth", bind: "paneBind" };
+    var EVT = {
+      CONNECT: "\u5EFA\u8FDE",
+      CALL: "\u8C03\u7528",
+      AUTH: "\u6388\u6743",
+      REVOKE: "\u64A4\u9500",
+      CONFIG: "\u914D\u7F6E"
+    };
+    var PANES = {
+      overview: "paneOverview",
+      tools: "paneTools",
+      auth: "paneAuth",
+      bind: "paneBind",
+      events: "paneEvents"
+    };
     var state = {
       conns: [],
       settingsFile: "",
@@ -25,6 +38,11 @@
       toolsFor: "",
       toolsError: "",
       toolDetail: "",
+      events: [],
+      eventsFor: "",
+      eventsError: "",
+      eventsRetained: 0,
+      call: null,
       allowPick: [],
       bindPick: [],
       bindFor: "",
@@ -101,6 +119,16 @@
       }
       return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
     }
+    function dateTimeOf(ms) {
+      if (!ms) {
+        return "\u2014";
+      }
+      var d = new Date(ms);
+      function p(x) {
+        return ("0" + x).slice(-2);
+      }
+      return d.getMonth() + 1 + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+    }
     function kv(k, v) {
       return '<div class="k">' + esc(k) + '</div><div class="v">' + v + "</div>";
     }
@@ -108,6 +136,14 @@
       for (var i = 0; i < state.conns.length; i++) {
         if (state.conns[i].name === name) {
           return state.conns[i];
+        }
+      }
+      return null;
+    }
+    function findTool(name) {
+      for (var i = 0; i < state.tools.length; i++) {
+        if (state.tools[i].originalName === name) {
+          return state.tools[i];
         }
       }
       return null;
@@ -292,6 +328,8 @@
         renderTools(c);
       } else if (state.tab === "auth") {
         renderAuth(c);
+      } else if (state.tab === "events") {
+        renderEvents(c);
       } else {
         renderBind(c);
       }
@@ -379,15 +417,20 @@
             schema = "\u65E0";
           }
           var domains = (t.boundDomains || []).join("\u3001") || "\u672A\u7ED1\u5B9A";
-          return "<tr><td>" + (t.allowed ? '<span class="tag public">\u5DF2\u5F00\u653E</span>' : '<span class="tag off">\u5DF2\u88C1\u526A</span>') + '</td><td><div class="mono">' + esc(t.originalName || "\u2014") + '</div><div class="dp-mcp-tool-mapped mono">' + esc(t.mappedName || "\u2014") + "</div></td><td>" + sideEffectTag(t.sideEffect) + "</td><td>" + (t.approvalRequired ? '<span class="tag approval">\u9700\u5BA1\u6279</span>' : '<span class="tag off">\u514D\u5BA1\u6279</span>') + "</td><td>" + esc(shortErr(t.description || "\u2014", 90)) + '<button class="dp-mcp-link" type="button" data-act="toolDetail" data-tool="' + esc(t.originalName) + '">' + (open ? "\u6536\u8D77\u53C2\u6570" : "\u53C2\u6570\u4E0E\u6765\u6E90") + '</button></td></tr><tr class="dp-mcp-tool-detail"' + (open ? "" : " hidden") + '><td colspan="5"><div class="dp-mcp-tool-meta"><div><b>\u8F93\u5165\u53C2\u6570</b><pre>' + esc(schema) + "</pre></div><div><b>\u751F\u6548\u57DF</b> " + esc(domains) + " \xB7 <b>\u5E42\u7B49</b> " + (t.idempotent ? "\u662F" : "\u5426") + ' \xB7 <b>\u6765\u6E90</b> <span class="mono">' + esc(t.source || "\u2014") + "</span></div></div></td></tr>";
+          return "<tr><td>" + (t.allowed ? '<span class="tag public">\u5DF2\u5F00\u653E</span>' : '<span class="tag off">\u5DF2\u88C1\u526A</span>') + '</td><td><div class="mono">' + esc(t.originalName || "\u2014") + '</div><div class="dp-mcp-tool-mapped mono">' + esc(t.mappedName || "\u2014") + "</div></td><td>" + sideEffectTag(t.sideEffect) + "</td><td>" + (t.approvalRequired ? '<span class="tag approval">\u9700\u5BA1\u6279</span>' : '<span class="tag off">\u514D\u5BA1\u6279</span>') + "</td><td>" + esc(shortErr(t.description || "\u2014", 90)) + '<div class="dp-mcp-links"><button class="dp-mcp-link" type="button" data-act="toolDetail" data-tool="' + esc(t.originalName) + '">' + (open ? "\u6536\u8D77\u53C2\u6570" : "\u53C2\u6570\u4E0E\u6765\u6E90") + '</button><button class="dp-mcp-link" type="button" data-act="callTool" data-tool="' + esc(t.originalName) + '">\u8BD5\u8DD1</button></div></td></tr><tr class="dp-mcp-tool-detail"' + (open ? "" : " hidden") + '><td colspan="5"><div class="dp-mcp-tool-meta"><div><b>\u8F93\u5165\u53C2\u6570</b><pre>' + esc(schema) + "</pre></div><div><b>\u751F\u6548\u57DF</b> " + esc(domains) + " \xB7 <b>\u5E42\u7B49</b> " + (t.idempotent ? "\u662F" : "\u5426") + ' \xB7 <b>\u6765\u6E90</b> <span class="mono">' + esc(t.source || "\u2014") + "</span></div></div></td></tr>";
         }).join("") + "</tbody></table></div>"
       );
     }
     function renderAuth(c) {
       var need = statusOf(c) === "NEEDS_AUTH";
+      var ti = c.tokenInfo || {};
+      var credState = "\u65E0";
+      if (ti.present) {
+        credState = ti.expired ? "\u5DF2\u8FC7\u671F" : ti.expiringSoon ? "\u5373\u5C06\u8FC7\u671F" : "\u6709\u6548";
+      }
       setHtml(
         "paneAuth",
-        '<div class="dp-mcp-kv">' + kv("\u5F53\u524D\u72B6\u6001", chip(c)) + kv("\u6388\u6743\u6311\u6218", esc(c.authChallenge || "\u65E0")) + kv("client_id", esc(c.oauthClientId || "\u672A\u767B\u8BB0\uFF08\u8D70\u52A8\u6001\u6CE8\u518C\uFF09")) + kv("client_secret", c.hasOauthClientSecret ? "\u5DF2\u914D\u7F6E\uFF08\u4E0D\u56DE\u663E\uFF09" : "\u672A\u914D\u7F6E") + kv("client \u540D\u79F0", esc(c.oauthClientName || "\u2014")) + kv("scope", esc(c.oauthScope || "\u670D\u52A1\u5668\u9ED8\u8BA4")) + kv("\u56DE\u8C03\u5730\u5740", esc(c.oauthRedirectUri || "\u5F53\u524D\u7BA1\u63A7\u53F0\u5730\u5740")) + '</div><div class="dp-mcp-pane-actions"><button class="btn btn-sm btn-outline-primary" type="button" data-act="oauth">' + (need ? "\u53D1\u8D77\u6388\u6743" : "\u91CD\u65B0\u6388\u6743") + "</button></div>"
+        '<div class="dp-mcp-kv">' + kv("\u5F53\u524D\u72B6\u6001", chip(c)) + kv("\u6388\u6743\u6311\u6218", esc(c.authChallenge || "\u65E0")) + kv("OAuth \u51ED\u636E", esc(credState)) + kv("\u8FC7\u671F\u65F6\u95F4", ti.present ? esc(dateTimeOf(ti.expiresAtMs)) : "\u2014") + kv("\u5DF2\u6388\u4E88 scope", ti.present ? esc(ti.scope || "\u670D\u52A1\u5668\u672A\u8FD4\u56DE") : "\u2014") + kv("refresh_token", ti.present ? ti.hasRefreshToken ? "\u6709" : "\u65E0" : "\u2014") + kv("\u7B7E\u53D1 client_id", ti.present ? esc(ti.clientId || "\u2014") : "\u2014") + kv("client_id", esc(c.oauthClientId || "\u672A\u767B\u8BB0\uFF08\u8D70\u52A8\u6001\u6CE8\u518C\uFF09")) + kv("client_secret", c.hasOauthClientSecret ? "\u5DF2\u914D\u7F6E\uFF08\u4E0D\u56DE\u663E\uFF09" : "\u672A\u914D\u7F6E") + kv("client \u540D\u79F0", esc(c.oauthClientName || "\u2014")) + kv("scope", esc(c.oauthScope || "\u670D\u52A1\u5668\u9ED8\u8BA4")) + kv("\u56DE\u8C03\u5730\u5740", esc(c.oauthRedirectUri || "\u5F53\u524D\u7BA1\u63A7\u53F0\u5730\u5740")) + '</div><div class="dp-mcp-pane-actions"><button class="btn btn-sm btn-outline-primary" type="button" data-act="oauth">' + (need ? "\u53D1\u8D77\u6388\u6743" : "\u91CD\u65B0\u6388\u6743") + "</button>" + (ti.present ? '<button class="btn btn-sm btn-outline-danger" type="button" data-act="revokeToken">\u64A4\u9500\u6388\u6743</button>' : "") + "</div>"
       );
     }
     function renderBind(c) {
@@ -414,6 +457,197 @@
           return '<div class="dp-mcp-bind-card' + (on ? " on" : "") + '" data-pick="' + esc(d.name) + '"><span class="mono">' + esc(d.name) + "</span>" + (d.callable ? "" : '<span class="tag approval">\u88C5\u914D</span>') + "</div>";
         }).join("") + '</div><div class="dp-mcp-diff">' + diff + '</div><div class="dp-mcp-pane-actions"><button class="btn btn-sm btn-outline-primary" type="button" data-act="saveBind">\u4FDD\u5B58\u7ED1\u5B9A</button><button class="btn btn-sm btn-outline-secondary" type="button" data-act="bindClear">\u5168\u90E8\u89E3\u7ED1</button></div>'
       );
+    }
+    function loadEvents(name) {
+      state.eventsFor = name;
+      return Console.api.get("/admin/mcp-connections/" + encodeURIComponent(name) + "/events?limit=50").then(function(r) {
+        state.events = r && r.events || [];
+        state.eventsRetained = r && r.retained || 0;
+        state.eventsError = "";
+        afterEvents(name);
+      }).catch(function(e) {
+        state.events = [];
+        state.eventsError = errText(e);
+        afterEvents(name);
+      });
+    }
+    function afterEvents(name) {
+      var c = findConn(state.selected);
+      if (c && c.name === name && state.tab === "events") {
+        renderEvents(c);
+      }
+    }
+    function reloadEventsIfActive() {
+      if (state.tab === "events" && state.selected) {
+        loadEvents(state.selected);
+      }
+    }
+    function renderEvents(c) {
+      if (state.eventsFor !== c.name) {
+        setHtml("paneEvents", Console.loadingHtml("\u6B63\u5728\u8BFB\u53D6\u4E8B\u4EF6\u2026"));
+        loadEvents(c.name);
+        return;
+      }
+      var reload = '<button class="btn btn-sm" type="button" data-act="reloadEvents">\u5237\u65B0</button>';
+      if (state.eventsError) {
+        setHtml("paneEvents", '<div class="dp-mcp-err">\u8BFB\u53D6\u4E8B\u4EF6\u5931\u8D25\uFF1A' + esc(state.eventsError) + "</div>" + reload);
+        return;
+      }
+      if (!state.events.length) {
+        setHtml("paneEvents", '<div class="dp-mcp-none">\u672C\u6B21\u8FD0\u884C\u8FD8\u6CA1\u6709\u4E8B\u4EF6</div>' + reload);
+        return;
+      }
+      setHtml(
+        "paneEvents",
+        '<div class="dp-mcp-tools-head"><span>\u672C\u6B21\u8FD0\u884C ' + state.eventsRetained + ' \u6761</span><span class="spacer"></span>' + reload + '</div><div class="dp-mcp-table-wrap"><table class="table dp-mcp-table dp-mcp-events"><thead><tr><th>\u65F6\u95F4</th><th>\u7C7B\u578B</th><th>\u7ED3\u679C</th><th>\u8017\u65F6</th><th>\u6458\u8981</th></tr></thead><tbody>' + state.events.map(function(e) {
+          return '<tr><td class="mono">' + esc(dateTimeOf(e.atMs)) + "</td><td>" + esc(EVT[e.type] || e.type || "\u2014") + "</td><td>" + (e.ok ? '<span class="tag public">\u6210\u529F</span>' : '<span class="tag destructive">\u5931\u8D25</span>') + '</td><td class="mono">' + (e.durationMs ? esc(String(e.durationMs)) + " ms" : "\u2014") + "</td><td>" + esc(e.summary || "\u2014") + "</td></tr>";
+        }).join("") + "</tbody></table></div>"
+      );
+    }
+    function schemaFields(schema) {
+      var props = schema && schema.properties || {};
+      var required = schema && schema.required || [];
+      var out = [];
+      Object.keys(props).forEach(function(k) {
+        var p = props[k] || {};
+        var type = p.type || (p.enum ? "string" : "string");
+        out.push({
+          key: k,
+          type,
+          desc: p.description || "",
+          enums: p.enum || null,
+          required: required.indexOf(k) >= 0,
+          def: p.default
+        });
+      });
+      return out;
+    }
+    function callFieldHtml(f) {
+      var name = ' data-arg="' + esc(f.key) + '" data-type="' + esc(f.type) + '"';
+      var head = '<label class="dp-mcp-call-label">' + esc(f.key) + (f.required ? '<span class="dp-mcp-req">\u5FC5\u586B</span>' : "") + '<span class="dp-mcp-call-type">' + esc(f.type) + "</span></label>";
+      var input;
+      if (f.enums) {
+        input = '<select class="form-select"' + name + '><option value="">\uFF08\u4E0D\u4F20\uFF09</option>' + f.enums.map(function(v) {
+          return '<option value="' + esc(String(v)) + '">' + esc(String(v)) + "</option>";
+        }).join("") + "</select>";
+      } else if (f.type === "boolean") {
+        input = '<select class="form-select"' + name + '><option value="">\uFF08\u4E0D\u4F20\uFF09</option><option value="true">true</option><option value="false">false</option></select>';
+      } else if (f.type === "number" || f.type === "integer") {
+        input = '<input class="form-control" type="number"' + name + ">";
+      } else if (f.type === "array" || f.type === "object") {
+        input = '<textarea class="form-control" rows="3"' + name + ' placeholder="JSON"></textarea>';
+      } else {
+        input = '<input class="form-control" type="text"' + name + ">";
+      }
+      return '<div class="dp-mcp-call-field">' + head + input + (f.desc ? '<div class="dp-mcp-call-desc">' + esc(f.desc) + "</div>" : "") + "</div>";
+    }
+    function renderCallForm(t) {
+      var fields = schemaFields(t.inputSchema);
+      if (!fields.length) {
+        setHtml("callForm", '<div class="dp-mcp-none">\u8BE5\u5DE5\u5177\u6CA1\u6709\u58F0\u660E\u53C2\u6570\uFF0C\u76F4\u63A5\u5199 JSON</div>');
+        setVal("callArgs", "{}");
+        return;
+      }
+      setHtml("callForm", fields.map(callFieldHtml).join(""));
+      syncArgsFromForm();
+    }
+    function syncArgsFromForm() {
+      var form = el("callForm");
+      var out = {};
+      if (form) {
+        form.querySelectorAll("[data-arg]").forEach(function(n) {
+          var k = n.getAttribute("data-arg");
+          var type = n.getAttribute("data-type") || "string";
+          var v = n.value;
+          if (v === "" || v === null || v === void 0) {
+            return;
+          }
+          if (type === "boolean") {
+            out[k] = v === "true";
+            return;
+          }
+          if (type === "number" || type === "integer") {
+            var num2 = Number(v);
+            if (!isNaN(num2)) {
+              out[k] = num2;
+            }
+            return;
+          }
+          if (type === "array" || type === "object") {
+            try {
+              out[k] = JSON.parse(v);
+            } catch (e) {
+              out[k] = v;
+            }
+            return;
+          }
+          out[k] = v;
+        });
+      }
+      setVal("callArgs", JSON.stringify(out, null, 2));
+    }
+    function openCall(t) {
+      state.call = { tool: t };
+      setText("callTitle", "\u8BD5\u8DD1 \xB7 " + (t.originalName || ""));
+      setHtml(
+        "callMeta",
+        sideEffectTag(t.sideEffect) + '<span class="tag ' + (t.approvalRequired ? "approval" : "off") + '">' + (t.approvalRequired ? "\u6A21\u578B\u8C03\u7528\u9700\u5BA1\u6279" : "\u6A21\u578B\u8C03\u7528\u514D\u5BA1\u6279") + '</span><span class="mono">' + esc(t.mappedName || "\u672A\u5F00\u653E") + "</span>"
+      );
+      renderCallForm(t);
+      setHtml("callResult", '<div class="dp-mcp-none">\u5C1A\u672A\u6267\u884C</div>');
+      setHidden("callModal", false);
+      document.body.style.overflow = "hidden";
+    }
+    function closeCall() {
+      state.call = null;
+      setHidden("callModal", true);
+      document.body.style.overflow = "";
+    }
+    function showCallResult(r) {
+      var ok = !!(r && r.success);
+      var head = '<div class="dp-mcp-call-head"><span class="tag ' + (ok ? "public" : "destructive") + '">' + (ok ? "\u6210\u529F" : "\u5931\u8D25") + '</span><span class="dp-mcp-call-dur">' + (r && r.durationMs ? esc(String(r.durationMs)) + " ms" : "\u2014") + '</span><span class="mono">' + esc(r && r.tool || "") + "</span></div>";
+      var text = '<pre class="dp-mcp-call-text">' + esc(r && r.text || "\uFF08\u65E0\u8FD4\u56DE\u6587\u672C\uFF09") + "</pre>";
+      var req = '<details class="dp-mcp-diag-raw"><summary>\u8BF7\u6C42\u53C2\u6570</summary><pre>' + esc(JSON.stringify(r && r.arguments || {}, null, 2)) + "</pre></details>";
+      var raw = r && r.raw ? '<details class="dp-mcp-diag-raw"><summary>\u54CD\u5E94\u539F\u6587</summary><pre>' + esc(r.raw) + "</pre></details>" : "";
+      setHtml("callResult", head + text + req + raw);
+    }
+    function runCall() {
+      var t = state.call && state.call.tool;
+      if (!t) {
+        return Promise.resolve();
+      }
+      var raw = val("callArgs");
+      var args;
+      try {
+        args = raw ? JSON.parse(raw) : {};
+        if (!args || typeof args !== "object" || Array.isArray(args)) {
+          throw new Error("\u9700\u8981 JSON \u5BF9\u8C61");
+        }
+      } catch (e) {
+        setHtml("callResult", '<div class="dp-mcp-err">\u53C2\u6570\u4E0D\u662F\u5408\u6CD5 JSON \u5BF9\u8C61\uFF1A' + esc(e.message) + "</div>");
+        return Promise.resolve();
+      }
+      var needConfirm = !!t.sideEffect && t.sideEffect !== "READ";
+      var go = needConfirm ? Console.confirm(
+        "\u5DE5\u5177 " + t.originalName + " \u662F " + t.sideEffect + " \u64CD\u4F5C\uFF0C\u8BD5\u8DD1\u4F1A\u771F\u5B9E\u4F5C\u7528\u5230\u5916\u90E8\u7CFB\u7EDF\u3002\n\n\u786E\u8BA4\u7EE7\u7EED\uFF1F",
+        { title: "\u8BD5\u8DD1\u5199\u64CD\u4F5C", okText: "\u6267\u884C", danger: true }
+      ) : Promise.resolve(true);
+      return go.then(function(ok) {
+        if (!ok) {
+          return;
+        }
+        setHtml("callResult", Console.loadingHtml("\u6B63\u5728\u6267\u884C\u2026"));
+        return Console.api.post(
+          "/admin/mcp-connections/" + encodeURIComponent(state.selected) + "/tools/call",
+          { tool: t.originalName, arguments: args, confirm: needConfirm }
+        ).then(function(r) {
+          showCallResult(r);
+          reloadEventsIfActive();
+          load();
+        }).catch(function(e) {
+          setHtml("callResult", '<div class="dp-mcp-err">\u6267\u884C\u5931\u8D25\uFF1A' + esc(errText(e)) + "</div>");
+        });
+      });
     }
     function showFieldError(id, msg) {
       var n = el(id);
@@ -686,6 +920,23 @@
         load();
       });
     }
+    function revokeToken(c) {
+      return Console.confirm(
+        "\u64A4\u9500\u8FDE\u63A5 " + c.name + " \u7684 OAuth \u6388\u6743\uFF1F\n\n\u672C\u5730\u4FDD\u5B58\u7684\u4EE4\u724C\u4F1A\u88AB\u5220\u9664\u5E76\u7ACB\u5373\u91CD\u8FDE\uFF1B\u6388\u6743\u670D\u52A1\u5668\u4FA7\u7684\u56DE\u8BDD\u53EF\u80FD\u4ECD\u7136\u6709\u6548\uFF0C\u76F4\u5230\u5176\u81EA\u8EAB\u8FC7\u671F\u3002",
+        { title: "\u64A4\u9500\u6388\u6743", okText: "\u64A4\u9500", danger: true }
+      ).then(function(ok) {
+        if (!ok) {
+          return;
+        }
+        return Console.api.del("/admin/mcp-connections/" + encodeURIComponent(c.name) + "/oauth/token").then(function(r) {
+          Console.toast(r && r.message || "\u5DF2\u64A4\u9500\u6388\u6743", { type: "success", wide: true });
+          reloadEventsIfActive();
+          load();
+        }).catch(function(e) {
+          Console.toast("\u64A4\u9500\u5931\u8D25\uFF1A" + errText(e), { type: "error" });
+        });
+      });
+    }
     function onAct(act, btn) {
       var c = findConn(state.selected);
       if (!c) {
@@ -714,6 +965,15 @@
         renderTools(c);
       } else if (act === "editAllow") {
         openEdit(c.name);
+      } else if (act === "callTool") {
+        var t = findTool(btn.getAttribute("data-tool") || "");
+        if (t) {
+          openCall(t);
+        }
+      } else if (act === "reloadEvents") {
+        loadEvents(c.name);
+      } else if (act === "revokeToken") {
+        revokeToken(c);
       } else if (act === "saveBind") {
         Console.busy(btn, function() {
           saveBind();
@@ -776,7 +1036,7 @@
           }
         });
       }
-      ["statusBar", "paneOverview", "paneTools", "paneAuth", "paneBind"].forEach(function(id) {
+      ["statusBar", "paneOverview", "paneTools", "paneAuth", "paneBind", "paneEvents"].forEach(function(id) {
         var box = el(id);
         if (!box) {
           return;
@@ -846,6 +1106,29 @@
         editModal.addEventListener("click", function(e) {
           if (e.target === editModal) {
             closeEdit();
+          }
+        });
+      }
+      var callForm = el("callForm");
+      if (callForm) {
+        callForm.addEventListener("input", syncArgsFromForm);
+        callForm.addEventListener("change", syncArgsFromForm);
+      }
+      var callCloseBtn = el("callClose");
+      if (callCloseBtn) {
+        callCloseBtn.addEventListener("click", closeCall);
+      }
+      var callRun = el("callRunBtn");
+      if (callRun) {
+        callRun.addEventListener("click", function() {
+          Console.busy(this, runCall, "\u6267\u884C\u4E2D\u2026");
+        });
+      }
+      var callModal = el("callModal");
+      if (callModal) {
+        callModal.addEventListener("click", function(e) {
+          if (e.target === callModal) {
+            closeCall();
           }
         });
       }
