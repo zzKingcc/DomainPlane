@@ -11,6 +11,7 @@ import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisSessionSt
 import com.zzkingcc.domainplane.infrastructure.redis.memory.RedisChatMemoryStore;
 import com.zzkingcc.domainplane.runtime.cancellation.CancellationRegistry;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.Set;
@@ -58,6 +59,8 @@ public class SessionPurgeService {
 
     private final Targets targets;
 
+    /** 两个构造器时 Spring 不猜：不标 @Autowired 会回落无参构造，启动直接失败 */
+    @Autowired
     public SessionPurgeService(RedisSessionStorage sessionStorage,
                                CancellationRegistry cancellationRegistry,
                                RedisChatMemoryStore chatMemoryStore,

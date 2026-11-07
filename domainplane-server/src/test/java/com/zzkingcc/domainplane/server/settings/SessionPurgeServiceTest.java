@@ -5,7 +5,10 @@ import com.zzkingcc.domainplane.common.exception.BaseException;
 import com.zzkingcc.domainplane.infrastructure.redis.conversation.RedisSessionStorage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
+import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -136,5 +139,22 @@ class SessionPurgeServiceTest {
         rig.failWith = original;
         assertSame(original, assertThrows(BaseException.class,
                 () -> new SessionPurgeService(rig.targets()).clear(SESSION)));
+    }
+
+    /**
+     * 上面几例都是纯内存 new，覆盖不到 Spring 装配；之前就是这个盲区让应用起不来：
+     * 生产构造器 + 包可见测试构造器共两个，不标 @Autowired 时 Spring 回落无参构造，
+     * 启动直接报 "No default constructor found"。
+     */
+    @Test
+    @DisplayName("Spring 能解析出生产构造器：多构造器必须显式标 @Autowired")
+    void springResolvesTheAutowiredConstructor() {
+        AutowiredAnnotationBeanPostProcessor processor = new AutowiredAnnotationBeanPostProcessor();
+        processor.setBeanFactory(new DefaultListableBeanFactory());
+        Constructor<?>[] candidates = processor.determineCandidateConstructors(
+                SessionPurgeService.class, "sessionPurgeService");
+        assertTrue(candidates != null && candidates.length == 1,
+                "多构造器下必须靠 @Autowired 指定，否则 Spring 回落到无参构造");
+        assertEquals(8, candidates[0].getParameterCount());
     }
 }
