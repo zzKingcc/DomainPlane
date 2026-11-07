@@ -89,8 +89,19 @@ public class McpRpcClient implements AutoCloseable {
     public record McpToolInfo(String name, String description, JsonNode inputSchema, JsonNode annotations) {
     }
 
-    /** tools/call 的结果 */
-    public record McpCallResult(boolean success, String text, boolean isError) {
+    /**
+     * tools/call 的结果。
+     *
+     * <p>{@code raw} 是响应里的 {@code result} 节点原样（管控台试跑要展示"响应原文"，
+     * 排障时常需要看 content 之外的 structuredContent / 自定字段）。执行器只读 {@code text}，
+     * 不看 raw，避免把大对象带进模型上下文。</p>
+     */
+    public record McpCallResult(boolean success, String text, boolean isError, JsonNode raw) {
+        /** 兼容构造：不带原文（既有调用方与测试） */
+        public McpCallResult(boolean success, String text, boolean isError) {
+            this(success, text, isError, null);
+        }
+
         public static McpCallResult ok(String text) {
             return new McpCallResult(true, text, false);
         }
@@ -195,7 +206,9 @@ public class McpRpcClient implements AutoCloseable {
                 }
             }
         }
-        return isError ? McpCallResult.fail(sb.toString()) : McpCallResult.ok(sb.toString());
+        return isError
+                ? new McpCallResult(false, sb.toString(), true, result)
+                : new McpCallResult(true, sb.toString(), false, result);
     }
 
     /** 关闭：停掉 Legacy SSE 读流并释放 HttpClient（每个客户端独有一个连接池/选择器） */

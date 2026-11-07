@@ -1,14 +1,22 @@
 package com.zzkingcc.domainplane.server.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
+import com.zzkingcc.domainplane.api.annotation.Tool;
 import com.zzkingcc.domainplane.common.exception.BaseException;
+import com.zzkingcc.domainplane.server.audit.AuditLog;
 import com.zzkingcc.domainplane.server.mcp.McpApprovalPolicy;
+import com.zzkingcc.domainplane.server.mcp.McpAuthChallengeException;
 import com.zzkingcc.domainplane.server.mcp.McpConnection;
 import com.zzkingcc.domainplane.server.mcp.McpConnectionRuntime;
 import com.zzkingcc.domainplane.server.mcp.McpConnectionRuntimeProvider;
 import com.zzkingcc.domainplane.server.mcp.McpConnectionStore;
+import com.zzkingcc.domainplane.server.mcp.McpDebugCallGuard;
+import com.zzkingcc.domainplane.server.mcp.McpEventLog;
 import com.zzkingcc.domainplane.server.mcp.McpOAuthClient;
 import com.zzkingcc.domainplane.server.mcp.McpOAuthSessionStore;
+import com.zzkingcc.domainplane.server.mcp.McpRpcClient;
 import com.zzkingcc.domainplane.server.mcp.McpToolBridge;
 import com.zzkingcc.domainplane.server.mcp.McpToolCatalog;
 import com.zzkingcc.domainplane.server.mcp.McpTransport;
@@ -52,6 +60,19 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/admin")
 public class AdminMcpController {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** 试跑响应原文上限：够看清结构，又不至于把整页撑着（超出截断并标注） */
+    private static final int MAX_RAW_CHARS = 8000;
+
+    /**
+     * 试跑闸门：每连接 60 秒最多 10 次。
+     *
+     * <p>试跑是真实副作用通道（不是沙箱），一次误点或页面连点就等于给外部系统发一串写请求。
+     * 额度按连接计，避免一条连接的高频把别的连接挤掉；单实例内存口径与平台现状一致。</p>
+     */
+    private final McpDebugCallGuard debugGuard = new McpDebugCallGuard(10, 60_000);
 
     private final McpConnectionStore store;
     private final McpConnectionRuntimeProvider runtimes;
@@ -113,6 +134,7 @@ public class AdminMcpController {
             item.put("oauthClientName", conn.oauth().clientName());
             item.put("oauthScope", conn.oauth().scope());
             item.put("hasOauthClientSecret", conn.oauth().hasClientSecret());
+            item.put("tokenInfo", tokenInfoOf(store.tokenOf(conn.name())));
             items.add(item);
         }
         Map<String, Object> body = new LinkedHashMap<>();
@@ -199,6 +221,10 @@ public class AdminMcpController {
         boolean ready = runtime != null && runtime.isReady();
         boolean needsAuth = runtime != null
                 && runtime.status() == McpConnectionRuntime.Status.NEEDS_AUTH;
+        // 建连事件由 provider 记（含 reconcile 触发的那次），这里只补一条"配置变了"
+        runtimes.eventLog().record(name, McpEventLog.CONFIG, true, 0,
+                (existing == null ? "新增连接" : "更新连接") + "（审批 " + policy.name()
+                        + "，白名单 " + (allowlist.isEmpty() ? "全部" : allowlist.size() + " 个") + "）");
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("code", 0);
         out.put("success", true);
@@ -231,6 +257,10 @@ public class AdminMcpController {
         if (!store.delete(name)) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, "MCP 连接「" + name + "」不存在");
         }
+        // 事件桶与试跑额度一起丢掉：同名重建后不该看到上一条连接的历史
+        runtimes.eventLog().forget(name.trim());
+        debugGuard.forget(name.trim());
+        AuditLog.record("mcp delete conn=" + name.trim(), "ok");
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("code", 0);
         out.put("success", true);
@@ -254,6 +284,7 @@ public class AdminMcpController {
             bridge.unpublish(name);
             runtimes.disconnect(name);
         }
+        runtimes.eventLog().record(name, McpEventLog.CONFIG, true, 0, enabled ? "已启用" : "已停用");
         McpConnectionRuntime runtime = runtimes.runtime(name);
         boolean ready = enabled && runtime != null && runtime.isReady();
         Map<String, Object> out = new LinkedHashMap<>();
@@ -331,6 +362,165 @@ public class AdminMcpController {
         out.put("ready", runtime != null && runtime.isReady());
         out.put("tools", items);
         out.put("count", items.size());
+        return out;
+    }
+
+    // ==================== 试跑（真实副作用通道） ====================
+
+    /**
+     * 试跑单个工具（管理面调试通道）。
+     *
+     * <p><b>这不是沙箱</b>：调用会真的打到外部 MCP server，写操作会产生真实后果。所以三件事
+     * 必须在这一层做完，不能只做在 UI 上：</p>
+     * <ol>
+     *   <li><b>确认</b>：本地推导的副作用不是 READ 时，必须显式带 {@code confirm=true}，
+     *       否则直接拒（4xx）。前端弹二次确认只是"提醒"，门禁在服务端；</li>
+     *   <li><b>限流</b>：每连接 60 秒最多 {@code McpDebugCallGuard} 次，超限拒绝并给出等待秒数；</li>
+     *   <li><b>审计</b>：AUDIT 日志补一行"哪个工具、什么副作用、成没成"（拦截器那行只有 URI 与状态码）。</li>
+     * </ol>
+     *
+     * <p>试跑不受工具白名单限制：白名单决定"模型能不能看见"，而试跑的意义恰恰是在开放前
+     * 验证一个还没开放的工具。响应里回 {@code whitelisted} 让运维知道当前是否已开放。</p>
+     */
+    @PostMapping("/mcp-connections/{name}/tools/call")
+    public Map<String, Object> callTool(@PathVariable("name") String name,
+                                        @RequestBody(required = false) CallBody body) {
+        McpConnection conn = store.get(name);
+        if (conn == null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "MCP 连接「" + name + "」不存在");
+        }
+        if (body == null || body.getTool() == null || body.getTool().isBlank()) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "缺少工具名（tool）");
+        }
+        McpConnectionRuntime runtime = runtimes.runtime(name);
+        if (runtime == null || !runtime.isReady()) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "连接未就绪，无法试跑："
+                    + (runtime == null ? "尚未建立连接" : runtime.status().name()
+                    + (runtime.lastError() == null ? "" : "（" + runtime.lastError() + "）")));
+        }
+        McpRpcClient.McpToolInfo tool = resolveTool(runtime, conn, body.getTool().trim());
+        if (tool == null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER,
+                    "该连接没有工具「" + body.getTool().trim() + "」（可用原始名或映射名）");
+        }
+        Tool.Effect effect = McpToolCatalog.deriveSideEffect(tool.annotations());
+        boolean confirmRequired = effect != Tool.Effect.READ;
+        if (confirmRequired && !Boolean.TRUE.equals(body.getConfirm())) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER,
+                    "工具「" + tool.name() + "」是 " + effect + " 操作，需要确认后再试跑");
+        }
+        long now = System.currentTimeMillis();
+        if (!debugGuard.tryAcquire(name, now)) {
+            long waitMs = debugGuard.retryAfterMs(name, now);
+            throw new BaseException(ErrorCode.INVALID_PARAMETER,
+                    "试跑过于频繁（每连接 " + (debugGuard.windowMs() / 1000) + " 秒最多 "
+                            + debugGuard.maxCalls() + " 次），请 " + Math.max(1, (waitMs + 999) / 1000)
+                            + " 秒后再试");
+        }
+        JsonNode args = body.getArguments() == null || body.getArguments().isNull()
+                ? MAPPER.createObjectNode() : body.getArguments();
+        long start = System.currentTimeMillis();
+        McpRpcClient.McpCallResult result;
+        try {
+            result = runtime.client().toolsCall(tool.name(), args.toString());
+        } catch (McpAuthChallengeException auth) {
+            runtimes.markNeedsAuth(name, auth.challenge());
+            result = McpRpcClient.McpCallResult.fail("MCP 授权已失效，需要管理员重新授权");
+        } catch (Exception e) {
+            result = McpRpcClient.McpCallResult.fail(e.getMessage() == null
+                    ? e.getClass().getSimpleName() : e.getMessage());
+        }
+        long cost = System.currentTimeMillis() - start;
+        boolean ok = result.success() && !result.isError();
+
+        runtimes.eventLog().record(name, McpEventLog.CALL, ok, cost,
+                "管控台试跑 " + tool.name() + "（" + effect + "）" + (ok ? "" : "：" + brief(result.text())));
+        AuditLog.record("mcp tools/call conn=" + name + " tool=" + tool.name() + " effect=" + effect,
+                ok ? "ok" : "fail");
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("code", 0);
+        out.put("success", ok);
+        out.put("isError", result.isError());
+        out.put("tool", tool.name());
+        out.put("effect", effect.name());
+        out.put("confirmRequired", confirmRequired);
+        out.put("whitelisted", conn.allows(tool.name()));
+        out.put("arguments", args);
+        out.put("text", result.text());
+        out.put("raw", rawText(result.raw()));
+        out.put("durationMs", cost);
+        out.put("status", runtime.status().name());
+        out.put("needsAuth", runtime.status() == McpConnectionRuntime.Status.NEEDS_AUTH);
+        return out;
+    }
+
+    /**
+     * 撤销本地 OAuth 授权：删掉落盘 token 后立即重连。
+     *
+     * <p>只清本地凭据，不调用授权服务器的撤销端点（RFC 7009 需要另一端支持且要额外网络与错误面）；
+     * 服务器的会话可能在它自己的过期时间前仍然有效。这一点在返回文案里如实说明，
+     * 不要让运维以为"点了撤销就等于上游也注销了"。</p>
+     */
+    @DeleteMapping("/mcp-connections/{name}/oauth/token")
+    public Map<String, Object> revokeToken(@PathVariable("name") String name) {
+        if (!store.exists(name)) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "MCP 连接「" + name + "」不存在");
+        }
+        McpConnection.OAuthToken token = store.tokenOf(name);
+        store.removeToken(name);
+        // 无 token 后重连：静态请求头仍可用则照常就绪，否则落到 NEEDS_AUTH
+        runtimes.connect(name);
+        McpConnectionRuntime runtime = runtimes.runtime(name);
+        boolean ready = runtime != null && runtime.isReady();
+        boolean needsAuth = runtime != null
+                && runtime.status() == McpConnectionRuntime.Status.NEEDS_AUTH;
+        runtimes.eventLog().record(name, McpEventLog.REVOKE, true, 0,
+                token == null ? "撤销请求：本地无 token，已按无凭据重连"
+                        : "已删除本地 OAuth token（scope " + (token.scope() == null || token.scope().isBlank()
+                        ? "未记录" : token.scope()) + "），按无凭据重连");
+        AuditLog.record("mcp revoke oauth token conn=" + name, token == null ? "absent" : "revoked");
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("code", 0);
+        out.put("success", true);
+        out.put("hadToken", token != null);
+        out.put("status", runtime == null ? "DISCONNECTED" : runtime.status().name());
+        out.put("ready", ready);
+        out.put("needsAuth", needsAuth);
+        out.put("lastError", runtime == null ? null : runtime.lastError());
+        out.put("message", token == null
+                ? "本地没有该连接的 OAuth token，已按无凭据重新连接（当前状态："
+                    + (runtime == null ? "未连接" : runtime.status().name()) + "）"
+                : "已撤销本地授权凭据。授权服务器侧的回话可能仍然有效，直到其自身过期；"
+                    + "当前连接状态：" + (runtime == null ? "未连接" : runtime.status().name()));
+        return out;
+    }
+
+    /** 事件记录（内存，新→旧）；limit 默认 50，最大 100 */
+    @GetMapping("/mcp-connections/{name}/events")
+    public Map<String, Object> events(@PathVariable("name") String name,
+                                      @RequestParam(value = "limit", required = false) Integer limit) {
+        if (!store.exists(name)) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "MCP 连接「" + name + "」不存在");
+        }
+        int cap = limit == null ? 50 : Math.max(1, Math.min(100, limit));
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (McpEventLog.Event e : runtimes.eventLog().recent(name, cap)) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("atMs", e.atMs());
+            m.put("type", e.type());
+            m.put("ok", e.ok());
+            m.put("durationMs", e.durationMs());
+            m.put("summary", e.summary());
+            items.add(m);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("code", 0);
+        out.put("name", name);
+        out.put("events", items);
+        out.put("count", items.size());
+        out.put("retained", runtimes.eventLog().size(name));
         return out;
     }
 
@@ -453,14 +643,20 @@ public class AdminMcpController {
             // ⑤ 授权 URL：管理员浏览器跳转
             String url = oauthClient.authorizeUrl(sm, clientId, session.redirectUri(),
                     codeChallenge, session.state(), session.scope());
+            runtimes.eventLog().record(name, McpEventLog.AUTH, true, 0,
+                    "已生成授权链接（client_id " + clientId + "，scope "
+                            + (session.scope() == null || session.scope().isBlank()
+                            ? "服务器默认" : session.scope()) + "）");
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("code", 0);
             out.put("authorizeUrl", url);
             out.put("message", "已生成授权链接，跳转后请完成登录与授权");
             return out;
         } catch (BaseException e) {
+            runtimes.eventLog().record(name, McpEventLog.AUTH, false, 0, "发起授权失败：" + brief(String.valueOf(e.getMessage())));
             throw e;
         } catch (Exception e) {
+            runtimes.eventLog().record(name, McpEventLog.AUTH, false, 0, "发起授权失败：" + brief(String.valueOf(e.getMessage())));
             throw new BaseException(ErrorCode.INVALID_PARAMETER, "发起 OAuth 授权失败："
                     + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
         }
@@ -508,19 +704,95 @@ public class AdminMcpController {
             runtimes.connect(name);
             McpConnectionRuntime rt = runtimes.runtime(name);
             if (rt != null && rt.isReady()) {
+                runtimes.eventLog().record(name, McpEventLog.AUTH, true, 0,
+                        "授权完成，token 已保存（scope "
+                                + (ts.scope() == null || ts.scope().isBlank() ? "未返回" : ts.scope()) + "）");
                 response.sendRedirect(back + "?auth=ok&name=" + encUri(name));
             } else {
                 String reason = rt == null ? "建连失败" : String.valueOf(rt.lastError());
+                runtimes.eventLog().record(name, McpEventLog.AUTH, false, 0,
+                        "token 已换取但建连未就绪：" + brief(reason));
                 response.sendRedirect(back + "?auth=fail&name=" + encUri(name)
                         + "&reason=" + encUri(reason));
             }
         } catch (Exception e) {
             String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            runtimes.eventLog().record(name, McpEventLog.AUTH, false, 0, "换取 token 失败：" + brief(reason));
             response.sendRedirect(back + "?auth=fail&name=" + encUri(name) + "&reason=" + encUri(reason));
         }
     }
 
     // ==================== 内部 ====================
+
+    /**
+     * token 元信息：只给"有没有、什么时候过期、什么 scope、有没有 refresh_token"。
+     *
+     * <p>永不回 access_token / refresh_token 本体 —— 管控台截图外发是常见场景，
+     * 元信息足够运维判断"要不要重新授权"，凭据本体一个字符都不该出现在响应里。</p>
+     */
+    private static Map<String, Object> tokenInfoOf(McpConnection.OAuthToken token) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        if (token == null) {
+            m.put("present", false);
+            return m;
+        }
+        m.put("present", true);
+        m.put("expiresAtMs", token.expiresAtEpochMs());
+        m.put("expired", token.expired());
+        m.put("expiringSoon", token.expiringSoon());
+        m.put("scope", token.scope() == null ? "" : token.scope());
+        m.put("hasRefreshToken", token.refreshToken() != null && !token.refreshToken().isBlank());
+        m.put("clientId", token.clientId() == null ? "" : token.clientId());
+        m.put("tokenEndpoint", token.tokenEndpoint() == null ? "" : token.tokenEndpoint());
+        return m;
+    }
+
+    /** 试跑时按"原始名或映射名"定位工具（页面上两种名字都看得到，只认一种会让人猜） */
+    private static McpRpcClient.McpToolInfo resolveTool(McpConnectionRuntime runtime,
+                                                        McpConnection conn, String key) {
+        for (McpRpcClient.McpToolInfo t : runtime.catalog()) {
+            if (key.equals(t.name())) {
+                return t;
+            }
+        }
+        for (Map.Entry<String, String> e : McpToolCatalog.nameMapping(runtime, conn).entrySet()) {
+            if (key.equals(e.getValue())) {
+                for (McpRpcClient.McpToolInfo t : runtime.catalog()) {
+                    if (e.getKey().equals(t.name())) {
+                        return t;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /** 响应原文：序列化后限长，超出标注截断（原文里可能有很长的 content 数组） */
+    private static String rawText(JsonNode raw) {
+        if (raw == null || raw.isNull() || raw.isMissingNode()) {
+            return null;
+        }
+        String text;
+        try {
+            text = MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(raw);
+        } catch (Exception e) {
+            return String.valueOf(raw);
+        }
+        return text.length() <= MAX_RAW_CHARS ? text : text.substring(0, MAX_RAW_CHARS) + "\n…（已截断）";
+    }
+
+    /** 异常信息截断（授权流程要把服务商的错误描述带回给管理员，但别刷屏） */
+    private static String brief(Exception e) {
+        String m = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        String flat = m.replaceAll("\\s+", " ").trim();
+        return flat.length() <= 200 ? flat : flat.substring(0, 200) + "…";
+    }
+
+    /** 文本截断（事件摘要与试跑失败原因共用同一口径） */
+    private static String brief(String text) {
+        String flat = text == null ? "" : text.replaceAll("\\s+", " ").trim();
+        return flat.length() <= 200 ? flat : flat.substring(0, 200) + "…";
+    }
 
     /** 授权回调地址（与授权页同源，浏览器带着凭证 Cookie 回来） */
     private static String redirectUri(String name, HttpServletRequest request) {
@@ -543,13 +815,6 @@ public class AdminMcpController {
 
     private static String encUri(String s) {
         return URLEncoder.encode(s == null ? "" : s, StandardCharsets.UTF_8);
-    }
-
-    /** 异常信息截断（授权流程要把服务商的错误描述带回给管理员，但别刷屏） */
-    private static String brief(Exception e) {
-        String m = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-        String flat = m.replaceAll("\\s+", " ").trim();
-        return flat.length() <= 200 ? flat : flat.substring(0, 200) + "…";
     }
 
     private static McpTransport parseTransport(String v) {
@@ -598,5 +863,21 @@ public class AdminMcpController {
     @Data
     public static class BindBody {
         private List<String> connections;
+    }
+
+    /**
+     * 试跑请求体。
+     *
+     * <p>{@code arguments} 用 {@link JsonNode} 而不是 String：前端按 inputSchema 生成的表单
+     * 直接提交对象，服务端不做"再解析一层字符串"的动作，也避免非法 JSON 被 MCP 客户端
+     * 静默替换成空参数（那样会变成"参数全丢但调用成功"，最难查的一类故障）。</p>
+     */
+    @Data
+    public static class CallBody {
+        /** 工具原始名或映射名 */
+        private String tool;
+        private JsonNode arguments;
+        /** 写操作必须显式置 true；缺省/假一律拒 */
+        private Boolean confirm;
     }
 }

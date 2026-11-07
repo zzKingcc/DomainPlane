@@ -78,6 +78,8 @@ MCP server 的 tools/list
 | 重盖章 | 每轮 reconcile 都会重拉工具目录并 diff，工具增减会同步到注册表 |
 | 域名变更 | 连接改名 = 旧工具全部下线 + 新工具上线 |
 | 测试 | `POST /admin/mcp-connections/{name}/test` 手动触发一次连通性检查 |
+| 试跑 | `POST /admin/mcp-connections/{name}/tools/call` 真实调用一个工具。**不是沙箱**：本地推导的副作用不是 READ 时必须显式带 `confirm=true`，每连接 60 秒最多 10 次，写操作留 AUDIT 日志；试跑不受工具白名单限制（白名单管的是"模型能不能看见"） |
+| 事件 | `GET /admin/mcp-connections/{name}/events` 最近建连 / 调用 / 授权 / 撤销 / 配置变更，内存环按连接分桶保留 100 条，重启即清空；长期留痕看 AUDIT 日志 |
 
 "重盖章"是这套机制里最容易被忽略的部分：MCP server 的工具有可能随版本变化，如果只在启动时桥接一次，server 升级后平台还挂着一批已经不存在的工具。
 
@@ -100,9 +102,12 @@ MCP server 的 tools/list
 POST /admin/mcp-connections/{name}/oauth/start   → 返回授权地址
    （浏览器跳转、用户授权）
 GET  /admin/mcp-connections/{name}/oauth/callback → 换 token 并落盘
+DELETE /admin/mcp-connections/{name}/oauth/token  → 撤销本地凭据并按无凭据重连
 ```
 
 回调地址必须与 MCP server 侧登记的一致，否则换 token 会失败。token 落盘位置随连接配置，`headers` 里的静态凭证与 OAuth token 二选一——同时配时以 OAuth 为准（运行期会刷新，静态头会过期）。
+
+撤销只删本地 token，不调用授权服务器的撤销端点（RFC 7009 不是所有服务端都实现）：授权服务器侧的会话可能到它自己的过期时间前仍然有效。管控台只回显 token 元信息（是否有效 / 过期时间 / scope / 有无 refresh_token），凭据本体不进任何响应。
 
 ---
 

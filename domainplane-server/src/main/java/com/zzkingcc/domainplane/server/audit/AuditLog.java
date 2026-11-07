@@ -19,6 +19,12 @@ public final class AuditLog {
 
     private static final Logger audit = LoggerFactory.getLogger("AUDIT");
 
+    /**
+     * 请求属性名：鉴权拦截器在 preHandle 里把解析好的操作者放进 request，
+     * 控制器写补充审计（如"哪个工具被试跑过"）时直接取，不必各自再解析一遍 Cookie / 凭证头。
+     */
+    public static final String OPERATOR_ATTR = "domainplane.audit.operator";
+
     private AuditLog() {}
 
     /**
@@ -29,6 +35,31 @@ public final class AuditLog {
     public static void record(String action, String operator, String result) {
         // 固定字段顺序与 key=value 形式：采集侧按空格/等号切分即可解析，不必写正则
         audit.info("action={} operator={} result={} ip={}", action, operator, result, clientIp());
+    }
+
+    /**
+     * 补充审计：操作者取 {@link #OPERATOR_ATTR}（缺省 unknown）。
+     *
+     * <p>拦截器已经为每个变更类请求记了一行"方法 + URI + 操作者"，那行看不到请求体。
+     * 需要记清"具体动了什么"（试跑了哪个工具、撤销了哪条授权）的动作，用这个重载再记一行。</p>
+     */
+    public static void record(String action, String result) {
+        record(action, currentOperator(), result);
+    }
+
+    /** 当前请求的操作者；不在请求线程里（定时任务等）返回 unknown */
+    public static String currentOperator() {
+        try {
+            if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+                Object v = attributes.getRequest().getAttribute(OPERATOR_ATTR);
+                if (v != null && !String.valueOf(v).isBlank()) {
+                    return String.valueOf(v);
+                }
+            }
+        } catch (Exception ignored) {
+            // 审计是旁路
+        }
+        return "unknown";
     }
 
     private static String clientIp() {

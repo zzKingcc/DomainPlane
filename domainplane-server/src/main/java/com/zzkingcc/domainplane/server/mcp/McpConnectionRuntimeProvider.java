@@ -38,6 +38,8 @@ public class McpConnectionRuntimeProvider {
     private final McpConnectionStore store;
     private final McpOAuthClient oauth;
     private final Map<String, McpConnectionRuntime> runtimes = new ConcurrentHashMap<>();
+    /** 事件记录（内存，按连接分桶）：建连与调用都落这里，管控台「事件」页读它 */
+    private final McpEventLog events = new McpEventLog();
 
     /** 连接就绪后的回调（由 McpToolBridge 注入为"盖章注册"），避免与 Bridge 形成构造环 */
     private volatile Consumer<String> afterConnect;
@@ -82,11 +84,19 @@ public class McpConnectionRuntimeProvider {
             McpConnectionRuntime blocked = runtimes.computeIfAbsent(connectionName,
                     n -> new McpConnectionRuntime(n, conn));
             blocked.markNeedsAuth("OAuth token 已过期且刷新失败，需要管理员重新授权");
+            events.record(connectionName, McpEventLog.CONNECT, false, 0,
+                    "token 已过期且刷新失败，未发起建连");
             return;
         }
         McpConnectionRuntime runtime = runtimes.computeIfAbsent(connectionName,
                 n -> new McpConnectionRuntime(n, conn));
         runtime.connect(() -> effectiveHeaders(connectionName));
+        events.record(connectionName, McpEventLog.CONNECT, runtime.isReady(),
+                System.currentTimeMillis() - runtime.lastAttemptMs(),
+                runtime.isReady()
+                        ? "建连就绪，工具 " + runtime.catalog().size() + " 个"
+                                + (runtime.protocolVersion() == null ? "" : "，协议 " + runtime.protocolVersion())
+                        : runtime.status().name() + (runtime.lastError() == null ? "" : "：" + runtime.lastError()));
         if (runtime.isReady() && afterConnect != null) {
             afterConnect.accept(connectionName);
         }
@@ -182,6 +192,11 @@ public class McpConnectionRuntimeProvider {
     /** 取活的运行时（执行器每次调用都经此解析，避免闭包死连接） */
     public McpConnectionRuntime runtime(String connectionName) {
         return runtimes.get(connectionName);
+    }
+
+    /** 事件记录（管控台「事件」页的数据源；执行器写入 CALL，这里写入 CONNECT） */
+    public McpEventLog eventLog() {
+        return events;
     }
 
     /** 所有连接名 */

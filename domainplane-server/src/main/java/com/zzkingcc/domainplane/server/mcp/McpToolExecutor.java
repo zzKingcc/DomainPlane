@@ -40,14 +40,12 @@ public class McpToolExecutor implements ToolExecutor {
 
     @Override
     public String execute(ToolExecutionRequest request, Object memoryId) {
+        long start = System.currentTimeMillis();
         boolean success = false;
         McpConnectionRuntime runtime = runtimes.runtime(connectionName);
         if (runtime == null || !runtime.isReady()) {
-            String message = "MCP 连接 " + connectionName + " 当前未就绪（连接失败或未建立），工具 "
-                    + remoteToolName + " 暂不可用";
-            log.warn("[MCP 执行器] {}", message);
-            MetricsRegistry.mcpToolCall(false);
-            return message;
+            return fail("MCP 连接 " + connectionName + " 当前未就绪（连接失败或未建立），工具 "
+                    + remoteToolName + " 暂不可用", start);
         }
         try {
             McpRpcClient.McpCallResult result;
@@ -58,44 +56,49 @@ public class McpToolExecutor implements ToolExecutor {
                 log.warn("[MCP 执行器] 连接 {} 调用中收到认证挑战，尝试刷新 token 后重试", connectionName);
                 if (!runtimes.refreshToken(connectionName)) {
                     runtimes.markNeedsAuth(connectionName, auth.challenge());
-                    String message = "工具 " + remoteToolName + " 调用失败（连接 " + connectionName
-                            + "）：MCP 授权已失效，需要管理员重新授权";
-                    log.warn("[MCP 执行器] {}", message);
-                    MetricsRegistry.mcpToolCall(false);
-                    return message;
+                    return fail("工具 " + remoteToolName + " 调用失败（连接 " + connectionName
+                            + "）：MCP 授权已失效，需要管理员重新授权", start);
                 }
                 // 重试前必须重新解析运行时：刷新 token 这段时间里，reconcile 可能已经把旧 client
                 // 关掉并换上新实例。继续用进入时那个引用，轻则对着已关闭的 HttpClient 调用，
                 // 重则 NPE，而失败信息会指向"授权失效"，把人往错误方向带。
                 McpConnectionRuntime retried = runtimes.runtime(connectionName);
                 if (retried == null || !retried.isReady()) {
-                    String message = "工具 " + remoteToolName + " 调用失败（连接 " + connectionName
-                            + "）：连接在重试期间被重置，请稍后再试";
-                    log.warn("[MCP 执行器] {}", message);
-                    MetricsRegistry.mcpToolCall(false);
-                    return message;
+                    return fail("工具 " + remoteToolName + " 调用失败（连接 " + connectionName
+                            + "）：连接在重试期间被重置，请稍后再试", start);
                 }
                 result = retried.client().toolsCall(remoteToolName, request.arguments());
             }
             if (result.isError()) {
-                String text = "工具 " + remoteToolName + " 执行失败: "
-                        + (result.text().isBlank() ? "MCP server 未给出原因" : result.text());
-                log.warn("[MCP 执行器] {} 在连接 {} 上业务失败: {}", remoteToolName, connectionName, result.text());
-                MetricsRegistry.mcpToolCall(false);
-                return text;
+                return fail("工具 " + remoteToolName + " 执行失败: "
+                        + (result.text().isBlank() ? "MCP server 未给出原因" : result.text()), start);
             }
             success = true;
             return result.text();
         } catch (Exception e) {
-            String message = "工具 " + remoteToolName + " 调用失败（连接 " + connectionName + "）："
-                    + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
-            log.warn("[MCP 执行器] {}", message);
-            MetricsRegistry.mcpToolCall(false);
-            return message;
+            return fail("工具 " + remoteToolName + " 调用失败（连接 " + connectionName + "）："
+                    + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()), start);
         } finally {
             if (success) {
                 MetricsRegistry.mcpToolCall(true);
+                // 成功的事件只记一行，不带结果正文：正文可能很长，也可能含业务数据
+                runtimes.eventLog().record(connectionName, McpEventLog.CALL, true,
+                        System.currentTimeMillis() - start, "模型调用 " + remoteToolName);
             }
         }
+    }
+
+    /**
+     * 失败收口：日志 + 指标 + 事件 + 回喂文本，一处写。
+     *
+     * <p>失败分支有 5 处，分散写必有遗漏（历史上漏记指标就是这样发生的）；
+     * 收敛成一个方法后，新增分支不可能漏掉事件记录。</p>
+     */
+    private String fail(String message, long start) {
+        log.warn("[MCP 执行器] {}", message);
+        MetricsRegistry.mcpToolCall(false);
+        runtimes.eventLog().record(connectionName, McpEventLog.CALL, false,
+                System.currentTimeMillis() - start, "模型调用 " + remoteToolName + "：" + message);
+        return message;
     }
 }

@@ -113,6 +113,12 @@ public class CredentialAuthInterceptor implements HandlerInterceptor {
                                 + "修改后变更类操作自动恢复（读取类请求不受影响）");
                 return false;
             }
+            /* 变更类管理请求先把操作者放进请求属性：控制器要写"具体动了什么"的补充审计
+               （试跑了哪个工具、撤销了哪条授权），而 Cookie / 凭证头的解析逻辑只应有一份。
+               只对变更类请求解析，读取类请求不承担这次会话查找的开销。 */
+            if (isMutating(request.getMethod()) && request.getRequestURI().startsWith("/admin/")) {
+                request.setAttribute(AuditLog.OPERATOR_ATTR, operator(request));
+            }
             return true;
         }
 
@@ -164,7 +170,10 @@ public class CredentialAuthInterceptor implements HandlerInterceptor {
         }
 
         if (isMutating(method) && (uri.startsWith("/admin/") || uri.startsWith("/api/agent/tools/"))) {
-            AuditLog.record(method + " " + uri, operator(request), String.valueOf(response.getStatus()));
+            // preHandle 已经解析过的直接复用，省掉一次会话查找
+            Object resolved = request.getAttribute(AuditLog.OPERATOR_ATTR);
+            String operator = resolved == null ? operator(request) : String.valueOf(resolved);
+            AuditLog.record(method + " " + uri, operator, String.valueOf(response.getStatus()));
         }
     }
 

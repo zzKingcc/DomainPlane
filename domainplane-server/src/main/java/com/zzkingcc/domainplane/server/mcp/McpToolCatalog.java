@@ -103,8 +103,13 @@ public final class McpToolCatalog {
         return out;
     }
 
-    /** 副作用等级：readOnlyHint→READ，destructiveHint→DESTRUCTIVE，缺省→WRITE（保守默认，外部不可信） */
-    private static Tool.Effect deriveSideEffect(JsonNode annotations) {
+    /**
+     * 副作用等级：readOnlyHint→READ，destructiveHint→DESTRUCTIVE，缺省→WRITE（保守默认，外部不可信）。
+     *
+     * <p>管控台试跑端点也要用它判"是否需要人工确认"，故公开 —— 但语义不变：
+     * 这是**本地**推导的保守等级，不是采信 server 的声明。</p>
+     */
+    public static Tool.Effect deriveSideEffect(JsonNode annotations) {
         if (annotations == null || annotations.isNull()) {
             return Tool.Effect.WRITE;
         }

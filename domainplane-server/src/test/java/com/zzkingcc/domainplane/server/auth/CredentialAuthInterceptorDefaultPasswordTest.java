@@ -38,12 +38,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("CredentialAuthInterceptor：默认口令未改时封死管控台变更类请求")
 class CredentialAuthInterceptorDefaultPasswordTest {
 
-    /** 只实现本测试用得到的几个方法，其余一律不支持 */
+    /** 只实现本测试用得到的几个方法，其余一律不支持（属性表除外：拦截器要往 request 里放操作者） */
     private static final class FakeRequest implements HttpServletRequest {
         private final String method;
         private final String uri;
         private final String header;
         private final Cookie[] cookies;
+        private final java.util.Map<String, Object> attributes = new java.util.HashMap<>();
 
         FakeRequest(String method, String uri, String header, Cookie... cookies) {
             this.method = method;
@@ -78,10 +79,12 @@ class CredentialAuthInterceptorDefaultPasswordTest {
         @Override public String getRemoteAddr() { throw new UnsupportedOperationException(); }
         @Override public String getLocalAddr() { throw new UnsupportedOperationException(); }
         @Override public String getRemoteHost() { throw new UnsupportedOperationException(); }
-        @Override public Object getAttribute(String name) { throw new UnsupportedOperationException(); }
-        @Override public void setAttribute(String name, Object o) { throw new UnsupportedOperationException(); }
-        @Override public void removeAttribute(String name) { throw new UnsupportedOperationException(); }
-        @Override public Enumeration<String> getAttributeNames() { throw new UnsupportedOperationException(); }
+        @Override public Object getAttribute(String name) { return attributes.get(name); }
+        @Override public void setAttribute(String name, Object o) { attributes.put(name, o); }
+        @Override public void removeAttribute(String name) { attributes.remove(name); }
+        @Override public Enumeration<String> getAttributeNames() {
+            return java.util.Collections.enumeration(attributes.keySet());
+        }
         @Override public String getCharacterEncoding() { throw new UnsupportedOperationException(); }
         @Override public void setCharacterEncoding(String env) { throw new UnsupportedOperationException(); }
         @Override public int getContentLength() { throw new UnsupportedOperationException(); }
