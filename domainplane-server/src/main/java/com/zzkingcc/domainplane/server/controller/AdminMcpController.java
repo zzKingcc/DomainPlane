@@ -126,6 +126,8 @@ public class AdminMcpController {
             item.put("lastAttemptMs", runtime == null ? 0L : runtime.lastAttemptMs());
             item.put("authChallenge", maskChallenge(runtime == null ? null : runtime.authChallenge()));
             item.put("protocolVersion", runtime == null ? null : runtime.protocolVersion());
+            item.put("protocolEra", runtime == null || runtime.protocolEra() == null
+                    ? null : runtime.protocolEra().name());
             item.put("capabilities", caps == null ? Map.of() : caps);
             item.put("boundDomains", store.boundDomainsOf(conn.name()));
             // OAuth 客户端配置：非密字段回显（表单编辑用），secret 只回是否存在

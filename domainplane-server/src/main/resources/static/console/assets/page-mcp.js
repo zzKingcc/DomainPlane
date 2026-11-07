@@ -2,7 +2,7 @@
   // src/pages/mcp.js
   (function() {
     var esc = Console.escapeHtml;
-    var PROTOCOL = "2025-03-26";
+    var PROTOCOL = "2026-07-28 \u65E0\u72B6\u6001 / 2025-03-26 \u4F1A\u8BDD";
     var POLL_MS = 15e3;
     var EP = { STREAMABLE_HTTP: "Streamable HTTP", LEGACY_SSE: "Legacy SSE" };
     var ST = {
@@ -101,6 +101,13 @@
     }
     function num(v) {
       return v === void 0 || v === null || v === "" ? "\u2014" : String(v);
+    }
+    function protoText(c) {
+      if (!c.protocolVersion) {
+        return "\u672A\u534F\u5546";
+      }
+      var e = c.protocolEra === "MODERN" ? "\u65E0\u72B6\u6001" : c.protocolEra === "LEGACY" ? "\u4F1A\u8BDD" : "";
+      return c.protocolVersion + (e ? " \xB7 " + e : "");
     }
     function errText(e) {
       return e && e.message ? String(e.message) : "\u672A\u77E5\u9519\u8BEF";
@@ -298,7 +305,7 @@
     }
     function renderStatusBar(c) {
       var s = statusOf(c);
-      var meta = "\u4F20\u8F93 " + (EP[c.transport] || c.transport || "\u2014") + " \xB7 \u534F\u5546\u534F\u8BAE " + (c.protocolVersion || "\u672A\u534F\u5546") + " \xB7 \u5DE5\u5177 " + (c.ready ? num(c.toolCount) : "0") + " \xB7 \u4E0A\u6B21\u63A2\u6D4B " + timeOf(c.lastAttemptMs) + " \xB7 \u9875\u9762\u540C\u6B65 " + timeOf(state.lastSync);
+      var meta = "\u4F20\u8F93 " + (EP[c.transport] || c.transport || "\u2014") + " \xB7 \u534F\u5546\u534F\u8BAE " + protoText(c) + " \xB7 \u5DE5\u5177 " + (c.ready ? num(c.toolCount) : "0") + " \xB7 \u4E0A\u6B21\u63A2\u6D4B " + timeOf(c.lastAttemptMs) + " \xB7 \u9875\u9762\u540C\u6B65 " + timeOf(state.lastSync);
       var err = (s === "FAILED" || s === "NEEDS_AUTH") && c.lastError ? '<div class="dp-mcp-sb-err">' + esc(shortErr(c.lastError, 120)) + (s === "NEEDS_AUTH" ? '<button class="btn btn-sm" type="button" data-act="oauth">\u53BB\u6388\u6743</button>' : '<button class="btn btn-sm" type="button" data-act="test">\u91CD\u8BD5\u6D4B\u8BD5</button>') + "</div>" : "";
       setHtml(
         "statusBar",
@@ -351,7 +358,7 @@
       var keys = c.headerKeys || [];
       setHtml(
         "paneOverview",
-        '<div id="diagCard"></div><div class="dp-mcp-kv">' + kv("\u5730\u5740", esc(c.url || "\u2014")) + kv("\u4F20\u8F93", esc(EP[c.transport] || c.transport || "\u2014")) + kv("\u5BA2\u6237\u7AEF\u57FA\u7EBF", esc(PROTOCOL)) + kv("\u534F\u5546\u534F\u8BAE", esc(c.protocolVersion || "\u672A\u534F\u5546\u6210\u529F")) + kv("\u670D\u52A1\u7AEF\u80FD\u529B", caps.length ? esc(caps.join("\u3001")) : "\u672A\u534F\u5546") + kv("\u4E0A\u6B21\u63A2\u6D4B", esc(timeOf(c.lastAttemptMs))) + kv("\u8C03\u7528\u8D85\u65F6", c.callTimeoutMs ? esc(String(c.callTimeoutMs)) + " ms" : "\u9ED8\u8BA4 30000 ms") + kv("\u5BA1\u6279\u7B56\u7565", esc(c.approvalPolicy || "\u2014")) + kv("\u8BF7\u6C42\u5934\u952E", keys.length ? keys.map(function(k) {
+        '<div id="diagCard"></div><div class="dp-mcp-kv">' + kv("\u5730\u5740", esc(c.url || "\u2014")) + kv("\u4F20\u8F93", esc(EP[c.transport] || c.transport || "\u2014")) + kv("\u5BA2\u6237\u7AEF\u57FA\u7EBF", esc(PROTOCOL)) + kv("\u534F\u5546\u534F\u8BAE", esc(protoText(c))) + kv("\u670D\u52A1\u7AEF\u80FD\u529B", caps.length ? esc(caps.join("\u3001")) : "\u672A\u534F\u5546") + kv("\u4E0A\u6B21\u63A2\u6D4B", esc(timeOf(c.lastAttemptMs))) + kv("\u8C03\u7528\u8D85\u65F6", c.callTimeoutMs ? esc(String(c.callTimeoutMs)) + " ms" : "\u9ED8\u8BA4 30000 ms") + kv("\u5BA1\u6279\u7B56\u7565", esc(c.approvalPolicy || "\u2014")) + kv("\u8BF7\u6C42\u5934\u952E", keys.length ? keys.map(function(k) {
           return '<span class="tag perm mono">' + esc(k) + "</span>";
         }).join(" ") : "\u672A\u914D\u7F6E") + kv("\u5DE5\u5177\u767D\u540D\u5355", allow.length ? esc(allow.join(", ")) : "\u5168\u90E8\u5F00\u653E") + kv("\u7ED1\u5B9A\u57DF", bound.length ? bound.map(function(d) {
           return '<span class="tag public mono">' + esc(d) + "</span>";

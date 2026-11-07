@@ -4,14 +4,32 @@
 
 ---
 
-## 1. 传输方式
+## 1. 传输方式与协议版本
 
 | 值 | 协议 | 现状 |
 | --- | --- | --- |
 | `STREAMABLE_HTTP` | MCP Streamable HTTP | 主推 |
-| `LEGACY_SSE` | MCP 旧版 HTTP+SSE | 已实现，**未对真实旧 server 验证** |
+| `LEGACY_SSE` | MCP 旧版 HTTP+SSE | 已实现，**未对真实旧 server 验证**；该传输在 2026-07-28 里已标废弃 |
 
-选哪个由连接配置决定，没有自动探测。
+传输由连接配置决定；**协议版本不用配，建连时自动判定**：
+
+```
+server/discover  ── 成功且 supportedVersions 含 2026-07-28 ──→ 无状态（逐请求声明）
+       │
+       └─ 回 -32601 / 404 / 400 无现代错误码 ────────────────→ initialize 握手（会话式）
+       └─ 回 -32022 且 supported 里没有本平台实现的版本 ────→ 直接失败并报出服务端支持的版本
+```
+
+| 时代 | 握手 | 会话 | 每请求带什么 |
+| --- | --- | --- | --- |
+| 无状态（2026-07-28） | 无 | 无 `Mcp-Session-Id` | `params._meta` 里的 `protocolVersion` / `clientCapabilities` / `clientInfo`，HTTP 头 `MCP-Protocol-Version`、`Mcp-Method`（`tools/call` 另带 `Mcp-Name`） |
+| 会话式（2025-03-26 ~ 2025-11-25） | `initialize` + `notifications/initialized` | `Mcp-Session-Id` | 会话头 |
+
+判定结果是**服务端（origin）的属性**，一次建连只判一次；协商结果（版本、时代、服务端能力集）在管控台状态条和概览里显示。
+
+**`resultType`**：无状态协议的所有 result 都带 `resultType`（`complete` / `input_required`），旧 server 不带、按 `complete` 处理。`input_required` 是多轮往返（MRTR）的中间结果，本平台未实现该模式，遇到会**如实返回失败**并说明原因，不会当空结果静默成功。
+
+**未采纳的 2026-07-28 能力**：`subscriptions/listen`（服务端主动推送变更）——页面/协调器已是 15s 轮询 + 30s reconcile，长连接流的复杂度换不来实际收益；`ttlMs` / `cacheScope` 缓存提示——`tools/list` 每次建连只拉一次，没有可复用的窗口；CIMD（客户端元信息文档）——仍用 DCR，待授权服务器强制要求时再迁；`x-mcp-header`（把某个工具参数搬进 `Mcp-Param-*` 请求头）——需要把工具 schema 一路传到调用点，未接时这类参数只会出现在 `arguments` 里。`inputSchema` 按 JSON Schema 2020-12 原样透传（本平台不校验也不改写 schema）。
 
 ---
 

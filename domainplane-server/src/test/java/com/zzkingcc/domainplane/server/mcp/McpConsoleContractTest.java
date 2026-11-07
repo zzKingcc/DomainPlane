@@ -98,6 +98,7 @@ class McpConsoleContractTest {
 
         assertTrue(item.containsKey("lastAttemptMs"), "上次探测时间必须回显");
         assertTrue(item.containsKey("protocolVersion"));
+        assertTrue(item.containsKey("protocolEra"), "协议时代要回显（无状态 / 会话）");
         assertTrue(item.containsKey("capabilities"));
         assertTrue(item.containsKey("authChallenge"));
         assertEquals(List.of("Authorization"), item.get("headerKeys"), "只回显请求头键名");
@@ -158,6 +159,7 @@ class McpConsoleContractTest {
 
             Map<String, Object> item = firstItem(controller(store, provider).list());
             assertEquals("2025-06-18", item.get("protocolVersion"), "协商版本来自 initialize 响应，不是客户端硬编码");
+            assertEquals("LEGACY", item.get("protocolEra"), "旧 server 应标成会话式协议");
             assertTrue(((Map<?, ?>) item.get("capabilities")).containsKey("tools"));
             assertTrue(((Number) item.get("lastAttemptMs")).longValue() > 0);
         }

@@ -9,7 +9,7 @@
    ========================================================================== */
 (function () {
     var esc = Console.escapeHtml;
-    var PROTOCOL = '2025-03-26';
+    var PROTOCOL = '2026-07-28 无状态 / 2025-03-26 会话';
     var POLL_MS = 15000;
     var EP = { STREAMABLE_HTTP: 'Streamable HTTP', LEGACY_SSE: 'Legacy SSE' };
     var ST = {
@@ -51,6 +51,12 @@
     function setChecked(id, v) { var n = el(id); if (n) { n.checked = !!v; } }
     function disable(id, on) { var n = el(id); if (n) { n.disabled = !!on; } }
     function num(v) { return (v === undefined || v === null || v === '') ? '—' : String(v); }
+    /* 协议时代：后端 protocolEra = MODERN（2026-07-28 逐请求声明）/ LEGACY（initialize 会话） */
+    function protoText(c) {
+        if (!c.protocolVersion) { return '未协商'; }
+        var e = c.protocolEra === 'MODERN' ? '无状态' : (c.protocolEra === 'LEGACY' ? '会话' : '');
+        return c.protocolVersion + (e ? ' · ' + e : '');
+    }
     function errText(e) { return (e && e.message) ? String(e.message) : '未知错误'; }
     function shortErr(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; }
     function timeOf(ms) {
@@ -191,7 +197,7 @@
     function renderStatusBar(c) {
         var s = statusOf(c);
         var meta = '传输 ' + (EP[c.transport] || c.transport || '—')
-            + ' · 协商协议 ' + (c.protocolVersion || '未协商')
+            + ' · 协商协议 ' + protoText(c)
             + ' · 工具 ' + (c.ready ? num(c.toolCount) : '0')
             + ' · 上次探测 ' + timeOf(c.lastAttemptMs)
             + ' · 页面同步 ' + timeOf(state.lastSync);
@@ -259,7 +265,7 @@
             + kv('地址', esc(c.url || '—'))
             + kv('传输', esc(EP[c.transport] || c.transport || '—'))
             + kv('客户端基线', esc(PROTOCOL))
-            + kv('协商协议', esc(c.protocolVersion || '未协商成功'))
+            + kv('协商协议', esc(protoText(c)))
             + kv('服务端能力', caps.length ? esc(caps.join('、')) : '未协商')
             + kv('上次探测', esc(timeOf(c.lastAttemptMs)))
             + kv('调用超时', c.callTimeoutMs ? esc(String(c.callTimeoutMs)) + ' ms' : '默认 30000 ms')

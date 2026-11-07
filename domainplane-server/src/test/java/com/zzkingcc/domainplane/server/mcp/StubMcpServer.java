@@ -52,6 +52,11 @@ final class StubMcpServer implements AutoCloseable {
         rec.path = ex.getRequestURI().getPath();
         rec.auth = ex.getRequestHeaders().getFirst("Authorization");
         rec.session = ex.getRequestHeaders().getFirst("Mcp-Session-Id");
+        // 头部名统一小写入表：无状态协议要断言 MCP-Protocol-Version / Mcp-Method / Mcp-Name
+        for (Map.Entry<String, List<String>> e : ex.getRequestHeaders().entrySet()) {
+            List<String> v = e.getValue();
+            rec.headers.put(e.getKey().toLowerCase(java.util.Locale.ROOT), v == null || v.isEmpty() ? "" : v.get(0));
+        }
         rec.body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         requests.add(rec);
 
@@ -61,6 +66,7 @@ final class StubMcpServer implements AutoCloseable {
         } catch (Exception ignore) {
             // 非 JSON 体也记录下来，responder 自行决定
         }
+        rec.rpcMethod = node == null ? "" : node.path("method").asText("");
         Resp resp = responder.apply(node);
         if (resp.sessionId != null) {
             ex.getResponseHeaders().set("Mcp-Session-Id", resp.sessionId);
@@ -86,11 +92,21 @@ final class StubMcpServer implements AutoCloseable {
 
     /** 一条被记录下来的请求 */
     static final class Recorded {
+        /** HTTP method（POST / GET） */
         String method;
+        /** JSON-RPC method（initialize / tools/list / server/discover …） */
+        String rpcMethod;
         String path;
         String auth;
         String session;
         String body;
+        /** 全部请求头（名小写） */
+        final Map<String, String> headers = new java.util.LinkedHashMap<>();
+
+        /** 便捷：取某个头（名不区分大小写） */
+        String header(String name) {
+            return headers.get(name.toLowerCase(java.util.Locale.ROOT));
+        }
     }
 
     /** stub 响应 */
