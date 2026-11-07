@@ -27,7 +27,7 @@
         bindings: { domainBindings: {}, connectionBindings: {} },
         domains: [],
         selected: '', tab: 'overview',
-        tools: [], toolsFor: '', toolsError: '',
+        tools: [], toolsFor: '', toolsError: '', toolDetail: '',
         allowPick: [], bindPick: [], bindFor: '', bindTouched: false,
         editing: false, editName: '',
         lastSync: 0, listSig: ''
@@ -170,8 +170,11 @@
 
     function renderStatusBar(c) {
         var s = statusOf(c);
-        var meta = '传输 ' + (EP[c.transport] || c.transport || '—') + ' · 协议 ' + PROTOCOL
-            + ' · 工具 ' + (c.ready ? num(c.toolCount) : '0') + ' · 上次同步 ' + timeOf(state.lastSync);
+        var meta = '传输 ' + (EP[c.transport] || c.transport || '—')
+            + ' · 协商协议 ' + (c.protocolVersion || '未协商')
+            + ' · 工具 ' + (c.ready ? num(c.toolCount) : '0')
+            + ' · 上次探测 ' + timeOf(c.lastAttemptMs)
+            + ' · 页面同步 ' + timeOf(state.lastSync);
         var err = (s === 'FAILED' || s === 'NEEDS_AUTH') && c.lastError
             ? '<div class="dp-mcp-sb-err">' + esc(shortErr(c.lastError, 120))
                 + (s === 'NEEDS_AUTH'
@@ -227,15 +230,22 @@
     function renderOverview(c) {
         var bound = boundOf(c.name);
         var allow = c.toolAllowlist || [];
+        var caps = Object.keys(c.capabilities || {});
+        var keys = c.headerKeys || [];
         setHtml('paneOverview',
             '<div id="diagCard"></div>'
             + '<div class="dp-mcp-kv">'
             + kv('地址', esc(c.url || '—'))
             + kv('传输', esc(EP[c.transport] || c.transport || '—'))
-            + kv('协议基线', esc(PROTOCOL))
+            + kv('客户端基线', esc(PROTOCOL))
+            + kv('协商协议', esc(c.protocolVersion || '未协商成功'))
+            + kv('服务端能力', caps.length ? esc(caps.join('、')) : '未协商')
+            + kv('上次探测', esc(timeOf(c.lastAttemptMs)))
             + kv('调用超时', c.callTimeoutMs ? esc(String(c.callTimeoutMs)) + ' ms' : '默认 30000 ms')
             + kv('审批策略', esc(c.approvalPolicy || '—'))
-            + kv('请求头', c.hasHeaders ? '已配置（不回显）' : '未配置')
+            + kv('请求头键', keys.length
+                ? keys.map(function (k) { return '<span class="tag perm mono">' + esc(k) + '</span>'; }).join(' ')
+                : '未配置')
             + kv('工具白名单', allow.length ? esc(allow.join(', ')) : '全部开放')
             + kv('绑定域', bound.length
                 ? bound.map(function (d) { return '<span class="tag public mono">' + esc(d) + '</span>'; }).join(' ')
@@ -258,6 +268,9 @@
             + '<div class="dp-mcp-diag-row"><span>最近错误</span>'
             + (has ? '<strong class="err">' + esc(shortErr(c.lastError, 100)) + '</strong>' : '<strong>无</strong>')
             + '</div>'
+            + '<div class="dp-mcp-diag-row"><span>授权挑战</span>'
+            + (c.authChallenge ? '<strong>' + esc(shortErr(c.authChallenge, 100)) + '</strong>'
+                : '<strong>无</strong>') + '</div>'
             + '<div class="dp-mcp-diag-row"><span>上次同步</span><strong>'
                 + esc(timeOf(state.lastSync)) + '</strong></div>'
             + (has ? '<details class="dp-mcp-diag-raw"' + (wasOpen ? ' open' : '')
@@ -302,21 +315,40 @@
             setHtml('paneTools', '<div class="dp-mcp-none">该连接没有工具</div>' + retry);
             return;
         }
+        /* 五列 + 跨列详情行：右侧详情区只有 600 多像素，七列加行内展开会把列压成竖条。
+           详情行占满整表宽度，Schema 才有地方铺开。 */
         setHtml('paneTools',
             '<div class="dp-mcp-tools-head"><span>' + state.tools.length + ' 个工具</span>'
             + '<span class="spacer"></span>' + retry
             + '<button class="btn btn-sm btn-outline-primary" type="button" data-act="editAllow">编辑白名单</button></div>'
             + '<div class="dp-mcp-table-wrap"><table class="table dp-mcp-table"><thead><tr>'
-            + '<th>状态</th><th>原始名</th><th>映射名</th><th>副作用</th><th>说明</th>'
+            + '<th>状态</th><th>工具</th><th>副作用</th><th>审批</th><th>说明</th>'
             + '</tr></thead><tbody>'
             + state.tools.map(function (t) {
+                var open = state.toolDetail === t.originalName;
+                var schema;
+                try { schema = t.inputSchema ? JSON.stringify(t.inputSchema, null, 2) : '无'; }
+                catch (e) { schema = '无'; }
+                var domains = (t.boundDomains || []).join('、') || '未绑定';
                 return '<tr><td>' + (t.allowed
                     ? '<span class="tag public">已开放</span>'
                     : '<span class="tag off">已裁剪</span>') + '</td>'
-                    + '<td class="mono">' + esc(t.originalName || '—') + '</td>'
-                    + '<td class="mono">' + esc(t.mappedName || '—') + '</td>'
+                    + '<td><div class="mono">' + esc(t.originalName || '—') + '</div>'
+                    + '<div class="dp-mcp-tool-mapped mono">' + esc(t.mappedName || '—') + '</div></td>'
                     + '<td>' + sideEffectTag(t.sideEffect) + '</td>'
-                    + '<td>' + esc(shortErr(t.description || '—', 90)) + '</td></tr>';
+                    + '<td>' + (t.approvalRequired
+                        ? '<span class="tag approval">需审批</span>'
+                        : '<span class="tag off">免审批</span>') + '</td>'
+                    + '<td>' + esc(shortErr(t.description || '—', 90))
+                    + '<button class="dp-mcp-link" type="button" data-act="toolDetail" data-tool="'
+                    + esc(t.originalName) + '">' + (open ? '收起参数' : '参数与来源') + '</button></td></tr>'
+                    + '<tr class="dp-mcp-tool-detail"' + (open ? '' : ' hidden') + '><td colspan="5">'
+                    + '<div class="dp-mcp-tool-meta">'
+                    + '<div><b>输入参数</b><pre>' + esc(schema) + '</pre></div>'
+                    + '<div><b>生效域</b> ' + esc(domains)
+                    + ' · <b>幂等</b> ' + (t.idempotent ? '是' : '否')
+                    + ' · <b>来源</b> <span class="mono">' + esc(t.source || '—') + '</span></div>'
+                    + '</div></td></tr>';
             }).join('') + '</tbody></table></div>');
     }
 
@@ -325,6 +357,7 @@
         setHtml('paneAuth',
             '<div class="dp-mcp-kv">'
             + kv('当前状态', chip(c))
+            + kv('授权挑战', esc(c.authChallenge || '无'))
             + kv('client_id', esc(c.oauthClientId || '未登记（走动态注册）'))
             + kv('client_secret', c.hasOauthClientSecret ? '已配置（不回显）' : '未配置')
             + kv('client 名称', esc(c.oauthClientName || '—'))
@@ -600,6 +633,11 @@
         else if (act === 'delete') { delConn(c); }
         else if (act === 'oauth') { startOAuth(c.name); }
         else if (act === 'reloadTools') { state.toolsFor = ''; loadTools(c.name); }
+        else if (act === 'toolDetail') {
+            var tool = btn.getAttribute('data-tool') || '';
+            state.toolDetail = state.toolDetail === tool ? '' : tool;
+            renderTools(c);
+        }
         else if (act === 'editAllow') { openEdit(c.name); }
         else if (act === 'saveBind') { Console.busy(btn, function () { saveBind(); return Promise.resolve(); }, '保存中…'); }
         else if (act === 'bindClear') {
@@ -636,6 +674,7 @@
                 });
                 state.bindTouched = false;
                 state.toolsFor = '';
+                state.toolDetail = '';
                 renderDetail();
             });
         }

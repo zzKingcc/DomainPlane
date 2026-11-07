@@ -2551,9 +2551,37 @@ pre.preview .mark { color: #93c5fd; }
 }
 .dp-mcp-tools-head .spacer { flex: 1 1 auto; }
 .dp-mcp-table-wrap { max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+/* 五列 + 跨列详情行：右侧详情区只有 600 多像素，七列会把列压成竖条；
+   详情行 colspan 占满整表宽度，Schema 才有地方铺开。 */
 .dp-mcp-table { margin: 0; font-size: 12.5px; }
 .dp-mcp-table td { vertical-align: top; line-height: 1.6; }
-.dp-mcp-table td:nth-child(5) { min-width: 220px; color: var(--muted); }
+.dp-mcp-table td:nth-child(1) { width: 70px; }
+.dp-mcp-table td:nth-child(2) { min-width: 150px; }
+.dp-mcp-table td:nth-child(5) { min-width: 200px; color: var(--muted); }
+.dp-mcp-tool-mapped { margin-top: 2px; font-size: 11px; color: var(--muted); }
+.dp-mcp-link {
+    display: block; margin-top: 4px; padding: 0;
+    border: 0; background: transparent; color: var(--primary);
+    font: inherit; font-size: 11.5px; cursor: pointer;
+}
+.dp-mcp-link:hover { color: var(--text); }
+.dp-mcp-tool-detail[hidden] { display: none; }
+.dp-mcp-tool-detail > td { padding: 0 12px 14px; }
+.dp-mcp-tool-meta {
+    padding: 8px 10px; line-height: 1.7;
+    min-width: 0; max-width: 100%; overflow-wrap: anywhere;
+    background: #fafafa; border: 1px solid var(--line); border-radius: 6px;
+}
+.dp-mcp-tool-meta > div + div { margin-top: 6px; }
+.dp-mcp-tool-meta b { color: var(--text); font-weight: 600; margin-right: 6px; }
+/* Tabler 给裸 pre 上了深色代码块底；这里显式压回浅色主题，并限制宽度不撑列 */
+.dp-mcp-tool-meta pre {
+    margin: 4px 0 0; padding: 6px 8px; max-height: 150px; overflow: auto;
+    max-width: 100%; box-sizing: border-box;
+    background: #f8fafc; color: var(--text);
+    border: 1px solid var(--line); border-radius: 4px;
+    font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+}
 .tag.off { background: var(--tblr-secondary-lt); color: var(--muted); }
 
 /* 通用空 / 错块 */

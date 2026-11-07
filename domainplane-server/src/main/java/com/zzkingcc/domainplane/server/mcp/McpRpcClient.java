@@ -100,8 +100,20 @@ public class McpRpcClient implements AutoCloseable {
         }
     }
 
-    /** initialize：建会话并返回协议版本 */
+    /**
+     * initialize 的协商结果：协议版本 + 服务端声明的能力集。
+     * 能力只取顶层键（原值），管控台要展示「server 声明了哪些能力」，不替 server 解释细节。
+     */
+    public record InitializeResult(String protocolVersion, Map<String, Object> capabilities) {
+    }
+
+    /** initialize：建会话并返回协商后的协议版本（旧签名保留，既有调用方不受影响） */
     public String initialize() throws Exception {
+        return initializeResult().protocolVersion();
+    }
+
+    /** initialize：建会话并返回完整协商结果（协议版本 + 服务端能力集） */
+    public InitializeResult initializeResult() throws Exception {
         if (transport == McpTransport.LEGACY_SSE) {
             openLegacySse();
         }
@@ -112,10 +124,17 @@ public class McpRpcClient implements AutoCloseable {
         JsonNode response = rpc("initialize", params);
         JsonNode result = requireResult(response);
         String negotiated = result.path("protocolVersion").asText(PROTOCOL_VERSION);
+        Map<String, Object> caps = new LinkedHashMap<>();
+        JsonNode capsNode = result.path("capabilities");
+        if (capsNode.isObject()) {
+            capsNode.fields().forEachRemaining(e -> caps.put(e.getKey(),
+                    e.getValue().isNull() ? null : MAPPER.convertValue(e.getValue(), Object.class)));
+        }
         // 能力声明：本平台不会反过来让 server 用模型，故如实上报不支持 sampling / roots / elicitation
         rpcNotification("notifications/initialized", Map.of());
-        log.info("[MCP 客户端] {} 初始化完成（协商协议版本 {}）", baseUrl, negotiated);
-        return negotiated;
+        log.info("[MCP 客户端] {} 初始化完成（协商协议版本 {}，能力 {}）",
+                baseUrl, negotiated, caps.keySet());
+        return new InitializeResult(negotiated, caps);
     }
 
     /** tools/list：返回工具定义列表 */

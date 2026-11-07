@@ -71,7 +71,12 @@ public class AdminMcpController {
         this.oauthClient = oauthClient;
     }
 
-    /** 连接列表（含运行期就绪状态、工具数、绑定域、最近错误） */
+    /**
+     * 连接列表（含运行期就绪状态、工具数、绑定域、最近错误、协商结果）。
+     *
+     * S2 新增五个诊断 / 治理字段：lastAttemptMs、authChallenge（脱敏）、protocolVersion、
+     * capabilities、headerKeys。headerKeys 只给键名 —— headers 里是明文凭据，出口一个字都不能带。
+     */
     @GetMapping("/mcp-connections")
     public Map<String, Object> list() {
         List<Map<String, Object>> items = new ArrayList<>();
@@ -79,6 +84,7 @@ public class AdminMcpController {
             McpConnectionRuntime runtime = runtimes.runtime(conn.name());
             boolean ready = runtime != null && runtime.isReady();
             int toolCount = ready ? runtime.catalog().size() : 0;
+            Map<String, Object> caps = runtime == null ? null : runtime.capabilities();
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("name", conn.name());
             item.put("url", conn.url());
@@ -87,6 +93,7 @@ public class AdminMcpController {
             item.put("approvalPolicy", conn.approvalPolicy().name());
             item.put("callTimeoutMs", conn.callTimeoutMs());
             item.put("hasHeaders", !conn.headers().isEmpty());
+            item.put("headerKeys", new ArrayList<>(conn.headers().keySet()));
             item.put("toolAllowlist", new ArrayList<>(conn.toolAllowlist()));
             item.put("remark", conn.remark());
             item.put("ready", ready);
@@ -95,6 +102,10 @@ public class AdminMcpController {
             item.put("status", runtime == null ? "DISCONNECTED" : runtime.status().name());
             item.put("toolCount", toolCount);
             item.put("lastError", runtime == null ? null : runtime.lastError());
+            item.put("lastAttemptMs", runtime == null ? 0L : runtime.lastAttemptMs());
+            item.put("authChallenge", maskChallenge(runtime == null ? null : runtime.authChallenge()));
+            item.put("protocolVersion", runtime == null ? null : runtime.protocolVersion());
+            item.put("capabilities", caps == null ? Map.of() : caps);
             item.put("boundDomains", store.boundDomainsOf(conn.name()));
             // OAuth 客户端配置：非密字段回显（表单编辑用），secret 只回是否存在
             item.put("oauthClientId", conn.oauth().clientId());
@@ -110,6 +121,31 @@ public class AdminMcpController {
         body.put("count", items.size());
         body.put("settingsFile", store.filePath());
         return body;
+    }
+
+    /**
+     * 授权挑战值脱敏：WWW-Authenticate 的 resource_metadata URL 里可能夹带上游凭据参数。
+     * 只摘掉每个 URL 的 query 段并整体限长，保留 scheme 与参数名供管理员判断「缺 scope / token 失效」。
+     * 包可见是为了让契约单测能直接验脱敏，不启 Spring 上下文。
+     */
+    static String maskChallenge(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String s = raw;
+        int q;
+        while ((q = s.indexOf('?')) >= 0) {
+            int end = q + 1;
+            while (end < s.length()) {
+                char c = s.charAt(end);
+                if (Character.isWhitespace(c) || c == ',' || c == '"' || c == '\'' || c == '#') {
+                    break;
+                }
+                end++;
+            }
+            s = s.substring(0, q) + s.substring(end);
+        }
+        return s.length() > 200 ? s.substring(0, 200) + "…" : s;
     }
 
     /**
@@ -273,13 +309,19 @@ public class AdminMcpController {
         McpConnectionRuntime runtime = runtimes.runtime(name);
         List<Map<String, Object>> items = new ArrayList<>();
         if (runtime != null && runtime.isReady()) {
-            for (McpToolCatalog.CatalogItem it : McpToolCatalog.catalogView(runtime, conn)) {
+            List<String> bound = store.boundDomainsOf(name);
+            for (McpToolCatalog.CatalogItem it : McpToolCatalog.catalogView(runtime, conn, bound)) {
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("originalName", it.originalName());
                 m.put("mappedName", it.mappedName());
                 m.put("sideEffect", it.sideEffect());
                 m.put("description", it.description());
                 m.put("allowed", it.allowed());
+                m.put("inputSchema", it.inputSchema());
+                m.put("idempotent", it.idempotent());
+                m.put("approvalRequired", it.approvalRequired());
+                m.put("boundDomains", it.boundDomains());
+                m.put("source", it.source());
                 items.add(m);
             }
         }

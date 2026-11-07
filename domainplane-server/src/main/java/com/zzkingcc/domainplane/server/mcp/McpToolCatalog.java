@@ -195,23 +195,41 @@ public final class McpToolCatalog {
         return map;
     }
 
-    /** 管控台用的工具目录视图项 */
+    /**
+     * 管控台用的工具目录视图项。
+     * S2 带出 inputSchema / 幂等 / 审批结论 / 绑定域 / 来源：这些数据在 toRegistered 里本来就算过，
+     * 只是过去没进目录视图，页面只能展示 5 列。审批结论取本地策略，不信 server 的 annotations。
+     */
     public record CatalogItem(String originalName, String mappedName, String sideEffect,
-                              String description, boolean allowed) {
+                              String description, boolean allowed,
+                              JsonNode inputSchema, boolean idempotent,
+                              boolean approvalRequired, List<String> boundDomains, String source) {
     }
 
-    /** 工具目录视图：原始名 / 映射名 / 副作用等级 / 描述 / 是否被白名单放行（供管控台展示排障） */
+    /** 工具目录视图（不传绑定域时按无绑定展示） */
     public static List<CatalogItem> catalogView(McpConnectionRuntime runtime, McpConnection connection) {
+        return catalogView(runtime, connection, List.of());
+    }
+
+    /** 工具目录视图：原始名 / 映射名 / 副作用 / 描述 / 放行 / 参数 Schema / 治理元数据 */
+    public static List<CatalogItem> catalogView(McpConnectionRuntime runtime, McpConnection connection,
+                                                List<String> bindingDomains) {
         Map<String, Integer> used = new LinkedHashMap<>();
         List<CatalogItem> out = new ArrayList<>();
+        List<String> bound = bindingDomains == null ? List.of() : List.copyOf(bindingDomains);
+        String source = "mcp://" + connection.name() + "@" + connection.url();
         for (McpRpcClient.McpToolInfo tool : runtime.catalog()) {
             if (tool.name() == null || tool.name().isBlank()) {
                 continue;
             }
             boolean allowed = connection.allows(tool.name());
             String mapped = allowed ? normalizeName(connection.name(), tool.name(), used) : null;
-            out.add(new CatalogItem(tool.name(), mapped,
-                    deriveSideEffect(tool.annotations()).name(), tool.description(), allowed));
+            Tool.Effect effect = deriveSideEffect(tool.annotations());
+            boolean idempotent = tool.annotations() != null
+                    && tool.annotations().path("idempotentHint").asBoolean(false);
+            boolean approvalRequired = connection.approvalPolicy().requiresApproval(effect);
+            out.add(new CatalogItem(tool.name(), mapped, effect.name(), tool.description(), allowed,
+                    tool.inputSchema(), idempotent, approvalRequired, bound, source));
         }
         return out;
     }

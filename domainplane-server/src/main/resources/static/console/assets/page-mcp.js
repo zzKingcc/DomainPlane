@@ -24,6 +24,7 @@
       tools: [],
       toolsFor: "",
       toolsError: "",
+      toolDetail: "",
       allowPick: [],
       bindPick: [],
       bindFor: "",
@@ -261,7 +262,7 @@
     }
     function renderStatusBar(c) {
       var s = statusOf(c);
-      var meta = "\u4F20\u8F93 " + (EP[c.transport] || c.transport || "\u2014") + " \xB7 \u534F\u8BAE " + PROTOCOL + " \xB7 \u5DE5\u5177 " + (c.ready ? num(c.toolCount) : "0") + " \xB7 \u4E0A\u6B21\u540C\u6B65 " + timeOf(state.lastSync);
+      var meta = "\u4F20\u8F93 " + (EP[c.transport] || c.transport || "\u2014") + " \xB7 \u534F\u5546\u534F\u8BAE " + (c.protocolVersion || "\u672A\u534F\u5546") + " \xB7 \u5DE5\u5177 " + (c.ready ? num(c.toolCount) : "0") + " \xB7 \u4E0A\u6B21\u63A2\u6D4B " + timeOf(c.lastAttemptMs) + " \xB7 \u9875\u9762\u540C\u6B65 " + timeOf(state.lastSync);
       var err = (s === "FAILED" || s === "NEEDS_AUTH") && c.lastError ? '<div class="dp-mcp-sb-err">' + esc(shortErr(c.lastError, 120)) + (s === "NEEDS_AUTH" ? '<button class="btn btn-sm" type="button" data-act="oauth">\u53BB\u6388\u6743</button>' : '<button class="btn btn-sm" type="button" data-act="test">\u91CD\u8BD5\u6D4B\u8BD5</button>') + "</div>" : "";
       setHtml(
         "statusBar",
@@ -308,9 +309,13 @@
     function renderOverview(c) {
       var bound = boundOf(c.name);
       var allow = c.toolAllowlist || [];
+      var caps = Object.keys(c.capabilities || {});
+      var keys = c.headerKeys || [];
       setHtml(
         "paneOverview",
-        '<div id="diagCard"></div><div class="dp-mcp-kv">' + kv("\u5730\u5740", esc(c.url || "\u2014")) + kv("\u4F20\u8F93", esc(EP[c.transport] || c.transport || "\u2014")) + kv("\u534F\u8BAE\u57FA\u7EBF", esc(PROTOCOL)) + kv("\u8C03\u7528\u8D85\u65F6", c.callTimeoutMs ? esc(String(c.callTimeoutMs)) + " ms" : "\u9ED8\u8BA4 30000 ms") + kv("\u5BA1\u6279\u7B56\u7565", esc(c.approvalPolicy || "\u2014")) + kv("\u8BF7\u6C42\u5934", c.hasHeaders ? "\u5DF2\u914D\u7F6E\uFF08\u4E0D\u56DE\u663E\uFF09" : "\u672A\u914D\u7F6E") + kv("\u5DE5\u5177\u767D\u540D\u5355", allow.length ? esc(allow.join(", ")) : "\u5168\u90E8\u5F00\u653E") + kv("\u7ED1\u5B9A\u57DF", bound.length ? bound.map(function(d) {
+        '<div id="diagCard"></div><div class="dp-mcp-kv">' + kv("\u5730\u5740", esc(c.url || "\u2014")) + kv("\u4F20\u8F93", esc(EP[c.transport] || c.transport || "\u2014")) + kv("\u5BA2\u6237\u7AEF\u57FA\u7EBF", esc(PROTOCOL)) + kv("\u534F\u5546\u534F\u8BAE", esc(c.protocolVersion || "\u672A\u534F\u5546\u6210\u529F")) + kv("\u670D\u52A1\u7AEF\u80FD\u529B", caps.length ? esc(caps.join("\u3001")) : "\u672A\u534F\u5546") + kv("\u4E0A\u6B21\u63A2\u6D4B", esc(timeOf(c.lastAttemptMs))) + kv("\u8C03\u7528\u8D85\u65F6", c.callTimeoutMs ? esc(String(c.callTimeoutMs)) + " ms" : "\u9ED8\u8BA4 30000 ms") + kv("\u5BA1\u6279\u7B56\u7565", esc(c.approvalPolicy || "\u2014")) + kv("\u8BF7\u6C42\u5934\u952E", keys.length ? keys.map(function(k) {
+          return '<span class="tag perm mono">' + esc(k) + "</span>";
+        }).join(" ") : "\u672A\u914D\u7F6E") + kv("\u5DE5\u5177\u767D\u540D\u5355", allow.length ? esc(allow.join(", ")) : "\u5168\u90E8\u5F00\u653E") + kv("\u7ED1\u5B9A\u57DF", bound.length ? bound.map(function(d) {
           return '<span class="tag public mono">' + esc(d) + "</span>";
         }).join(" ") : "\u672A\u7ED1\u5B9A") + kv("\u5907\u6CE8", esc(c.remark || "\u2014")) + kv("\u914D\u7F6E\u6587\u4EF6", esc(state.settingsFile || "\u2014")) + "</div>"
       );
@@ -323,7 +328,7 @@
       var wasOpen = !!(card && card.querySelector(".dp-mcp-diag-raw[open]"));
       setHtml(
         "diagCard",
-        '<div class="dp-mcp-diag"><div class="dp-mcp-diag-head">\u8BCA\u65AD</div><div class="dp-mcp-diag-row"><span>\u8FD0\u884C\u72B6\u6001</span><strong>' + esc(ST[s].label) + '</strong></div><div class="dp-mcp-diag-row"><span>\u6700\u8FD1\u9519\u8BEF</span>' + (has ? '<strong class="err">' + esc(shortErr(c.lastError, 100)) + "</strong>" : "<strong>\u65E0</strong>") + '</div><div class="dp-mcp-diag-row"><span>\u4E0A\u6B21\u540C\u6B65</span><strong>' + esc(timeOf(state.lastSync)) + "</strong></div>" + (has ? '<details class="dp-mcp-diag-raw"' + (wasOpen ? " open" : "") + "><summary>\u5C55\u5F00\u9519\u8BEF\u539F\u6587</summary><pre>" + esc(c.lastError) + "</pre></details>" : "") + "</div>"
+        '<div class="dp-mcp-diag"><div class="dp-mcp-diag-head">\u8BCA\u65AD</div><div class="dp-mcp-diag-row"><span>\u8FD0\u884C\u72B6\u6001</span><strong>' + esc(ST[s].label) + '</strong></div><div class="dp-mcp-diag-row"><span>\u6700\u8FD1\u9519\u8BEF</span>' + (has ? '<strong class="err">' + esc(shortErr(c.lastError, 100)) + "</strong>" : "<strong>\u65E0</strong>") + '</div><div class="dp-mcp-diag-row"><span>\u6388\u6743\u6311\u6218</span>' + (c.authChallenge ? "<strong>" + esc(shortErr(c.authChallenge, 100)) + "</strong>" : "<strong>\u65E0</strong>") + '</div><div class="dp-mcp-diag-row"><span>\u4E0A\u6B21\u540C\u6B65</span><strong>' + esc(timeOf(state.lastSync)) + "</strong></div>" + (has ? '<details class="dp-mcp-diag-raw"' + (wasOpen ? " open" : "") + "><summary>\u5C55\u5F00\u9519\u8BEF\u539F\u6587</summary><pre>" + esc(c.lastError) + "</pre></details>" : "") + "</div>"
       );
     }
     function loadTools(name) {
@@ -365,8 +370,16 @@
       }
       setHtml(
         "paneTools",
-        '<div class="dp-mcp-tools-head"><span>' + state.tools.length + ' \u4E2A\u5DE5\u5177</span><span class="spacer"></span>' + retry + '<button class="btn btn-sm btn-outline-primary" type="button" data-act="editAllow">\u7F16\u8F91\u767D\u540D\u5355</button></div><div class="dp-mcp-table-wrap"><table class="table dp-mcp-table"><thead><tr><th>\u72B6\u6001</th><th>\u539F\u59CB\u540D</th><th>\u6620\u5C04\u540D</th><th>\u526F\u4F5C\u7528</th><th>\u8BF4\u660E</th></tr></thead><tbody>' + state.tools.map(function(t) {
-          return "<tr><td>" + (t.allowed ? '<span class="tag public">\u5DF2\u5F00\u653E</span>' : '<span class="tag off">\u5DF2\u88C1\u526A</span>') + '</td><td class="mono">' + esc(t.originalName || "\u2014") + '</td><td class="mono">' + esc(t.mappedName || "\u2014") + "</td><td>" + sideEffectTag(t.sideEffect) + "</td><td>" + esc(shortErr(t.description || "\u2014", 90)) + "</td></tr>";
+        '<div class="dp-mcp-tools-head"><span>' + state.tools.length + ' \u4E2A\u5DE5\u5177</span><span class="spacer"></span>' + retry + '<button class="btn btn-sm btn-outline-primary" type="button" data-act="editAllow">\u7F16\u8F91\u767D\u540D\u5355</button></div><div class="dp-mcp-table-wrap"><table class="table dp-mcp-table"><thead><tr><th>\u72B6\u6001</th><th>\u5DE5\u5177</th><th>\u526F\u4F5C\u7528</th><th>\u5BA1\u6279</th><th>\u8BF4\u660E</th></tr></thead><tbody>' + state.tools.map(function(t) {
+          var open = state.toolDetail === t.originalName;
+          var schema;
+          try {
+            schema = t.inputSchema ? JSON.stringify(t.inputSchema, null, 2) : "\u65E0";
+          } catch (e) {
+            schema = "\u65E0";
+          }
+          var domains = (t.boundDomains || []).join("\u3001") || "\u672A\u7ED1\u5B9A";
+          return "<tr><td>" + (t.allowed ? '<span class="tag public">\u5DF2\u5F00\u653E</span>' : '<span class="tag off">\u5DF2\u88C1\u526A</span>') + '</td><td><div class="mono">' + esc(t.originalName || "\u2014") + '</div><div class="dp-mcp-tool-mapped mono">' + esc(t.mappedName || "\u2014") + "</div></td><td>" + sideEffectTag(t.sideEffect) + "</td><td>" + (t.approvalRequired ? '<span class="tag approval">\u9700\u5BA1\u6279</span>' : '<span class="tag off">\u514D\u5BA1\u6279</span>') + "</td><td>" + esc(shortErr(t.description || "\u2014", 90)) + '<button class="dp-mcp-link" type="button" data-act="toolDetail" data-tool="' + esc(t.originalName) + '">' + (open ? "\u6536\u8D77\u53C2\u6570" : "\u53C2\u6570\u4E0E\u6765\u6E90") + '</button></td></tr><tr class="dp-mcp-tool-detail"' + (open ? "" : " hidden") + '><td colspan="5"><div class="dp-mcp-tool-meta"><div><b>\u8F93\u5165\u53C2\u6570</b><pre>' + esc(schema) + "</pre></div><div><b>\u751F\u6548\u57DF</b> " + esc(domains) + " \xB7 <b>\u5E42\u7B49</b> " + (t.idempotent ? "\u662F" : "\u5426") + ' \xB7 <b>\u6765\u6E90</b> <span class="mono">' + esc(t.source || "\u2014") + "</span></div></div></td></tr>";
         }).join("") + "</tbody></table></div>"
       );
     }
@@ -374,7 +387,7 @@
       var need = statusOf(c) === "NEEDS_AUTH";
       setHtml(
         "paneAuth",
-        '<div class="dp-mcp-kv">' + kv("\u5F53\u524D\u72B6\u6001", chip(c)) + kv("client_id", esc(c.oauthClientId || "\u672A\u767B\u8BB0\uFF08\u8D70\u52A8\u6001\u6CE8\u518C\uFF09")) + kv("client_secret", c.hasOauthClientSecret ? "\u5DF2\u914D\u7F6E\uFF08\u4E0D\u56DE\u663E\uFF09" : "\u672A\u914D\u7F6E") + kv("client \u540D\u79F0", esc(c.oauthClientName || "\u2014")) + kv("scope", esc(c.oauthScope || "\u670D\u52A1\u5668\u9ED8\u8BA4")) + kv("\u56DE\u8C03\u5730\u5740", esc(c.oauthRedirectUri || "\u5F53\u524D\u7BA1\u63A7\u53F0\u5730\u5740")) + '</div><div class="dp-mcp-pane-actions"><button class="btn btn-sm btn-outline-primary" type="button" data-act="oauth">' + (need ? "\u53D1\u8D77\u6388\u6743" : "\u91CD\u65B0\u6388\u6743") + "</button></div>"
+        '<div class="dp-mcp-kv">' + kv("\u5F53\u524D\u72B6\u6001", chip(c)) + kv("\u6388\u6743\u6311\u6218", esc(c.authChallenge || "\u65E0")) + kv("client_id", esc(c.oauthClientId || "\u672A\u767B\u8BB0\uFF08\u8D70\u52A8\u6001\u6CE8\u518C\uFF09")) + kv("client_secret", c.hasOauthClientSecret ? "\u5DF2\u914D\u7F6E\uFF08\u4E0D\u56DE\u663E\uFF09" : "\u672A\u914D\u7F6E") + kv("client \u540D\u79F0", esc(c.oauthClientName || "\u2014")) + kv("scope", esc(c.oauthScope || "\u670D\u52A1\u5668\u9ED8\u8BA4")) + kv("\u56DE\u8C03\u5730\u5740", esc(c.oauthRedirectUri || "\u5F53\u524D\u7BA1\u63A7\u53F0\u5730\u5740")) + '</div><div class="dp-mcp-pane-actions"><button class="btn btn-sm btn-outline-primary" type="button" data-act="oauth">' + (need ? "\u53D1\u8D77\u6388\u6743" : "\u91CD\u65B0\u6388\u6743") + "</button></div>"
       );
     }
     function renderBind(c) {
@@ -695,6 +708,10 @@
       } else if (act === "reloadTools") {
         state.toolsFor = "";
         loadTools(c.name);
+      } else if (act === "toolDetail") {
+        var tool = btn.getAttribute("data-tool") || "";
+        state.toolDetail = state.toolDetail === tool ? "" : tool;
+        renderTools(c);
       } else if (act === "editAllow") {
         openEdit(c.name);
       } else if (act === "saveBind") {
@@ -745,6 +762,7 @@
           });
           state.bindTouched = false;
           state.toolsFor = "";
+          state.toolDetail = "";
           renderDetail();
         });
       }

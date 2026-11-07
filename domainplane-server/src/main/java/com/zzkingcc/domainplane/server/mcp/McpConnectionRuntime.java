@@ -36,6 +36,10 @@ public class McpConnectionRuntime {
     /** NEEDS_AUTH 时的 WWW-Authenticate 挑战值（oauth/start 据此发现授权端点） */
     private volatile String authChallenge;
     private volatile long lastAttemptMs;
+    /** 上次成功 initialize 协商出的协议版本（从未建连成功时为 null） */
+    private volatile String protocolVersion;
+    /** 上次成功 initialize 时服务端声明的能力集（顶层键 → 原值），管控台只读展示 */
+    private volatile Map<String, Object> capabilities = Map.of();
 
     public McpConnectionRuntime(String connectionName, McpConnection connection) {
         this.connectionName = connectionName;
@@ -88,6 +92,14 @@ public class McpConnectionRuntime {
         return lastAttemptMs;
     }
 
+    public String protocolVersion() {
+        return protocolVersion;
+    }
+
+    public Map<String, Object> capabilities() {
+        return capabilities;
+    }
+
     /** 建立/重建连接：initialize + tools/list。失败只记状态，不抛（不影响其它连接与启动）。
      *  synchronized：reconcile / 管理员"测试" / 启动线程可能并发触发同一连接的建连，串行化避免重复建 client、旧的泄漏。
      *  @param headerSupplier 请求头提供者，每次请求现取，OAuth token 刷新后不重建 client 即生效 */
@@ -95,13 +107,19 @@ public class McpConnectionRuntime {
         lastAttemptMs = System.currentTimeMillis();
         status = Status.CONNECTING;
         authChallenge = null;
+        // 协商结果属于「本次建连」：重连开始即清空，只有 initialize + tools/list 都成功才写回。
+        // markNeedsAuth 不清它 —— 运行中 401 时保留上次成功协商的版本，供排障对照。
+        protocolVersion = null;
+        capabilities = Map.of();
         closeQuietly();
         try {
             McpRpcClient c = new McpRpcClient(connection.url(), connection.transport(),
                     headerSupplier, connection.callTimeoutMs());
-            c.initialize();
+            McpRpcClient.InitializeResult negotiated = c.initializeResult();
             List<McpToolInfo> tools = c.toolsList();
             this.client = c;
+            this.protocolVersion = negotiated.protocolVersion();
+            this.capabilities = negotiated.capabilities();
             this.catalog = tools;
             this.status = Status.READY;
             this.lastError = null;
