@@ -21,13 +21,14 @@ import java.util.Optional;
 /**
  * 单会话体量盘点与导出副本（F04-c）。
  *
- * <p><b>只量、只导、不删</b>：这一块的存在前提就是"存储无限增长是 accepted cost，不是待办"
- * ——用户约束下记忆与归档只增不减，任何"清理/瘦身/LRU"需求都不得先于这条约束。
- * 于是运维侧真正缺的不是删除按钮，而是两件事：<b>看得见</b>（哪个会话长到该注意了）
+ * <p><b>只量、只导、不删</b>：本类只提供盘点与副本，删除动作不在这里。
+ * 存储无限增长仍是 accepted cost，运维侧需要的是<b>看得见</b>（哪个会话长到该注意了）
  * 和<b>搬得走</b>（要迁移、要留存、要给人看时拿得出一份完整副本）。</p>
  *
- * <p><b>为什么不提供清理接口</b>：一旦有了"清理"这个动作，它就一定会长成"按体量自动清理"，
- * 而自动清理与"原始记忆不主动删除"是正面冲突的。这里把口子收死：接口只返回数字与副本。</p>
+ * <p><b>为什么清理不放在这里</b>：单会话清空是会话维度、跨六路存储的级联动作，
+ * 由 server 层的 {@code SessionPurgeService} 统一编排；本类在 infrastructure 层，
+ * 看不到检查点、滚动摘要、倒排这些存储。口子仍然是收死的：允许人工指名删一个会话，
+ * 不允许按体量排行、批量或定时清理 —— 后者与"原始记忆不主动淘汰"正面冲突。</p>
  *
  * <p>体量取自各键的 {@code LLEN} / {@code HLEN}，都是 O(1)，不做全量读取：
  * 盘点一个会话不该把它的全部内容拉进内存。</p>
@@ -76,6 +77,19 @@ public class RedisSessionStorage {
     /** 导出副本：归档全轮 + 最近若干条装配清单 */
     public record Export(String sessionKey, Instant exportedAt, List<TurnRecord> turns,
                          List<ContextAssemblyReport> assemblyReports) {
+    }
+
+    /**
+     * 一页轮记录（F04-d：按轮号区间分页，只读）。
+     *
+     * @param total            该会话的归档总轮数（LLEN，O(1)）
+     * @param from             本页起始轮号，1 基；不给时落到最后一页
+     * @param size             每页条数（已 clamp 到 1–50）
+     * @param turns            本页轮记录，由旧到新；越界由 turnsBetween 收敛为空
+     * @param assemblyReports  本页轮号命中的装配清单；账本只留最近 50 条且带 TTL，可能为空
+     */
+    public record Page(String sessionKey, long total, long from, int size,
+                       List<TurnRecord> turns, List<ContextAssemblyReport> assemblyReports) {
     }
 
     /** 体量最大的 {@code limit} 个会话（按归档轮数降序） */
@@ -152,6 +166,42 @@ public class RedisSessionStorage {
         List<ContextAssemblyReport> reports = assemblyReportStore == null
                 ? List.of() : assemblyReportStore.recent(sessionKey, AssemblyReportStore.KEEP_PER_SESSION);
         return Optional.of(new Export(sessionKey, Instant.now(), records, reports));
+    }
+
+    /**
+     * 按轮号区间取一页（F04-d：长会话不全量拉进内存）。
+     *
+     * <p>分页键是<b>轮号</b>而不是偏移量：存储下标恒为 {@code turnId - 1}，新轮只 RPUSH
+     * 追加到尾部，已有页的轮号永不重排，翻页不会重复或漏轮，因此不需要游标、登记表或索引。</p>
+     *
+     * @param fromRaw 起始轮号；null / 非正数表示"最后一页"（查档默认从最新一轮看起）
+     * @param sizeRaw 每页条数；null 取 20，clamp 到 1–50
+     */
+    public Page page(String sessionKey, Long fromRaw, Integer sizeRaw) {
+        if (sessionKey == null || sessionKey.isBlank()) {
+            return new Page("", 0L, 1L, 20, List.of(), List.of());
+        }
+        int size = sizeRaw == null ? 20 : Math.max(1, Math.min(sizeRaw, 50));
+        long total = lengthOf(ARCHIVE_PREFIX + sessionKey);
+        long from = fromRaw == null || fromRaw <= 0
+                ? Math.max(1L, total - size + 1) : fromRaw;
+        /* 越过尾部直接回落到最新页，避免返回一个空页却把 from 留在界外 */
+        if (total > 0 && from > total) {
+            from = Math.max(1L, total - size + 1);
+        }
+        List<TurnRecord> turns = total <= 0 || archive == null
+                ? List.of()
+                : archive.turnsBetween(sessionKey, from, from + size - 1L);
+        long lo = from, hi = from + size - 1L;
+        List<ContextAssemblyReport> reports = assemblyReportStore == null
+                ? List.of()
+                : assemblyReportStore.recent(sessionKey, AssemblyReportStore.KEEP_PER_SESSION)
+                .stream()
+                /* turnId=0 是开轮失败落的账，不属于任何轮次 */
+                .filter(r -> r != null && r.turnId() > 0 && r.turnId() >= lo && r.turnId() <= hi)
+                .sorted(Comparator.comparingLong(ContextAssemblyReport::turnId))
+                .toList();
+        return new Page(sessionKey, total, from, size, turns, reports);
     }
 
     private long lengthOf(String key) {

@@ -181,6 +181,33 @@ public class RedisCheckpointSaver implements BaseCheckpointSaver {
     }
 
     /**
+     * 清除单个会话的检查点（清会话级联用）。
+     *
+     * <p>键是 {@code KEY_PREFIX + sessionKey} 单键，精确删，不拼通配符：
+     * sessionId 可能含 glob 字符。断点里存着"即将执行、尚未执行"的工具调用，
+     * 漏删等于把这份执行授权留在原地，所以失败必须抛。</p>
+     *
+     * @return 删除的键数（0 或 1）
+     */
+    public int deleteBySession(String sessionKey) {
+        if (sessionKey == null || sessionKey.isBlank()) {
+            return 0;
+        }
+        try {
+            Boolean removed = redisTemplate.delete(KEY_PREFIX + sessionKey);
+            int deleted = Boolean.TRUE.equals(removed) ? 1 : 0;
+            log.info("[检查点] 已清除会话[{}]检查点 {} 个键", sessionKey, deleted);
+            return deleted;
+        } catch (ChatMemoryException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ChatMemoryException(ErrorCode.CHECKPOINT_ERROR,
+                    "清除会话检查点失败（会话 " + sessionKey + "）：" + e.getMessage()
+                            + "。断点可能残留 —— 其中可能存有待执行的工具调用，需重新执行清除", e);
+        }
+    }
+
+    /**
      * 删除某个域下的全部检查点（删域级联清理用）。
      *
      * 断点里存着"即将执行但还没执行"的工具调用。域被删后若不清，24 小时内同路径域重建

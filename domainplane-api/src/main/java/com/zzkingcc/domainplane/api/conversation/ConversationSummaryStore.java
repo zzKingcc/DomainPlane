@@ -31,6 +31,16 @@ public interface ConversationSummaryStore {
     void save(String sessionKey, Stored summary);
 
     /**
+     * 删除单个会话的滚动摘要（清会话级联用）。
+     *
+     * <p>摘要是有损压缩产物，归档清了它也复原不出来；漏删等于模型开局还"记得"一段
+     * 用户以为已经删掉的对话。失败必须抛。</p>
+     *
+     * @return 删除的键数（0 或 1）
+     */
+    int deleteBySession(String sessionKey);
+
+    /**
      * 删除某个域下的全部摘要（删域级联清理用）。
      *
      * <p>失败必须抛：摘要不清掉的话，同路径域将来重建，上一段对话的摘要会原样复活，

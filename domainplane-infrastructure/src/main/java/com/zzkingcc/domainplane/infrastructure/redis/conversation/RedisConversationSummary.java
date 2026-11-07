@@ -27,8 +27,9 @@ import java.util.Optional;
  * 不需要"读全量 → 改 → 写全量"。</p>
  *
  * <p><b>不设 TTL</b>：摘要是有损压缩的产物，过期之后重放归档也复原不出同一份措辞，
- * 所以按档案级对待。生命周期与归档一致，删域即清（{@link #deleteByDomain}），
- * 那是 fail-closed 的，漏删等于旧会话的摘要在域重建后复活。</p>
+ * 所以按档案级对待。生命周期与归档一致，删域（{@link #deleteByDomain}）与清会话
+ * （{@link #deleteBySession}）都要清，两者都是 fail-closed 的：
+ * 漏删等于旧会话的摘要在域重建或下次对话时复活。</p>
  *
  * @author zzkingcc
  */
@@ -92,6 +93,22 @@ public class RedisConversationSummary implements ConversationSummaryStore {
         } catch (Exception e) {
             // 摘要写失败只告警：下一次闭轮会再试；装配侧读不到就退化为 digest 拼接
             log.warn("[会话摘要] 写入会话[{}]摘要失败：{}", sessionKey, e.getMessage());
+        }
+    }
+
+    @Override
+    public int deleteBySession(String sessionKey) {
+        if (sessionKey == null || sessionKey.isBlank()) {
+            return 0;
+        }
+        try {
+            Boolean removed = redisTemplate.delete(KEY_PREFIX + sessionKey);
+            int deleted = Boolean.TRUE.equals(removed) ? 1 : 0;
+            log.info("[会话摘要] 已清除会话[{}]摘要 {} 个键", sessionKey, deleted);
+            return deleted;
+        } catch (Exception e) {
+            throw new ChatMemoryException(ErrorCode.CHAT_MEMORY_DELETE_ERROR,
+                    "清除会话摘要失败（会话 " + sessionKey + "）：" + e.getMessage(), e);
         }
     }
 

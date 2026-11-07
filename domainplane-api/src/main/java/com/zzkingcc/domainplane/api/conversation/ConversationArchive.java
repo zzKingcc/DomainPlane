@@ -119,7 +119,13 @@ public interface ConversationArchive {
      */
     int recoverStaleOpenTurn(String sessionKey);
 
-    /** 清空一个会话的归档（记忆清除的级联；M3 起连同摘要 / 倒排一起清） */
+    /**
+     * 清空一个会话的归档（单会话清除级联的一步）。
+     *
+     * <p>只清归档 list 本身；记忆、检查点、倒排 + 向量、滚动摘要、装配清单由
+     * server 层的 {@code SessionPurgeService} 一并清掉。漏任何一路，旧内容都会
+     * 从另一路被召回。失败必须抛：清会话流程靠它中止。</p>
+     */
     void clearSession(String sessionKey);
 
     /**

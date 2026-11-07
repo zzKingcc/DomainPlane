@@ -69,6 +69,10 @@ class RollingSummaryServiceTest {
             saved.put(sessionKey, summary);
         }
 
+        @Override public int deleteBySession(String sessionKey) {
+            return 0;
+        }
+
         @Override public int deleteByDomain(String domain) {
             return 0;
         }

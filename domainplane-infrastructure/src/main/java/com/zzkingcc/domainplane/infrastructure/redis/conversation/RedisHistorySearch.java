@@ -43,8 +43,9 @@ import java.util.Set;
  * 通配语义还会扩大删除面），登记表让删除是精确集合运算。</p>
  *
  * <p><b>派生数据</b>：写失败只告警（归档已经落盘，重放归档即可重建索引），
- * 查不到走 {@link HistorySearch#FALLBACK_TAIL} 子串扫描。唯一必须抛的是
- * {@link #deleteByDomain} —— 那是删域级联，漏删等于历史还能被勾回来。</p>
+ * 查不到走 {@link HistorySearch#FALLBACK_TAIL} 子串扫描。清理接口
+ * （{@link #deleteByDomain} / {@link #deleteBySession}）必须抛：
+ * 漏删等于历史还能被勾回来。</p>
  *
  * @author zzkingcc
  */
@@ -475,6 +476,48 @@ public class RedisHistorySearch implements HistorySearch {
     }
 
     // ==================== 清理 ====================
+
+    /**
+     * 清除单个会话的索引：只按 terms 登记表精确删，不做前缀 SCAN 兜底。
+     *
+     * <p>deleteByDomain 敢用 {@code idx:{域}|*} 兜底，是因为域路径是受控的；
+     * sessionId 不是——它可能带 {@code * ? [ ]}，拼进 pattern 会匹配到别的会话。
+     * 所以这里宁可留几个"写索引时崩了、登记表没记上"的孤儿 idx 键：
+     * 归档已清，兜底子串扫描读不到任何轮次，索引键本身也带 TTL。</p>
+     */
+    @Override
+    public int deleteBySession(String sessionKey) {
+        if (sessionKey == null || sessionKey.isBlank()) {
+            return 0;
+        }
+        String termsKey = termsKey(sessionKey);
+        try {
+            int deleted = 0;
+            Set<String> terms = redisTemplate.opsForSet().members(termsKey);
+            if (terms != null && !terms.isEmpty()) {
+                List<String> idxKeys = new ArrayList<>(terms.size());
+                for (String term : terms) {
+                    idxKeys.add(idxKey(sessionKey, term));
+                }
+                Long removed = redisTemplate.delete(idxKeys);
+                deleted += removed == null ? 0 : removed.intValue();
+            }
+            Boolean removedTerms = redisTemplate.delete(termsKey);
+            deleted += Boolean.TRUE.equals(removedTerms) ? 1 : 0;
+            // 语义路与关键词路是同一批轮次的两个影子：漏删一个，旧话会被另一路勾回来
+            if (vectorIndex != null) {
+                deleted += vectorIndex.deleteBySession(sessionKey);
+            }
+            log.info("[会话检索] 已清除会话[{}]的索引键 {} 个", sessionKey, deleted);
+            return deleted;
+        } catch (ChatMemoryException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ChatMemoryException(ErrorCode.CHAT_MEMORY_DELETE_ERROR,
+                    "清除会话检索索引失败（会话 " + sessionKey + "）：" + e.getMessage()
+                            + "。索引键可能残留 —— 需修复后重新执行清除", e);
+        }
+    }
 
     @Override
     public int deleteByDomain(String domain) {

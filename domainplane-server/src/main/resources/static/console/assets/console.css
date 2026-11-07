@@ -1888,6 +1888,106 @@ pre.preview .mark { color: #93c5fd; }
 .field .help.err { color: #dc2626; }
 @media (max-width: 640px) { .preset-pick { grid-template-columns: 1fr; } }
 
+/* ==========================================================================
+   会话档案页（console/sessions.html）
+   按 sessionId 查档：查询条 + 事实行 + 左轮次分页 + 右单轮三块。
+   所有规则限定 .dp-sessions，避免碰到另外三页共用的 .dp-panel-*。
+   ========================================================================== */
+.dp-sessions .dp-sessions-query { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.dp-sessions .dp-sessions-query input { width: 220px; }
+.dp-sessions .dp-sessions-query #domainInput { width: 240px; }
+/* 破坏性动作靠右、与"查看/导出"分开，避免顺手点到 */
+.dp-sessions .dp-sessions-query #btnClear { margin-left: auto; }
+.dp-sessions .dp-sessions-facts {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px; margin-top: 14px;
+}
+.dp-sessions .dp-sessions-fact {
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 12px; min-width: 0;
+}
+.dp-sessions .dp-sessions-fact-label { font-size: 12px; color: var(--muted); }
+.dp-sessions .dp-sessions-fact-value {
+    font-size: 14px; font-weight: 500; color: var(--text);
+    overflow-wrap: anywhere; margin-top: 2px;
+}
+.dp-sessions .dp-sessions-split {
+    display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+    gap: 16px; align-items: start; margin-top: 16px;
+}
+.dp-sessions .card-title { margin-bottom: 12px; }
+.dp-sessions .dp-sessions-turns {
+    max-height: calc(100vh - 400px); min-height: 240px; overflow-y: auto;
+    border: 1px solid var(--line); border-radius: 8px;
+}
+.dp-sessions .dp-sessions-turn {
+    padding: 8px 10px; border-bottom: 1px solid var(--line);
+    border-left: 3px solid transparent; cursor: pointer;
+}
+.dp-sessions .dp-sessions-turn:last-child { border-bottom: 0; }
+.dp-sessions .dp-sessions-turn:hover { background: var(--primary-dim); }
+.dp-sessions .dp-sessions-turn.on { background: var(--primary-dim); border-left-color: var(--primary); }
+.dp-sessions .dp-sessions-turn-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.dp-sessions .dp-sessions-turn-no {
+    font-family: ui-monospace, Consolas, monospace; font-weight: 500; color: var(--text);
+}
+.dp-sessions .dp-sessions-turn-time { color: var(--muted); flex: 1 1 auto; }
+.dp-sessions .dp-sessions-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--red); flex: 0 0 auto;
+}
+.dp-sessions .dp-sessions-turn-digest {
+    font-size: 13px; color: var(--text); margin-top: 3px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dp-sessions .dp-sessions-turn-meta { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+.dp-sessions .dp-sessions-pager {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px;
+}
+.dp-sessions #pageInfo { font-size: 12px; color: var(--muted); }
+.dp-sessions .dp-sessions-section { margin-bottom: 18px; }
+.dp-sessions .dp-sessions-section:last-child { margin-bottom: 0; }
+.dp-sessions .dp-sessions-section-title {
+    font-size: 13px; font-weight: 600; color: var(--text);
+    padding-bottom: 6px; margin-bottom: 10px; border-bottom: 1px solid var(--line);
+}
+.dp-sessions .dp-sessions-line { display: flex; gap: 10px; margin-bottom: 10px; }
+.dp-sessions .dp-sessions-role { flex: 0 0 34px; font-size: 12px; color: var(--muted); padding-top: 2px; }
+.dp-sessions .dp-sessions-line-body { flex: 1 1 auto; min-width: 0; }
+.dp-sessions .dp-sessions-text {
+    white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6;
+}
+.dp-sessions .dp-sessions-media { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+.dp-sessions .dp-sessions-media code { font-size: 11.5px; }
+.dp-sessions .dp-sessions-empty { color: var(--muted); font-size: 13px; }
+.dp-sessions .dp-sessions-fold summary { cursor: pointer; font-size: 12px; color: var(--primary); }
+.dp-sessions .dp-sessions-fold pre {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px; margin: 8px 0 0; max-height: 340px; overflow: auto;
+    white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.55;
+}
+.dp-sessions .dp-sessions-step { border-left: 2px solid var(--line); padding: 0 0 10px 12px; margin-bottom: 8px; }
+.dp-sessions .dp-sessions-step.err { border-left-color: var(--red); }
+.dp-sessions .dp-sessions-step-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.dp-sessions .dp-sessions-step-type {
+    font-family: ui-monospace, Consolas, monospace; color: var(--muted); min-width: 116px;
+}
+.dp-sessions .dp-sessions-step.err .dp-sessions-step-type { color: var(--red); }
+.dp-sessions .dp-sessions-step-head code { font-size: 11.5px; }
+.dp-sessions .dp-sessions-step-gap { margin-left: auto; color: var(--muted); white-space: nowrap; }
+.dp-sessions .dp-sessions-step-body { margin-top: 4px; font-size: 13px; }
+.dp-sessions .dp-sessions-facts-grid {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
+}
+.dp-sessions .dp-sessions-error { color: var(--red); font-size: 13px; }
+@media (max-width: 1100px) {
+    .dp-sessions .dp-sessions-split { grid-template-columns: 1fr; }
+    .dp-sessions .dp-sessions-turns { max-height: 320px; }
+}
+@media (max-width: 900px) {
+    .dp-sessions .dp-sessions-facts,
+    .dp-sessions .dp-sessions-facts-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 /* ===== 知识库 · 操作卡（上传 / 重建 / 重灌） =====
    三张等宽并排：图标 + 标题的头、内容区、按钮沉底（margin-top:auto），
    三张卡的动作按钮横向对齐，不会因为内容多少不同而参差。 */

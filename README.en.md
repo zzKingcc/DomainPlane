@@ -124,7 +124,7 @@ A body card carries every action for one dataset: upload, documents, health, reb
 
 > Screenshots of an early empty-library state; the pages have since been rebuilt around knowledge bodies. Data is demo data.
 
-The other pages: overview (quality and tool risk mix), prompts (edit per domain chain segment), MCP connections (credentials only echoed as `hasHeaders`), tool instances (live list, circuit-break, force offline), session archive (memory, archive, assembly report, copy export), account (changing the password invalidates every credential).
+The other pages: overview (quality and tool risk mix), prompts (edit per domain chain segment), MCP connections (credentials only echoed as `hasHeaders`), tool instances (live list, circuit-break, force offline), session archive (paginated turns by session ID, with conversation text, execution steps and per-turn status; a confirmed action clears one session), account (changing the password invalidates every credential).
 
 ---
 

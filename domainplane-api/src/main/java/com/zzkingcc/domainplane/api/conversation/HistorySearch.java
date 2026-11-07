@@ -61,6 +61,19 @@ public interface HistorySearch {
     List<HistoryCard> search(String sessionKey, String query, int limit);
 
     /**
+     * 删除单个会话的全部索引键（清会话级联用）。
+     *
+     * <p>与 {@link #deleteByDomain} 同属 fail-closed：漏删等于旧话还能被勾回来。
+     * 实现侧必须按会话<b>精确删</b>，不得拿 sessionKey 拼通配符做 SCAN ——
+     * sessionId 可能含 glob 字符，通配一展开就会碰到别的会话。</p>
+     *
+     * <p>关键词路与语义路是同一批轮次的两个影子，两路都要清。</p>
+     *
+     * @return 删除的键数
+     */
+    int deleteBySession(String sessionKey);
+
+    /**
      * 删除某个域下的全部索引键（删域级联清理用）。
      *
      * <p>归档含全量对话，漏删等于"删域成功"之后一句旧话还能把整段历史勾回来

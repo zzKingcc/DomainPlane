@@ -18,32 +18,35 @@
         </div>
         <div class="page-body dp-sessions">
 
-            <!-- 体量：哪个会话长到该注意了。记忆条数 / 归档轮数 / 向量轮数 / 清单条数 -->
             <div class="card dp-panel">
                 <div class="card-body">
-                    <h3 class="card-title">会话体量（按归档轮数降序）</h3>
-                    <div class="table-wrap">
-                        <table class="table">
-                            <thead>
-                            <tr>
-                                <th>会话</th>
-                                <th>域</th>
-                                <th>记忆条数</th>
-                                <th>归档轮数</th>
-                                <th>向量轮数</th>
-                                <th>装配清单</th>
-                                <th>操作</th>
-                            </tr>
-                            </thead>
-                            <tbody id="sessionList"></tbody>
-                        </table>
+                    <div class="dp-sessions-query">
+                        <input id="sessionIdInput" type="text" placeholder="会话 ID" autocomplete="off">
+                        <input id="domainInput" type="text" placeholder="域（选填）" autocomplete="off">
+                        <button class="btn" id="btnQuery" type="button">查看</button>
+                        <button class="btn" id="btnExport" type="button">导出副本</button>
+                        <button class="btn btn-outline-danger" id="btnClear" type="button">清空会话</button>
                     </div>
+                    <div class="dp-sessions-facts" id="sessionFacts"></div>
                 </div>
             </div>
 
-            <!-- 装配清单：每段给了多少、砍了多少 ——「它为什么忘了」的唯一入口 -->
-            <div class="card dp-panel" id="assemblyBox">
-                <div class="card-body"></div>
+            <div class="dp-sessions-split">
+                <div class="card dp-panel">
+                    <div class="card-body">
+                        <h3 class="card-title">轮次</h3>
+                        <div id="turnList" class="dp-sessions-turns"></div>
+                        <div class="dp-sessions-pager">
+                            <button class="btn btn-sm" id="btnPrevPage" type="button">上一页</button>
+                            <span id="pageInfo"></span>
+                            <button class="btn btn-sm" id="btnNextPage" type="button">下一页</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card dp-panel">
+                    <div class="card-body" id="turnDetail"></div>
+                </div>
             </div>
         </div>
     </main>

@@ -44,6 +44,7 @@ class HistoryRecallToolTest {
         RuntimeException failure;
 
         @Override public void indexTurn(String sessionKey, TurnRecord record) {}
+        @Override public int deleteBySession(String sessionKey) { return 0; }
         @Override public int deleteByDomain(String domain) { return 0; }
 
         @Override public List<HistoryCard> search(String sessionKey, String query, int limit) {
