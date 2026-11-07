@@ -55,17 +55,24 @@ public class AdminSessionController {
     }
 
     /**
-     * 体量最大的若干会话（F04-c：看得见）。
+     * 会话清单（F04-c 看得见 + F04-e 按域筛选）。
      *
-     * @param limit 返回条数（默认 20）
+     * <p>{@code domains} 始终是扫描到的全部域，不受 {@code domain} 影响：
+     * 前端下拉靠它在选中某个域之后还能切回去。</p>
+     *
+     * @param domain 域筛选，留空 = 全部域，精确匹配不含子域
+     * @param limit  返回条数（默认 20，上限 100），按归档轮数降序
      */
     @GetMapping("/storage")
-    public Map<String, Object> storage(@RequestParam(required = false) Integer limit) {
+    public Map<String, Object> storage(@RequestParam(required = false) String domain,
+                                       @RequestParam(required = false) Integer limit) {
         int n = limit == null || limit <= 0 ? 20 : Math.min(limit, 100);
-        List<RedisSessionStorage.Snapshot> sessions = sessionStorage.topBySize(n);
+        RedisSessionStorage.Listing listing = sessionStorage.list(domain, n);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("code", 0);
-        body.put("sessions", sessions);
+        body.put("domain", domain == null ? "" : domain.trim());
+        body.put("domains", listing.domains());
+        body.put("sessions", listing.sessions());
         return body;
     }
 

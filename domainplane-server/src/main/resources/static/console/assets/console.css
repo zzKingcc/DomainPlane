@@ -1898,6 +1898,21 @@ pre.preview .mark { color: #93c5fd; }
 .dp-sessions .dp-sessions-query #domainInput { width: 240px; }
 /* 破坏性动作靠右、与"查看/导出"分开，避免顺手点到 */
 .dp-sessions .dp-sessions-query #btnClear { margin-left: auto; }
+
+/* F04-e · 会话列表：按域筛选，点行进入下方查档 */
+.dp-sessions .dp-sessions-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.dp-sessions .dp-sessions-filter label { margin: 0; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.dp-sessions .dp-sessions-filter #domainFilter { width: 220px; }
+.dp-sessions .dp-sessions-filter #sessionLimit { width: 80px; }
+.dp-sessions .dp-sessions-count { margin-left: auto; font-size: 12px; color: var(--muted); }
+.dp-sessions .dp-sessions-table-wrap { overflow-x: auto; }
+.dp-sessions .dp-sessions-table { margin-bottom: 0; font-size: 13px; }
+.dp-sessions .dp-sessions-table th { font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.dp-sessions .dp-sessions-table td { vertical-align: middle; white-space: nowrap; }
+.dp-sessions .dp-sessions-row { cursor: pointer; }
+.dp-sessions .dp-sessions-row:hover > td { background: var(--bg); }
+.dp-sessions .dp-sessions-row.on > td { background: rgba(59, 130, 246, 0.09); }
+.dp-sessions .dp-sessions-table code { font-size: 12px; }
 .dp-sessions .dp-sessions-facts {
     display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 12px; margin-top: 14px;

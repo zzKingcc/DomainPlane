@@ -1,6 +1,7 @@
 /* ==========================================================================
-   F04-d · sessions 页脚本
+   F04-d/e · sessions 页脚本
    按 sessionId 查档：轮号分页拉归档，单轮展示对话内容 / 执行步骤 / 执行情况。
+   会话列表表格按域筛选，点行回填查询条件并进入查档。
    查档只读；唯一写操作是「清空会话」（二次确认后按 sessionId 单会话清除）。
    ========================================================================== */
 (function () {
@@ -10,7 +11,8 @@
     var state = {
         sessionId: '', domain: '', sessionKey: '',
         total: 0, from: 1, size: PAGE_SIZE,
-        turns: [], reports: [], selected: null
+        turns: [], reports: [], selected: null,
+        tableSelected: ''
     };
 
     function el(id) { return document.getElementById(id); }
@@ -279,6 +281,100 @@
         });
     }
 
+    // ==================== F04-e · 按域筛选的会话列表 ====================
+
+    /* 域下拉每次都重填，但保留当前选中：后端返回的 domains 是全部域，不受筛选影响 */
+    function fillDomainFilter(domains, current) {
+        var sel = el('domainFilter');
+        if (!sel) { return; }
+        var html = '<option value="">全部域</option>';
+        (domains || []).forEach(function (d) {
+            var v = String(d || '');
+            if (!v) { return; }
+            html += '<option value="' + esc(v) + '"' + (v === current ? ' selected' : '')
+                + '>' + esc(v) + '</option>';
+        });
+        sel.innerHTML = html;
+        sel.value = current || '';
+    }
+
+    function renderSessionTable(list) {
+        if (!list.length) {
+            setHtml('sessionTableBody', '<tr><td colspan="7" class="dp-sessions-empty">'
+                + '该域下没有会话档案</td></tr>');
+            return;
+        }
+        setHtml('sessionTableBody', list.map(function (s) {
+            var key = String(s.sessionKey || '');
+            return '<tr class="dp-sessions-row' + (key === state.tableSelected ? ' on' : '') + '"'
+                + ' data-key="' + esc(key) + '"'
+                + ' data-sid="' + esc(String(s.sessionId || '')) + '"'
+                + ' data-domain="' + esc(String(s.domain || '')) + '">'
+                + '<td><code>' + esc(String(s.sessionId || '')) + '</code></td>'
+                + '<td>' + esc(String(s.domain || '—')) + '</td>'
+                + '<td>' + esc(num(s.archiveTurns)) + '</td>'
+                + '<td>' + esc(num(s.memoryMessages)) + '</td>'
+                + '<td>' + esc(num(s.vectorTurns)) + '</td>'
+                + '<td>' + esc(num(s.assemblyReports)) + '</td>'
+                + '<td><button class="btn btn-sm" type="button">查看</button></td>'
+                + '</tr>';
+        }).join(''));
+        bindSessionRows();
+    }
+
+    function bindSessionRows() {
+        var body = el('sessionTableBody');
+        if (!body) { return; }
+        body.querySelectorAll('[data-sid]').forEach(function (row) {
+            row.addEventListener('click', function () {
+                openSession(row.getAttribute('data-domain'), row.getAttribute('data-sid'),
+                    row.getAttribute('data-key'));
+            });
+        });
+    }
+
+    function loadSessions() {
+        var current = val('domainFilter');
+        var limit = val('sessionLimit') || '50';
+        var u = '/admin/sessions/storage?limit=' + encodeURIComponent(limit);
+        if (current) { u += '&domain=' + encodeURIComponent(current); }
+        Console.api.get(u).then(function (d) {
+            var list = (d && d.sessions) || [];
+            fillDomainFilter((d && d.domains) || [], current);
+            renderSessionTable(list);
+            setText('sessionCount', list.length + ' 个会话');
+        }).catch(function (e) {
+            setHtml('sessionTableBody', '<tr><td colspan="7" class="dp-sessions-error">'
+                + esc(e && e.message ? String(e.message) : '读取失败') + '</td></tr>');
+            setText('sessionCount', '');
+        });
+    }
+
+    /* 表格只在加载时渲染一次，选中态就地切，别为一次点击整表重画 */
+    function markTableSelection() {
+        var body = el('sessionTableBody');
+        if (!body) { return; }
+        body.querySelectorAll('.dp-sessions-row').forEach(function (row) {
+            row.classList.toggle('on', row.getAttribute('data-key') === state.tableSelected);
+        });
+    }
+
+    /* 表格行 → 查询条 → 查档。带上域可以直接拼键，省掉一次 SCAN 反查 */
+    function openSession(domain, sid, key) {
+        if (!sid) { return; }
+        var sidInput = el('sessionIdInput'), domInput = el('domainInput');
+        if (sidInput) { sidInput.value = sid; }
+        if (domInput) { domInput.value = domain || ''; }
+        state.sessionId = sid;
+        state.domain = domain || '';
+        state.tableSelected = key || '';
+        markTableSelection();
+        resetView();
+        loadPage(null);
+        var split = document.querySelector('.dp-sessions-split');
+        if (split && split.scrollIntoView) { split.scrollIntoView({ block: 'start' }); }
+    }
+
     function clearSession() {
         var sid = val('sessionIdInput') || state.sessionId;
         if (!sid) { return; }
@@ -293,7 +389,9 @@
                 .then(function (res) {
                     disable('btnClear', false);
                     Console.toast(res.message || '已清空', { type: 'success', wide: true });
+                    state.tableSelected = '';
                     resetView();
+                    loadSessions();
                 }).catch(function (e) {
                     disable('btnClear', false);
                     Console.toast('清空失败：' + (e && e.message ? e.message : '未知错误'),
@@ -308,6 +406,8 @@
             q.addEventListener('click', function () {
                 state.sessionId = val('sessionIdInput');
                 state.domain = val('domainInput');
+                state.tableSelected = '';
+                markTableSelection();
                 resetView();
                 if (state.sessionId) { loadPage(null); }
             });
@@ -326,6 +426,18 @@
         var clr = el('btnClear');
         if (clr) {
             clr.addEventListener('click', clearSession);
+        }
+        var df = el('domainFilter');
+        if (df) {
+            df.addEventListener('change', loadSessions);
+        }
+        var sl = el('sessionLimit');
+        if (sl) {
+            sl.addEventListener('change', loadSessions);
+        }
+        var rs = el('btnRefreshSessions');
+        if (rs) {
+            rs.addEventListener('click', loadSessions);
         }
         var prev = el('btnPrevPage');
         if (prev) {
@@ -352,5 +464,6 @@
         renderFacts(null);
         renderPager();
         bindActions();
+        loadSessions();
     });
 })();

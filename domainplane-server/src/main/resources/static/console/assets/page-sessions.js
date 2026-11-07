@@ -12,7 +12,8 @@
       size: PAGE_SIZE,
       turns: [],
       reports: [],
-      selected: null
+      selected: null,
+      tableSelected: ""
     };
     function el(id) {
       return document.getElementById(id);
@@ -311,6 +312,96 @@
         setHtml("turnDetail", '<div class="dp-sessions-error">' + esc(e && e.message ? String(e.message) : "\u8BFB\u53D6\u5931\u8D25") + "</div>");
       });
     }
+    function fillDomainFilter(domains, current) {
+      var sel = el("domainFilter");
+      if (!sel) {
+        return;
+      }
+      var html = '<option value="">\u5168\u90E8\u57DF</option>';
+      (domains || []).forEach(function(d) {
+        var v = String(d || "");
+        if (!v) {
+          return;
+        }
+        html += '<option value="' + esc(v) + '"' + (v === current ? " selected" : "") + ">" + esc(v) + "</option>";
+      });
+      sel.innerHTML = html;
+      sel.value = current || "";
+    }
+    function renderSessionTable(list) {
+      if (!list.length) {
+        setHtml("sessionTableBody", '<tr><td colspan="7" class="dp-sessions-empty">\u8BE5\u57DF\u4E0B\u6CA1\u6709\u4F1A\u8BDD\u6863\u6848</td></tr>');
+        return;
+      }
+      setHtml("sessionTableBody", list.map(function(s) {
+        var key = String(s.sessionKey || "");
+        return '<tr class="dp-sessions-row' + (key === state.tableSelected ? " on" : "") + '" data-key="' + esc(key) + '" data-sid="' + esc(String(s.sessionId || "")) + '" data-domain="' + esc(String(s.domain || "")) + '"><td><code>' + esc(String(s.sessionId || "")) + "</code></td><td>" + esc(String(s.domain || "\u2014")) + "</td><td>" + esc(num(s.archiveTurns)) + "</td><td>" + esc(num(s.memoryMessages)) + "</td><td>" + esc(num(s.vectorTurns)) + "</td><td>" + esc(num(s.assemblyReports)) + '</td><td><button class="btn btn-sm" type="button">\u67E5\u770B</button></td></tr>';
+      }).join(""));
+      bindSessionRows();
+    }
+    function bindSessionRows() {
+      var body = el("sessionTableBody");
+      if (!body) {
+        return;
+      }
+      body.querySelectorAll("[data-sid]").forEach(function(row) {
+        row.addEventListener("click", function() {
+          openSession(
+            row.getAttribute("data-domain"),
+            row.getAttribute("data-sid"),
+            row.getAttribute("data-key")
+          );
+        });
+      });
+    }
+    function loadSessions() {
+      var current = val("domainFilter");
+      var limit = val("sessionLimit") || "50";
+      var u = "/admin/sessions/storage?limit=" + encodeURIComponent(limit);
+      if (current) {
+        u += "&domain=" + encodeURIComponent(current);
+      }
+      Console.api.get(u).then(function(d) {
+        var list = d && d.sessions || [];
+        fillDomainFilter(d && d.domains || [], current);
+        renderSessionTable(list);
+        setText("sessionCount", list.length + " \u4E2A\u4F1A\u8BDD");
+      }).catch(function(e) {
+        setHtml("sessionTableBody", '<tr><td colspan="7" class="dp-sessions-error">' + esc(e && e.message ? String(e.message) : "\u8BFB\u53D6\u5931\u8D25") + "</td></tr>");
+        setText("sessionCount", "");
+      });
+    }
+    function markTableSelection() {
+      var body = el("sessionTableBody");
+      if (!body) {
+        return;
+      }
+      body.querySelectorAll(".dp-sessions-row").forEach(function(row) {
+        row.classList.toggle("on", row.getAttribute("data-key") === state.tableSelected);
+      });
+    }
+    function openSession(domain, sid, key) {
+      if (!sid) {
+        return;
+      }
+      var sidInput = el("sessionIdInput"), domInput = el("domainInput");
+      if (sidInput) {
+        sidInput.value = sid;
+      }
+      if (domInput) {
+        domInput.value = domain || "";
+      }
+      state.sessionId = sid;
+      state.domain = domain || "";
+      state.tableSelected = key || "";
+      markTableSelection();
+      resetView();
+      loadPage(null);
+      var split = document.querySelector(".dp-sessions-split");
+      if (split && split.scrollIntoView) {
+        split.scrollIntoView({ block: "start" });
+      }
+    }
     function clearSession() {
       var sid = val("sessionIdInput") || state.sessionId;
       if (!sid) {
@@ -329,7 +420,9 @@
         Console.api.post("/admin/sessions/clear", { sessionId: sid, domain: dom }).then(function(res) {
           disable("btnClear", false);
           Console.toast(res.message || "\u5DF2\u6E05\u7A7A", { type: "success", wide: true });
+          state.tableSelected = "";
           resetView();
+          loadSessions();
         }).catch(function(e) {
           disable("btnClear", false);
           Console.toast(
@@ -345,6 +438,8 @@
         q.addEventListener("click", function() {
           state.sessionId = val("sessionIdInput");
           state.domain = val("domainInput");
+          state.tableSelected = "";
+          markTableSelection();
           resetView();
           if (state.sessionId) {
             loadPage(null);
@@ -369,6 +464,18 @@
       var clr = el("btnClear");
       if (clr) {
         clr.addEventListener("click", clearSession);
+      }
+      var df = el("domainFilter");
+      if (df) {
+        df.addEventListener("change", loadSessions);
+      }
+      var sl = el("sessionLimit");
+      if (sl) {
+        sl.addEventListener("change", loadSessions);
+      }
+      var rs = el("btnRefreshSessions");
+      if (rs) {
+        rs.addEventListener("click", loadSessions);
       }
       var prev = el("btnPrevPage");
       if (prev) {
@@ -396,6 +503,7 @@
       renderFacts(null);
       renderPager();
       bindActions();
+      loadSessions();
     });
   })();
 })();

@@ -92,17 +92,48 @@ public class RedisSessionStorage {
                        List<TurnRecord> turns, List<ContextAssemblyReport> assemblyReports) {
     }
 
-    /** 体量最大的 {@code limit} 个会话（按归档轮数降序） */
-    public List<Snapshot> topBySize(int limit) {
+    /**
+     * 会话清单（F04-e：按域筛选的表格）。
+     *
+     * @param domains  扫描到的<b>全部</b>域，不受筛选影响（下拉要能切回别的域）
+     * @param sessions 筛选后按归档轮数降序的 top N 个会话
+     */
+    public record Listing(List<String> domains, List<Snapshot> sessions) {
+    }
+
+    /**
+     * 按域列会话，同时给出有档案的域清单（F04-e 表格数据源）。
+     *
+     * <p>一次 SCAN 同时产出两样东西是刻意的：域清单必须来自<b>全部</b>归档键，
+     * 不能只从筛选结果里取，否则选中某个域之后下拉里就只剩这一个域、切不回去了。
+     * 过滤放在应用内而非拼进 SCAN 的 MATCH：域清单本来就需要遍历全量键，
+     * 顺手比一下字符串比再拼一处 glob 更省事，也不用担心域路径里的特殊字符。</p>
+     *
+     * <p>筛选是<b>精确匹配</b>，不向下含子域：会话键里的域是开轮那一刻的装配域，
+     * 而域链继承是能力绑定规则，两者不是一回事。</p>
+     *
+     * @param domain 域筛选；空 = 全部域
+     * @param limit  返回条数（按归档轮数降序）
+     */
+    public Listing list(String domain, int limit) {
         int n = Math.max(1, limit);
+        String filter = domain == null || domain.isBlank() ? null : domain.trim();
         List<Snapshot> out = new ArrayList<>();
+        List<String> domains = new ArrayList<>();
         try (Cursor<String> cursor = redisTemplate.scan(
                 ScanOptions.scanOptions().match(ARCHIVE_PREFIX + "*").count(SCAN_BATCH).build())) {
             int scanned = 0;
             while (cursor.hasNext() && scanned < MAX_SCAN) {
                 String key = cursor.next();
                 scanned++;
-                out.add(snapshotOf(key.substring(ARCHIVE_PREFIX.length())));
+                String sessionKey = key.substring(ARCHIVE_PREFIX.length());
+                String d = SessionKeys.domainOf(sessionKey);
+                if (d != null && !d.isBlank()) {
+                    domains.add(d);
+                }
+                if (filter == null || filter.equals(d)) {
+                    out.add(snapshotOf(sessionKey));
+                }
             }
             if (scanned >= MAX_SCAN) {
                 log.warn("[会话体量] 归档键超过 {} 个，本次只盘点了前 {} 个（提高 limit 无效，需按域分批查）",
@@ -112,7 +143,13 @@ public class RedisSessionStorage {
             log.warn("[会话体量] 扫描归档键失败：{}", e.getMessage());
         }
         out.sort(Comparator.comparingLong(Snapshot::archiveTurns).reversed());
-        return out.size() <= n ? out : new ArrayList<>(out.subList(0, n));
+        List<Snapshot> page = out.size() <= n ? out : new ArrayList<>(out.subList(0, n));
+        return new Listing(domains.stream().distinct().sorted().toList(), page);
+    }
+
+    /** 保留旧入口：体量最大的 {@code limit} 个会话（按归档轮数降序） */
+    public List<Snapshot> topBySize(int limit) {
+        return list(null, limit).sessions();
     }
 
     /** 单个会话的体量快照（键不存在时各项为 0，不返回空——"这个会话没有档案"本身就是答案） */

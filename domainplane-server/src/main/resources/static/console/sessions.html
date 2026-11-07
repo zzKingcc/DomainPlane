@@ -31,6 +31,40 @@
                 </div>
             </div>
 
+            <div class="card dp-panel">
+                <div class="card-body">
+                    <h3 class="card-title">会话列表</h3>
+                    <div class="dp-sessions-filter">
+                        <label for="domainFilter">域</label>
+                        <select id="domainFilter" class="form-control"></select>
+                        <label for="sessionLimit">条数</label>
+                        <select id="sessionLimit" class="form-control">
+                            <option value="20">20</option>
+                            <option value="50" selected>50</option>
+                            <option value="100">100</option>
+                        </select>
+                        <button class="btn btn-sm" id="btnRefreshSessions" type="button">刷新</button>
+                        <span class="dp-sessions-count" id="sessionCount"></span>
+                    </div>
+                    <div class="dp-sessions-table-wrap">
+                        <table class="table dp-sessions-table">
+                            <thead>
+                            <tr>
+                                <th>会话 ID</th>
+                                <th>域</th>
+                                <th>轮数</th>
+                                <th>记忆条数</th>
+                                <th>向量轮数</th>
+                                <th>装配清单</th>
+                                <th></th>
+                            </tr>
+                            </thead>
+                            <tbody id="sessionTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <div class="dp-sessions-split">
                 <div class="card dp-panel">
                     <div class="card-body">
