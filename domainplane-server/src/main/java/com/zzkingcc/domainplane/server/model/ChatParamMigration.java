@@ -29,8 +29,9 @@ final class ChatParamMigration {
     /**
      * 一条映射：{@code key} 是旧 UI 名，{@code wire} 是线上字段名。
      *
-     * @param wrap 非空时把标量包一层单键对象（对应适配里的 {@code wireWrap}），
-     *             如 {@code responseFormat: "json_object"} → {@code response_format: {type: "json_object"}}
+     * @param wrap 非空时把标量包一层单键对象（如 {@code responseFormat: "json_object"}
+     *             → {@code response_format: {"type": "json_object"}}）；适配 schema 时代这层包装
+     *             由 {@code wireWrap} 声明，翻译层删掉后只剩这张表记得这件事
      */
     private record Rule(String key, String wire, String wrap) {
     }

@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
-import org.springframework.core.io.DefaultResourceLoader;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -164,7 +163,7 @@ class ModelProfileUnspecifiedTypeTest {
         assertNotNull(registry.bind("default", List.of("p")), "绑定时就已拒绝");
 
         DefaultModelResolver resolver = new DefaultModelResolver(registry,
-                new ModelClientFactory(new ModelAdapterRegistry(new DefaultResourceLoader())));
+                new ModelClientFactory());
 
         assertThrows(NotConfiguredException.class, () -> resolver.streamingChat("default"),
                 "未识别档案不再被解析成一个来路不明的模型");
@@ -177,7 +176,7 @@ class ModelProfileUnspecifiedTypeTest {
         assertNull(registry.bind("default", List.of("p")));
 
         DefaultModelResolver resolver = new DefaultModelResolver(registry,
-                new ModelClientFactory(new ModelAdapterRegistry(new DefaultResourceLoader())));
+                new ModelClientFactory());
 
         assertNotNull(resolver.streamingChat("default"), "探测过的对话档案照常解析得出模型");
     }

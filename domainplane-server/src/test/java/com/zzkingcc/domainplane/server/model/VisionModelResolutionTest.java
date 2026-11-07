@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
-import org.springframework.core.io.DefaultResourceLoader;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -45,8 +44,7 @@ class VisionModelResolutionTest {
     }
 
     private static DefaultModelResolver resolver(ModelProfileRegistry registry) {
-        return new DefaultModelResolver(registry,
-                new ModelClientFactory(new ModelAdapterRegistry(new DefaultResourceLoader())));
+        return new DefaultModelResolver(registry, new ModelClientFactory());
     }
 
     /** 视觉对话模型：输入模态含 image：判据就是它，不新增字段 */

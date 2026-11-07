@@ -41,7 +41,7 @@ class ChatParamMigrationTest {
         assertEquals(0.9, out.get("top_p"));
         assertEquals(5, out.get("top_logprobs"));
         assertEquals(Map.of("type", "json_object"), out.get("response_format"),
-                "responseFormat 要包成 {\"type\": ...}，与适配里的 wireWrap 一致");
+                "responseFormat 要包成 {\"type\": ...}：适配的 wireWrap 已经删了，这层包装只剩迁移表记得");
         assertTrue(out.keySet().stream().noneMatch(k -> k.equals("reasoningEffort")
                 || k.equals("topP") || k.equals("topLogprobs") || k.equals("responseFormat")),
                 "旧键不能在结果里残留：" + out.keySet());

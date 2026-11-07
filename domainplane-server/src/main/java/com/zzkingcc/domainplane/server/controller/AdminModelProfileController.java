@@ -1194,8 +1194,7 @@ public class AdminModelProfileController {
      *
      * 下发 schema（{@code params}）而不是只下发若干「键 = 值」的文字，是因为卡片右侧要放一个
      * **可编辑**的调优框：控件类型（枚举 / 布尔 / 数值及 min / max / step）只能从 schema 得到。
-     * 形状与 {@code POST /admin/model-adapters/match} 的 {@code adapter.params} 保持一致：
-     * 模态里与卡片上渲染的是同一套 schema，两份形状漂移会让两处控件长得不一样。
+     * 现在只剩向量档案会走到这里（{@code dimensions} 一个数值控件），对话档案的 schema 已下架。
      *
      * 下发的参数按**档案类型**取族（见 {@link ModelAdapterRegistry.MatchResult#tuningParams}）：
      * 向量档案给 embedding 族的 dimensions，对话档案给 chat 族：卡片绿框渲染的就是这一份。

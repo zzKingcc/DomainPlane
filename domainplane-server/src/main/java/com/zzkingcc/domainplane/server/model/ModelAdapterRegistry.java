@@ -589,11 +589,6 @@ public class ModelAdapterRegistry {
             throw new IllegalArgumentException(where + ": 参数 " + key + " 的 wire「" + wire + "」保留给标准参数"
                     + "（std=true），私有参数不得占用");
         }
-        /* 包装只对私有参数成立：标准参数落的是 langchain4j 老字段，值形状由框架定，没法再套一层 */
-        String wireWrap = optText(node, "wireWrap", where);
-        if (wireWrap != null && std) {
-            throw new IllegalArgumentException(where + ": 标准参数 " + key + " 不能有 wireWrap");
-        }
         /* 呈现方式只对枚举成立：分档进度条靠的就是 options 的先后顺序，非枚举没有"档"可言 */
         String display = optText(node, "display", where);
         if (display != null) {
@@ -641,7 +636,7 @@ public class ModelAdapterRegistry {
             }
         }
 
-        ParamSpec spec = new ParamSpec(key, label, type, wire, wireWrap, std, min, max, step, defaultValue,
+        ParamSpec spec = new ParamSpec(key, label, type, wire, std, min, max, step, defaultValue,
                 List.copyOf(options), display,
                 parseEnabledWhen(node.get("enabledWhen"), where, key));
         /* default 也要过同一套校验：文件里写坏的默认值必须在加载期暴露，而不是等用户保存才炸 */
@@ -839,9 +834,6 @@ public class ModelAdapterRegistry {
      * @param std         true = 标准参数（wire 限 temperature / max_tokens，值存 ModelProfile 老字段）；
      *                    false = 私有参数（值存 params map，注入走 customParameters）
      * @param min / max   数值类型的值域；在 {@code stringList} 上是**元素条数**区间（如 stop 最多 16 条）
-     * @param wireWrap    非空时注入的值要包一层单键对象 {@code {wireWrap: value}}，
-     *                    厂商把标量塞进子对象的标准写法（如 {@code response_format.type}）。
-     *                    只对私有参数成立：标准参数的值形状由框架定，没法再套一层
      * @param display     非空时指定控件呈现方式（仅 enum 可用）：{@code bar} = 分档进度条。
      *                    只是呈现提示，不参与取值与注入，值仍是 options 里那个枚举字符串
      * @param defaultValue 官方文档写明的默认值。用户没填时它同时管两件事：控件空态上显示
@@ -850,7 +842,7 @@ public class ModelAdapterRegistry {
      *                    条件不成立时连默认值都不发射
      * @param enabledWhen 非空时本参数是**条件参数**：依赖参数取到指定值才可填，见 {@link EnabledWhen}
      */
-    public record ParamSpec(String key, String label, String type, String wire, String wireWrap,
+    public record ParamSpec(String key, String label, String type, String wire,
                             boolean std, Double min, Double max, Double step,
                             /* 下发的 JSON 键就是适配文件里那个 "default"：记录组件叫 defaultValue，
                                Jackson 默认按组件名序列化，前端读 spec.default 会永远拿到 undefined */

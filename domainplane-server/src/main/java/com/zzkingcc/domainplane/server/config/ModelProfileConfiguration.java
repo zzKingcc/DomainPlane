@@ -58,8 +58,8 @@ public class ModelProfileConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean
-    public ModelClientFactory modelClientFactory(ModelAdapterRegistry adapterRegistry) {
-        return new ModelClientFactory(adapterRegistry);
+    public ModelClientFactory modelClientFactory() {
+        return new ModelClientFactory();
     }
 
     /**

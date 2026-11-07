@@ -2,7 +2,6 @@ package com.zzkingcc.domainplane.server.model;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.core.io.DefaultResourceLoader;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -29,8 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("ModelClientFactory：同指纹复用，并发首建不产生孤儿实例")
 class ModelClientFactoryConcurrentTest {
 
-    private final ModelClientFactory factory =
-            new ModelClientFactory(new ModelAdapterRegistry(new DefaultResourceLoader()));
+    private final ModelClientFactory factory = new ModelClientFactory();
 
     private static ModelProfile profile(String alias, String apiKey) {
         return new ModelProfile(

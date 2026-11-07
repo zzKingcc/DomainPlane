@@ -178,12 +178,12 @@ Console.renderSidebar('models');
 
     /* 卡片上的「上下文长度」输入框（对话档案的信息行里）。
        落 ModelProfile#contextWindow：用户按服务商文档手填，平台不做识别，
-       适配文件的 schema 里本就没有这一项，服务商清单（GET /models）也不提供，探测更探不出来。
+       服务商清单（GET /models）也不提供，探测更探不出来。
        它就是装配预算的封顶值（服务端 ContextBudget：min(配置预算, 该值 - 输出预留 - 边际)），
        且只用来**收紧**，填大了不构成"还能再塞"的保证。
        留空 = 未声明 → 装配预算按配置值，与该字段引入前完全一致。
-       刻意不放进绿色调优框：那里只在"按模型名命中适配"的档案上渲染，而标准 OpenAI / DeepSeek
-       这类最常见的档案恰恰不命中，放那儿等于多数人根本看不到这个框。 */
+       它是"平台自己消费的上限"而不是发给服务商的参数，所以单列一行、不塞进下面的
+       自定义参数框（塞进 params 会被当成要发给上游的键）。 */
     function ctxCell(p) {
         var v = p.contextWindow == null ? '' : String(p.contextWindow);
         return '<input type="number" class="mono model-ctx form-control" data-ctx="'
@@ -204,8 +204,9 @@ Console.renderSidebar('models');
 
     /* 一张向量档案卡片。向量段逐张列出全部向量档案，全局只启用一个，
        所以「启用」是每张卡片上的动作，而不是"新建即占用槽位"。
-       命中适配（如硅基流动 bge-m3）时，右侧带上与对话卡片同款的绿色调优框 + 「更新」按钮，
-       唯一可调项是「向量维度」，默认显示模型原生维度，可就地改。 */
+       命中适配（如硅基流动 bge-m3）时，右侧带上绿色调优框 + 「更新」按钮，
+       唯一可调项是「向量维度」，默认显示模型原生维度，可就地改。
+       这一段是绿框**唯一**的剩余使用者：对话卡片的 schema 已下架，改成标准字段 + JSON 框。 */
     function vectorCard(p, active, prefix) {
         /* 「探测」与对话卡片同款、同一个接口（服务端的 profile(alias) 两类桶通吃）：
            向量档案同样会停在"未识别"而进不了向量槽位，得靠探测把 embedding 端点与模态实测出来。
@@ -215,7 +216,7 @@ Console.renderSidebar('models');
                     + (p.usable ? '' : ' disabled') + '>启用</button>')
             + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">探测</button>'
             + '<button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">删除</button>';
-        /* 「已适配」徽标 + 绿框 + 更新按钮，与对话卡片同一套件（见 renderProfiles） */
+        /* 「已适配」徽标 + 绿框 + 更新按钮（对话卡片已不再有这一套） */
         var adapterBadge = p.adapter ? '<span class="mbadge">已适配</span>' : '';
         var hasTune = !!(p.adapter && (p.adapter.params || []).length);
         var tuneBox = hasTune ? adapterTuneBox(p, prefix) : '';
@@ -760,9 +761,10 @@ Console.renderSidebar('models');
 
     /* ---------- 调优框（只剩向量卡片在用） ----------
        对话族的适配 schema 已经下架，对话卡片改成「标准字段（温度 / 单次最大输出）+ 自定义参数
-       JSON 框」，不再向 /admin/model-adapters/match 问 schema。剩下的唯一消费者是向量卡片上
-       那个改 dimensions 的绿框 —— 它是一个真正的 number 控件，比让用户手写
-       {"dimensions": 1024} 更不容易填错，而 dimensions 又是本机索引契约、写错要重灌。
+       JSON 框」；那个"边填表边问 schema"的试匹配接口（POST /admin/model-adapters/match）
+       也随对话 schema 一起删了。剩下的唯一消费者是向量卡片上那个改 dimensions 的绿框 ——
+       它是一个真正的 number 控件，比让用户手写 {"dimensions": 1024} 更不容易填错，
+       而 dimensions 又是本机索引契约、写错要重灌。
        下面这套渲染（renderParamRow / collectTuning / tuningByKey）就为它留着。 */
 
     /* 条件参数此刻能不能填 —— 与后端 ModelAdapterRegistry#enabled 同一套语义。

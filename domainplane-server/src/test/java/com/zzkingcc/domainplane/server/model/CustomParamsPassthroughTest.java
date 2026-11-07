@@ -37,7 +37,7 @@ class CustomParamsPassthroughTest {
     private static final String MODEL = "some-unregistered-model";
 
     private final ModelAdapterRegistry registry = new ModelAdapterRegistry(new DefaultResourceLoader());
-    private final ModelClientFactory factory = new ModelClientFactory(registry);
+    private final ModelClientFactory factory = new ModelClientFactory();
 
     private static ModelProfile profile(Map<String, Object> params) {
         return new ModelProfile("p", List.of(ModelProfile.EP_CHAT), List.of("text"), List.of("text"),

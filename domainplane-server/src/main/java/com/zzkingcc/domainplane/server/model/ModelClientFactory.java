@@ -8,7 +8,6 @@ import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -33,23 +32,20 @@ import java.util.concurrent.ConcurrentHashMap;
  * 两种 builder 的 setter 同名同义，故完全共用 —— 新增参数只写一遍，不会两侧漂移。
  * 服务商差异由对方暴露的 OpenAI 兼容入口吸收，不按服务商开分支。
  *
- * 服务商适配（{@link ModelAdapterRegistry}）落在两个地方：
+ * 参数施加分两路，两路互不重叠：
  *
  *   • 标准参数（temperature / maxTokens）—— 档案老字段 → builder setter；
- *   • 私有参数（如 {@code enable_thinking}）—— 档案 {@code params} → builder
+ *   • 私有参数（如 {@code reasoning_effort}）—— 档案 {@code params} → builder
  *     {@code customParameters}（langchain4j 1.18.1 起支持，与标准字段并列合并进请求体），
- *     适配 schema 里声明了 {@code default} 而用户没填的，在此补缺。
+ *     原样下发，不做键名翻译。
+ *
+ * 本类不再依赖 {@link ModelAdapterRegistry}：对话族的适配 schema 下架后，"按 schema 翻译
+ * key→wire / 补 default / 校验 enabledWhen"那条分支已经没有任何可达输入。
  *
  * @author zzkingcc
  */
 @Slf4j
 public class ModelClientFactory {
-
-    private final ModelAdapterRegistry adapterRegistry;
-
-    public ModelClientFactory(ModelAdapterRegistry adapterRegistry) {
-        this.adapterRegistry = adapterRegistry;
-    }
 
     /** 别名 → （指纹 → 实例） */
     private final Map<String, Map<String, StreamingChatModel>> streamingByAlias = new ConcurrentHashMap<>();
@@ -210,49 +206,23 @@ public class ModelClientFactory {
     }
 
     /**
-     * 档案 params → 请求体字段：有 schema 时按 schema 翻译，没有就**原样下发**。
+     * 档案 params → 请求体字段：原样下发。
      *
-     * <p>对话族的 schema 已经下架（适配文件里 {@code families.chat.params} 为空），
-     * 所以对话档案走的永远是"原样下发"这条分支：档案里存的键就是线上字段名
-     * （存量档案由 {@code ModelProfileStore} 读盘时归一，见 {@link ChatParamMigration}）。
-     * 剩下的 schema 分支只服务仍带参数的族（当前是向量的 {@code dimensions}，
-     * 而它压根不经过本方法）。</p>
+     * <p>对话族的 schema 已经下架，这里曾经有的"按 schema 翻译 key→wire、补 default、
+     * 校验 enabledWhen"那条分支随之删除 —— 它只在 chat 族有参数时才会走到，
+     * 而现在 chat 族的参数表是空的，那条分支连一个可达输入都找不到。
+     * 档案里存的键就是线上字段名（存量档案由 {@code ModelProfileStore} 读盘时归一，
+     * 见 {@link ChatParamMigration}）。</p>
      *
-     * <p>刻意保留而不是整段删掉：schema 机制还有 {@code validateParams} 与向量那一份消费者，
-     * 删掉翻译逻辑会让"哪天某个族重新登记参数"变成一次静默的键名错配。</p>
+     * <p>标准参数（{@code temperature} / {@code max_tokens}）**不走这里**：它们的值在
+     * {@link ModelProfile} 的老字段上，由 {@link #applyTemperature} / {@link #applyMaxTokens}
+     * 那条路专管，否则同一个值会既进 customParameters、又进 builder setter，发两遍。</p>
      *
-     * <p>标准参数（{@code std=true}）**不走这里**：它的值在 {@link ModelProfile} 的老字段上，
-     * 由 {@link #applyTemperature} / {@link #applyMaxTokens} 那条路专管，
-     * 否则同一个 {@code temperature} 会既进 customParameters、又进 builder setter，发两遍。</p>
-     *
-     * <p>包级可见是为了让测试直接钉住"原样下发"这四个字：这条分支以前被注释成
+     * <p>包级可见是为了让测试直接钉住"原样下发"这四个字：这条路径以前被注释成
      * "正常应为空"，因为控制器那时拒绝非空；现在它是**唯一**路径，
      * 从"没有测试"变成"必须有测试"。</p>
      */
     Map<String, Object> effectiveParams(ModelProfile profile) {
-        ModelAdapterRegistry.MatchResult matched = adapterRegistry.match(profile.baseUrl(), profile.modelName());
-        /* 没有 chat schema → 原样下发。判空必须在这里做：命中适配但该族没有参数是现在的**常态**
-           （适配文件对 chat 只声明端点族），若顺着下面的循环走，params 会被整个丢掉 —— 
-           表现为"填了参数、请求体里一个字都没有" */
-        if (!matched.matched() || matched.chatParams().isEmpty()) {
-            return profile.params();
-        }
-        Map<String, Object> declared = profile.params();
-        Map<String, Object> out = new LinkedHashMap<>();
-        for (ModelAdapterRegistry.ParamSpec spec : matched.chatParams()) {
-            /* 标准参数不进 customParameters：值由 applyTemperature / applyMaxTokens 走 builder setter，
-               它登记的 default 只用于界面空态提示 */
-            if (spec.std()) {
-                continue;
-            }
-            Object value = declared.containsKey(spec.key()) ? declared.get(spec.key()) : spec.defaultValue();
-            if (value == null || !ModelAdapterRegistry.enabled(spec, declared)) {
-                continue;
-            }
-            out.put(spec.wire(), spec.wireWrap() == null ? value : Map.of(spec.wireWrap(), value));
-        }
-        /* 不在 chatParams 里的键直接不发射：保存时 validateParams 已按 chatParams 拦过，
-           能走到这里的只可能是内存态被绕过硬造；发一个服务商不认的字段比不发更糟 */
-        return out;
+        return profile.params();
     }
 }
