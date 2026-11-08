@@ -1935,6 +1935,9 @@ pre.preview .mark { color: #93c5fd; }
     max-height: calc(100vh - 400px); min-height: 240px; overflow-y: auto;
     border: 1px solid var(--line); border-radius: 8px;
 }
+/* 右栏详情：还没选轮次时里面是空的，没有下界就缩成一条细边 —— 给个与左侧轮次列表相称的底线，
+   选中轮次后由内容自己撑开。只设 min-height 不设 height，长内容照常向下长、不内滚。 */
+.dp-sessions .dp-sessions-detail { min-height: 320px; }
 .dp-sessions .dp-sessions-turn {
     padding: 8px 10px; border-bottom: 1px solid var(--line);
     border-left: 3px solid transparent; cursor: pointer;
