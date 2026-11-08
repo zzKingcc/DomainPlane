@@ -40,7 +40,7 @@
         <domainplane.version>v1.0</domainplane.version>
         <langchain4j.version>1.18.1</langchain4j.version>
         <langchain4j.beta.version>1.18.1-beta28</langchain4j.beta.version>
-        <langgraph4j.version>1.8.17</langgraph4j.version>
+        <langgraph4j.version>1.9.8</langgraph4j.version>
         <elasticsearch.version>9.4.4</elasticsearch.version>
         <spring-security-crypto.version>6.3.3</spring-security-crypto.version>
         <poi.version>5.4.1</poi.version>
