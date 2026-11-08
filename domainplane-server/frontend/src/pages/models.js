@@ -319,6 +319,8 @@ Console.renderSidebar('models');
     }
 
     /* 换向量模型共用的二次确认。
+       只有服务端判定「向量身份真变了」（地址 / 模型名 / 维度任一）时才会走到这里 ——
+       换档案但模型没变（删了重建同一个模型、别名被加 -2）服务端直接切过去，不弹框。
        返回 'rebuild'（保留原文重灌）、'purge'（丢弃旧内容）或 null（本次不做任何改动）。
        确认框改成 Tabler 模态后是异步的（要等用户点），所以这个函数返回 Promise。 */
     async function askRebuildOrPurge(message) {
@@ -359,7 +361,9 @@ Console.renderSidebar('models');
             })
             .then(function (r) {
                 if (!r) { return; }
-                Console.toast(r.message || '已切换', { type: 'success' });
+                /* wide：换档案但模型没变时，服务端会交代"为什么没让你重灌"，
+                   那句话比默认 350px 的气泡宽，折成三行就没人读了。 */
+                Console.toast(r.message || '已切换', { type: 'success', wide: true });
                 loadProfiles();
                 loadSettings();
             })
@@ -1524,8 +1528,12 @@ Console.renderSidebar('models');
 
         var text = '确认删除模型 ' + alias + '？\n\n';
         if (isCurrentEmbedding) {
+            /* 别在这里写"需换模型后重灌"：换回同一个模型（删了重建、别名被加后缀）
+               不需要重灌，服务端会按向量身份（地址 / 模型名 / 维度）判掉这次无谓的全量 embed。
+               把话说全，用户才不会因为怕重灌而不敢删、或者删了白重灌一遍。 */
             text += '⚠️ 它正是当前向量模型，删除后向量配置会一并取消，'
-                + '知识库的灌库与向量检索将停用（已灌库的向量仍在索引里，需换模型后重灌）。\n\n';
+                + '知识库的灌库与向量检索将停用。已灌库的向量仍在索引里：'
+                + '之后选回同一个模型就能直接复用，换成别的模型才需要重灌。\n\n';
         } else if (isEmb) {
             text += '它是一个向量档案，删除后需要重新选用向量模型。\n\n';
         } else {

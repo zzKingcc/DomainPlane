@@ -155,9 +155,37 @@ public class ModelProfileRegistry {
         return profile(alias).filter(ModelProfile::isEmbedding).filter(ModelProfile::isUsable);
     }
 
-    /** 当前启用的向量档案别名（未配置为 {@code null}；不校验档案是否仍可用，用于展示"选中了什么"） */
+    /**
+     * 当前启用的向量档案别名（未配置为 {@code null}；不校验档案是否仍可用，用于展示"选中了什么"）
+     */
     public String embeddingAlias() {
         return hasText(settings.getEmbeddingAlias()) ? settings.getEmbeddingAlias().trim() : null;
+    }
+
+    /**
+     * 索引里的向量是用哪个模型算的；{@code null} = 未知（老配置或从未配过向量模型）。
+     *
+     * <p>与 {@link #embeddingAlias()} 是两件事：别名说"现在选的是哪份档案"，
+     * 身份说"库里那批向量是谁算的"。档案可以被删了重建（别名变了、身份没变），
+     * 也可以被覆盖成别的模型名（别名没变、身份变了）—— 只有身份能回答"要不要重灌"。</p>
+     */
+    public VectorIdentity embeddingIdentity() {
+        return settings.getEmbeddingIdentity();
+    }
+
+    /**
+     * 记下"索引是用这个模型算的"。
+     *
+     * <p>与档案增删解耦：删档案时<b>不</b>清它 —— 删档案不动索引，索引还是它算的。
+     * 只有真正换了向量空间（切换成功 / 重灌完成）才更新。</p>
+     */
+    public synchronized void markEmbeddingIdentity(VectorIdentity identity) {
+        if (java.util.Objects.equals(settings.getEmbeddingIdentity(), identity)) {
+            return;
+        }
+        ModelProfileSettings next = copyOf(settings);
+        next.setEmbeddingIdentity(identity);
+        persist(next);
     }
 
     /**
@@ -282,6 +310,16 @@ public class ModelProfileRegistry {
            表现是灌库时报"未配置"却查不出是哪个档案没了。 */
         boolean wasEmbedding = key.equals(next.getEmbeddingAlias());
         if (wasEmbedding) {
+            /* 删档案不动索引：索引里那批向量还是它算的，所以先把它算过的向量身份记下来。
+               不记的话槽位一清就没人知道"上一个是谁"，用户把它删了再建一份同样的模型选回来，
+               会被当成换模型、白重灌一遍 —— 而这条路径（删 → 重建 → 选回）正是最常见的。 */
+            ModelProfileSettings.ProfileData removed = settings.find(key);
+            if (removed != null) {
+                VectorIdentity identity = VectorIdentity.of(removed.toProfile(key));
+                if (identity != null) {
+                    next.setEmbeddingIdentity(identity);
+                }
+            }
             next.setEmbeddingAlias(null);
         }
         next.remove(key);
@@ -556,6 +594,10 @@ public class ModelProfileRegistry {
            内存态里恒为空，不参与拷贝也不参与写盘。 */
         copy.setProfiles(copyProfiles(source.getProfiles()));
         copy.setEmbeddingAlias(source.getEmbeddingAlias());
+        /* 逐字段拷贝：漏了这一行不会有任何报错，只会在下一次写盘时把这个字段静默抹掉
+           （表现是"删档案之后重建同一个模型又要重灌一次"，查起来毫无头绪）。
+           record 不可变，直接hold同一个引用即可。 */
+        copy.setEmbeddingIdentity(source.getEmbeddingIdentity());
         return copy;
     }
 

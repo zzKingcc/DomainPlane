@@ -1,5 +1,7 @@
 package com.zzkingcc.domainplane.server.controller;
 
+import com.zzkingcc.domainplane.common.exception.BaseException;
+import com.zzkingcc.domainplane.server.config.AiProperties;
 import com.zzkingcc.domainplane.server.config.RagProperties;
 import com.zzkingcc.domainplane.server.env.StorageLocations;
 import com.zzkingcc.domainplane.server.knowledge.KnowledgeBaseService;
@@ -9,6 +11,9 @@ import com.zzkingcc.domainplane.server.model.ModelMetadataReader;
 import com.zzkingcc.domainplane.server.model.ModelProfile;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
 import com.zzkingcc.domainplane.server.model.ModelProfileStore;
+import com.zzkingcc.domainplane.server.model.VectorIdentity;
+import com.zzkingcc.domainplane.server.settings.LlmModelHolder;
+import com.zzkingcc.domainplane.server.settings.LlmSettingsStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -24,6 +29,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -43,6 +49,9 @@ class ModelProfileSaveContractTest {
 
     private ModelProfileRegistry lastRegistry;
 
+    /** 供"落盘往返"用例重建一个 registry：验证新字段真的写进了 models.json 并能读回来 */
+    private ModelProfileStore lastStore;
+
     /** metadataReader 传 null 是刻意的：save 一次都不该碰它 */
     private AdminModelProfileController controller(ModelMetadataReader metadataReader) {
         return build(metadataReader, null);
@@ -51,16 +60,33 @@ class ModelProfileSaveContractTest {
     /** 只有「换向量模型要二次确认」这组用例才需要装一个带内容的知识库桩 */
     private AdminModelProfileController build(ModelMetadataReader metadataReader,
                                               KnowledgeBaseService knowledgeBase) {
+        return build(metadataReader, knowledgeBase, false);
+    }
+
+    /**
+     * @param withHolder 需要走到"切换真的执行"的用例才装真实 holder。
+     *                   传 false 时 holder 为 null：那些用例一旦越过二次确认就会 NPE ——
+     *                   这比"mock 一个 holder 再断言没被调用"更硬，连对象都不给。
+     */
+    private AdminModelProfileController build(ModelMetadataReader metadataReader,
+                                              KnowledgeBaseService knowledgeBase,
+                                              boolean withHolder) {
         StandardEnvironment env = new StandardEnvironment();
         Map<String, Object> props = new LinkedHashMap<>();
         props.put("domainplane.settings.path", tempDir.resolve("config").toString());
         props.put("domainplane.logging.path", tempDir.resolve("log").toString());
         props.put("domainplane.export.path", tempDir.resolve("export").toString());
         env.getPropertySources().addFirst(new MapPropertySource("test", props));
-        ModelProfileStore store = new ModelProfileStore(new StorageLocations(env));
+        StorageLocations storage = new StorageLocations(env);
+        ModelProfileStore store = new ModelProfileStore(storage);
         ModelProfileRegistry registry = new ModelProfileRegistry(store);
         lastRegistry = registry;
-        return new AdminModelProfileController(registry, store, null, metadataReader,
+        lastStore = store;
+        /* 无配置文件时 reload 只会记一条 INFO 然后三个实例留空，不发任何上游请求 */
+        LlmModelHolder holder = withHolder
+                ? new LlmModelHolder(new AiProperties(), new LlmSettingsStore(storage), registry)
+                : null;
+        return new AdminModelProfileController(registry, store, holder, metadataReader,
                 new ModelAdapterRegistry(new DefaultResourceLoader()),
                 new ModelCapabilityProbe(), null, knowledgeBase);
     }
@@ -236,5 +262,191 @@ class ModelProfileSaveContractTest {
         assertEquals(Boolean.TRUE, ask.get("requiresConfirmation"));
         assertEquals("old-vec", lastRegistry.embeddingAlias(),
                 "没拿到用户表态前不能留下「已切换」状态");
+    }
+
+    // ==================== 换的是档案，还是模型？ ====================
+
+    /** 一个固定的向量服务商地址：同一模型 / 换模型两种情形都从它出发 */
+    private static final String VEC_URL = "https://api.siliconflow.cn/v1";
+
+    /**
+     * 有内容的知识库桩：只要有人动索引就直接抛。
+     *
+     * <p>比"事后断言返回值为空"更硬 —— 断言写漏了还能悄悄过，抛是躲不掉的。</p>
+     */
+    private static KnowledgeBaseService contentKb() {
+        RagProperties rag = new RagProperties();
+        return new KnowledgeBaseService(null, rag, null, null, null, null, null, null) {
+            @Override public List<String> existingIndices() { return List.of("kb_test"); }
+            @Override public long totalIndexedDocuments() { return 3L; }
+            @Override public Map<String, Integer> rebuildPreservingText(int dims) {
+                throw new AssertionError("这次切换不该重灌知识库（dims=" + dims + "）");
+            }
+            @Override public List<String> purgeAll() {
+                throw new AssertionError("这次切换不该清空知识库");
+            }
+        };
+    }
+
+    private static AdminModelProfileController.ProfileBody vecBody(String alias, String modelName,
+                                                                   Integer dimensions) {
+        AdminModelProfileController.ProfileBody b = new AdminModelProfileController.ProfileBody();
+        b.setAlias(alias);
+        b.setApiKey("sk-test");
+        b.setBaseUrl(VEC_URL);
+        b.setModelName(modelName);
+        b.setDimensions(dimensions);
+        b.setEndpoints(List.of(ModelProfile.EP_EMBEDDING));
+        return b;
+    }
+
+    private static AdminModelProfileController.EmbeddingBody embeddingRequest(String alias, String mode) {
+        AdminModelProfileController.EmbeddingBody b = new AdminModelProfileController.EmbeddingBody();
+        b.setAlias(alias);
+        b.setMode(mode);
+        return b;
+    }
+
+    @Test
+    @DisplayName("删了重建同一个模型（别名被加 -2 后缀）：不弹确认、不重灌，向量原样复用")
+    void sameModelUnderANewAliasReusesVectors() {
+        AdminModelProfileController c = build(null, contentKb(), true);
+        c.save(vecBody("bge", "BAAI/bge-m3", 1024));
+        assertNull(lastRegistry.setEmbeddingAlias("bge"));
+        /* 前端 deriveAlias 遇重名会加 -2：删掉 bge 再添加同一个模型，拿到的就是 bge-2。
+           旧判据（比别名）在这里会把一次零变更的操作判成换模型，逼用户全库重灌。 */
+        c.save(vecBody("bge-2", "BAAI/bge-m3", 1024));
+
+        Map<String, Object> out = c.selectEmbeddingModel(embeddingRequest("bge-2", null));
+
+        assertFalse(out.containsKey("requiresConfirmation"),
+                "地址 / 模型名 / 维度都没变，只是换了个档案名：不该让用户面对重灌确认框");
+        assertEquals("bge-2", lastRegistry.embeddingAlias(), "档案本身确实换过去了");
+        assertEquals(Boolean.TRUE, out.get("vectorsReused"), "前端据此确认索引被复用，不会自己去点重灌");
+        assertNull(out.get("reindexed"), "没有重灌");
+        assertNull(out.get("removedIndices"), "也没有清空");
+        String message = String.valueOf(out.get("message"));
+        assertTrue(message.contains("不需要重灌"),
+                "必须明确交代「没弹框是因为不用重灌」，否则用户会怀疑漏了一步、然后手动补一次全量 embed：" + message);
+    }
+
+    @Test
+    @DisplayName("换了模型名（维度相同）仍要二次确认：判据收窄不能把真保护一起放掉")
+    void differentModelStillRequiresConfirmation() {
+        AdminModelProfileController c = build(null, contentKb(), false);
+        c.save(vecBody("bge", "BAAI/bge-m3", 1024));
+        assertNull(lastRegistry.setEmbeddingAlias("bge"));
+        c.save(vecBody("bce", "netease-youdao/bce-embedding-base_v1", 1024));
+
+        Map<String, Object> ask = c.selectEmbeddingModel(embeddingRequest("bce", null));
+
+        assertEquals(Boolean.TRUE, ask.get("requiresConfirmation"),
+                "维度一样不代表向量可比：这是最容易靠直觉放过的一种错配");
+        assertEquals("bge", lastRegistry.embeddingAlias(), "没拿到用户表态前不能留下已切换");
+    }
+
+    @Test
+    @DisplayName("当前向量档案不能从「保存」改掉模型名：这条路没有重灌确认，只能拒")
+    void editingVectorIdentityThroughSaveIsRejected() {
+        AdminModelProfileController c = controller(null);
+        c.save(vecBody("vec", "BAAI/bge-m3", 1024));
+        assertNull(lastRegistry.setEmbeddingAlias("vec"));
+
+        BaseException e = assertThrows(BaseException.class,
+                () -> c.save(vecBody("vec", "netease-youdao/bce-embedding-base_v1", 1024)));
+
+        assertTrue(e.getMessage().contains("新建一份档案"),
+                "拒绝的同时必须给出正确路径，否则用户只会觉得这条路被封死了：" + e.getMessage());
+        assertEquals("BAAI/bge-m3", lastRegistry.profile("vec").orElseThrow().modelName(),
+                "被拒的保存不能已经把新模型名落盘");
+    }
+
+    @Test
+    @DisplayName("换一把 Key 不改变向量：当前向量档案照常保存，不该被那道门禁拦住")
+    void rotatingApiKeyOnCurrentVectorProfileIsAllowed() {
+        AdminModelProfileController c = controller(null);
+        c.save(vecBody("vec", "BAAI/bge-m3", 1024));
+        assertNull(lastRegistry.setEmbeddingAlias("vec"));
+
+        AdminModelProfileController.ProfileBody rotated = vecBody("vec", "BAAI/bge-m3", 1024);
+        rotated.setApiKey("sk-rotated");
+        c.save(rotated);
+
+        assertEquals("sk-rotated", lastRegistry.profile("vec").orElseThrow().apiKey(),
+                "Key 不属于向量身份：换 Key 的诉求是连接层排障，不是换模型");
+    }
+
+    // ==================== 删了重建：槽位被清空之后还认得出来吗 ====================
+
+    @Test
+    @DisplayName("删掉向量档案再建一份同样的模型选上：不弹确认（删档案不动索引，身份被记着）")
+    void deleteThenRecreateSameModelDoesNotAskAgain() {
+        AdminModelProfileController c = build(null, contentKb(), true);
+        c.save(vecBody("bge", "BAAI/bge-m3", 1024));
+        assertNull(lastRegistry.setEmbeddingAlias("bge"));
+        /* 正常由 selectEmbeddingModel 的成功路径写入；这里直接预置，把用例聚焦在"删除之后" */
+        lastRegistry.markEmbeddingIdentity(VectorIdentity.of(lastRegistry.profile("bge").orElseThrow()));
+
+        assertTrue(lastRegistry.delete("bge").deleted(), "删档案会级联清空槽位 —— 这是身份的用武之地");
+        assertNull(lastRegistry.embeddingAlias());
+        c.save(vecBody("bge-2", "BAAI/bge-m3", 1024));
+
+        Map<String, Object> out = c.selectEmbeddingModel(embeddingRequest("bge-2", null));
+
+        assertFalse(out.containsKey("requiresConfirmation"),
+                "槽位被清空过也应该认得出来：身份与档案增删无关，只与索引里那批向量由谁算的有关");
+        assertEquals(Boolean.TRUE, out.get("vectorsReused"));
+    }
+
+    @Test
+    @DisplayName("删了重建但换成了别的模型：仍然弹确认 —— 记录不能把真变更一起吞掉")
+    void deleteThenRecreateDifferentModelStillAsks() {
+        AdminModelProfileController c = build(null, contentKb(), false);
+        c.save(vecBody("bge", "BAAI/bge-m3", 1024));
+        assertNull(lastRegistry.setEmbeddingAlias("bge"));
+        lastRegistry.markEmbeddingIdentity(VectorIdentity.of(lastRegistry.profile("bge").orElseThrow()));
+
+        assertTrue(lastRegistry.delete("bge").deleted());
+        c.save(vecBody("bce", "netease-youdao/bce-embedding-base_v1", 1024));
+
+        Map<String, Object> ask = c.selectEmbeddingModel(embeddingRequest("bce", null));
+
+        assertEquals(Boolean.TRUE, ask.get("requiresConfirmation"),
+                "维度相同也不行：换模型就是换向量空间");
+    }
+
+    @Test
+    @DisplayName("向量身份要写进 models.json：copyOf 漏字段会让它每次保存都凭空消失")
+    void embeddingIdentitySurvivesPersistAndReload() {
+        AdminModelProfileController c = controller(null);
+        c.save(vecBody("vec", "BAAI/bge-m3", 1024));
+        assertNull(lastRegistry.setEmbeddingAlias("vec"));
+        lastRegistry.markEmbeddingIdentity(VectorIdentity.of(lastRegistry.profile("vec").orElseThrow()));
+
+        /* 再存一份别的档案：走的是 copyOf → 漏拷就会把 identity 抹成 null */
+        c.save(vecBody("other", "BAAI/bge-m3", 1024));
+        assertEquals(Integer.valueOf(1024), lastRegistry.embeddingIdentity().dimensions());
+
+        /* 换一个 registry 从同一份文件读回来：验证 record 能被 Jackson 反序列化 */
+        ModelProfileRegistry reloaded = new ModelProfileRegistry(lastStore);
+        assertEquals(VectorIdentity.of(lastRegistry.profile("vec").orElseThrow()),
+                reloaded.embeddingIdentity(),
+                "这个字段丢了不会有任何报错，只会表现为「删了重建又要重灌一次」，查起来毫无头绪");
+    }
+
+    @Test
+    @DisplayName("重复点选当前档案不补记身份：老配置的库可能是别的模型算的，别一次误点就抹平疑问")
+    void reselectingSameAliasDoesNotRecordIdentity() {
+        AdminModelProfileController c = build(null, null, true);
+        c.save(vecBody("vec", "BAAI/bge-m3", 1024));
+        /* 直接写槽位 = 模拟老配置：有选中的档案，但没有 embeddingIdentity 这段记录 */
+        assertNull(lastRegistry.setEmbeddingAlias("vec"));
+        assertNull(lastRegistry.embeddingIdentity());
+
+        c.selectEmbeddingModel(embeddingRequest("vec", null));
+
+        assertNull(lastRegistry.embeddingIdentity(),
+                "别名没变、身份也没变，没有发生任何切换：这时补记等于凭空断言"
+                        + "「库里那批向量就是这个模型算的」，而老配置恰恰无法确认这一点");
     }
 }

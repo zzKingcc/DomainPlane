@@ -16,6 +16,7 @@ import com.zzkingcc.domainplane.server.model.ModelProfile;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
 import com.zzkingcc.domainplane.server.model.ModelProfileSettings;
 import com.zzkingcc.domainplane.server.model.ModelProfileStore;
+import com.zzkingcc.domainplane.server.model.VectorIdentity;
 import com.zzkingcc.domainplane.server.settings.LlmFailureDescriber;
 import com.zzkingcc.domainplane.server.settings.LlmModelHolder;
 import com.zzkingcc.domainplane.server.settings.LlmSettings;
@@ -153,6 +154,11 @@ public class AdminModelProfileController {
      *
      * <p>唯一保留的复核是 {@link #checkAdapterTuning}：它管的是"参数能不能到达请求体"，
      * 属于本机契约，与服务商能力无关。</p>
+     *
+     * <p><b>唯一被拒的保存</b>：把<b>当前向量档案</b>的向量身份（地址 / 模型名 / 维度）改掉。
+     * 本接口没有重灌确认，放过去就是索引静默错配 —— 检索照常返回结果，只是全是噪声。
+     * 换模型应当新建档案再走向量槽位切换（{@link #selectEmbeddingModel}），那里有确认。
+     * 换 Key / 改协议不受影响：它们不改变向量，不需要重灌。</p>
      */
     @PostMapping("/model-profiles")
     public Map<String, Object> save(@RequestBody ProfileBody body) {
@@ -185,6 +191,20 @@ public class AdminModelProfileController {
 
         /* 覆盖的是当前启用的向量档案吗？写盘后必须重装配，否则内存里仍是旧实例。 */
         boolean wasEmbedding = alias.equals(registry.embeddingAlias());
+        /* 当前向量档案不允许从"保存"这条路改掉向量身份（地址 / 模型名 / 维度）。
+           本接口没有重灌确认，改完就是静默错配：查询用新模型算向量、库里还是旧模型的，
+           检索照常返回结果，只是全是噪声 —— 这种错比维度不符难发现得多，因为它不报错。
+           fail-closed，把用户送到带确认的切换入口（新建档案 → 向量槽位切换）。 */
+        if (wasEmbedding) {
+            ModelProfile before = registry.profile(alias).orElse(null);
+            if (before != null && !VectorIdentity.same(before, profile)) {
+                throw new BaseException(ErrorCode.INVALID_PARAMETER,
+                        "「" + alias + "」是当前向量模型，直接改服务商地址 / 模型名 / 维度会让索引里的向量失配"
+                                + "（旧向量还能被查出来，但结果不准，而且不会报错）。"
+                                + "要换模型请新建一份档案，再到「模型设置」页的向量槽位切换 —— "
+                                + "那里会带你确认保留原文重灌还是清空知识库。");
+            }
+        }
         String failure = registry.save(profile);
         if (failure != null) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, failure);
@@ -327,6 +347,9 @@ public class AdminModelProfileController {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, failure);
         }
         Map<String, Object> out = result("tuned", alias);
+        /* 这里不需要"索引维度对不上"的提醒：validateDimension 已经把维度钉在模型原生维度上，
+           能通过保存的只有 null ↔ 原生值 这一种变化，而两者按实测得到的是同一个维度 ——
+           索引不会失配。真正会改掉索引维度的是换模型，那条路走 selectEmbeddingModel，带重灌确认。 */
         out.put("message", "已保存 " + alias + " 的调优参数");
         /* 回带新视图：卡片拿它就地重画绿框与「已适配」摘要，不必为一次调优重拉整张列表 */
         out.put("profile", profileView(updated));
@@ -977,9 +1000,13 @@ public class AdminModelProfileController {
      *   • {@code purge} —— 丢弃旧内容：删掉全部知识库索引，之后自行重新上传。
      *
      *
-     * 触发条件是「换了模型或维度任一变化」，不是只看维度。两个不同模型即使维度相同，
+     * <p>触发条件是<b>向量身份变了</b>（见 {@link VectorIdentity}：服务商地址 / 模型名 / 维度
+     * 任一变化），既不是"别名变了"，也不是只看维度。两个不同模型即使维度相同，
      * 向量空间也完全不一样，旧向量检索出来是噪声，而这种错配不会报错，只会让检索质量
-     * 静默下降，比维度不符更难发现。
+     * 静默下降，比维度不符更难发现。</p>
+     *
+     * <p>反过来也成立：换了档案但身份没变（删掉重建同一个模型，前端派生别名会加 {@code -2}
+     * 后缀）<b>不弹确认、不重灌</b> —— 索引里那些向量就是它算的，重算一遍纯属浪费。</p>
      */
     @PutMapping("/embedding-model")
     public Map<String, Object> selectEmbeddingModel(@RequestBody(required = false) EmbeddingBody body) {
@@ -996,12 +1023,34 @@ public class AdminModelProfileController {
 
         ModelProfile selected = alias == null || alias.isBlank()
                 ? null : registry.profile(alias.trim()).orElse(null);
-        boolean changed = !java.util.Objects.equals(previousAlias, registry.embeddingAlias());
+        /* 两个变化必须分开算，它们驱动的动作不同：
+
+           • aliasChanged 只管"档案换了一个" —— 影响文案与重新装配；
+           • vectorChanged 才决定"动不动索引"。判据是向量身份（地址 / 模型名 / 维度），
+             不是别名：别名只是配置句柄，删了重建同一个模型会拿到新别名（前端派生别名
+             遇重名会加 -2 后缀），拿它判等就会把一次"完全没换模型"的操作判成换模型，
+             逼用户全量重灌一遍 —— 白花时间与 embed 费用，还把索引短暂推进半成品状态。
+
+           反过来，同一个别名被覆盖成别的模型名（脚本 / 手改落盘）也必须能判出来，
+           否则索引静默错配：检索结果变噪声，一条错误都不报。 */
+        boolean aliasChanged = !java.util.Objects.equals(previousAlias, registry.embeddingAlias());
+        /* 索引里那批向量是谁算的 —— 有记录就以记录为准。
+
+           为什么不能只跟"上一个选中的档案"比：删掉向量档案会级联清空槽位，
+           之后再建一份同样的模型选上时，槽位已经不知道上一个是谁了，这条最常见的
+           「删了重建」路径会被判成换模型、白重灌一遍。记录与档案增删无关，所以能扛住。
+
+           没有记录（老配置 / 从未配过）才退化为跟上一个档案比：保守，可能多问一次，但不会漏。 */
+        VectorIdentity recorded = registry.embeddingIdentity();
+        VectorIdentity target = VectorIdentity.of(selected);
+        boolean vectorChanged = recorded != null
+                ? !recorded.equals(target)
+                : !VectorIdentity.same(previous, selected);
 
         // 知识库里已有内容 → 旧向量即将作废，必须让用户明确表态
         int affectedIndices = existingIndexCount();
         boolean hasVectors = affectedIndices > 0 && hasAnyIndexedContent();
-        if (changed && hasVectors) {
+        if (vectorChanged && hasVectors) {
             if (!"rebuild".equals(mode) && !"purge".equals(mode)) {
                 // 撤销刚才的单选：没有用户确认就不该留下"已切换"的状态
                 registry.setEmbeddingAlias(previousAlias);
@@ -1031,12 +1080,23 @@ public class AdminModelProfileController {
         // 重灌要用刚装配好的新模型算向量，顺序反了会拿老模型重算一遍
         Map<String, Integer> reindexed = null;
         List<String> purged = null;
-        if (changed && hasVectors) {
+        if (vectorChanged && hasVectors) {
             if ("purge".equals(mode)) {
                 purged = knowledgeBaseService.purgeAll();
             } else {
                 reindexed = knowledgeBaseService.rebuildPreservingText(holder.effectiveEmbeddingDimension());
             }
+        }
+
+        /* 到这里索引要么已按新模型重灌完、要么本来就无需动 —— 才把"索引是谁算的"记下来。
+           刻意放在重灌之后：中途失败会抛在这里之前，记录保持旧值，下次仍然会要求重灌，
+           不会把一次半成品状态固化成"已一致"。
+
+           只在真的发生了切换时才写：重复点选当前档案（aliasChanged 与 vectorChanged 都为 false）
+           不该顺手补记 —— 老配置的库里那批向量可能是历史上别的模型算的，一次误点就把这个
+           疑问永久抹平了。宁可不记（下次还是保守弹框），也不要记错。 */
+        if (aliasChanged || vectorChanged) {
+            registry.markEmbeddingIdentity(target);
         }
 
         Map<String, Object> out = new LinkedHashMap<>();
@@ -1049,7 +1109,10 @@ public class AdminModelProfileController {
         out.put("dimensions", selected == null ? null : selected.dimensions());
         out.put("reindexed", reindexed);
         out.put("removedIndices", purged);
-        out.put("message", describeResult(changed, previous, selected, mode, hasVectors));
+        /* 换了档案、但向量被原样复用。前端据此确认"没漏掉重灌"，不必自己去比对
+           地址 / 模型名 / 维度（那等于把判据复制到前端，迟早漂移）。 */
+        out.put("vectorsReused", aliasChanged && !vectorChanged && hasVectors);
+        out.put("message", describeResult(aliasChanged, vectorChanged, previous, selected, mode, hasVectors));
         out.put("settingsFile", store.filePath());
         return out;
     }
@@ -1134,13 +1197,26 @@ public class AdminModelProfileController {
                 + "当前有 " + indices + " 个索引存着内容。";
     }
 
-    private static String describeResult(boolean changed, ModelProfile previous, ModelProfile selected,
+    /**
+     * 切换结果的一句话交代。
+     *
+     * <p>三态而不是两态：只把"换了 / 没换"说清楚不够。别名变了但向量身份没变时，
+     * 索引原样复用是一个<b>用户看不见的动作</b> —— 他明明换了一个档案，却没被要求重灌，
+     * 如果界面上不给一句明确交代，他会怀疑是不是漏了、然后自己跑去点「重灌」，
+     * 于是我们省下来的那次全量 embed 又被手动补了回去。</p>
+     */
+    private static String describeResult(boolean aliasChanged, boolean vectorChanged,
+                                         ModelProfile previous, ModelProfile selected,
                                          String mode, boolean hadContent) {
-        if (!changed) {
-            return "向量模型没有变化";
-        }
         String oldName = previous == null ? "（未配置）" : previous.modelName();
         String newName = selected == null ? "（已取消配置）" : selected.modelName();
+        if (!vectorChanged) {
+            if (!aliasChanged) {
+                return "向量模型没有变化";
+            }
+            return "已切换到 " + newName + "：它与原档案是同一个向量模型（地址 / 模型名 / 维度一致），"
+                    + "索引里的向量可以直接复用，不需要重灌";
+        }
         if (!hadContent) {
             return "向量模型已由 " + oldName + " 切换为 " + newName + "（知识库暂无内容，直接生效）";
         }

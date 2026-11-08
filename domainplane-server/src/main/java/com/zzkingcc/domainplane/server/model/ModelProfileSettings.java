@@ -85,6 +85,19 @@ public class ModelProfileSettings {
      */
     private String embeddingAlias;
 
+    /**
+     * 索引里的向量是用哪个模型算的 —— 「要不要重灌」的<b>唯一事实依据</b>。
+     *
+     * <p>为什么不直接拿当前选中的档案比：删掉一份向量档案会级联清空
+     * {@link #embeddingAlias}（见 {@code ModelProfileRegistry#delete}），之后再建一份同样的
+     * 档案选上时，槽位已经不知道"上一个是谁"了 —— 于是每次"删了重建同一个模型"都会被
+     * 判成换模型、白重灌一遍。把身份单独记下来，档案怎么增删都不影响这个事实。</p>
+     *
+     * <p>{@code null} = 不知道：老版本落盘的配置没有这个字段，或者从未配过向量模型。
+     * 此时调用方退化为"与上一个档案比较"，保守处理 —— 可能多问一次，但不会漏。</p>
+     */
+    private VectorIdentity embeddingIdentity;
+
     /** 在唯一一张表里按别名取档案 */
     public ProfileData find(String alias) {
         return alias == null ? null : profiles.get(alias);
