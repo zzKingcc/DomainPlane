@@ -45,7 +45,7 @@ jobs:
 
       - name: 归档各模块测试报告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: surefire-reports-jdk${{ matrix.java }}
           path: "**/target/surefire-reports/**"
@@ -54,7 +54,7 @@ jobs:
 
       - name: 归档可执行 jar（仅正式 JDK）
         if: matrix.java == '21'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: domainplane-server-jar
           path: domainplane-server/target/*.jar
