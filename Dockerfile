@@ -18,7 +18,7 @@
 #   4. 切片预览目录默认 /var/lib/domainplane/chunks（上传后每个文档一个 txt，供人工核对切点）。
 #      不挂卷也能用，只是重建容器后会丢；要长期留就挂 -v domainplane-chunks:/var/lib/domainplane/chunks
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:25-jre
 
 RUN groupadd -r domainplane \
  && useradd -r -g domainplane -d /opt/domainplane -s /sbin/nologin domainplane \
