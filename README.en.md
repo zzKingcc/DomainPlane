@@ -104,13 +104,13 @@ Everything is configured in the browser and **takes effect on save** — Elastic
 
 ![Domains](docs/assets/screenshots/console-domains.png)
 
-Callable models, visible tools and bound MCP connections sit on the same card. The root domain is an **assembly node** (it only passes capabilities down and cannot be an entry point); leaf domains are the **callable units**. "Visible tools (including inherited)" answers the only question that matters: what can this domain actually do?
+Callable models, the bound knowledge body and visible tools sit on the same card. The root domain is an **assembly node** (it only passes capabilities down and cannot be an entry point); leaf domains are the **callable units**. "Visible tools (including inherited)" answers the only question that matters: what can this domain actually do?
 
-### Models: the embedding model is managed separately
+### Models: one table, assigned by purpose
 
 ![Models](docs/assets/screenshots/console-models.png)
 
-There is exactly one embedding model platform-wide (both ingestion and retrieval depend on it), so it gets its own section. Other profiles are grouped by type, and "used by which domains" is printed on the card — no page jumping to change a binding. Context window and thinking-output toggles are edited in place.
+When adding a model you tick its purpose (chat / embedding / rerank / image / TTS / ASR / video); saving only registers it — no type guessing, no probe request. Every profile lives in the same table, and the endpoint-family tag says what it can do. The "Purpose assignment" bar at the top designates one of them as the single platform-wide embedding model (ingestion and retrieval both go through it); the other capabilities are bound to domains on the Domains page. Not sure about the purpose? Hit "Detect purpose" for a pre-ticked suggestion — you can still change it. Context window, thinking-output flag, temperature and custom parameters are all edited in place on the card.
 
 ### Storage: the connection pool
 
@@ -122,9 +122,9 @@ Redis, keyword (Elasticsearch), vector (Qdrant) and raw (S3-compatible) connecti
 
 ![Knowledge base](docs/assets/screenshots/console-knowledge.png)
 
-A body card carries every action for one dataset: upload, documents, health, rebuild, change landing spot, bind domains, delete. A collapsed operations section at the bottom handles diagnostics, adopting orphaned collections, cleaning up leftovers and merging bodies.
+A body card carries every action for one dataset: upload, documents, health, rebuild, change landing spot, bind domains, delete. An operations section at the bottom handles diagnostics, adopting orphaned collections, cleaning up leftovers and merging bodies.
 
-> Screenshots of an early empty-library state; the pages have since been rebuilt around knowledge bodies. Data is demo data.
+> Screenshots come from a demo environment; the data is synthetic.
 
 The other pages: overview (quality and tool risk mix), prompts (edit per domain chain segment), MCP connections (automatic protocol-era detection, tool try-runs and event log, OAuth authorization and revocation; credentials only echoed as `hasHeaders`), tool instances (live list, circuit-break, force offline), session archive (paginated turns by session ID, with conversation text, execution steps and per-turn status; a confirmed action clears one session), account (changing the password invalidates every credential).
 
