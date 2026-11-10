@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 556" width="1100" height="556" role="img" aria-label="模型档案、端点族与能力工具的映射">
+  <defs>
+    <marker id="a7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <style>
+      .t { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #0f172a; }
+      .m { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #64748b; }
+      .mono { font-family: "JetBrains Mono","Cascadia Mono",Consolas,monospace; }
+      .box { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
+      .acc { fill: #eef2ff; stroke: #c7d2fe; stroke-width: 1.5; }
+      .fam { fill: #ecfdf5; stroke: #99f6e4; stroke-width: 1.5; }
+      .no { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; stroke-dasharray: 4 3; }
+      .panel { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1.5; }
+      .chip { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1; }
+    </style>
+  </defs>
+
+  <rect width="1100" height="556" fill="#ffffff"/>
+  <text class="t" x="40" y="44" font-size="20" font-weight="700">模型：能力写在档案里，不写在代码里</text>
+  <text class="m" x="40" y="70" font-size="13">上游清单只回 id / object / owned_by，根本不声明能力。所以能力来自你手选的两组模态，或者来自一次真实探测——不来自猜。</text>
+
+  <rect class="box" x="40" y="96" width="230" height="112" rx="10"/>
+  <text class="t" x="56" y="120" font-size="12.5" font-weight="600">① 手选输入 / 输出模态</text>
+  <rect class="chip" x="56" y="132" width="42" height="20" rx="4"/><text class="m" x="62" y="146" font-size="9.5">text</text>
+  <rect class="chip" x="103" y="132" width="46" height="20" rx="4"/><text class="m" x="109" y="146" font-size="9.5">image</text>
+  <rect class="chip" x="154" y="132" width="44" height="20" rx="4"/><text class="m" x="160" y="146" font-size="9.5">audio</text>
+  <rect class="chip" x="203" y="132" width="46" height="20" rx="4"/><text class="m" x="209" y="146" font-size="9.5">video</text>
+  <rect class="chip" x="56" y="158" width="40" height="20" rx="4"/><text class="m" x="62" y="172" font-size="9.5">file</text>
+  <text class="m" x="56" y="196" font-size="10">输入决定它"看得懂什么"，输出决定"它能产出什么"。</text>
+
+  <rect class="acc" x="300" y="96" width="230" height="112" rx="10"/>
+  <text class="t" x="316" y="120" font-size="12.5" font-weight="600">② 端点族 · 本地反查</text>
+  <text class="m mono" x="316" y="140" font-size="9.5">familiesFromModalities()</text>
+  <text class="m" x="316" y="160" font-size="10">纯本地映射，保存时零上游请求、</text>
+  <text class="m" x="316" y="176" font-size="10">不读清单、不测维度。</text>
+  <text class="m" x="316" y="196" font-size="10">所以配一个模型是秒级的。</text>
+
+  <rect class="box" x="560" y="96" width="230" height="112" rx="10"/>
+  <text class="t" x="576" y="120" font-size="12.5" font-weight="600">③ 按族分派</text>
+  <text class="m" x="576" y="142" font-size="10">能绑域的族 → 绑到域，按域生效</text>
+  <text class="m" x="576" y="160" font-size="10">embedding → 全局唯一槽位</text>
+  <text class="m" x="576" y="178" font-size="10">（灌库与检索共用同一个向量空间）</text>
+  <text class="m" x="576" y="196" font-size="10">rerank → 暂不绑定</text>
+
+  <rect class="fam" x="820" y="96" width="240" height="112" rx="10"/>
+  <text class="t" x="836" y="120" font-size="12.5" font-weight="600">④ 能力工具自动出现</text>
+  <text class="m mono" x="836" y="142" font-size="9.5">generateImage / generateVideo</text>
+  <text class="m mono" x="836" y="160" font-size="9.5">speak / transcribe / seeImage</text>
+  <text class="m" x="836" y="180" font-size="10">判据是纯读的：档案声明 + 连接可解析，</text>
+  <text class="m" x="836" y="196" font-size="10">不试调用。域没有这个族 = 没有这个工具。</text>
+
+  <line x1="270" y1="152" x2="296" y2="152" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a7)"/>
+  <line x1="530" y1="152" x2="556" y2="152" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a7)"/>
+  <line x1="790" y1="152" x2="816" y2="152" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a7)"/>
+
+  <text class="m" x="40" y="240" font-size="11.5" font-weight="600">七个端点族——这就是"能干什么"的全部词汇</text>
+
+  <rect class="fam" x="40" y="250" width="140" height="42" rx="8"/>
+  <text class="t mono" x="52" y="268" font-size="11">chat</text>
+  <text class="m" x="52" y="284" font-size="9">能绑域 · 对话</text>
+
+  <rect class="no" x="190" y="250" width="140" height="42" rx="8"/>
+  <text class="t mono" x="202" y="268" font-size="11">embedding</text>
+  <text class="m" x="202" y="284" font-size="9">全局一个槽</text>
+
+  <rect class="no" x="340" y="250" width="140" height="42" rx="8"/>
+  <text class="t mono" x="352" y="268" font-size="11">rerank</text>
+  <text class="m" x="352" y="284" font-size="9">暂不绑定</text>
+
+  <rect class="fam" x="490" y="250" width="140" height="42" rx="8"/>
+  <text class="t mono" x="502" y="268" font-size="11">images</text>
+  <text class="m" x="502" y="284" font-size="9">能绑域 · 生图</text>
+
+  <rect class="fam" x="640" y="250" width="140" height="42" rx="8"/>
+  <text class="t mono" x="652" y="268" font-size="11">tts</text>
+  <text class="m" x="652" y="284" font-size="9">能绑域 · 语音合成</text>
+
+  <rect class="fam" x="790" y="250" width="140" height="42" rx="8"/>
+  <text class="t mono" x="802" y="268" font-size="11">asr</text>
+  <text class="m" x="802" y="284" font-size="9">能绑域 · 语音识别</text>
+
+  <rect class="fam" x="940" y="250" width="120" height="42" rx="8"/>
+  <text class="t mono" x="952" y="268" font-size="11">video</text>
+  <text class="m" x="952" y="284" font-size="9">能绑域 · 生视频</text>
+
+  <rect class="panel" x="40" y="312" width="1020" height="106" rx="10"/>
+  <text class="t" x="58" y="336" font-size="12" font-weight="600">不确定能力时：点「探测」，真打一次上游</text>
+  <text class="m" x="58" y="358" font-size="10">按端点族串行实测：/chat/completions（文本 · 看图 · 听音频 · 看视频 · 读文件）· /images/generations · /audio/speech · /audio/transcriptions</text>
+  <text class="m" x="58" y="378" font-size="10">写回两种：confirmed 只补不删（默认，安全）　/　override 整体覆盖（清理误标）</text>
+  <text class="m" x="58" y="398" font-size="10">探测不在建档路径上：不点它，模型也能用；点了它，能力从"声明的"变成"实测的"。</text>
+
+  <rect class="box" x="40" y="434" width="1020" height="52" rx="10"/>
+  <text class="t" x="58" y="456" font-size="11.5" font-weight="600">两层配置，分开改</text>
+  <text class="m" x="58" y="475" font-size="10">ProviderConnection（连哪家、什么密钥）→ ModelProfile（用哪个模型、开哪些能力、带什么参数）→ Domain（谁用它）。换密钥只改连接，档案不动。</text>
+
+  <text class="m" x="40" y="514" font-size="10">代价：embedding 全局唯一，换它等于换整个向量空间——知识库要重灌或清空，管控台会拦一下再让你确认。</text>
+</svg>

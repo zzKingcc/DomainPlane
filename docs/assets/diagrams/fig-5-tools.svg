@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 556" width="1100" height="556" role="img" aria-label="工具的三种来源汇入同一张目录">
+  <defs>
+    <marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <style>
+      .t { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #0f172a; }
+      .m { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #64748b; }
+      .mono { font-family: "JetBrains Mono","Cascadia Mono",Consolas,monospace; }
+      .box { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
+      .src { fill: #eef2ff; stroke: #c7d2fe; stroke-width: 1.5; }
+      .desc { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; }
+      .wait { fill: #fffbeb; stroke: #fde68a; stroke-width: 1.5; }
+      .ok { fill: #ecfdf5; stroke: #99f6e4; stroke-width: 1.5; }
+      .panel { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect width="1100" height="556" fill="#ffffff"/>
+  <text class="t" x="40" y="44" font-size="20" font-weight="700">工具：三种来源，一条描述符</text>
+  <text class="m" x="40" y="70" font-size="13">加一种来源不用改编排——编排侧只认 ToolDescriptor，它不知道这个工具住在进程里、住在别人机器上，还是住在一个 MCP server 里。</text>
+
+  <rect class="src" x="40" y="96" width="300" height="96" rx="10"/>
+  <text class="t" x="58" y="120" font-size="13" font-weight="600">本地 Bean</text>
+  <text class="m" x="58" y="140" font-size="10">方法上标 @Tool，启动时扫描</text>
+  <text class="m" x="58" y="158" font-size="10">执行：本进程直接调用</text>
+  <text class="m" x="58" y="176" font-size="10">审批：读注解 approval / effect</text>
+
+  <rect class="src" x="380" y="96" width="300" height="96" rx="10"/>
+  <text class="t" x="398" y="120" font-size="13" font-weight="600">远程实例</text>
+  <text class="m" x="398" y="140" font-size="10">宿主应用反向注册 + 5s 心跳</text>
+  <text class="m" x="398" y="158" font-size="10">执行：HTTP 回调宿主</text>
+  <text class="m" x="398" y="176" font-size="10">掉线：35s 无心跳判死（= 7 个周期）</text>
+
+  <rect class="src" x="720" y="96" width="300" height="96" rx="10"/>
+  <text class="t" x="738" y="120" font-size="13" font-weight="600">MCP server</text>
+  <text class="m" x="738" y="140" font-size="10">后台建连 + 30s 对账</text>
+  <text class="m" x="738" y="158" font-size="10">协议版本自动协商，不用手填</text>
+  <text class="m" x="738" y="176" font-size="10">审批：默认全审批</text>
+
+  <line x1="190" y1="192" x2="190" y2="222" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a5)"/>
+  <line x1="530" y1="192" x2="530" y2="222" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a5)"/>
+  <line x1="870" y1="192" x2="870" y2="222" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a5)"/>
+
+  <rect class="desc" x="40" y="226" width="1020" height="84" rx="10"/>
+  <text class="t" x="60" y="250" font-size="13" font-weight="600">ToolDescriptor　—　编排侧唯一认识的东西</text>
+  <text class="m mono" x="60" y="274" font-size="10.5">name · description · paramSchema · effect(READ / WRITE / DESTRUCTIVE) · approval · visibleDomains · source</text>
+  <text class="m" x="60" y="294" font-size="10">模型看到的工具名、审批看到的参数、日志里记的调用、管控台工具目录里的说明——都是这一条，没有第二份。</text>
+
+  <line x1="300" y1="310" x2="300" y2="336" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a5)"/>
+  <line x1="800" y1="310" x2="800" y2="336" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a5)"/>
+  <text class="m" x="316" y="328" font-size="10">需要审批</text>
+  <text class="m" x="816" y="328" font-size="10">免审批</text>
+
+  <rect class="wait" x="40" y="340" width="520" height="80" rx="10"/>
+  <text class="t" x="58" y="364" font-size="12.5" font-weight="600">停在这里等人 → INTERRUPT</text>
+  <text class="m" x="58" y="384" font-size="10">参数在这一步就已经换成 ***，工具下线时整个参数体换成"已整体屏蔽"。</text>
+  <text class="m" x="58" y="402" font-size="10">审批人看到的是"这件事"，不是"这个密钥"——所以审批可以给业务方看。</text>
+
+  <rect class="box" x="600" y="340" width="460" height="80" rx="10"/>
+  <text class="t" x="618" y="364" font-size="12.5" font-weight="600">直接进执行器</text>
+  <text class="m" x="618" y="384" font-size="10">读类工具不该打断对话；写类默认要人看一眼。</text>
+  <text class="m" x="618" y="402" font-size="10">远程 / MCP 未声明时，按 effect != READ 推导。</text>
+
+  <rect class="ok" x="40" y="436" width="1020" height="52" rx="10"/>
+  <text class="t" x="58" y="458" font-size="12" font-weight="600">执行与回填</text>
+  <text class="m" x="58" y="477" font-size="10">本地直调 / 远程 HTTP / MCP 调用，各自超时与失败分类；结果回填成 TOOL_RESULT，再回到 agent。</text>
+
+  <text class="m" x="40" y="516" font-size="10.5">判据永远是同一句：加完之后主干有没有多出一个 if。三种来源、三种执行、三种保活，主干里没有 if(source == …)。</text>
+</svg>

@@ -403,7 +403,7 @@ session.modalities   = ["text", "audio"]
 
 - **2xx 不等于产出**：必须验响应形状；
 - **超时按端点分级**：chat 数十秒、生图可达数分钟；
-- **失败只记"未确认"，不写"不支持"**：一次抖动不该删掉昨天还能用的能力。
+- **只有端点确实不存在（404 / 405 / 415 / 501）才写"不支持"**，并会把 embedding 自动撤销；400 / 422 / 5xx / 429 / 超时 / 网络一律记"未确认"、不写"不支持"：一次抖动不该删掉昨天还能用的能力。
 
 ---
 
@@ -420,8 +420,7 @@ session.modalities   = ["text", "audio"]
 | `video` | 无（Sora 已下线） | — | 只能等元数据或手动声明 |
 | （未实现） | `/v1/realtime` | **C** | 平台目前没有 WebSocket 音频通道 |
 
-参数注入点：标准字段（`temperature` / `max_tokens` 等）走客户端 builder；其它参数一律由用户在
-「自定义参数」JSON 里声明，原样拼进请求体（见 `docs/08-模型与多模态.md`）。
+参数注入点：标准字段（`temperature` / `max_tokens` 等）与私有参数都由管控台写在「自定义参数」JSON 里，原样拼进请求体（见 `docs/08-模型与多模态.md`）。
 
 ---
 
@@ -432,7 +431,7 @@ session.modalities   = ["text", "audio"]
 对话：POST /chat/completions      {model, messages, stream, max_completion_tokens}
       产出 choices[0].message(.content / .tool_calls / .audio.data)
 新主线：POST /responses           {model, input, tools, store}（兼容层普遍没有）
-向量：POST /embeddings            {model, input, dimensions} → data[].embedding
+向量：POST /embeddings            {model, input, dimensions} → data[].embedding   # 上游规范含 dimensions；本平台不下发 dimensions，维度取模型实测值
 生图：POST /images/generations    {model, prompt, size?} → data[].b64_json|url
 改图：POST /images/edits          multipart(image[], mask?, prompt)
 TTS ：POST /audio/speech          {model, input, voice, response_format} → 二进制

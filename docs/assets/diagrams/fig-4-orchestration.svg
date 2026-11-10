@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 566" width="1100" height="566" role="img" aria-label="一轮对话的编排状态图与三类出口">
+  <defs>
+    <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="a4r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
+    </marker>
+    <style>
+      .t { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #0f172a; }
+      .m { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #64748b; }
+      .mono { font-family: "JetBrains Mono","Cascadia Mono",Consolas,monospace; }
+      .box { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
+      .gate { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; }
+      .acc { fill: #eef2ff; stroke: #c7d2fe; stroke-width: 1.5; }
+      .wait { fill: #fffbeb; stroke: #fde68a; stroke-width: 1.5; }
+      .panel { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect width="1100" height="566" fill="#ffffff"/>
+  <text class="t" x="40" y="44" font-size="20" font-weight="700">一轮对话：三道闸、三个节点、三类出口</text>
+  <text class="m" x="40" y="70" font-size="13">审批中断的本质是"图停在某个节点之前"，不是抛异常——所以它停得下来，也接得回去。</text>
+
+  <text class="m" x="40" y="100" font-size="11.5" font-weight="600">入口三道闸（顺序不能换：先域、再容量、最后会话）</text>
+
+  <rect class="gate" x="40" y="112" width="170" height="46" rx="8"/>
+  <text class="t" x="56" y="132" font-size="11">① 域校验</text>
+  <text class="m" x="56" y="149" font-size="9.5">存在 / 可调用 / 未软删</text>
+
+  <rect class="gate" x="240" y="112" width="170" height="46" rx="8"/>
+  <text class="t" x="256" y="132" font-size="11">② 并发闸门</text>
+  <text class="m" x="256" y="149" font-size="9.5">拿不到 → 20002 SYSTEM_BUSY</text>
+
+  <rect class="gate" x="440" y="112" width="170" height="46" rx="8"/>
+  <text class="t" x="456" y="132" font-size="11">③ 会话串行锁</text>
+  <text class="m" x="456" y="149" font-size="9.5">占不到 → 30003 SESSION_BUSY</text>
+
+  <text class="m" x="640" y="132" font-size="10">反过来会在"域根本不可用"时白占一个并发位。</text>
+  <text class="m" x="640" y="149" font-size="10">域不可用是确定的，容量是稀缺的。</text>
+
+  <line x1="210" y1="135" x2="236" y2="135" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
+  <line x1="410" y1="135" x2="436" y2="135" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
+
+  <rect class="box" x="356" y="196" width="120" height="30" rx="15"/>
+  <text class="m mono" x="416" y="215" font-size="10" text-anchor="middle">START</text>
+  <line x1="416" y1="226" x2="416" y2="240" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
+
+  <rect class="acc" x="300" y="244" width="220" height="64" rx="10"/>
+  <text class="t" x="318" y="268" font-size="13" font-weight="600">agent</text>
+  <text class="m" x="318" y="288" font-size="10">调模型，收集本轮的 tool_calls</text>
+  <text class="m" x="318" y="302" font-size="10">吐 TOKEN / THINKING　查停止标志</text>
+
+  <rect class="wait" x="300" y="348" width="220" height="56" rx="10"/>
+  <text class="t" x="318" y="370" font-size="13" font-weight="600">review</text>
+  <text class="m" x="318" y="390" font-size="10">空节点，一行业务代码都没有</text>
+
+  <rect class="box" x="300" y="444" width="220" height="56" rx="10"/>
+  <text class="t" x="318" y="466" font-size="13" font-weight="600">tools</text>
+  <text class="m" x="318" y="486" font-size="10">本地 / 远程 / MCP 逐个执行并回填</text>
+
+  <rect class="box" x="640" y="248" width="110" height="56" rx="10"/>
+  <text class="t" x="656" y="272" font-size="13" font-weight="600">END</text>
+  <text class="m" x="656" y="290" font-size="10">DONE</text>
+
+  <line x1="520" y1="272" x2="636" y2="272" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
+  <text class="m" x="528" y="264" font-size="10">模型不再要工具</text>
+
+  <line x1="380" y1="308" x2="380" y2="344" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
+  <text class="m" x="254" y="330" font-size="10">有调用 · 需审批</text>
+
+  <line x1="410" y1="404" x2="410" y2="440" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
+  <text class="m" x="424" y="426" font-size="10">批准后执行</text>
+
+  <path d="M524,296 L580,296 L580,472 L526,472" fill="none" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
+  <text class="m" x="590" y="316" font-size="10">有调用 · 免审批</text>
+  <text class="m" x="590" y="332" font-size="10">（判断在调用产生之后，</text>
+  <text class="m" x="590" y="348" font-size="10">不是提前按域拦一遍）</text>
+
+  <path d="M296,472 L246,472 L246,276 L296,276" fill="none" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
+  <text class="m" x="120" y="380" font-size="10">有工具结果就回 agent</text>
+  <text class="m" x="120" y="396" font-size="10">直到模型不再要工具</text>
+
+  <rect class="panel" x="790" y="196" width="270" height="304" rx="10"/>
+  <text class="t" x="808" y="220" font-size="12" font-weight="600">三类出口</text>
+  <text class="m mono" x="808" y="242" font-size="10.5">DONE</text>
+  <text class="m" x="864" y="242" font-size="10">正常结束，出交付单</text>
+  <text class="m mono" x="808" y="262" font-size="10.5">STOPPED</text>
+  <text class="m" x="864" y="262" font-size="10">用户主动停止，幂等</text>
+  <text class="m mono" x="808" y="282" font-size="10.5">ERROR</text>
+  <text class="m" x="864" y="282" font-size="10">带 code / retryable</text>
+
+  <text class="t" x="808" y="316" font-size="12" font-weight="600">中断与恢复</text>
+  <text class="m" x="808" y="338" font-size="10">停在 review 前 → 发 INTERRUPT</text>
+  <text class="m" x="808" y="356" font-size="10">参数已掩码：审批看的是"这件事"</text>
+  <text class="m" x="808" y="374" font-size="10">断点落 Redis，默认 24h</text>
+  <text class="m" x="808" y="392" font-size="10">resume 从断点续跑，不重放已花的钱</text>
+
+  <text class="t" x="808" y="426" font-size="12" font-weight="600">拒绝也要走完</text>
+  <text class="m" x="808" y="448" font-size="10">approved=false 不是砍断图，而是往</text>
+  <text class="m" x="808" y="464" font-size="10">tools 注入一条"被拒绝"的结果，让</text>
+  <text class="m" x="808" y="480" font-size="10">模型改口——否则用户只看到半截回答。</text>
+
+  <rect class="panel" x="40" y="500" width="1020" height="50" rx="10"/>
+  <text class="m" x="60" y="521" font-size="10.5">预算：历史检索 read_history + recall_history 合计 ≤ 3 次　·　生图 ≤ 3 次　·　看图 60s　·　能力工具 120s　·　知识注入 8 片 / 3000 字符</text>
+  <text class="m" x="60" y="539" font-size="10">预算挂在"本轮"上，不挂在工具里——一轮会走多遍 agent → tools，挂工具里等于每遍重置一次。</text>
+</svg>

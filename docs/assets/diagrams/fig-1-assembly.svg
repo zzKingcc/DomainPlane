@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 650" width="1100" height="650" role="img" aria-label="一轮对话的装配路径">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 620" width="1100" height="620" role="img" aria-label="一轮对话的四维能力装配">
   <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
     </marker>
     <style>
@@ -9,96 +9,107 @@
       .mono { font-family: "JetBrains Mono","Cascadia Mono",Consolas,monospace; }
       .box { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
       .panel { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1.5; }
-      .accent { fill: #eef2ff; stroke: #c7d2fe; stroke-width: 1.5; }
-      .teal { fill: #ecfdf5; stroke: #99f6e4; stroke-width: 1.5; }
-      .amber { fill: #fffbeb; stroke: #fde68a; stroke-width: 1.5; }
+      .add { fill: #ecfdf5; stroke: #99f6e4; stroke-width: 1.5; }
+      .win { fill: #fffbeb; stroke: #fde68a; stroke-width: 1.5; }
+      .none { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1.2; stroke-dasharray: 4 3; }
     </style>
   </defs>
 
-  <rect width="1100" height="650" fill="#ffffff"/>
-  <text class="t" x="40" y="46" font-size="20" font-weight="700">一轮对话的装配路径</text>
-  <text class="m" x="40" y="72" font-size="13">带域进来 → 沿链取能力 → 进图执行 → 事件流回传。装配发生在每一次请求，不是启动时算一次。</text>
+  <rect width="1100" height="620" fill="#ffffff"/>
+  <text class="t" x="40" y="44" font-size="20" font-weight="700">一轮对话的装配路径</text>
+  <text class="m" x="40" y="70" font-size="13">带域进来 → 沿链取四维能力 → 装配结果只作用于这一轮。装配发生在每次请求，不是启动时算一次。</text>
 
-  <!-- Stage 1 -->
-  <rect class="box" x="40" y="100" width="200" height="96" rx="10"/>
-  <text class="t" x="60" y="130" font-size="14" font-weight="600">① HTTP 请求</text>
-  <text class="m mono" x="60" y="154" font-size="11">POST /api/agent/chat</text>
-  <text class="m" x="60" y="174" font-size="11">domain / sessionId / 问题</text>
+  <rect class="panel" x="40" y="94" width="1020" height="42" rx="8"/>
+  <text class="m mono" x="60" y="112" font-size="11">POST /api/agent/chat</text>
+  <text class="m" x="60" y="128" font-size="11">domain · sessionId · message</text>
+  <text class="m" x="330" y="120" font-size="11">→ 域校验（存在 / 可调用 / 未软删）→ 输入清洗 → 并发闸门 → 会话串行锁</text>
+  <text class="m" x="880" y="120" font-size="11">三道闸顺序不可换</text>
 
-  <!-- Stage 2 -->
-  <rect class="accent" x="290" y="100" width="230" height="96" rx="10"/>
-  <text class="t" x="310" y="130" font-size="14" font-weight="600">② 域链解析</text>
-  <text class="m" x="310" y="154" font-size="11">从自身向上取到根域</text>
-  <text class="m" x="310" y="174" font-size="11">可调用性 / 软删 / 版本校验</text>
+  <text class="m" x="40" y="168" font-size="12" font-weight="600">域链</text>
+  <text class="m" x="332" y="168" font-size="12" font-weight="600" text-anchor="middle">工具</text>
+  <text class="m" x="532" y="168" font-size="12" font-weight="600" text-anchor="middle">知识</text>
+  <text class="m" x="732" y="168" font-size="12" font-weight="600" text-anchor="middle">提示词</text>
+  <text class="m" x="932" y="168" font-size="12" font-weight="600" text-anchor="middle">模型</text>
 
-  <!-- Stage 3 -->
-  <rect class="teal" x="570" y="100" width="240" height="96" rx="10"/>
-  <text class="t" x="590" y="130" font-size="14" font-weight="600">③ 四维能力装配</text>
-  <text class="m" x="590" y="154" font-size="11">工具 · 知识 · 提示词 · 模型</text>
-  <text class="m" x="590" y="174" font-size="11">三累加 + 一就近覆盖</text>
+  <rect class="box" x="40" y="180" width="180" height="58" rx="8"/>
+  <text class="t mono" x="56" y="204" font-size="12">default</text>
+  <text class="m" x="56" y="224" font-size="10">根域 · 只能装配，不可调用</text>
 
-  <!-- Stage 4 -->
-  <rect class="amber" x="860" y="100" width="200" height="96" rx="10"/>
-  <text class="t" x="880" y="130" font-size="14" font-weight="600">④ 编排图执行</text>
-  <text class="m" x="880" y="154" font-size="11">agent ⇄ tools</text>
-  <text class="m" x="880" y="174" font-size="11">审批点可中断</text>
+  <rect class="box" x="240" y="180" width="185" height="58" rx="8"/>
+  <text class="t" x="254" y="204" font-size="11">web_search</text>
+  <text class="m" x="254" y="222" font-size="10">声明在根 → 全体可见</text>
 
-  <line x1="240" y1="148" x2="284" y2="148" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <line x1="520" y1="148" x2="564" y2="148" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <line x1="810" y1="148" x2="854" y2="148" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect class="none" x="440" y="180" width="185" height="58" rx="8"/>
+  <text class="m" x="454" y="204" font-size="11">未绑知识体</text>
+  <text class="m" x="454" y="222" font-size="10">不检索、不下发检索工具</text>
 
-  <!-- Domain chain detail -->
-  <rect class="panel" x="40" y="228" width="1020" height="150" rx="12"/>
-  <text class="m" x="60" y="256" font-size="12" font-weight="600">域链（示例）</text>
+  <rect class="box" x="640" y="180" width="185" height="58" rx="8"/>
+  <text class="t" x="654" y="204" font-size="11">基底片段</text>
+  <text class="m" x="654" y="222" font-size="10">根域提示词 = 地基</text>
 
-  <rect class="box" x="60" y="272" width="190" height="52" rx="8"/>
-  <text class="t mono" x="76" y="296" font-size="12">default</text>
-  <text class="m" x="76" y="314" font-size="10">根域 · 提示词基底</text>
+  <rect class="win" x="840" y="180" width="185" height="58" rx="8"/>
+  <text class="t" x="854" y="204" font-size="11">gpt-4o</text>
+  <text class="m" x="854" y="222" font-size="10">链上第一个绑定</text>
 
-  <rect class="box" x="290" y="272" width="220" height="52" rx="8"/>
-  <text class="t mono" x="306" y="296" font-size="12">default.customer</text>
-  <text class="m" x="306" y="314" font-size="10">装配节点 · 绑主模型</text>
+  <rect class="box" x="40" y="248" width="180" height="58" rx="8"/>
+  <text class="t mono" x="56" y="272" font-size="12">default.customer</text>
+  <text class="m" x="56" y="292" font-size="10">装配节点</text>
 
-  <rect class="accent" x="550" y="272" width="270" height="52" rx="8"/>
-  <text class="t mono" x="566" y="296" font-size="12">default.customer.aftersale</text>
-  <text class="m" x="566" y="314" font-size="10">可调用叶子 · 本轮入口</text>
+  <rect class="box" x="240" y="248" width="185" height="58" rx="8"/>
+  <text class="t" x="254" y="272" font-size="11">order_query</text>
+  <text class="m" x="254" y="290" font-size="10">+1</text>
 
-  <line x1="250" y1="298" x2="284" y2="298" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <line x1="510" y1="298" x2="544" y2="298" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect class="add" x="440" y="248" width="185" height="58" rx="8"/>
+  <text class="t" x="454" y="272" font-size="11">kb-order</text>
+  <text class="m" x="454" y="290" font-size="10">绑到本域 → 本域及后代可查</text>
 
-  <rect class="box" x="850" y="264" width="190" height="68" rx="8"/>
-  <text class="m" x="866" y="286" font-size="11">工具：祖先声明即可见</text>
-  <text class="m" x="866" y="304" font-size="11">知识：只向上召回</text>
-  <text class="m" x="866" y="322" font-size="11">模型：最近绑定胜出</text>
+  <rect class="box" x="640" y="248" width="185" height="58" rx="8"/>
+  <text class="t" x="654" y="272" font-size="11">+ 客服口吻</text>
+  <text class="m" x="654" y="290" font-size="10">拼接在基底之后</text>
 
-  <!-- Graph -->
-  <rect class="panel" x="40" y="402" width="1020" height="128" rx="12"/>
-  <text class="m" x="60" y="428" font-size="12" font-weight="600">编排图（LangGraph4j）</text>
+  <rect class="none" x="840" y="248" width="185" height="58" rx="8"/>
+  <text class="m" x="854" y="272" font-size="11">未绑定</text>
+  <text class="m" x="854" y="290" font-size="10">继续向祖先找</text>
 
-  <rect class="box" x="80" y="444" width="150" height="56" rx="8"/>
-  <text class="t" x="112" y="468" font-size="13" font-weight="600">agent</text>
-  <text class="m" x="96" y="488" font-size="10">调模型 / 吐 TOKEN</text>
+  <rect class="box" x="40" y="316" width="180" height="58" rx="8"/>
+  <text class="t mono" x="56" y="340" font-size="11">default.customer</text>
+  <text class="t mono" x="56" y="356" font-size="11">.aftersale</text>
+  <text class="m" x="150" y="356" font-size="10">入口</text>
 
-  <rect class="amber" x="300" y="444" width="150" height="56" rx="8"/>
-  <text class="t" x="330" y="468" font-size="13" font-weight="600">review</text>
-  <text class="m" x="314" y="488" font-size="10">审批中断锚点</text>
+  <rect class="box" x="240" y="316" width="185" height="58" rx="8"/>
+  <text class="t" x="254" y="340" font-size="11">refund_order</text>
+  <text class="m" x="254" y="358" font-size="10">+1（需审批）</text>
 
-  <rect class="box" x="520" y="444" width="150" height="56" rx="8"/>
-  <text class="t" x="552" y="468" font-size="13" font-weight="600">tools</text>
-  <text class="m" x="536" y="488" font-size="10">本地 / 远程 / MCP</text>
+  <rect class="add" x="440" y="316" width="185" height="58" rx="8"/>
+  <text class="t" x="454" y="340" font-size="11">kb-aftersale</text>
+  <text class="m" x="454" y="358" font-size="10">与前一个体一起查</text>
 
-  <line x1="230" y1="462" x2="294" y2="462" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <line x1="450" y1="462" x2="514" y2="462" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <path d="M595,500 C595,530 155,530 155,504" fill="none" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <text class="m" x="340" y="524" font-size="10">有工具调用就循环，直到模型不再要工具</text>
+  <rect class="box" x="640" y="316" width="185" height="58" rx="8"/>
+  <text class="t" x="654" y="340" font-size="11">+ 退货政策</text>
+  <text class="m" x="654" y="358" font-size="10">越靠近入口越靠后</text>
 
-  <text class="m" x="720" y="466" font-size="11">无审批 → 直接进 tools</text>
-  <text class="m" x="720" y="486" font-size="11">有审批 → 停在 review 前，发 INTERRUPT</text>
-  <text class="m" x="720" y="506" font-size="11">resume 从断点续跑，不重放已花掉的钱</text>
+  <rect class="win" x="840" y="316" width="185" height="58" rx="8"/>
+  <text class="t" x="854" y="340" font-size="11">qwen-max</text>
+  <text class="m" x="854" y="358" font-size="10">就近覆盖，完全盖掉父域</text>
 
-  <!-- SSE -->
-  <rect class="box" x="40" y="552" width="1020" height="66" rx="10"/>
-  <text class="t" x="60" y="578" font-size="13" font-weight="600">SSE 事件流</text>
-  <text class="m mono" x="60" y="600" font-size="11">TOKEN · THINKING · PLAN · TOOL_CALL · TOOL_RESULT · MEDIA · INTERRUPT · STOPPED · ERROR · DONE</text>
-  <text class="m" x="820" y="600" font-size="10">终止事件只有三个：DONE / STOPPED / ERROR</text>
+  <line x1="220" y1="209" x2="236" y2="209" stroke="#94a3b8" stroke-width="1.2"/>
+  <line x1="220" y1="277" x2="236" y2="277" stroke="#94a3b8" stroke-width="1.2"/>
+  <line x1="220" y1="345" x2="236" y2="345" stroke="#94a3b8" stroke-width="1.2"/>
+
+  <rect class="panel" x="40" y="392" width="1020" height="76" rx="10"/>
+  <text class="t" x="60" y="416" font-size="12" font-weight="600">本轮装配结果（只对这一次请求有效，下一轮重新算）</text>
+  <text class="m" x="60" y="440" font-size="11">工具 3 个　·　知识 2 个体（都查）　·　提示词 3 段（按根 → 叶拼接）　·　模型 qwen-max（链上第一个绑定胜出）</text>
+  <text class="m" x="60" y="458" font-size="10">为什么工具 / 知识 / 提示词累加、模型覆盖：前三者是"能力供给"，父域给了子域就该能用；模型是"资源绑定"，一个域只能有一份档案。</text>
+
+  <rect x="40" y="486" width="14" height="14" rx="3" fill="#ecfdf5" stroke="#99f6e4" stroke-width="1.5"/>
+  <text class="m" x="62" y="497" font-size="11">沿链累加</text>
+  <rect x="140" y="486" width="14" height="14" rx="3" fill="#fffbeb" stroke="#fde68a" stroke-width="1.5"/>
+  <text class="m" x="162" y="497" font-size="11">就近覆盖</text>
+  <rect x="240" y="486" width="14" height="14" rx="3" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text class="m" x="262" y="497" font-size="11">未贡献（不是"继承了个空"）</text>
+
+  <rect class="box" x="40" y="518" width="1020" height="70" rx="10"/>
+  <text class="t" x="60" y="542" font-size="12" font-weight="600">装配完进编排图，结果从 SSE 出去</text>
+  <text class="m mono" x="60" y="564" font-size="10.5">TOKEN · THINKING · PLAN · TOOL_CALL · TOOL_RESULT · MEDIA · INTERRUPT · STOPPED · ERROR · DONE</text>
+  <text class="m" x="60" y="581" font-size="10">终止只有三个：DONE / STOPPED / ERROR —— 只收到 TOKEN 就断流的，SDK 报 STREAM_TRUNCATED，不当正常结束。</text>
 </svg>

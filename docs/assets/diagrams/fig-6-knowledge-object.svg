@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 596" width="1100" height="596" role="img" aria-label="知识体的对象模型、摄取链路与换落点">
+  <defs>
+    <marker id="a6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <style>
+      .t { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #0f172a; }
+      .m { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #64748b; }
+      .mono { font-family: "JetBrains Mono","Cascadia Mono",Consolas,monospace; }
+      .box { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
+      .conn { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; }
+      .body { fill: #ecfdf5; stroke: #99f6e4; stroke-width: 1.5; }
+      .dom { fill: #eef2ff; stroke: #c7d2fe; stroke-width: 1.5; }
+      .step { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
+      .panel { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect width="1100" height="596" fill="#ffffff"/>
+  <text class="t" x="40" y="44" font-size="20" font-weight="700">知识库的对象只有一个：知识体</text>
+  <text class="m" x="40" y="70" font-size="13">不是"给某个域建一个库"。域只是绑定它的消费者——所以一份资料能给多个场景用，删域也不会碰这份数据。</text>
+
+  <text class="m" x="40" y="100" font-size="11.5" font-weight="600">Connection　连哪台机器</text>
+  <rect class="conn" x="40" y="110" width="165" height="46" rx="8"/>
+  <text class="t mono" x="54" y="130" font-size="11">es-main</text>
+  <text class="m" x="54" y="147" font-size="9.5">elasticsearch · 关键字槽</text>
+
+  <rect class="conn" x="220" y="110" width="165" height="46" rx="8"/>
+  <text class="t mono" x="234" y="130" font-size="11">qdrant-vec</text>
+  <text class="m" x="234" y="147" font-size="9.5">qdrant · 向量槽</text>
+
+  <rect class="conn" x="400" y="110" width="165" height="46" rx="8"/>
+  <text class="t mono" x="414" y="130" font-size="11">cos-raw</text>
+  <text class="m" x="414" y="147" font-size="9.5">s3 兼容 · 只存原文</text>
+
+  <line x1="120" y1="160" x2="120" y2="188" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <line x1="300" y1="160" x2="300" y2="188" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <line x1="480" y1="160" x2="480" y2="188" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text class="m" x="500" y="178" font-size="9.5">被引用（一个槽一条，不做同槽扇出）</text>
+
+  <rect class="body" x="40" y="192" width="525" height="126" rx="10"/>
+  <text class="t" x="58" y="216" font-size="13" font-weight="600">KnowledgeBody　一份数据 = 一个对象</text>
+  <text class="m mono" x="58" y="238" font-size="10">slug = aftersale-kb　→　index = domainplane_kb_aftersale-kb_1a2b3c4d</text>
+  <text class="m" x="58" y="258" font-size="10">· 索引名建体时派生并<b>冻结</b>：改名、换连接、换绑定都不动它</text>
+  <text class="m" x="58" y="276" font-size="10">· 关键字槽 / 向量槽 各一条连接，至少留一路；两路都配才是混合召回</text>
+  <text class="m" x="58" y="294" font-size="10">· 原文落点：本地盘或一条 s3 连接；archiveRaw 决定是否归档原始字节</text>
+  <text class="m" x="58" y="310" font-size="10">· 两个槽可以指向同一台（同地址只写一次）或两台（扇出后逐台合并）</text>
+
+  <line x1="300" y1="322" x2="300" y2="348" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text class="m" x="316" y="340" font-size="9.5">被绑定（纯查表，不继承）</text>
+
+  <rect class="dom" x="40" y="352" width="165" height="48" rx="8"/>
+  <text class="t mono" x="54" y="372" font-size="10.5">default.customer</text>
+  <text class="m" x="54" y="390" font-size="9.5">绑 → aftersale-kb</text>
+
+  <rect class="dom" x="220" y="352" width="165" height="48" rx="8"/>
+  <text class="t mono" x="234" y="372" font-size="10.5">…customer.aftersale</text>
+  <text class="m" x="234" y="390" font-size="9.5">绑 → aftersale-kb</text>
+
+  <rect class="dom" x="400" y="352" width="165" height="48" rx="8"/>
+  <text class="t mono" x="414" y="372" font-size="10.5">default.sales</text>
+  <text class="m" x="414" y="390" font-size="9.5">绑 → aftersale-kb</text>
+
+  <rect class="panel" x="40" y="414" width="525" height="46" rx="8"/>
+  <text class="m" x="58" y="434" font-size="10.5">三个域绑同一个体：查的是同一个索引、同一份数据，不是三份副本。</text>
+  <text class="m" x="58" y="451" font-size="10">删域只解绑——体的原文与索引一个字节都不动，之后可以再绑给新域。</text>
+
+  <text class="m" x="640" y="100" font-size="11.5" font-weight="600">摄取链路</text>
+
+  <rect class="step" x="640" y="110" width="420" height="48" rx="8"/>
+  <text class="t" x="656" y="130" font-size="11.5" font-weight="600">① 上传</text>
+  <text class="m" x="656" y="148" font-size="10">扩展名白名单：pdf / doc / docx / xls / xlsx / md / markdown / txt</text>
+
+  <rect class="step" x="640" y="168" width="420" height="48" rx="8"/>
+  <text class="t" x="656" y="188" font-size="11.5" font-weight="600">② 解析</text>
+  <text class="m" x="656" y="206" font-size="10">直连底层库取标题层级与坐标（不走"格式无关纯文本"）</text>
+
+  <rect class="step" x="640" y="226" width="420" height="48" rx="8"/>
+  <text class="t" x="656" y="246" font-size="11.5" font-weight="600">③ 切片</text>
+  <text class="m" x="656" y="264" font-size="10">按块级结构切，保留页码与标题路径，供召回后定位</text>
+
+  <rect class="step" x="640" y="284" width="420" height="48" rx="8"/>
+  <text class="t" x="656" y="304" font-size="11.5" font-weight="600">④ 双写</text>
+  <text class="m" x="656" y="322" font-size="10">切片进索引（派生数据）＋ 原文与原始字节进落点（不可再生）</text>
+
+  <line x1="850" y1="158" x2="850" y2="164" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a6)"/>
+  <line x1="850" y1="216" x2="850" y2="222" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a6)"/>
+  <line x1="850" y1="274" x2="850" y2="280" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a6)"/>
+
+  <rect class="panel" x="640" y="350" width="420" height="110" rx="10"/>
+  <text class="t" x="656" y="372" font-size="11.5" font-weight="600">换落点 = 搬家，不是迁移</text>
+  <text class="m" x="656" y="392" font-size="10">在原文还在的前提下，索引随时可以重建。</text>
+  <text class="m" x="656" y="410" font-size="10">① 在新连接上从原文写满　② 校验条数对得上</text>
+  <text class="m" x="656" y="428" font-size="10">③ 才切指针　④ 旧集合留着不删（留退路）</text>
+  <text class="m" x="656" y="448" font-size="10">所以"换向量库"不是数据迁移，是一次重灌。</text>
+
+  <text class="m" x="40" y="490" font-size="10.5" font-weight="600">代价：</text>
+  <text class="m" x="80" y="490" font-size="10.5">索引名带 8 位哈希、人不可读；排障要走知识库页反查，不能靠肉眼认。</text>
+  <text class="m" x="40" y="510" font-size="10.5">　　　保存配置时不校验类型——配错的那一路在检索时被跳过并留日志，不在保存时拦你。</text>
+  <text class="m" x="40" y="534" font-size="10">　　　后者是刻意的：保存路径上一旦加了网络校验，对端一不可达，运维就改不了配置了。</text>
+</svg>

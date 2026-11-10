@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 616" width="1100" height="616" role="img" aria-label="部署拓扑与外部依赖">
+  <defs>
+    <marker id="a8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="a8s" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M10,0 L0,5 L10,10 z" fill="#94a3b8"/>
+    </marker>
+    <style>
+      .t { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #0f172a; }
+      .m { font-family: "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif; fill: #64748b; }
+      .mono { font-family: "JetBrains Mono","Cascadia Mono",Consolas,monospace; }
+      .box { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
+      .core { fill: #eef2ff; stroke: #c7d2fe; stroke-width: 1.5; }
+      .ext { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; }
+      .store { fill: #ecfdf5; stroke: #99f6e4; stroke-width: 1.5; }
+      .warn { fill: #fffbeb; stroke: #fde68a; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect width="1100" height="616" fill="#ffffff"/>
+  <text class="t" x="40" y="44" font-size="20" font-weight="700">部署：一个 jar，四个外部依赖</text>
+  <text class="m" x="40" y="70" font-size="13">只有 Redis 是必填（不配也能启动，第一轮对话才报 90005）。ES / Qdrant 只在用知识库时需要，S3 只在原文要放对象存储时需要。</text>
+
+  <rect class="ext" x="40" y="140" width="230" height="80" rx="10"/>
+  <text class="t" x="56" y="164" font-size="12" font-weight="600">调用方</text>
+  <text class="m" x="56" y="184" font-size="10">浏览器（管控台 11 页）</text>
+  <text class="m" x="56" y="200" font-size="10">业务应用（HTTP + SSE）</text>
+
+  <rect class="ext" x="40" y="250" width="230" height="80" rx="10"/>
+  <text class="t" x="56" y="274" font-size="12" font-weight="600">三个 SDK（可选）</text>
+  <text class="m" x="56" y="294" font-size="10">chat / kb / tool-provider</text>
+  <text class="m" x="56" y="310" font-size="10">只是同一份报文的便利封装</text>
+
+  <rect class="core" x="330" y="230" width="440" height="150" rx="12"/>
+  <text class="t" x="350" y="256" font-size="13" font-weight="600">domainplane-v1.0.jar　:9527</text>
+  <text class="m mono" x="350" y="278" font-size="10">/console/*　　管控台（同源静态资源，零 CDN）</text>
+  <text class="m mono" x="350" y="296" font-size="10">/api/agent/*　对话 / 审批 / 停止（SSE 出口）</text>
+  <text class="m mono" x="350" y="314" font-size="10">/admin/*　　　配置与运维（Cookie 或凭证头）</text>
+  <text class="m mono" x="350" y="332" font-size="10">/health　　　 免鉴权，给容器健康检查用</text>
+  <text class="m" x="350" y="360" font-size="10">启动期不建立任何强网络依赖：ES / MCP / Redis 都是懒连接。</text>
+
+  <rect class="ext" x="810" y="130" width="250" height="96" rx="10"/>
+  <text class="t" x="826" y="154" font-size="12" font-weight="600">上游服务商</text>
+  <text class="m" x="826" y="174" font-size="10">对话 · 生图 · 视频 · TTS · ASR · 向量</text>
+  <text class="m" x="826" y="192" font-size="10">OpenAI 兼容 / Anthropic 两种协议</text>
+  <text class="m" x="826" y="210" font-size="10">连接与密钥存在管控台里，不写配置文件</text>
+
+  <rect class="ext" x="810" y="252" width="250" height="72" rx="10"/>
+  <text class="t" x="826" y="276" font-size="12" font-weight="600">MCP server</text>
+  <text class="m" x="826" y="296" font-size="10">后台建连 · 30s 对账 · 断线重连</text>
+  <text class="m" x="826" y="312" font-size="10">协议版本自动协商，OAuth 授权可撤销</text>
+
+  <rect class="ext" x="810" y="350" width="250" height="82" rx="10"/>
+  <text class="t" x="826" y="374" font-size="12" font-weight="600">工具实例（宿主应用）</text>
+  <text class="m" x="826" y="394" font-size="10">启动反向注册 @Tool + 5s 心跳</text>
+  <text class="m" x="826" y="412" font-size="10">服务端 HTTP 回调它执行</text>
+
+  <line x1="270" y1="180" x2="326" y2="240" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a8)"/>
+  <text class="m" x="252" y="216" font-size="9.5">SSE</text>
+  <line x1="270" y1="290" x2="326" y2="290" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a8)"/>
+
+  <line x1="770" y1="200" x2="806" y2="180" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a8)"/>
+  <line x1="770" y1="278" x2="806" y2="284" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a8)"/>
+  <line x1="770" y1="368" x2="806" y2="388" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a8)"/>
+  <line x1="806" y1="404" x2="772" y2="384" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#a8)"/>
+
+  <rect class="store" x="230" y="440" width="170" height="66" rx="10"/>
+  <text class="t" x="244" y="462" font-size="11.5" font-weight="600">Redis　必填</text>
+  <text class="m" x="244" y="480" font-size="9.5">记忆 · 检查点 · 会话归档</text>
+  <text class="m" x="244" y="496" font-size="9.5">未配 → 第一轮报 90005</text>
+
+  <rect class="store" x="420" y="440" width="170" height="66" rx="10"/>
+  <text class="t" x="434" y="462" font-size="11.5" font-weight="600">ES / Qdrant</text>
+  <text class="m" x="434" y="480" font-size="9.5">按需：只有知识库要用</text>
+  <text class="m" x="434" y="496" font-size="9.5">关键字槽只能 ES（BM25+ik）</text>
+
+  <rect class="store" x="610" y="440" width="170" height="66" rx="10"/>
+  <text class="t" x="624" y="462" font-size="11.5" font-weight="600">本地盘 / S3</text>
+  <text class="m" x="624" y="480" font-size="9.5">切片原文 · 原始字节 · 媒体</text>
+  <text class="m" x="624" y="496" font-size="9.5">不可再生，要进备份</text>
+
+  <line x1="315" y1="436" x2="315" y2="384" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a8)"/>
+  <line x1="505" y1="436" x2="505" y2="384" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a8)"/>
+  <line x1="695" y1="436" x2="695" y2="384" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a8)"/>
+  <text class="m" x="782" y="470" font-size="9.5">全部懒连接：</text>
+  <text class="m" x="782" y="486" font-size="9.5">第一次真正用到才建</text>
+
+  <rect class="warn" x="40" y="524" width="1020" height="44" rx="8"/>
+  <text class="m" x="58" y="543" font-size="10">单实例约束：会话运行态（取消标志 · SSE 流注册）在 JVM 堆里，重启即丢——所以现在只支持单实例。</text>
+  <text class="m" x="58" y="559" font-size="10">single-instance-guard 只防两个进程抢同一份配置，把它置 false 不等于支持多实例。</text>
+
+  <text class="m" x="40" y="586" font-size="10">Docker：镜像内建 HEALTHCHECK 打 /health。config 卷必须挂——账号、模型、存储连接都在里面，不挂等于重建容器就回落种子账号。</text>
+  <text class="m" x="40" y="604" font-size="10">热切换：ES / Redis 连接改完即生效，不重启、不打断在途请求，旧连接延迟 30s 销毁。</text>
+</svg>
