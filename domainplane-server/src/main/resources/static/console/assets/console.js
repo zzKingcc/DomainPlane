@@ -1,5 +1,5 @@
 (() => {
-  // src/core/request.js
+  // domainplane-server/frontend/src/core/request.js
   function pick(raw, helpers) {
     if (!raw || typeof raw !== "object") {
       return "";
@@ -61,7 +61,7 @@
     };
   }
 
-  // src/core/feedback.js
+  // domainplane-server/frontend/src/core/feedback.js
   var ICON = {
     success: '<path d="M5 12l5 5l10 -10"/>',
     error: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
@@ -195,7 +195,7 @@
         modal.setAttribute("role", "dialog");
         modal.setAttribute("aria-modal", "true");
         modal.setAttribute("aria-labelledby", "dpConfirmTitle");
-        modal.innerHTML = '<div class="modal-dialog" role="document"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="dpConfirmTitle">' + escapeHtml(cfg.title || "\u786E\u8BA4\u64CD\u4F5C") + '</h5><button type="button" class="btn-close" data-dp-confirm="cancel" aria-label="\u5173\u95ED"></button></div><div class="modal-body dp-confirm-body">' + escapeHtml(message) + '</div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-dp-confirm="cancel">' + escapeHtml(cfg.cancelText || "\u53D6\u6D88") + '</button><button type="button" class="' + (cfg.danger === false ? "btn btn-outline-primary" : "btn btn-outline-danger") + '" data-dp-confirm="ok">' + escapeHtml(cfg.okText || "\u786E\u8BA4") + "</button></div></div></div>";
+        modal.innerHTML = '<div class="modal-dialog" role="document"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="dpConfirmTitle">' + escapeHtml(cfg.title || "\u786E\u8BA4\u64CD\u4F5C") + '</h5><button type="button" class="btn-close" data-dp-confirm="cancel" aria-label="\u5173\u95ED"></button></div><div class="modal-body dp-confirm-body' + (cfg.html ? " dp-confirm-html" : "") + '">' + (cfg.html ? message : escapeHtml(message)) + '</div><div class="modal-footer">' + (cfg.hideCancel ? "" : '<button type="button" class="btn btn-outline-secondary" data-dp-confirm="cancel">' + escapeHtml(cfg.cancelText || "\u53D6\u6D88") + "</button>") + '<button type="button" class="' + (cfg.danger === false ? "btn btn-outline-primary" : "btn btn-outline-danger") + '" data-dp-confirm="ok">' + escapeHtml(cfg.okText || "\u786E\u8BA4") + "</button></div></div></div>";
         var backdrop = doc.createElement("div");
         backdrop.className = "modal-backdrop show";
         pending = {
@@ -240,7 +240,7 @@
     };
   }
 
-  // src/console.js
+  // domainplane-server/frontend/src/console.js
   (function(global) {
     "use strict";
     function baseUrl() {
@@ -427,7 +427,7 @@
       prompts: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 12.5h5"/>',
       /* 域：三层堆叠 = 域的叠加空间（域是平行的命名空间，用"叠"而不是"箱"） */
       domains: '<path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 12l10 5 10-5"/><path d="M2 17l10 5 10-5"/>',
-      /* 熔断工具调用：心跳线，实例还在不在跳，决定它的工具是否还能被调用 */
+      /* 工具调用 / 熔断：心跳线，实例还在不在跳，决定它的工具是否还能被调用 */
       instances: '<path d="M2 12h4l3-7 4 14 3-7h6"/>',
       /* 会话档案：按会话 ID 查档（轮号分页 + 单轮内容 / 步骤 / 情况，全页只读） */
       sessions: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/>',
@@ -443,7 +443,7 @@
       { key: "domains", label: "\u57DF\u7A7A\u95F4", href: "domains.html", icon: "domains" },
       { key: "prompts", label: "\u63D0\u793A\u8BCD\u8BBE\u5B9A", href: "prompts.html", icon: "prompts" },
       { key: "knowledge", label: "\u77E5\u8BC6\u5E93", href: "knowledge.html", icon: "knowledge" },
-      { key: "instances", label: "\u7194\u65AD\u5DE5\u5177\u8C03\u7528", href: "instances.html", icon: "instances" },
+      { key: "instances", label: "\u5DE5\u5177\u8C03\u7528 / \u7194\u65AD", href: "instances.html", icon: "instances" },
       { key: "sessions", label: "\u4F1A\u8BDD\u6863\u6848", href: "sessions.html", icon: "sessions" },
       { key: "account", label: "\u8D26\u53F7", href: "account.html", icon: "account" }
     ];

@@ -1,5 +1,5 @@
 (() => {
-  // src/pages/knowledge.js
+  // domainplane-server/frontend/src/pages/knowledge.js
   (function() {
     var esc = Console.escapeHtml;
     var state = {

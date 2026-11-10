@@ -19,14 +19,14 @@ import java.util.Map;
 class ModelProfileTest {
 
     private static ModelProfile profile(List<String> endpoints, List<String> input,
-                                        List<String> output, Integer dimensions) {
+                                        List<String> output) {
         return new ModelProfile("a", endpoints, input, output, "https://api.example.com/v1",
-                "sk-test", "m", null, null, null, null, dimensions, null, null);
+                "sk-test", "m", null, null, null, null, null, null);
     }
 
     @Test
     void 端点族为空时保持未声明且不猜成对话模型() {
-        ModelProfile p = profile(null, null, null, null);
+        ModelProfile p = profile(null, null, null);
         assert p.endpoints().isEmpty()
                 : "端点族为空应保持未声明，不该默认补 chat，实际 " + p.endpoints();
         assert !p.isChat()
@@ -37,7 +37,7 @@ class ModelProfileTest {
 
     @Test
     void 集合字段为空时不抛异常且不是null() {
-        ModelProfile p = profile(List.of(), List.of(), List.of(), null);
+        ModelProfile p = profile(List.of(), List.of(), List.of());
         assert p.input().isEmpty() && p.output().isEmpty()
                 : "空集合应被保留为空集合，不允许是 null";
     }
@@ -47,7 +47,7 @@ class ModelProfileTest {
         ModelProfile p = profile(
                 List.of(ModelProfile.EP_CHAT, ModelProfile.EP_IMAGES),
                 List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE),
-                List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE), null);
+                List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE));
 
         assert p.endpoints().contains(ModelProfile.EP_CHAT)
                 && p.endpoints().contains(ModelProfile.EP_IMAGES)
@@ -59,9 +59,66 @@ class ModelProfileTest {
     @Test
     void 纯向量模型不算对话模型() {
         ModelProfile p = profile(List.of(ModelProfile.EP_EMBEDDING),
-                List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_EMBEDDING), 1024);
+                List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_EMBEDDING));
         assert !p.isChat() : "只有 embedding 端点时应判定为非对话模型";
-        assert p.dimensions() != null && p.dimensions() == 1024 : "向量维度应保留，实际 " + p.dimensions();
+        assert p.isEmbedding() : "含 embedding 端点就应能被选为向量模型";
+        assert !p.domainBindable() : "向量模型只做全局单选，不参与域绑定";
+    }
+
+    @Test
+    void 撤销误标的向量族时保留对话能力与文本输出() {
+        ModelProfile p = profile(
+                List.of(ModelProfile.EP_CHAT, ModelProfile.EP_EMBEDDING),
+                List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE),
+                List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_EMBEDDING));
+
+        ModelProfile fixed = p.withoutFamilies(List.of(ModelProfile.EP_EMBEDDING));
+
+        assert fixed.endpoints().equals(List.of(ModelProfile.EP_CHAT))
+                : "只撤明确不存在的那一族，chat 不能一起没了：" + fixed.endpoints();
+        assert fixed.output().equals(List.of(ModelProfile.MOD_TEXT))
+                : "embedding 专属产出清掉，对话的文本输出必须留着：" + fixed.output();
+        assert fixed.input().equals(p.input()) : "输入模态是共用的，一律不动";
+        assert fixed.fallbacks().equals(p.fallbacks()) : "撤销不触碰其它字段";
+    }
+
+    @Test
+    void 撤销对话族时按剩余端点剪枝模态() {
+        ModelProfile p = profile(
+                List.of(ModelProfile.EP_CHAT, ModelProfile.EP_IMAGES),
+                List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE),
+                List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE));
+
+        ModelProfile fixed = p.withoutFamilies(List.of(ModelProfile.EP_CHAT));
+
+        assert fixed.endpoints().equals(List.of(ModelProfile.EP_IMAGES)) : fixed.endpoints();
+        assert fixed.input().equals(List.of(ModelProfile.MOD_TEXT))
+                : "媒体输入只走对话端点，撤了 chat 就该清掉：" + fixed.input();
+        assert fixed.output().equals(List.of(ModelProfile.MOD_IMAGE))
+                : "生图端点还在，image 输出必须留；text 没人产出了，该清：" + fixed.output();
+    }
+
+    @Test
+    void 一族都不剩时模态一并清空() {
+        ModelProfile p = profile(List.of(ModelProfile.EP_CHAT),
+                List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_AUDIO),
+                List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_AUDIO));
+
+        ModelProfile fixed = p.withoutFamilies(List.of(ModelProfile.EP_CHAT));
+
+        assert fixed.endpoints().isEmpty() : fixed.endpoints();
+        assert fixed.input().isEmpty() && fixed.output().isEmpty()
+                : "端点都没了，模态不该还挂着：" + fixed.input() + " / " + fixed.output();
+    }
+
+    @Test
+    void 没有明确不存在的族时返回原档案() {
+        ModelProfile p = profile(List.of(ModelProfile.EP_CHAT),
+                List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_TEXT));
+
+        assert p.withoutFamilies(List.of()) == p : "空列表不该白复制一份";
+        assert p.withoutFamilies(List.of(ModelProfile.EP_EMBEDDING)) == p
+                : "档案上本来没有这一族时也不该复制一份";
     }
 
     @Test
@@ -69,7 +126,7 @@ class ModelProfileTest {
         ModelProfile p = new ModelProfile("gpt4o", List.of(ModelProfile.EP_CHAT, ModelProfile.EP_TTS),
                 List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_AUDIO),
                 "https://api.example.com/v1", "sk-test", "gpt-4o", 0.5, 100,
-                Boolean.FALSE, Boolean.TRUE, null, List.of("backup"), null);
+                Boolean.FALSE, Boolean.TRUE, List.of("backup"), null);
 
         ModelProfile back = ProfileData.from(p).toProfile(p.alias());
         assert back.endpoints().equals(p.endpoints()) : "端点族应往返一致： " + back.endpoints();
@@ -84,9 +141,9 @@ class ModelProfileTest {
 
     @Test
     void 思考开关参与指纹() {
-        ModelProfile on = profile(List.of(ModelProfile.EP_CHAT), null, null, null);
+        ModelProfile on = profile(List.of(ModelProfile.EP_CHAT), null, null);
         ModelProfile off = new ModelProfile(on.alias(), on.endpoints(), on.input(), on.output(),
-                on.baseUrl(), on.apiKey(), on.modelName(), null, null, Boolean.FALSE, null, null, null, null);
+                on.baseUrl(), on.apiKey(), on.modelName(), null, null, Boolean.FALSE, null, null, null);
 
         assert !on.fingerprint().equals(off.fingerprint())
                 : "思考开关变了指纹就必须变，否则缓存里那份旧客户端照旧在用 —— "
@@ -98,7 +155,7 @@ class ModelProfileTest {
         ModelProfile p = new ModelProfile("a", List.of(ModelProfile.EP_CHAT),
                 List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_TEXT),
                 "https://api.example.com/v1", "sk-test", "m", 0.5, 100,
-                Boolean.FALSE, null, 1024, List.of("backup"), Map.of("top_p", 0.9));
+                Boolean.FALSE, null, List.of("backup"), Map.of("top_p", 0.9));
 
         ModelProfile on = p.withReturnThinking(Boolean.TRUE);
         assert Boolean.TRUE.equals(on.returnThinking()) : "开关应换成 true，实际 " + on.returnThinking();
@@ -108,20 +165,20 @@ class ModelProfileTest {
                 && on.modelName().equals(p.modelName()) : "连接信息应原样带走";
         assert on.temperature().equals(p.temperature()) && on.maxTokens().equals(p.maxTokens())
                 && on.thinking().equals(p.thinking()) : "调优值与思考模式应原样带走";
-        assert on.dimensions().equals(p.dimensions()) && on.fallbacks().equals(p.fallbacks())
-                && on.params().equals(p.params()) : "维度 / 降级链 / 私有参数应原样带走";
+        assert on.fallbacks().equals(p.fallbacks())
+                && on.params().equals(p.params()) : "降级链 / 私有参数应原样带走";
         assert !on.fingerprint().equals(p.fingerprint())
                 : "回写开关变了指纹就必须变，否则缓存里那份旧客户端照旧在用 —— "
                         + "表现为「保存成功、开关也变了，思考却照旧不回传」";
     }
 
-    // ==================== 私有调优参数（服务商适配） ====================
+    // ==================== 私有调优参数（原样透传） ====================
 
     @Test
     void 私有调优参数参与指纹() {
-        ModelProfile base = profile(List.of(ModelProfile.EP_CHAT), null, null, null);
+        ModelProfile base = profile(List.of(ModelProfile.EP_CHAT), null, null);
         ModelProfile tuned = new ModelProfile(base.alias(), base.endpoints(), base.input(), base.output(),
-                base.baseUrl(), base.apiKey(), base.modelName(), null, null, null, null, null, null,
+                base.baseUrl(), base.apiKey(), base.modelName(), null, null, null, null, null,
                 Map.of("reasoning_effort", "high"));
 
         assert !base.fingerprint().equals(tuned.fingerprint())
@@ -130,9 +187,9 @@ class ModelProfileTest {
 
         /* 空 params 与改造前逐字节一致：存量缓存不被打醒 */
         ModelProfile same = new ModelProfile(base.alias(), base.endpoints(), base.input(), base.output(),
-                base.baseUrl(), base.apiKey(), base.modelName(), null, null, null, null, null, null, null);
+                base.baseUrl(), base.apiKey(), base.modelName(), null, null, null, null, null, null);
         assert base.fingerprint().equals(same.fingerprint())
-                : "未适配档案（params 为空）的指纹不能因这次改造变化，否则全网缓存被打醒";
+                : "params 为空的档案，其指纹不能因这次改造变化，否则全网缓存被打醒";
     }
 
     @Test
@@ -141,7 +198,7 @@ class ModelProfileTest {
         in.put("verbosity", "low");
         in.put("reasoning_effort", null); // null 的语义是「不发送该参数」
         ModelProfile p = new ModelProfile("a", List.of(ModelProfile.EP_CHAT), null, null,
-                "https://api.example.com/v1", "sk", "m", null, null, null, null, null, null, in);
+                "https://api.example.com/v1", "sk", "m", null, null, null, null, null, in);
 
         assert p.params().size() == 1 && "low".equals(p.params().get("verbosity"))
                 : "null 值应被剔除（Map.copyOf 遇 null 直接 NPE），实际 " + p.params();
@@ -158,7 +215,7 @@ class ModelProfileTest {
         ModelProfile p = new ModelProfile("gpt4o", List.of(ModelProfile.EP_CHAT),
                 List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_TEXT),
                 "https://api.example.com/v1", "sk-test", "gpt-5.6-sol", null, null,
-                null, null, null, null,
+                null, null, null,
                 Map.of("reasoning_effort", "high", "verbosity", "low"));
 
         ModelProfile back = ProfileData.from(p).toProfile(p.alias());
@@ -170,7 +227,7 @@ class ModelProfileTest {
 
     @Test
     void 未声明温度时保持null而不是替服务商决定() {
-        ModelProfile p = profile(List.of(ModelProfile.EP_CHAT), null, null, null);
+        ModelProfile p = profile(List.of(ModelProfile.EP_CHAT), null, null);
 
         assert p.temperature() == null
                 : "未声明就保持 null：调用方据此不发送 temperature，由服务商默认决定，实际 " + p.temperature();
@@ -179,14 +236,14 @@ class ModelProfileTest {
     @Test
     void 声明了温度就以声明值为准() {
         ModelProfile p = new ModelProfile("a", List.of(ModelProfile.EP_CHAT), null, null,
-                "https://api.example.com/v1", "sk", "m", 0.1, null, null, null, null, null, null);
+                "https://api.example.com/v1", "sk", "m", 0.1, null, null, null, null, null);
 
         assert p.temperature() == 0.1 : "声明值应原样保留，实际 " + p.temperature();
     }
 
     @Test
     void 未声明最大token时不限制() {
-        ModelProfile p = profile(List.of(ModelProfile.EP_CHAT), null, null, null);
+        ModelProfile p = profile(List.of(ModelProfile.EP_CHAT), null, null);
 
         assert p.maxTokens() == null : "原始声明值应保持 null，实际 " + p.maxTokens();
         assert p.effectiveMaxTokens() == null
@@ -196,7 +253,7 @@ class ModelProfileTest {
     @Test
     void 声明了最大token就以声明值为准() {
         ModelProfile p = new ModelProfile("a", List.of(ModelProfile.EP_CHAT), null, null,
-                "https://api.example.com/v1", "sk", "m", null, 2048, null, null, null, null, null);
+                "https://api.example.com/v1", "sk", "m", null, 2048, null, null, null, null);
 
         assert p.effectiveMaxTokens() == 2048 : "显式声明就该设限，实际 " + p.effectiveMaxTokens();
     }

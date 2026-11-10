@@ -15,7 +15,7 @@ import java.util.Map;
  * <p>迁移只做一次、必须幂等：跑第二遍时 map 里已经没有旧键，返回 {@code null} 表示"无需改写"。
  * 键名已经是线上字段名的档案一个字节都不动。</p>
  *
- * <p>映射表刻意只收 {@code adapters/deepseek-flash.json} 曾经登记过、且 UI 名与 wire 名不同的四项：
+ * <p>映射表刻意只收旧适配声明里登记过、且 UI 名与 wire 名不同的四项：
  * 别的一看就知道线上键（{@code stop} / {@code logprobs}），{@code temperature} / {@code maxTokens}
  * 走档案老字段本来就不在 {@code params} 里。表里多写一条就多一次误伤用户手写键的机会。</p>
  *

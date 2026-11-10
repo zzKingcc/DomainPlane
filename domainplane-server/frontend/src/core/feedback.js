@@ -158,8 +158,11 @@ export function createFeedback(options) {
 
     /**
      * 二次确认。返回 Promise<boolean>：true = 用户点了确认。
-     * @param {string} message 正文（可含换行）
-     * @param {{title?:string, okText?:string, cancelText?:string, danger?:boolean}} [o]
+     * @param {string} message 正文（可含换行）；html=true 时是已转义好的 HTML 片段
+     * @param {{title?:string, okText?:string, cancelText?:string, danger?:boolean,
+     *          html?:boolean, hideCancel?:boolean}} [o]
+     *        html=true 用于分区结果展示（调用方自己转义），hideCancel=true 只留一个按钮。
+     *        两个选项都不传时行为与纯文本确认框完全一致。
      */
     function confirm(message, o) {
         var cfg = o || {};
@@ -184,10 +187,11 @@ export function createFeedback(options) {
                 + escapeHtml(cfg.title || '确认操作') + '</h5>'
                 + '<button type="button" class="btn-close" data-dp-confirm="cancel" aria-label="关闭"></button>'
                 + '</div>'
-                + '<div class="modal-body dp-confirm-body">' + escapeHtml(message) + '</div>'
+                + '<div class="modal-body dp-confirm-body' + (cfg.html ? ' dp-confirm-html' : '') + '">'
+                + (cfg.html ? message : escapeHtml(message)) + '</div>'
                 + '<div class="modal-footer">'
-                + '<button type="button" class="btn btn-outline-secondary" data-dp-confirm="cancel">'
-                + escapeHtml(cfg.cancelText || '取消') + '</button>'
+                + (cfg.hideCancel ? '' : '<button type="button" class="btn btn-outline-secondary" data-dp-confirm="cancel">'
+                    + escapeHtml(cfg.cancelText || '取消') + '</button>')
                 + '<button type="button" class="' + (cfg.danger === false ? 'btn btn-outline-primary' : 'btn btn-outline-danger')
                 + '" data-dp-confirm="ok">' + escapeHtml(cfg.okText || '确认') + '</button>'
                 + '</div>'

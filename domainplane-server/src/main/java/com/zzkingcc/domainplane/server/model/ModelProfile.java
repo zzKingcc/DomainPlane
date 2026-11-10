@@ -20,7 +20,7 @@ import java.util.TreeMap;
  *   • {@link #endpoints()} —— 端点族："怎么调它"，如 {@code chat} / {@code embedding}；
  *   • {@link #input()} / {@link #output()} —— 模态："能吃什么 / 产出什么"，如 text / image / audio。
  *
- * 上面两者是**识别得来**的（适配文件声明或元数据读取）。另一个数 {@link #contextWindow()}
+ * 上面两者来自用户手选（模态反查端点族）、服务商元数据读取或探测实测。另一个数 {@link #contextWindow()}
  * 不属于这两个维度、也不来自识别：它是"这个模型能吃多少"，只能由用户按服务商文档手填。
  * 它不参与绑域门禁、不进指纹，唯一消费点是装配预算的封顶。
  *
@@ -38,7 +38,7 @@ import java.util.TreeMap;
  * @param maxTokens    单次最大输出 token（可空 = 不限制，由模型上下文决定）
  * @param contextWindow 模型的上下文窗口（token，含输入与输出；可空 = 未声明）。
  *                     <p>由用户在管控台卡片上手工填写，来源是服务商的模型文档。刻意不做自动识别：
- *                     适配文件的 schema 里本就没有这一项，服务商元数据清单（{@code GET /models}）
+ *                     服务商元数据清单（{@code GET /models}）
  *                     也不提供，探测更探不出来，唯一可行的来源就是用户。另外
  *                     {@code ModelCapabilityProbe} 的探针全是端点族与模态，加一个"上下文长度探针"
  *                     意味着发一条必然超限的请求去换一个 400，代价与收益不成比例。</p>
@@ -49,11 +49,9 @@ import java.util.TreeMap;
  *                     用户的数字与平台的 {@code CjkWidth} 估算都对不上它）。</p>
  * @param thinking     是否开启思考模式（可空 = 不声明，由服务商默认决定）
  * @param returnThinking 是否把思考内容回传给平台（可空 = 不声明，等价于框架默认的"不返回"）
- * @param dimensions   向量维度（仅 embedding 用；可空 = 按模型默认）
  * @param fallbacks    降级链：本档案不可用时依次尝试的别名（M3 生效，先只存）
- * @param params       自定义参数（如 {@code enable_thinking}）：
- *                     命中适配时按厂商 schema 复核，未命中时由用户自助填写、原样透传
- *                     （见 {@code CustomParamsGate}）。换协议会被清空 —— 同一个键在两种
+ * @param params       自定义参数（如 {@code enable_thinking}）：用户自助填写、原样透传，
+ *                     保存前由 {@code CustomParamsGate} 复核。换协议会被清空 —— 同一个键在两种
  *                     协议下语义与必填性都不同，留着旧值就是一个查不出原因的黑盒
  * @param protocol     上游协议：{@link #PROTOCOL_OPENAI}（默认，OpenAI 兼容端点）或
  *                     {@link #PROTOCOL_ANTHROPIC}（{@code /v1/messages}，鉴权头与 OpenAI 不同，
@@ -73,7 +71,6 @@ public record ModelProfile(String alias,
                            Integer contextWindow,
                            Boolean thinking,
                            Boolean returnThinking,
-                           Integer dimensions,
                            List<String> fallbacks,
                            Map<String, Object> params,
                            String protocol) {
@@ -104,11 +101,10 @@ public record ModelProfile(String alias,
                         Integer maxTokens,
                         Boolean thinking,
                         Boolean returnThinking,
-                        Integer dimensions,
                         List<String> fallbacks,
                         Map<String, Object> params) {
         this(alias, endpoints, input, output, baseUrl, apiKey, modelName, temperature, maxTokens,
-                null, thinking, returnThinking, dimensions, fallbacks, params, PROTOCOL_OPENAI);
+                null, thinking, returnThinking, fallbacks, params, PROTOCOL_OPENAI);
     }
 
     /** 这份档案走的是 Anthropic 原生协议（{@code /v1/messages}）而不是 OpenAI 兼容端点 */
@@ -146,6 +142,15 @@ public record ModelProfile(String alias,
 
     /** 能力族（主模型之外的四个），顺序即管控台绑定弹窗的分段顺序 */
     public static final List<String> CAPABILITY_FAMILIES = List.of(EP_IMAGES, EP_TTS, EP_ASR, EP_VIDEO);
+
+    /**
+     * 全部端点族 —— "这个族名是否存在"的唯一词表。
+     *
+     * <p>手动移除能力、按族定向探测之类需要校验族名的地方都读它，别各自 List.of 一份：
+     * 加了新族却漏改某一处，表现是"接口说未知族"或"这个族永远删不掉"。</p>
+     */
+    public static final List<String> ALL_FAMILIES = List.of(
+            EP_CHAT, EP_EMBEDDING, EP_RERANK, EP_IMAGES, EP_TTS, EP_ASR, EP_VIDEO);
 
     /** 族 → 中文名（管控台展示 / 拒绝文案共用，避免同一份词表两处各写一遍） */
     public static String familyLabel(String family) {
@@ -251,8 +256,30 @@ public record ModelProfile(String alias,
                 mergeModalities(input, detectedInput, modalitiesAuthoritative),
                 mergeModalities(output, detectedOutput, modalitiesAuthoritative),
                 baseUrl, apiKey, modelName,
-                temperature, maxTokens, contextWindow, thinking, returnThinking, dimensions, fallbacks,
+                temperature, maxTokens, contextWindow, thinking, returnThinking, fallbacks,
                 params, protocol);
+    }
+
+    /**
+     * 探测结论整体替换：端点族与输入 / 输出模态一律以实测为准，**空表也是结论**。
+     *
+     * <p>与 {@link #withDetected} 的分工：那一条服务「读元数据」，空态的语义是"这次没读到"，
+     * 必须保留旧声明；这一条服务「用户点了探测」，只要这次探测至少确认到一个端点族，
+     * 就是一次有效实测 —— 没确认到的模态等于不成立，必须清掉，不能再靠旧声明续命。
+     * 否则"某个模态不行了"永远不发生变化，整体覆盖就退化成只增不减。</p>
+     *
+     * <p>整次一条都没确认到（网络抖动 / Key 失效，全是 UNCONFIRMED）不该调这里，
+     * 由调用方守住那道护栏。</p>
+     */
+    public ModelProfile withProbeResult(List<String> probeEndpoints,
+                                        List<String> probeInput,
+                                        List<String> probeOutput) {
+        return new ModelProfile(alias,
+                probeEndpoints == null ? List.of() : List.copyOf(probeEndpoints),
+                probeInput == null ? List.of() : List.copyOf(probeInput),
+                probeOutput == null ? List.of() : List.copyOf(probeOutput),
+                baseUrl, apiKey, modelName, temperature, maxTokens, contextWindow,
+                thinking, returnThinking, fallbacks, params, protocol);
     }
 
     /** 模态合并：权威（完整枚举）覆盖，基线值并集。读不到一律保留原值。 */
@@ -288,8 +315,62 @@ public record ModelProfile(String alias,
                 union(input, confirmedInput),
                 union(output, confirmedOutput),
                 baseUrl, apiKey, modelName,
-                temperature, maxTokens, contextWindow, thinking, returnThinking, dimensions, fallbacks,
+                temperature, maxTokens, contextWindow, thinking, returnThinking, fallbacks,
                 params, protocol);
+    }
+
+    /**
+     * 复制一份、去掉探测明确判定「不存在」的端点族，以及随之失效的产出模态。
+     *
+     * <p>只由 {@code ModelCapabilityProbe.ProbeResult#unsupportedFamilies()} 驱动，即
+     * 404 / 405 / 415 / 501 那类「端点或类型确实不存在」的结论。400 / 5xx / 网络抖动是
+     * 「没确认到」，不会进这个列表，也就不会因一次抖动抹掉用户声明 —— 那正是
+     * {@link #withConfirmed} 只增不减要防的事。这是给误标留的唯一一条撤销路径。</p>
+     *
+     * <p>模态随之剪枝，而不是原样留着：产出侧按「剩下的端点族里还有谁能产出它」判断，
+     * 输入侧只保留 {@code text}（媒体输入只走对话端点）。一族都不剩时输入 / 输出一并清空 ——
+     * 撤销了能力却还挂着「输入 text+audio」，卡片就在说一件做不到的事。</p>
+     */
+    public ModelProfile withoutFamilies(List<String> families) {
+        if (families == null || families.isEmpty()) {
+            return this;
+        }
+        List<String> ep = new ArrayList<>(endpoints);
+        ep.removeAll(families);
+
+        List<String> in = new ArrayList<>(input);
+        if (ep.isEmpty()) {
+            /* 一族都不剩，模态就没有承载者了：留着只会让卡片继续显示「能吃音频」却无处可用。
+               这正是误标档案最需要的那一步 —— 撤销之后卡片该是空的，不是半清的。 */
+            in.clear();
+        } else if (!ep.contains(EP_CHAT)) {
+            /* 媒体输入只走 /chat/completions；text 是向量 / 重排 / TTS 也吃的，留着 */
+            in.removeAll(List.of(MOD_IMAGE, MOD_AUDIO, MOD_VIDEO, MOD_FILE));
+        }
+
+        List<String> out = new ArrayList<>(output);
+        /* 产出模态按「剩下的端点族里还有谁能产出它」剪枝，别硬编码哪一族清哪一格 */
+        out.removeIf(modality -> !producibleBy(ep, modality));
+        if (ep.equals(endpoints) && out.equals(output) && in.equals(input)) {
+            return this;
+        }
+        return new ModelProfile(alias, List.copyOf(ep), List.copyOf(in), List.copyOf(out),
+                baseUrl, apiKey,
+                modelName, temperature, maxTokens, contextWindow, thinking, returnThinking,
+                fallbacks, params, protocol);
+    }
+
+    /** 该产出模态是不是还能由剩下的端点族产出；不认识的模态一律保留（不替用户做决定） */
+    private static boolean producibleBy(List<String> endpoints, String modality) {
+        return switch (modality) {
+            case MOD_TEXT -> endpoints.contains(EP_CHAT) || endpoints.contains(EP_ASR);
+            case MOD_IMAGE -> endpoints.contains(EP_IMAGES);
+            case MOD_AUDIO -> endpoints.contains(EP_TTS);
+            case MOD_VIDEO -> endpoints.contains(EP_VIDEO);
+            case MOD_EMBEDDING -> endpoints.contains(EP_EMBEDDING);
+            case MOD_SCORE -> endpoints.contains(EP_RERANK);
+            default -> true;
+        };
     }
 
     /** 有序并集：{@code base} 原样在前，{@code extra} 里没有的新值追加在后 */
@@ -314,36 +395,24 @@ public record ModelProfile(String alias,
      */
     public ModelProfile withTuning(Double newTemperature, Integer newMaxTokens,
                                    Map<String, Object> newParams) {
-        return withTuning(newTemperature, newMaxTokens, dimensions, newParams);
-    }
-
-    /**
-     * 复制一份、替换调优字段并**带上向量维度**（向量卡片绿框的那条保存路径）。
-     *
-     * dimensions 走专用字段而不是 params：它要参与 ES 索引契约、换模型时触发重灌确认，
-     * 与"服务商私有参数"是两码事。四个参数都是全量替换（{@code null} / 空 map 即清除）。
-     */
-    public ModelProfile withTuning(Double newTemperature, Integer newMaxTokens,
-                                   Integer newDimensions, Map<String, Object> newParams) {
         return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey, modelName,
-                newTemperature, newMaxTokens, contextWindow, thinking, returnThinking, newDimensions, fallbacks,
+                newTemperature, newMaxTokens, contextWindow, thinking, returnThinking, fallbacks,
                 newParams, protocol);
     }
 
     /**
      * 复制一份、只换自定义参数（卡片上那个 JSON 文本框的保存口）。
      *
-     * <p>刻意与 {@link #withTuning} 分开：调优框是**按适配 schema 渲染控件**的，只出现在
-     * 按模型名命中适配的档案上；自定义参数文本框走的是"用户声明、我透传"，
-     * 未命中适配的档案**恰恰最需要它** —— 两条路的适用面正好互补，放在一起就得在
-     * 接口里再判一次"这份档案走哪条路"，而这个判据前后端各存一份就会漂移。</p>
+     * <p>刻意与 {@link #withTuning} 分开：那个接口是标准字段（温度 / 单次最大输出）
+     * 的全量替换，改动即存时必须把另外几项一起带回；本接口只写 {@code params}，
+     * 正好服务"只改 JSON 框"这一个动作，不必为了改一个文本框重传整份调优表单。</p>
      *
      * <p>与其余复制方法同口径：只提供 params 一个入口，连接信息 / 标准字段 / 端点族
      * 一律原样带走（{@code null} / 空 map = 清除）。</p>
      */
     public ModelProfile withParams(Map<String, Object> newParams) {
         return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey, modelName,
-                temperature, maxTokens, contextWindow, thinking, returnThinking, dimensions, fallbacks,
+                temperature, maxTokens, contextWindow, thinking, returnThinking, fallbacks,
                 newParams, protocol);
     }
 
@@ -359,20 +428,8 @@ public record ModelProfile(String alias,
      */
     public ModelProfile withProtocol(String newProtocol) {
         return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey, modelName,
-                temperature, maxTokens, contextWindow, thinking, returnThinking, dimensions, fallbacks,
+                temperature, maxTokens, contextWindow, thinking, returnThinking, fallbacks,
                 Map.of(), newProtocol == null ? PROTOCOL_OPENAI : newProtocol);
-    }
-
-    /**
-     * 复制一份、只换向量维度。
-     *
-     * 用于新建向量档案时的「原生维度回填」：用户没填维度时，用探测到的模型出厂维度落上，
-     * 卡片就不再是"按模型默认"而是显示一个具体数字（见 AdminModelProfileController#save）。
-     */
-    public ModelProfile withDimensions(Integer newDimensions) {
-        return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey, modelName,
-                temperature, maxTokens, contextWindow, thinking, returnThinking, newDimensions, fallbacks,
-                params, protocol);
     }
 
     /**
@@ -387,7 +444,7 @@ public record ModelProfile(String alias,
      */
     public ModelProfile withReturnThinking(Boolean newReturnThinking) {
         return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey, modelName,
-                temperature, maxTokens, contextWindow, thinking, newReturnThinking, dimensions, fallbacks,
+                temperature, maxTokens, contextWindow, thinking, newReturnThinking, fallbacks,
                 params, protocol);
     }
 
@@ -396,15 +453,14 @@ public record ModelProfile(String alias,
      *
      * <p>与 {@link #withReturnThinking} 同一个理由走独立动作，但**不能**与它共用接口：
      * 上下文长度不属于"发给服务商的参数"（OpenAI 兼容端点没有这个入参，写进 {@code params}
-     * 就是往请求体里塞一个服务商不认识的键），也不属于适配 schema 管的范围，
-     * 而调优那条路（{@code PUT /model-profiles/tuning}）是按"是否命中适配"放行的，
-     * 最常见的标准 OpenAI / DeepSeek 档案恰恰不命中，从那里根本改不到。</p>
+     * 就是往请求体里塞一个服务商不认识的键），也不该跟着调优表单一起全量替换 ——
+     * 那会迫使卡片为了改一个数字把温度与自定义参数重传一遍。</p>
      *
      * <p>传 {@code null} = 清除（回到"未声明"，装配预算维持配置值）。</p>
      */
     public ModelProfile withContextWindow(Integer newContextWindow) {
         return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey, modelName,
-                temperature, maxTokens, newContextWindow, thinking, returnThinking, dimensions, fallbacks,
+                temperature, maxTokens, newContextWindow, thinking, returnThinking, fallbacks,
                 params, protocol);
     }
 

@@ -1,13 +1,19 @@
 /* ==========================================================================
    P1 · instances 页脚本
-   自 instances.html 的内联 <script> 机械平移（1 块合并），逻辑未改。
+   一个页面两块：工具目录（内置可改说明 / 远程与 MCP 只读）+ 实例熔断表。
    ========================================================================== */
 (function () {
-/* 在线实例页：只读 + 断开 / 恢复工具调用两个动作。
-       数据全部来自 /admin/instances，前端不自己算存活（判据是服务端的 lastSeen 与超时窗，
-       前端再算一遍就会多出一个"多久算死"的副本，迟早与服务端不一致）。 */
     var AUTO_INTERVAL = 10000;
     var timer = null;
+
+    var TOOLS = [];          /* 工具目录快照，只由 loadTools 更新 */
+    var openName = null;     /* 当前展开的工具 */
+    var dirty = false;       /* 编辑区是否有未保存的输入 */
+    var toolSeq = 0;         /* 工具区请求并发守卫 */
+
+    function esc(s) {
+        return Console.escapeHtml(s == null ? '' : String(s));
+    }
 
     function fmtTime(ms) {
         if (!ms) { return '—'; }
@@ -26,81 +32,29 @@
         return Math.floor(m / 60) + ' 小时前';
     }
 
-    /* 状态 → 现有的 tag 色：绿=正常、黄=过渡/待复核、红=已拒（复用 tag 的三个语义色，不新增样式） */
+    function el(id) {
+        return document.getElementById(id);
+    }
+
+    /* ==================================================================
+       实例熔断区：只读 + 断开 / 恢复两个动作。
+       判据全在服务端（lastSeen + 超时窗），前端不再算一遍「多久算死」。
+
+       这一块的轮询每 10 秒跑一次，只允许碰统计卡与 instanceBody。
+       工具目录的编辑区在另一个 tbody，碰一下就会把用户写到一半的说明清空。
+       ================================================================== */
+
     function stateTag(it) {
         var cls = it.state === 'ONLINE' ? 'read'
             : (it.rejecting ? 'destructive' : 'write');
         var label = it.stateLabel || it.state;
         if (it.rejecting) { label += '（重连返 410）'; }
         if (it.muted) { label += '（工具不可用）'; }
-        return '<span class="tag ' + cls + '">' + Console.escapeHtml(label) + '</span>';
+        return '<span class="tag ' + cls + '">' + esc(label) + '</span>';
     }
 
-    function render(data) {
-        var stats = data.stats || {};
-        var list = data.instances || [];
-
-        var online = document.getElementById('statOnline');
-        online.textContent = stats.onlineCount || 0;
-        online.className = 'dp-stat-value' + ((stats.onlineCount || 0) ? '' : ' warn');
-        var note = [];
-        if (stats.mutedCount) { note.push(stats.mutedCount + ' 个已熔断'); }
-        if (stats.drainingCount) { note.push(stats.drainingCount + ' 个清理中'); }
-        if (stats.forceOfflineCount) { note.push(stats.forceOfflineCount + ' 个已强制下线'); }
-        if (!note.length) { note.push((stats.instanceCount || 0) + ' 条在线表记录'); }
-        document.getElementById('statOnlineNote').textContent = note.join('，');
-
-        document.getElementById('statReplica').textContent = stats.remoteReplicaCount || 0;
-        document.getElementById('statReplica').className = 'dp-stat-value' + ((stats.remoteReplicaCount || 0) ? '' : ' warn');
-        document.getElementById('statReplicaNote').textContent = '同名多实例 = 多副本，调用时随机选一个';
-
-        document.getElementById('statTools').textContent = stats.registeredToolCount || 0;
-        document.getElementById('statTools').className = 'dp-stat-value';
-        document.getElementById('statToolsNote').textContent = '逻辑工具条目数（含本地 Bean 工具）';
-
-        document.getElementById('statTimeout').textContent = (stats.timeoutSeconds || 0) + ' 秒';
-        document.getElementById('statTimeout').className = 'dp-stat-value';
-
-        var body = document.getElementById('instanceBody');
-        var wrap = document.getElementById('tableWrap');
-        var empty = document.getElementById('emptyHint');
-        if (!list.length) {
-            body.innerHTML = '';
-            wrap.style.display = 'none';
-            empty.style.display = 'block';
-            return;
-        }
-        wrap.style.display = 'block';
-        empty.style.display = 'none';
-
-        body.innerHTML = list.map(function (it) {
-            var tools = (it.toolNames || []).map(function (n) {
-                return '<span class="tag perm">' + Console.escapeHtml(n) + '</span>';
-            }).join('');
-            return '<tr>'
-                + '<td class="mono">' + Console.escapeHtml(it.instanceId) + '</td>'
-                + '<td class="mono">' + Console.escapeHtml(it.endpoint) + '</td>'
-                + '<td>' + stateTag(it) + '</td>'
-                + '<td>' + fmtTime(it.lastSeen)
-                +   '<div class="muted">' + Console.escapeHtml(fmtSilent(it.silentMillis)) + '</div></td>'
-                + '<td class="tools-cell">' + (tools || '<span class="muted">0</span>')
-                +   '<div class="muted">共 ' + (it.toolCount || 0) + ' 个</div></td>'
-                + '<td class="mono muted">' + Console.escapeHtml(it.digest || '—') + '</td>'
-                + '<td>' + actionCell(it) + '</td>'
-                + '</tr>';
-        }).join('');
-
-        body.querySelectorAll('button[data-act]').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                act(btn.getAttribute('data-act'), btn.getAttribute('data-id'), btn);
-            });
-        });
-    }
-
-    /* 操作列随状态变：这一页只做一件事，断开（恢复）某个实例的工具调用。
-       按钮按 data-act 分派，避免每加一个动作就多绑一轮选择器。 */
     function actionCell(it) {
-        var id = Console.escapeHtml(it.instanceId);
+        var id = esc(it.instanceId);
         if (it.rejecting) {
             return '<span class="muted">已吊销（只能由接口恢复）</span>';
         }
@@ -112,40 +66,90 @@
             + '" title="摘除工具副本，心跳照常受理">断开工具调用</button>';
     }
 
-    /* 并发守卫：轮询、手动"重新读取"、操作后的重载三者可能叠在一起，
-       晚发出的请求不一定后返回。只让"最后一次发出"的结果落地，否则旧数据会覆盖新数据，
-       表现出来就是"点了刷新但表格没变"。 */
+    function renderInstances(data) {
+        var stats = data.stats || {};
+        var list = data.instances || [];
+
+        var online = el('statOnline');
+        online.textContent = stats.onlineCount || 0;
+        online.className = 'dp-stat-value' + ((stats.onlineCount || 0) ? '' : ' warn');
+        var note = [];
+        if (stats.mutedCount) { note.push(stats.mutedCount + ' 个已熔断'); }
+        if (stats.drainingCount) { note.push(stats.drainingCount + ' 个清理中'); }
+        if (stats.forceOfflineCount) { note.push(stats.forceOfflineCount + ' 个已强制下线'); }
+        if (!note.length) { note.push((stats.instanceCount || 0) + ' 条在线表记录'); }
+        el('statOnlineNote').textContent = note.join('，');
+
+        el('statReplica').textContent = stats.remoteReplicaCount || 0;
+        el('statReplica').className = 'dp-stat-value' + ((stats.remoteReplicaCount || 0) ? '' : ' warn');
+        el('statReplicaNote').textContent = '同名多实例 = 多副本，调用时随机选一个';
+
+        el('statTools').textContent = stats.registeredToolCount || 0;
+        el('statTools').className = 'dp-stat-value';
+        el('statToolsNote').textContent = '逻辑工具条目数（含本地 Bean 工具）';
+
+        el('statTimeout').textContent = (stats.timeoutSeconds || 0) + ' 秒';
+        el('statTimeout').className = 'dp-stat-value';
+
+        var body = el('instanceBody');
+        var wrap = el('tableWrap');
+        var empty = el('emptyHint');
+        if (!list.length) {
+            body.innerHTML = '';
+            wrap.style.display = 'none';
+            empty.style.display = 'block';
+            return;
+        }
+        wrap.style.display = 'block';
+        empty.style.display = 'none';
+
+        body.innerHTML = list.map(function (it) {
+            var tools = (it.toolNames || []).map(function (n) {
+                return '<span class="tag perm">' + esc(n) + '</span>';
+            }).join('');
+            return '<tr>'
+                + '<td class="mono">' + esc(it.instanceId) + '</td>'
+                + '<td class="mono">' + esc(it.endpoint) + '</td>'
+                + '<td>' + stateTag(it) + '</td>'
+                + '<td>' + fmtTime(it.lastSeen)
+                +   '<div class="muted">' + esc(fmtSilent(it.silentMillis)) + '</div></td>'
+                + '<td class="tools-cell">' + (tools || '<span class="muted">0</span>')
+                +   '<div class="muted">共 ' + (it.toolCount || 0) + ' 个</div></td>'
+                + '<td class="mono muted">' + esc(it.digest || '—') + '</td>'
+                + '<td>' + actionCell(it) + '</td>'
+                + '</tr>';
+        }).join('');
+
+        body.querySelectorAll('button[data-act]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                act(btn.getAttribute('data-act'), btn.getAttribute('data-id'), btn);
+            });
+        });
+    }
+
     var loadSeq = 0;
-    var LOADED = false;          /* 首次加载是否已完成（决定要不要放占位行） */
+    var LOADED = false;
 
     function load() {
-        var state = document.getElementById('loadState');
+        var state = el('loadState');
         var seq = ++loadSeq;
-        /* 首次加载：表格区是 display:none 的，什么都不显示像页面坏了。
-           先把表壳亮出来放一行转圈占位，数据到了 render() 自己接管显示切换。 */
         if (!LOADED) {
-            var wrap0 = document.getElementById('tableWrap');
-            if (wrap0) { wrap0.style.display = 'block'; }
-            var body0 = document.getElementById('instanceBody');
-            if (body0) { body0.innerHTML = Console.loadingRowHtml(7, '正在读取实例…'); }
-            if (state) { state.textContent = '正在读取…'; }
+            el('tableWrap').style.display = 'block';
+            el('instanceBody').innerHTML = Console.loadingRowHtml(7, '正在读取实例…');
+            state.textContent = '正在读取…';
         }
-        /* P2：/admin/instances 是 D 类裸对象（无 code/success），
-           api.get 的 normalize 会把它判为成功，直接返回 data。 */
         return Console.api.get('/admin/instances').then(function (data) {
             if (seq !== loadSeq) { return; }
             LOADED = true;
-            render(data);
-            state.textContent = '更新于 ' + fmtTime(Date.now());
+            renderInstances(data);
+            el('updatedAt').textContent = '更新于 ' + fmtTime(Date.now());
+            state.textContent = '';
         }).catch(function (e) {
             if (seq !== loadSeq) { return; }
-            /* 读取失败时保留上一次的快照（总比清空好），但把失败写在标题栏上，
-               避免用户把"过期数据"当成"当前状态" */
             state.textContent = '读取失败（下面仍是上次成功的数据）：' + e.message;
         });
     }
 
-    /* 三个动作共用一段确认 + 回调：差别只在文案与端点 */
     var ACTIONS = {
         mute: {
             text: '断开实例「%s」的工具调用？\n\n'
@@ -171,27 +175,23 @@
             danger: action === 'mute'
         });
         if (!ok) { return; }
-        /* P2：/admin/instances/{id}/{action} 是 C 类（只有 success）。
-           原来是「拿到响应就 alert(r.message)」，后端 success:false 时页面照样走成功分支；
-           改 api.post 后失败会 reject 进 catch，与 mute/restore 的语义对齐。 */
         Console.busy(btn, function () {
             return Console.api.post('/admin/instances/' + encodeURIComponent(instanceId) + '/' + action)
                 .then(function (r) {
                     Console.toast(r.message || '已提交', { type: 'success' });
                     load();
                 }).catch(function (e) {
-                    Console.toast('操作失败：' + e.message, { type: 'error' });
+                    Console.toast('操作失败：' + Console.sanitizeError(e.message), { type: 'error' });
                 });
         }, action === 'mute' ? '断开中…' : '恢复中…');
     }
 
     function setupAutoRefresh() {
-        var box = document.getElementById('autoRefresh');
+        var box = el('autoRefresh');
         function sync() {
             if (timer) { clearInterval(timer); timer = null; }
             if (box.checked) {
                 timer = setInterval(function () {
-                    /* 页面被切到后台时不刷新：没人看的表格没必要每隔 10 秒打一次接口 */
                     if (!document.hidden) { load(); }
                 }, AUTO_INTERVAL);
             }
@@ -200,12 +200,259 @@
         sync();
     }
 
+    /* ==================================================================
+       工具目录区
+       全量行与详情行一次生成，筛选只切 display、不重建 DOM —— 输入永不丢失。
+       只有首次加载、手动重新读取、保存成功后才重建。
+       ================================================================== */
+
+    function findTool(name) {
+        for (var i = 0; i < TOOLS.length; i++) {
+            if (TOOLS[i].name === name) { return TOOLS[i]; }
+        }
+        return null;
+    }
+
+    function findDetail(name) {
+        var rows = el('toolBody').querySelectorAll('tr[data-detail]');
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].getAttribute('data-detail') === name) { return rows[i]; }
+        }
+        return null;
+    }
+
+    function kindTag(kind) {
+        var label = kind === 'LOCAL' ? '内置' : (kind === 'MCP' ? 'MCP' : '远程');
+        var cls = kind === 'LOCAL' ? 'kind-local' : (kind === 'MCP' ? 'kind-mcp' : 'kind-remote');
+        return '<span class="kind-tag ' + cls + '">' + label + '</span>';
+    }
+
+    function paramRow(p, editable) {
+        var indent = (p.depth || 0) * 18;
+        var head = '<div class="param-label"><code>' + esc(p.path) + '</code>'
+            + ' <span class="muted">' + esc(p.type) + '</span>'
+            + (p.overridden ? ' <span class="kind-tag kind-local">已改</span>' : '')
+            + '</div>';
+        var body = editable
+            ? '<input type="text" class="form-control form-control-sm mono" data-param="'
+                + esc(p.path) + '" value="' + esc(p.description) + '">'
+            : '<div class="mono">' + esc(p.description) + '</div>';
+        var baseline = (editable && p.overridden)
+            ? '<div class="baseline-line">原文：' + esc(p.baselineDescription) + '</div>' : '';
+        return '<div class="param-row" style="padding-left:' + indent + 'px">'
+            + head + body + baseline + '</div>';
+    }
+
+    function detailHtml(t) {
+        var editable = !!t.editable;
+        var head = '<div class="tool-detail-head">工具说明'
+            + (t.overridden ? ' <span class="kind-tag kind-local">已改</span>' : '')
+            + (t.drift ? '<span class="drift-tag">上游说明已变化</span>' : '')
+            + '</div>';
+        var desc = editable
+            ? '<textarea class="form-control mono tool-desc-input" data-tool-desc rows="3">'
+                + esc(t.description) + '</textarea>'
+                + (t.description !== t.baselineDescription
+                    ? '<div class="baseline-line">原文：' + esc(t.baselineDescription) + '</div>' : '')
+            : '<div class="mono">' + esc(t.description) + '</div>';
+        var params = (t.params || []).map(function (p) {
+            return paramRow(p, editable);
+        }).join('');
+        var foot = editable
+            ? '<div class="tool-detail-foot">'
+                + '<span class="tool-detail-status"></span>'
+                + '<button type="button" class="btn btn-sm btn-outline-secondary" data-tool-act="close">收起</button>'
+                + '<button type="button" class="btn btn-sm btn-outline-secondary" data-tool-act="reset"'
+                +   (t.overridden ? '' : ' disabled') + '>恢复默认</button>'
+                + '<button type="button" class="btn btn-sm btn-primary" data-tool-act="save">保存</button>'
+                + '</div>'
+            : '<div class="tool-detail-foot">'
+                + '<button type="button" class="btn btn-sm btn-outline-secondary" data-tool-act="close">收起</button>'
+                + '</div>';
+        return '<div class="tool-detail">' + head + desc
+            + '<div class="tool-detail-head">参数说明</div>'
+            + (params || '<div class="muted">没有参数</div>')
+            + foot + '</div>';
+    }
+
+    function toolRows(t) {
+        var name = esc(t.name);
+        var domains = (t.domains || []).join('、');
+        return '<tr data-tool-row="' + name + '" data-tool="' + name + '">'
+            + '<td class="mono tool-name">' + name + '</td>'
+            + '<td>' + kindTag(t.kind) + '</td>'
+            + '<td><div class="tool-desc">' + esc(t.description || '—') + '</div></td>'
+            + '<td class="muted">' + ((t.params || []).length) + ' 个</td>'
+            + '<td class="mono muted">' + esc(domains || '—') + '</td>'
+            + '<td class="mono muted">' + (t.replicaCount || 0) + '</td>'
+            + '<td><button type="button" class="btn btn-sm btn-outline-secondary" data-tool-act="toggle"'
+            +   ' data-tool="' + name + '">' + (t.editable ? '编辑' : '查看') + '</button></td>'
+            + '</tr>'
+            + '<tr class="tool-detail-row" data-detail="' + name + '" style="display:none;">'
+            +   '<td colspan="7">' + detailHtml(t) + '</td></tr>';
+    }
+
+    function matches(t, kind, q) {
+        if (kind && t.kind !== kind) { return false; }
+        if (q) {
+            var hay = (String(t.name) + ' ' + String(t.description || '')).toLowerCase();
+            if (hay.indexOf(q) < 0) { return false; }
+        }
+        return true;
+    }
+
+    /** 只切 display，不碰任何输入控件 */
+    function applyView() {
+        var kind = el('toolKind').value;
+        var q = (el('toolSearch').value || '').trim().toLowerCase();
+        var body = el('toolBody');
+        body.querySelectorAll('tr[data-tool-row]').forEach(function (row) {
+            var t = findTool(row.getAttribute('data-tool'));
+            row.style.display = (t && matches(t, kind, q)) ? '' : 'none';
+        });
+        body.querySelectorAll('tr[data-detail]').forEach(function (row) {
+            var name = row.getAttribute('data-detail');
+            var t = findTool(name);
+            row.style.display = (t && openName === name && matches(t, kind, q)) ? '' : 'none';
+        });
+    }
+
+    function renderTools() {
+        var counts = { LOCAL: 0, REMOTE: 0, MCP: 0 };
+        TOOLS.forEach(function (t) {
+            if (counts[t.kind] != null) { counts[t.kind]++; }
+        });
+        el('toolSummary').textContent = '内置 ' + counts.LOCAL
+            + ' · 远程 ' + counts.REMOTE + ' · MCP ' + counts.MCP;
+
+        var body = el('toolBody');
+        if (!TOOLS.length) {
+            body.innerHTML = '<tr><td colspan="7" class="muted">注册表里还没有工具</td></tr>';
+            return;
+        }
+        body.innerHTML = TOOLS.map(toolRows).join('');
+        applyView();
+    }
+
+    function loadTools() {
+        var seq = ++toolSeq;
+        if (!el('toolBody').children.length) {
+            el('toolBody').innerHTML = Console.loadingRowHtml(7, '正在读取工具…');
+        }
+        return Console.api.get('/admin/tool-catalog').then(function (data) {
+            if (seq !== toolSeq) { return; }
+            TOOLS = (data && data.tools) || [];
+            if (openName && !findTool(openName)) { openName = null; }
+            renderTools();
+            el('toolState').textContent = '更新于 ' + fmtTime(Date.now());
+        }).catch(function (e) {
+            if (seq !== toolSeq) { return; }
+            el('toolState').textContent = '读取失败：' + Console.sanitizeError(e.message);
+        });
+    }
+
+    function setStatus(detail, text, cls) {
+        var box = detail.querySelector('.tool-detail-status');
+        if (!box) { return; }
+        box.textContent = text || '';
+        box.className = 'tool-detail-status' + (cls ? ' ' + cls : '');
+    }
+
+    function saveText(name, btn) {
+        var detail = findDetail(name);
+        if (!detail) { return; }
+        var desc = detail.querySelector('[data-tool-desc]');
+        var paramDescriptions = {};
+        detail.querySelectorAll('[data-param]').forEach(function (input) {
+            paramDescriptions[input.getAttribute('data-param')] = input.value;
+        });
+        var payload = {
+            description: desc ? desc.value : '',
+            paramDescriptions: paramDescriptions
+        };
+        Console.busy(btn, function () {
+            return Console.api.put('/admin/tool-catalog/' + encodeURIComponent(name) + '/text', payload)
+                .then(function (r) {
+                    dirty = false;
+                    Console.toast(r.message || '已保存', { type: 'success' });
+                    return loadTools();
+                }).catch(function (e) {
+                    setStatus(detail, '保存失败：' + Console.sanitizeError(e.message), 'err');
+                });
+        }, '保存中…');
+    }
+
+    function resetText(name, btn) {
+        Console.confirm('恢复「' + name + '」的注解原文？当前写的说明会被清除。', {
+            title: '恢复默认', okText: '恢复', danger: true
+        }).then(function (ok) {
+            if (!ok) { return; }
+            Console.busy(btn, function () {
+                return Console.api.del('/admin/tool-catalog/' + encodeURIComponent(name) + '/text')
+                    .then(function (r) {
+                        dirty = false;
+                        Console.toast(r.message || '已恢复', { type: 'success' });
+                        return loadTools();
+                    }).catch(function (e) {
+                        var detail = findDetail(name);
+                        if (detail) { setStatus(detail, '恢复失败：' + Console.sanitizeError(e.message), 'err'); }
+                    });
+            }, '恢复中…');
+        });
+    }
+
+    function manualReloadTools() {
+        if (dirty && openName) {
+            Console.confirm('有未保存的说明，重新读取会丢弃。继续？', {
+                title: '重新读取', okText: '继续', danger: true
+            }).then(function (ok) {
+                if (ok) { dirty = false; openName = null; loadTools(); }
+            });
+            return;
+        }
+        loadTools();
+    }
+
+    function bindToolEvents() {
+        var body = el('toolBody');
+        body.addEventListener('click', function (e) {
+            var btn = e.target.closest ? e.target.closest('button[data-tool-act]') : null;
+            if (!btn) { return; }
+            var action = btn.getAttribute('data-tool-act');
+            var name = btn.getAttribute('data-tool');
+            if (!name) {
+                var detail = btn.closest('tr[data-detail]');
+                name = detail ? detail.getAttribute('data-detail') : null;
+            }
+            if (!name) { return; }
+            if (action === 'toggle') {
+                openName = openName === name ? null : name;
+                applyView();
+            } else if (action === 'close') {
+                openName = null;
+                applyView();
+            } else if (action === 'save') {
+                saveText(name, btn);
+            } else if (action === 'reset') {
+                resetText(name, btn);
+            }
+        });
+        body.addEventListener('input', function (e) {
+            if (e.target.matches && e.target.matches('[data-tool-desc], [data-param]')) {
+                dirty = true;
+            }
+        });
+        el('toolKind').addEventListener('change', applyView);
+        el('toolSearch').addEventListener('input', applyView);
+        el('toolRefreshBtn').addEventListener('click', manualReloadTools);
+    }
+
     Console.renderSidebar('instances');
-    document.getElementById('refreshBtn').addEventListener('click', load);
-    /* 首次加载走 Console.ready：先确认登录态，未登录直接跳登录页，
-       不会先打一轮受保护接口留下 401 日志（见 console.js ready 的注释） */
+    el('refreshBtn').addEventListener('click', load);
+    bindToolEvents();
     Console.ready(function () {
         load();
+        loadTools();
         setupAutoRefresh();
     });
 })();

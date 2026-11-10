@@ -28,10 +28,8 @@ import java.util.regex.Pattern;
  *       用户以为在调温度，实际生效的是另一路。与其静默，不如在保存时把话说清楚。</li>
  * </ul>
  *
- * <p><b>对话档案一律走这里</b>，包括命中适配的档案：对话的适配 schema 已经下架
- * （参数面改成「标准字段 + 用户自填 JSON」），只剩下向量的 {@code dimensions} 还留在 schema 上。
- * 命中但该族没有 schema 的档案也走这里，所以 {@link ModelAdapterRegistry#validateParams}
- * 与这四道闸门的分界不再是"命中与否"，而是"该族**有没有** schema"。</p>
+ * <p><b>所有从 JSON 框进来的参数一律走这四道闸门</b>：适配层已整套删除，
+ * 不存在"命中适配就另走一套 schema 校验"的分支，这里是唯一一道关。</p>
  */
 public final class CustomParamsGate {
 
@@ -62,19 +60,18 @@ public final class CustomParamsGate {
             "base_url", "baseurl", "base-url", "url", "endpoint", "uri", "host", "api_base");
 
     /**
-     * 标准参数：它们在别处已经有入口（builder setter / 档案老字段），自定义里出现即冲突。
+     * 标准参数：它们在别处已经有权威来源，自定义里出现会变成"两处都填、生效的是哪一处看不见"。
      *
-     * <p>只收真正另有入口的三个键：{@code temperature} / {@code max_tokens} 走档案老字段
-     * 与卡片上的标准字段，{@code dimensions} 走向量维度专用字段（索引契约）。
-     * {@code top_p} / {@code seed} / {@code stop} / {@code response_format} / penalties
-     * 这些**曾经**也在这张表里，但它们的入口是适配 schema —— schema 下架后若继续拒，
-     * 就成了"哪条路都填不了"的能力净损失，故一并放开，与普通私有参数同待遇。</p>
+     * <p>现在只剩 {@code dimensions}：向量维度没有配置入口也照样拒绝 —— 维度由模型决定、
+     * 索引按实测维度建，通过私有参数下发只会在上游换回另一种长度的向量，与本地索引静默失配。</p>
      *
-     * <p>拒绝而不是"后者覆盖前者"：覆盖意味着两条路的优先级成了隐式约定，
-     * 而它连在日志里都看不出来 —— 保存时报一句话，比事后查"为什么温度不生效"便宜得多。</p>
+     * <p>{@code temperature} / {@code max_tokens} 已经<b>从这张表里移出</b>：卡片上的温度 /
+     * 单次最大输出控件删除后，JSON 框成了它们唯一的入口；继续拒等于把这两个参数变成
+     * "哪条路都填不了"的能力净损失。写 JSON 时若档案还留着老的同名字段，
+     * 保存接口会把那个字段清掉（见 {@code AdminModelProfileController#updateCustomParams}），
+     * 保证同一个值只有一条下发路径。</p>
      */
-    private static final Set<String> STD_CONFLICTS = Set.of(
-            "temperature", "max_tokens", "dimensions");
+    private static final Set<String> STD_CONFLICTS = Set.of("dimensions");
 
     /** 合法键名：字母或下划线开头，后续允许数字与 . - _（厂商私有参数里点号常见） */
     private static final Pattern KEY_SHAPE = Pattern.compile("^[A-Za-z_][A-Za-z0-9_.-]{0,63}$");
@@ -112,8 +109,8 @@ public final class CustomParamsGate {
             }
             // ④ 标准键冲突
             if (STD_CONFLICTS.contains(key)) {
-                return "自定义参数不允许使用键「" + rawKey + "」：它是标准字段（温度 / 单次最大输出 / 向量维度）"
-                        + "，请用卡片上对应的输入框填写"
+                return "自定义参数不允许使用键「" + rawKey + "」：它属于标准参数"
+                        + "（向量维度由模型自己决定，不通过私有参数下发）"
                         + "（两处都填会让同一个值发两条路，生效的是哪一路不可见）";
             }
             // ② 形状（键名）

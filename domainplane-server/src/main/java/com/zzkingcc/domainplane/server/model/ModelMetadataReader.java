@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * 模型元数据读取 —— 只读提供商的 {@code GET {baseUrl}/models}，一个推理请求都不发。
@@ -30,19 +29,20 @@ import java.util.concurrent.CompletableFuture;
  * OpenAI 规范里 {@code GET /models} 给了什么、没给什么，这是本类的全部依据：
  *
  *   • 给了：{@code data[].id/object/created/owned_by}，即「这个 Key 能用到哪些模型」；
- *   • 没给：端点族、输入 / 输出模态、向量维度，一项都没有。
+ *   • 没给：端点族、输入 / 输出模态，一项都没有。
  *
- * 于是按元数据形态由强到弱依次尝试：
+ * 于是按元数据形态由强到弱：
  *
  *   • OpenRouter 风格：清单每项额外带 {@code architecture}（输入 / 输出模态），模态直接读到，
  *       且是**完整枚举**，可以覆盖档案里过时的声明；
- *   • 过滤式（硅基流动这类）：清单本身只有 id，但支持 {@code ?sub_type=chat|embedding|…} 过滤，
- *       靠"该模型出现在哪个子类型列表里"反推端点族，并按该端点的 OpenAI 规范语义填输入 / 输出模态
- *       （{@code /chat/completions} 是文本进、文本出；{@code /embeddings} 是文本进、向量出）。
- *       这一路给的是**基线值**，只能并进已有声明，绝不能覆盖，能吃图片的对话模型在清单里
- *       同样是 {@code chat}，覆盖会把用户手填的 {@code image} 悄悄抹掉；
  *   • 标准 OpenAI 规范（OpenAI / DeepSeek 官方、vLLM、LM Studio、各类中转）：只有那四个字段，
- *       {@code sub_type} 也不认，除"模型存在"外一律未声明。
+ *       除"模型存在"外一律未声明。
+ *
+ * <p><b>刻意不读服务商私有的过滤参数</b>（例如 {@code GET /models?sub_type=chat|embedding|…}）：
+ * 那套语义只有一家认，换个服务商就失效；更糟的是"忽略该参数、原样回全量清单"会被误读成
+ * "这个模型命中所有子类型"，历史上就把一个纯对话模型标成了「向量 + 重排 + 生图」。
+ * 能力要么来自清单里明确的能力字段（{@code architecture}），要么来自实测（卡片上的「探测」，
+ * 走的是 OpenAI 规范端点）—— 不从服务商私有的清单语义里推。</p>
  *
  *
  * 两条规范化，只做"对齐规范"不改语义：
@@ -66,78 +66,6 @@ public class ModelMetadataReader {
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(20);
-
-    /**
-     * 过滤式提供商的 {@code sub_type} → 端点族（取值见硅基流动 {@code GET /models} 的 OpenAPI）。
-     */
-    private static final Map<String, String> SUB_TYPE_ENDPOINT = subTypeEndpoints();
-
-    /**
-     * 子类型 → 输入模态。
-     *
-     * 按该端点实际吃什么给基线值，不是猜：{@code /chat/completions} 的 {@code messages[].content}
-     * 是文本，{@code /embeddings} 与 {@code /rerank} 的入参是文本，
-     * {@code /images/generations} 收文本提示词，而 {@code /audio/transcriptions} 吃的是音频文件。
-     *
-     * 基线值必须照着端点的主入参给：语音识别的主体入参是音频，它的 {@code prompt} 只是可选辅助参数，
-     * 不能因为它能带文本就填 text。
-     *
-     * 基线 ≠ 全集：能吃图片的对话模型（VLM）在 {@code sub_type} 里仍然是 {@code chat}，
-     * 这里只会给出 {@code text}。
-     */
-    private static final Map<String, String> SUB_TYPE_INPUT = Map.of(
-            "chat", ModelProfile.MOD_TEXT,
-            "embedding", ModelProfile.MOD_TEXT,
-            "reranker", ModelProfile.MOD_TEXT,
-            "speech-to-text", ModelProfile.MOD_AUDIO,
-            "text-to-image", ModelProfile.MOD_TEXT,
-            "text-to-video", ModelProfile.MOD_TEXT,
-            "image-to-image", ModelProfile.MOD_IMAGE);
-
-    /**
-     * 子类型 → 输出模态，同样按端点规范给基线值。
-     *
-     * 刻意保留 {@code chat → text}：子类型既然已判定"走 {@code /chat/completions}"，
-     * 按 OpenAI 规范该端点的产出就是文本，填 {@code text} 是对齐规范而不是猜测。
-     *
-     * {@code reranker → score}：重排产出的是与传入 documents 一一对应的相关性分数
-     * （服务商字段名 {@code relevance_score}）。原先这一格是空的，于是重排模型在卡片上显示成
-     * 「端点族=重排、输入=文本、输出=（空）」，看着像识别失败。
-     */
-    private static final Map<String, String> SUB_TYPE_OUTPUT = Map.of(
-            "chat", ModelProfile.MOD_TEXT,
-            "embedding", ModelProfile.MOD_EMBEDDING,
-            "reranker", ModelProfile.MOD_SCORE,
-            "text-to-image", ModelProfile.MOD_IMAGE,
-            "image-to-image", ModelProfile.MOD_IMAGE,
-            "text-to-video", ModelProfile.MOD_VIDEO,
-            "speech-to-text", ModelProfile.MOD_TEXT);
-
-    /**
-     * 端点族 → 基线模态。由 {@code architecture} 推端点族、或由子类型判定端点族之后，
-     * 用它把该端点规范的输入 / 输出模态补齐。
-     *
-     * 与 SUB_TYPE_* 两张表的区别：那两张按 {@code sub_type} 组织，而 {@code text-to-image}
-     * 与 {@code image-to-image} 同归 {@code images} 端点族，反查会有冲突；这里直接按端点族写，
-     * 一个端点一条，没有歧义。
-     */
-    private static final Map<String, String> EP_BASELINE_INPUT = Map.of(
-            ModelProfile.EP_CHAT, ModelProfile.MOD_TEXT,
-            ModelProfile.EP_EMBEDDING, ModelProfile.MOD_TEXT,
-            ModelProfile.EP_RERANK, ModelProfile.MOD_TEXT,
-            ModelProfile.EP_IMAGES, ModelProfile.MOD_TEXT,
-            ModelProfile.EP_ASR, ModelProfile.MOD_AUDIO,
-            ModelProfile.EP_TTS, ModelProfile.MOD_TEXT,
-            ModelProfile.EP_VIDEO, ModelProfile.MOD_TEXT);
-
-    private static final Map<String, String> EP_BASELINE_OUTPUT = Map.of(
-            ModelProfile.EP_CHAT, ModelProfile.MOD_TEXT,
-            ModelProfile.EP_EMBEDDING, ModelProfile.MOD_EMBEDDING,
-            ModelProfile.EP_RERANK, ModelProfile.MOD_SCORE,
-            ModelProfile.EP_IMAGES, ModelProfile.MOD_IMAGE,
-            ModelProfile.EP_ASR, ModelProfile.MOD_TEXT,
-            ModelProfile.EP_TTS, ModelProfile.MOD_AUDIO,
-            ModelProfile.EP_VIDEO, ModelProfile.MOD_VIDEO);
 
     private final ObjectMapper mapper;
     private final HttpClient http;
@@ -165,12 +93,12 @@ public class ModelMetadataReader {
 
         String base = baseUrl.trim();
         String addressNote = "";
-        JsonNode data = fetchModelList(base, apiKey, null);
+        JsonNode data = fetchModelList(base, apiKey);
         if (data == null) {
             /* 只有 404 / 405 才补 /v1 重试：401 / 403 / 5xx 换地址也不会变好 */
             String withV1 = appendV1(base);
             if (withV1 != null) {
-                data = fetchModelList(withV1, apiKey, null);
+                data = fetchModelList(withV1, apiKey);
                 if (data != null) {
                     addressNote = "（地址 " + base + " 下没有 /models，已按 OpenAI 规范补上 /v1）";
                     base = withV1;
@@ -204,16 +132,10 @@ public class ModelMetadataReader {
             return withNote(fromArchitecture(match.entry()), idNote);
         }
 
-        SubTypeOutcome bySubType = classifyBySubType(base, apiKey, modelName, data);
-        if (bySubType.result() != null) {
-            return withNote(bySubType.result(), idNote);
-        }
-        if (bySubType.filterWorks()) {
-            /* 过滤确实生效、这个模型也在全量清单里，却没有落进任何一个已知子类型，
-               这不是"服务商不认 sub_type"，如实说清，别把两件事混成一句 */
-            return withNote(unlistedInSubTypes(modelName), idNote);
-        }
-
+        /* 只按 OpenAI 规范读：清单里没有能力字段就是"不知道"，如实返回未声明，
+           不靠任何服务商私有的过滤语义去反推类型 —— 那类语义换个服务商就失效，
+           而且会把整份全量清单误当成"过滤生效"的证据（历史上就出过 rerank 误标）。
+           真要知道能力，走卡片上的「探测」（OpenAI 规范端点，实测）。 */
         return withNote(openaiPlain(modelName), idNote);
     }
 
@@ -280,136 +202,25 @@ public class ModelMetadataReader {
         return endpoints;
     }
 
-    // ==================== 过滤式：清单只有 id，但支持 sub_type 过滤 ====================
-
-    /**
-     * 过滤式：靠 {@code ?sub_type=…} 过滤反推端点族。
-     *
-     * 七个子类型并行问一次：串行会把"保存一份档案"拖到七次往返那么长，而每个请求都只是读清单，
-     * 并行不改变语义、也不多花钱。
-     *
-     * @return 两件事分开报：{@code filterWorks} 是"过滤器确实生效"（决定读不到时该说哪句话），
-     *         {@code result} 是判定结果（{@code null} = 没判出来）
-     */
-    private SubTypeOutcome classifyBySubType(String baseUrl, String apiKey, String modelName,
-                                             JsonNode full) {
-        Set<String> fullIds = idsOf(full);
-
-        Map<String, CompletableFuture<Set<String>>> pending = new LinkedHashMap<>();
-        for (String subType : SUB_TYPE_ENDPOINT.keySet()) {
-            pending.put(subType, http.sendAsync(modelListRequest(baseUrl, apiKey, subType),
-                            HttpResponse.BodyHandlers.ofString())
-                    .thenApply(resp -> resp.statusCode() / 100 == 2
-                            ? idsOf(parseData(resp.body())) : Set.<String>of())
-                    .exceptionally(e -> {
-                        log.debug("[模型元数据] sub_type={} 过滤请求失败，跳过：{}", subType, e.getMessage());
-                        return Set.of();
-                    }));
-        }
-        Map<String, Set<String>> bySubType = new LinkedHashMap<>();
-        pending.forEach((subType, future) -> bySubType.put(subType, future.join()));
-
-        boolean filterWorks = bySubType.values().stream()
-                .anyMatch(ids -> !normalizedIds(ids).equals(normalizedIds(fullIds)));
-        return new SubTypeOutcome(filterWorks, decideBySubType(modelName, fullIds, bySubType));
-    }
-
-    /**
-     * @param filterWorks 过滤器是否确实生效（至少一个子类型回了真子集）
-     * @param result      判定结果；{@code null} = 没判出端点族
-     */
-    private record SubTypeOutcome(boolean filterWorks, MetadataResult result) {
-    }
-
-    /**
-     * 纯决策（不联网，便于单测）：从各子类型清单判定该模型属于哪些端点族。
-     *
-     * 关键保护：提供商不认识 {@code sub_type} 时会忽略该参数并回全量清单。
-     * 若不识别这种情况，每个子类型都会"命中"该模型，于是所有端点族都会被标上。
-     * 因此只有当至少一个子类型返回了真子集（证明过滤确实生效）才采信。
-     *
-     * @param fullIds   不带过滤时的全量 id，用来识别"过滤器被忽略"
-     * @param bySubType 子类型 → 该子类型清单里的 id
-     * @return 判定结果；过滤未生效 / 一个都没命中时返回 {@code null}，交由调用方如实说"读不到"
-     */
-    static MetadataResult decideBySubType(String modelName, Set<String> fullIds,
-                                          Map<String, Set<String>> bySubType) {
-        boolean filterWorks = bySubType.values().stream()
-                .anyMatch(ids -> !normalizedIds(ids).equals(normalizedIds(fullIds)));
-        if (!filterWorks) {
-            return null;
-        }
-
-        String want = normalizeModelId(modelName);
-        Set<String> endpoints = new LinkedHashSet<>();
-        List<String> input = new ArrayList<>();
-        List<String> output = new ArrayList<>();
-        List<String> matched = new ArrayList<>();
-        for (Map.Entry<String, Set<String>> e : bySubType.entrySet()) {
-            if (!normalizedIds(e.getValue()).contains(want)) {
-                continue;
-            }
-            matched.add(e.getKey());
-            String endpoint = SUB_TYPE_ENDPOINT.get(e.getKey());
-            if (endpoint != null) {
-                endpoints.add(endpoint);
-            }
-            String in = SUB_TYPE_INPUT.get(e.getKey());
-            if (in != null && !input.contains(in)) {
-                input.add(in);
-            }
-            String out = SUB_TYPE_OUTPUT.get(e.getKey());
-            if (out != null && !output.contains(out)) {
-                output.add(out);
-            }
-        }
-        if (endpoints.isEmpty()) {
-            return null;
-        }
-
-        /* authoritative = false：这一路给的是端点规范的基线值（chat → text → text），
-           它能吃图片也照样只写 text，所以只能并进已有声明，绝不能覆盖 */
-        return new MetadataResult(List.copyOf(endpoints), List.copyOf(input), List.copyOf(output), false,
-                "来自提供商元数据（sub_type 过滤式）：" + modelName + " 命中子类型 " + matched
-                        + "，据此判定端点族 " + endpoints
-                        + "；输入 / 输出模态按该端点的规范填为 " + orNone(input) + " → " + orNone(output)
-                        + "（基线值：子类型只说明「怎么调」，它能吃什么、产出什么按端点主入参 / 主产出给，"
-                        + "例如语音识别是 audio → text，不吃文本）。"
-                        + undeclaredTail(endpoints, input, output));
-    }
-
     // ==================== 标准 OpenAI 规范：清单什么都不给 ====================
 
     /**
-     * 清单支持 {@code sub_type} 过滤、模型也在清单里，却没落进任何一个已知子类型时的结论。
-     *
-     * 与 {@link #openaiPlain} 严格分开：那种情况下说"服务商不认 sub_type"是错的，
-     * 过滤是生效的，只是该模型属于我们不认识的子类型（服务商加了新区分类，或这是个新模态）。
-     * 两者的下一步完全不同：前者无解，后者是"把子类型表补全就能读到"，说错就把排查方向带偏。
-     */
-    private static MetadataResult unlistedInSubTypes(String modelName) {
-        return MetadataResult.undeclared("该服务商的清单支持 sub_type 过滤，但 " + modelName
-                + " 没有出现在任何一个已知子类型（" + String.join(" / ", SUB_TYPE_ENDPOINT.keySet())
-                + "）的清单里。\n服务商可能新增了子类型分类。因此无法判定它属于哪一类，"
-                + "该档案保持未声明；不猜一个类型 —— 猜错会让它能被绑到域却用不了，且全程不报错。");
-    }
-
-    /**
-     * 清单只有 {@code id/object/created/owned_by} 且 {@code sub_type} 不生效时的结论。
+     * 清单只有 {@code id/object/created/owned_by} 且没有任何能力字段时的结论。
      *
      * 唯一被证实的事实是"这个 Key 的清单里有这个模型"，其余一律未声明。端点族不自动补
      * chat：OpenAI 规范的清单里同样列着向量模型，补错就是"能绑到域、却当不了向量模型"的那种
      * 全程不报错的错。这类提供商（OpenAI / DeepSeek 官方、vLLM / LM Studio / 各类中转）
      * 在管控台上识别不出类型，档案保持未声明，这是零成本识别的固有边界，
-     * 如实说明比猜一个类型强。
+     * 如实说明比猜一个类型强。要知道能力就点卡片上的「探测」。
      */
     private static MetadataResult openaiPlain(String modelName) {
         return MetadataResult.undeclared("该服务商的模型清单是标准 OpenAI 规范：只有 id / object / "
-                + "created / owned_by，既没有类型与模态字段，也不认 sub_type 过滤参数。"
+                + "created / owned_by，既没有类型与模态字段。"
                 + "\n已证实：" + modelName + " 在这个 Key 的清单里存在（仅此一项）。"
                 + "\n因此无法判定它属于哪一类：不自动补成对话模型，是因为向量模型与生图模型"
                 + "也列在同一份清单里，猜错会让它们能被绑到域却用不了，且全程不报错。"
-                + "\n不花 token 就读不出类型与模态 —— 这是元数据读取的边界，不是识别失败。");
+                + "\n不花 token 就读不出类型与模态 —— 这是元数据读取的边界，不是识别失败。"
+                + "\n要实测能力，用卡片上的「探测」（走 OpenAI 规范端点，花几个 token）。");
     }
 
     // ==================== 匹配与地址规范化 ====================
@@ -468,14 +279,6 @@ public class ModelMetadataReader {
         String s = raw.trim().toLowerCase(Locale.ROOT);
         int slash = s.indexOf('/');
         return slash >= 0 && slash < s.length() - 1 ? s.substring(slash + 1) : s;
-    }
-
-    private static Set<String> normalizedIds(Set<String> ids) {
-        Set<String> out = new LinkedHashSet<>();
-        for (String id : ids) {
-            out.add(normalizeModelId(id));
-        }
-        return out;
     }
 
     /**
@@ -577,10 +380,10 @@ public class ModelMetadataReader {
     // ==================== HTTP ====================
 
     /** {@code GET {baseUrl}/models}，返回 {@code data} 数组；不存在该端点（404/405）返回 {@code null} */
-    private JsonNode fetchModelList(String baseUrl, String apiKey, String subType) {
+    private JsonNode fetchModelList(String baseUrl, String apiKey) {
         HttpResponse<String> resp;
         try {
-            resp = http.send(modelListRequest(baseUrl, apiKey, subType),
+            resp = http.send(modelListRequest(baseUrl, apiKey),
                     HttpResponse.BodyHandlers.ofString());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -604,9 +407,9 @@ public class ModelMetadataReader {
         return parseData(resp.body());
     }
 
-    private HttpRequest modelListRequest(String baseUrl, String apiKey, String subType) {
-        String url = endpoint(baseUrl, "/models") + (subType == null ? "" : "?sub_type=" + subType);
-        return HttpRequest.newBuilder(URI.create(url))
+    /** 只按 OpenAI 规范读：不加任何服务商私有的查询参数 */
+    private HttpRequest modelListRequest(String baseUrl, String apiKey) {
+        return HttpRequest.newBuilder(URI.create(endpoint(baseUrl, "/models")))
                 .timeout(REQUEST_TIMEOUT)
                 .header("Authorization", "Bearer " + apiKey.trim())
                 .header("Accept", "application/json")
@@ -628,17 +431,6 @@ public class ModelMetadataReader {
         return data;
     }
 
-    private static Set<String> idsOf(JsonNode data) {
-        Set<String> ids = new LinkedHashSet<>();
-        for (JsonNode item : data) {
-            String id = item.path("id").asText("");
-            if (!id.isBlank()) {
-                ids.add(id);
-            }
-        }
-        return ids;
-    }
-
     /** 容忍地址末尾多打斜杠 */
     private static String endpoint(String baseUrl, String path) {
         String s = baseUrl.trim();
@@ -656,18 +448,6 @@ public class ModelMetadataReader {
         return one.length() > 160 ? one.substring(0, 160) + "…" : one;
     }
 
-    private static Map<String, String> subTypeEndpoints() {
-        Map<String, String> m = new LinkedHashMap<>();
-        m.put("chat", ModelProfile.EP_CHAT);
-        m.put("embedding", ModelProfile.EP_EMBEDDING);
-        m.put("reranker", ModelProfile.EP_RERANK);
-        m.put("text-to-image", ModelProfile.EP_IMAGES);
-        m.put("image-to-image", ModelProfile.EP_IMAGES);
-        m.put("speech-to-text", ModelProfile.EP_ASR);
-        m.put("text-to-video", ModelProfile.EP_VIDEO);
-        return Collections.unmodifiableMap(m);
-    }
-
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();
     }
@@ -680,8 +460,7 @@ public class ModelMetadataReader {
      * @param endpoints     端点族；空 = 提供商没给（档案将保持未声明）
      * @param input         输入模态；空 = 未声明
      * @param output        输出模态；空 = 未声明
-     * @param authoritative 读到的模态是不是**完整枚举**。只有 OpenRouter 风格的 {@code architecture}
-     *                      是；{@code sub_type} 给的是端点规范基线值，只能并进已有声明。
+     * @param authoritative 读到的模态是不是**完整枚举**。只有 OpenRouter 风格的 {@code architecture}     *                      是；{@code sub_type} 给的是端点规范基线值，只能并进已有声明。
      *                      覆盖与并集的分岔见 {@link ModelProfile#withDetected}
      * @param note          这次读到了什么 / 为什么读不到（供日志与接口诊断，界面不直接展示）
      */

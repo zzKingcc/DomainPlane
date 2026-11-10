@@ -38,12 +38,8 @@ public class AiProperties {
         /**
          * 文本向量模型名。
          * 刻意不设代码默认值：向量模型的维度直接决定 ES 索引 mapping，
+         * 而维度按该模型的原生维度实测（不提供手工配置项），换模型即换索引契约。
          */
         private String modelName;
-
-        /**
-         * 向量维度，管控台填写优先。
-         */
-        private Integer dimensions;
     }
 }

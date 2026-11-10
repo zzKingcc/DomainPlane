@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>这个字段最容易出的两种错都在"复制一份"和"归一"上，不在它自己的取值：</p>
  * <ul>
- *   <li>某条复制方法（withDetected / withConfirmed / withTuning / withDimensions /
+ *   <li>某条复制方法（withDetected / withConfirmed / withTuning /
  *       withReturnThinking）漏传它：表现是"保存后那个值凭空消失"，且全程不报错；</li>
  *   <li>被顺手加进指纹或绑域门禁：前者让用户改个数字就打醒一份新客户端，
  *       后者让一个填错的数字把档案变成绑不上域。</li>
@@ -30,7 +30,7 @@ class ModelProfileContextWindowTest {
         return new ModelProfile("a", List.of(ModelProfile.EP_CHAT),
                 List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_TEXT),
                 "https://api.example.com/v1", "sk-test", "m",
-                0.5, 2048, 32_000, Boolean.TRUE, Boolean.TRUE, null, List.of("fb"),
+                0.5, 2048, 32_000, Boolean.TRUE, Boolean.TRUE, List.of("fb"),
                 Map.of("enable_thinking", true), ModelProfile.PROTOCOL_OPENAI);
     }
 
@@ -43,8 +43,6 @@ class ModelProfileContextWindowTest {
         assertContext(p.withConfirmed(List.of(ModelProfile.EP_CHAT),
                 List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_TEXT)), "withConfirmed");
         assertContext(p.withTuning(0.9, 4096, Map.of()), "withTuning");
-        assertContext(p.withTuning(0.9, 4096, 1024, Map.of()), "withTuning(带维度)");
-        assertContext(p.withDimensions(768), "withDimensions");
         assertContext(p.withReturnThinking(Boolean.FALSE), "withReturnThinking");
     }
 
@@ -125,12 +123,12 @@ class ModelProfileContextWindowTest {
 
     @Test
     void 兼容构造器默认未声明() {
-        /* 既有调用方与测试一律走 14 参重载（见 record 里的兼容构造器）：
+        /* 既有调用方与测试一律走兼容重载（见 record 里的兼容构造器）：
            它必须把新字段落成 null，而不是让人以为"默认给了一个数" */
         ModelProfile legacy = new ModelProfile("a", List.of(ModelProfile.EP_CHAT),
                 List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_TEXT),
                 "https://api.example.com/v1", "sk-test", "m",
-                null, null, null, null, null, new java.util.ArrayList<>(), new LinkedHashMap<>());
+                null, null, null, null, new java.util.ArrayList<>(), new LinkedHashMap<>());
         assertNull(legacy.contextWindow());
         assertNull(legacy.effectiveContextWindow());
     }

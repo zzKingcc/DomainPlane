@@ -16,8 +16,11 @@ import static org.junit.jupiter.api.Assertions.*;
  * 元数据解析的纯单测 —— 一个网络请求都不发。
  *
  * 把"清单长什么样 → 判定成什么"这件事整段钉住：名称匹配的三种结果、模态词表翻译、
- * 由输出模态推端点族、子类型过滤的两道保护（过滤器被忽略时不采信 / 命中多条端点族）、
- * {@code /v1} 补全规则。控制器侧只覆盖"读到的结果怎么落档"，解析细节全在这里。
+ * 由输出模态推端点族、{@code /v1} 补全规则。控制器侧只覆盖"读到的结果怎么落档"，
+ * 解析细节全在这里。
+ *
+ * <p>服务商私有的 {@code sub_type} 过滤已整套移除：那套语义只有一家认，且"忽略参数回全量清单"
+ * 会被误读成"命中所有子类型"。能力只来自清单里的能力字段（{@code architecture}）或实测探测。</p>
  *
  * @author zzkingcc
  */
@@ -140,60 +143,6 @@ class ModelMetadataReaderTest {
 
         assertEquals(List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE), r.input());
         assertEquals(List.of(ModelProfile.MOD_TEXT), r.output());
-    }
-
-    // ==================== sub_type 过滤 ====================
-
-    @Test
-    void 过滤器被忽略时判不出端点族() {
-        Set<String> full = Set.of("a", "b");
-        Map<String, Set<String>> bySubType = new LinkedHashMap<>();
-        /* 每个子类型都回了全量清单：说明服务商不认 sub_type，任何结论都是假的 */
-        bySubType.put("chat", Set.of("a", "b"));
-        bySubType.put("embedding", Set.of("a", "b"));
-
-        assertNull(ModelMetadataReader.decideBySubType("a", full, bySubType),
-                "过滤没生效就不能采信，否则每个子类型都会命中、所有端点族都会被标上");
-    }
-
-    @Test
-    void 过滤生效时按命中的子类型判定端点族() {
-        Set<String> full = Set.of("m-chat", "m-rerank");
-        Map<String, Set<String>> bySubType = new LinkedHashMap<>();
-        bySubType.put("chat", Set.of("m-chat"));
-        bySubType.put("reranker", Set.of("m-rerank"));
-
-        ModelMetadataReader.MetadataResult r =
-                ModelMetadataReader.decideBySubType("m-rerank", full, bySubType);
-
-        assertNotNull(r);
-        assertFalse(r.authoritative(), "sub_type 给的是端点规范基线值，不能覆盖已有声明");
-        assertEquals(List.of(ModelProfile.EP_RERANK), r.endpoints());
-        assertEquals(List.of(ModelProfile.MOD_TEXT), r.input());
-        assertEquals(List.of(ModelProfile.MOD_SCORE), r.output());
-    }
-
-    @Test
-    void 过滤生效但该模型一个子类型都没命中时判不出() {
-        Set<String> full = Set.of("m-chat", "m-embed");
-        Map<String, Set<String>> bySubType = new LinkedHashMap<>();
-        bySubType.put("chat", Set.of("m-chat"));
-
-        assertNull(ModelMetadataReader.decideBySubType("m-ghost", full, bySubType));
-    }
-
-    @Test
-    void 子类型清单里的vendor前缀也能对上() {
-        Set<String> full = Set.of("vendor/m-embed");
-        Map<String, Set<String>> bySubType = new LinkedHashMap<>();
-        bySubType.put("chat", Set.of("m-chat"));
-        bySubType.put("embedding", Set.of("vendor/m-embed"));
-
-        ModelMetadataReader.MetadataResult r =
-                ModelMetadataReader.decideBySubType("m-embed", full, bySubType);
-
-        assertNotNull(r, "规范化匹配对子类型清单同样成立");
-        assertEquals(List.of(ModelProfile.EP_EMBEDDING), r.endpoints());
     }
 
     // ==================== 地址 ====================

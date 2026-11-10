@@ -2,7 +2,6 @@ package com.zzkingcc.domainplane.server.model;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.core.io.DefaultResourceLoader;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,10 +14,8 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>钉的是这条路线里最容易被悄悄改坏的三件事：</p>
  * <ol>
- *   <li><b>原样下发</b> —— 未命中适配时，档案里的 params 必须<b>一个键不删、一个值不改</b>地
- *       进请求体。这是整条路线的兑现点：用户填了什么，服务商就得收到什么。
- *       这条分支以前的注释写着"正常应为空"，因为控制器那时拒绝非空；
- *       现在 30 个模型里 29 个走它 —— 从"没有测试"变成"必须有测试"。</li>
+ *   <li><b>原样下发</b> —— 档案里的 params 必须<b>一个键不删、一个值不改</b>地进请求体。
+ *       这是整条路线的兑现点：用户填了什么，服务商就得收到什么。</li>
  *   <li><b>闸门拦得住</b> —— 黑名单、形状、量三道闸门的拒绝必须落在<b>保存时</b>，
  *       而不是等到对话时。它拦的不是"值对不对"（那是服务商的事），
  *       是"这个键归谁管"与"这坨东西会不会让请求体失控"。</li>
@@ -26,8 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *       "参数不合法"这种文案等于让用户对着一坨 JSON 自己猜。</li>
  * </ol>
  *
- * <p>用真实注册表（{@code classpath:adapters/*.json}）而不是桩：归档 29 份之后只剩
- * deepseek-flash 一份，任何非 DeepSeek 的模型名都走未命中分支 —— 这正是要测的那条路。</p>
+ * <p>适配层整套删除后，所有档案都走同一条透传路径，没有"命中 / 未命中"两种分支。</p>
  *
  * @author zzkingcc
  */
@@ -36,12 +32,11 @@ class CustomParamsPassthroughTest {
     private static final String BASE_URL = "https://api.example.com/v1";
     private static final String MODEL = "some-unregistered-model";
 
-    private final ModelAdapterRegistry registry = new ModelAdapterRegistry(new DefaultResourceLoader());
     private final ModelClientFactory factory = new ModelClientFactory();
 
     private static ModelProfile profile(Map<String, Object> params) {
         return new ModelProfile("p", List.of(ModelProfile.EP_CHAT), List.of("text"), List.of("text"),
-                BASE_URL, "sk-test", MODEL, null, null, null, null, null, null, List.of(), params,
+                BASE_URL, "sk-test", MODEL, null, null, null, null, null, List.of(), params,
                 ModelProfile.PROTOCOL_OPENAI);
     }
 
@@ -53,18 +48,10 @@ class CustomParamsPassthroughTest {
         return m;
     }
 
-    /** 先钉住前提：这个模型名确实没被任何适配登记，否则下面测的就不是"未命中"这条分支 */
-    @Test
-    @DisplayName("测试用的模型名必须未命中适配（否则下面的断言测的是另一条分支）")
-    void fixtureIsUnmatched() {
-        assertFalse(registry.match(BASE_URL, MODEL).matched(),
-                "测试夹具失效：some-unregistered-model 被适配登记了，改用别的模型名");
-    }
-
     // ==================== ① 原样下发 ====================
 
     @Test
-    @DisplayName("未命中适配时，档案 params 一个键不删、一个值不改地进请求体")
+    @DisplayName("档案 params 一个键不删、一个值不改地进请求体")
     void passesThroughVerbatim() {
         Map<String, Object> in = params(
                 "enable_thinking", true,

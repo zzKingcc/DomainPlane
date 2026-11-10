@@ -3,7 +3,6 @@ package com.zzkingcc.domainplane.server.controller;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.common.exception.BaseException;
 import com.zzkingcc.domainplane.server.env.StorageLocations;
-import com.zzkingcc.domainplane.server.model.ModelAdapterRegistry;
 import com.zzkingcc.domainplane.server.model.ModelCapabilityProbe;
 import com.zzkingcc.domainplane.server.model.ModelProfile;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
@@ -12,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
-import org.springframework.core.io.DefaultResourceLoader;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -27,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * 口径（与前端那颗卡片开关一一对应）：
  *   • 拨到开 / 关都落盘，且只动 returnThinking 一个字段；
  *   • 不要求重填 API Key：卡片上只有脱敏值，为拨一颗开关让用户再输一遍密钥没有道理；
- *   • 不要求命中适配：思考是对话流的概念，与"这家服务商有没有登记调优 schema"无关；
+ *   • 不要求任何额外登记：思考是对话流的概念，与"这家服务商的参数面长什么样"无关；
  *   • 别名不存在 / 请求体缺失一律拒绝，且原因说得清是哪一个。
  *
  * 控制器其余依赖（holder / domainRegistry / knowledgeBaseService）不参与本路径，传 null。
@@ -53,11 +51,10 @@ class AdminModelProfileReturnThinkingTest {
         ModelProfileRegistry registry = new ModelProfileRegistry(store);
         lastRegistry = registry;
         return new AdminModelProfileController(registry, store,
-                null, null, new ModelAdapterRegistry(new DefaultResourceLoader()),
-                new ModelCapabilityProbe(), null, null);
+                null, null, new ModelCapabilityProbe(), null, null);
     }
 
-    /** 先建一份对话档案（端点族显式声明，绕过元数据读取；未命中适配，params 为空） */
+    /** 先建一份对话档案（端点族显式声明，绕过元数据读取；params 为空） */
     private void seed(AdminModelProfileController c) {
         AdminModelProfileController.ProfileBody b = new AdminModelProfileController.ProfileBody();
         b.setAlias("p");

@@ -30,8 +30,8 @@ public final class ModelPresets {
     /**
      * 全部预设。
      *
-     * 只保留 OpenAI 与 DeepSeek 两家，预设的价值是「选中即得官方地址」，而这两家也正是
-     * 有内置适配的。其余厂商不设预设：地址栏本就是自由输入，用户手填即可，不必留一堆占位项。
+     * 只保留 OpenAI 与 DeepSeek 两家，预设的价值只是「选中即得官方地址」，与任何服务商
+     * 参数登记无关。其余厂商不设预设：地址栏本就是自由输入，用户手填即可，不必留一堆占位项。
      */
     private static final List<Preset> ALL = List.of(
             new Preset("DeepSeek 官方",

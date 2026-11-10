@@ -61,23 +61,23 @@ class ModelProfileUnifiedTableTest {
 
     private static ModelProfile chat(String alias) {
         return new ModelProfile(alias, List.of("chat"), List.of("text"), List.of("text"),
-                "https://x/v1", "k", alias, null, null, null, null, null, List.of(), null);
+                "https://x/v1", "k", alias, null, null, null, null, List.of(), null);
     }
 
     private static ModelProfile images(String alias) {
         return new ModelProfile(alias, List.of("images"), List.of("text"), List.of("image"),
-                "https://x/v1", "k", alias, null, null, null, null, null, List.of(), null);
+                "https://x/v1", "k", alias, null, null, null, null, List.of(), null);
     }
 
     private static ModelProfile vector(String alias) {
         return new ModelProfile(alias, List.of("embedding"), List.of("text"), List.of("embedding"),
-                "https://x/v1", "k", alias, null, null, null, null, 2048, List.of(), null);
+                "https://x/v1", "k", alias, null, null, null, null, List.of(), null);
     }
 
     /** 同时支持对话与向量：可绑域，也可当向量模型用，两个视图里都该出现 */
     private static ModelProfile dual(String alias) {
         return new ModelProfile(alias, List.of("chat", "embedding"), List.of("text"), List.of("text"),
-                "https://x/v1", "k", alias, null, null, null, null, 1024, List.of(), null);
+                "https://x/v1", "k", alias, null, null, null, null, List.of(), null);
     }
 
     private static ModelProfileSettings.ProfileData data(ModelProfile p) {

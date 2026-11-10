@@ -169,7 +169,7 @@ class ModelEndpointClientTest {
             ModelEndpointClient client = new ModelEndpointClient();
             ModelProfile profile = new ModelProfile("img", List.of(ModelProfile.EP_IMAGES), null, null,
                     "http://localhost:" + errPort, "sk-test", "m",
-                    null, null, null, null, null, null, null);
+                    null, null, null, null, null, null);
 
             ModelEndpointException e = assertThrows(ModelEndpointException.class,
                     () -> client.generateImage(profile,
@@ -243,7 +243,7 @@ class ModelEndpointClientTest {
     private ModelProfile openAi(String alias, List<String> endpoints) {
         return new ModelProfile(alias, endpoints, null, null,
                 "http://localhost:" + port, "sk-test", "test-model",
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null);
     }
 
     private AdminModelEndpointController controllerWith(ModelProfile profile) {

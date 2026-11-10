@@ -52,7 +52,7 @@ class VisionModelResolutionTest {
         return new ModelProfile(alias, List.of(ModelProfile.EP_CHAT),
                 List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE), List.of(ModelProfile.MOD_TEXT),
                 "https://api.example.com/v1", "sk-test", modelName,
-                null, null, null, null, null, List.of(), Map.of());
+                null, null, null, null, List.of(), Map.of());
     }
 
     /** 纯文本对话模型 */
@@ -60,7 +60,7 @@ class VisionModelResolutionTest {
         return new ModelProfile(alias, List.of(ModelProfile.EP_CHAT),
                 List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_TEXT),
                 "https://api.example.com/v1", "sk-test", modelName,
-                null, null, null, null, null, List.of(), Map.of());
+                null, null, null, null, List.of(), Map.of());
     }
 
     @Test

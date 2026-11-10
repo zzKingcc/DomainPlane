@@ -242,5 +242,6 @@ The module docs are currently written in Chinese. One document per module: const
 | 12 | [SDK integration](docs/12-SDK接入.md) | Three SDKs: configuration, usage, approval flow, wire contract |
 | 13 | [Configuration reference](docs/13-配置参考.md) | Every yaml key and default, on-disk files, settings that must change together |
 | 14 | [Operations and limits](docs/14-运维与边界.md) | Single-instance constraint, backup and restore, background jobs, upgrades, troubleshooting |
+| 15 | [OpenAI-style API landscape](docs/15-OpenAI风格API全景.md) | Three transports, endpoint inventory, modality matrix, compatibility spectrum, minimal probes |
 
 Pre-refactor long-form documents (design doc, architecture review, L1–L4 plans, deep-dive analysis) are no longer tracked in the repository; they are kept locally only. The knowledge-base v2 design draft was removed once P0–P5 shipped — docs 01–14 and the code are the current truth.

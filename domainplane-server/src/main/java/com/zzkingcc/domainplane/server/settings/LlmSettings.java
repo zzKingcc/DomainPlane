@@ -37,13 +37,8 @@ public class LlmSettings {
     /** 向量模型 API Key（留空则复用对话模型 Key） */
     private String embeddingApiKey;
 
-    /** 向量模型名，如 text-embedding-v3。注意维度须与 ES 索引一致 */
+    /** 向量模型名，如 text-embedding-v3。索引维度按该模型原生维度实测，不单独配置 */
     private String embeddingModelName;
-
-    /**
-     * 向量维度（可空）。
-     */
-    private Integer embeddingDimensions;
 
     /** 向量模型能力（探测得出；仅展示用） */
     private List<String> embeddingCapabilities = new ArrayList<>();

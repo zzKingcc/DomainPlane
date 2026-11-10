@@ -6,14 +6,6 @@ import com.zzkingcc.domainplane.api.annotation.ToolDomains;
 import com.zzkingcc.domainplane.api.tool.ParamSchemaResolver;
 import com.zzkingcc.domainplane.api.tool.ToolDescriptor;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.model.chat.request.json.JsonArraySchema;
-import dev.langchain4j.model.chat.request.json.JsonBooleanSchema;
-import dev.langchain4j.model.chat.request.json.JsonEnumSchema;
-import dev.langchain4j.model.chat.request.json.JsonIntegerSchema;
-import dev.langchain4j.model.chat.request.json.JsonNumberSchema;
-import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
-import dev.langchain4j.model.chat.request.json.JsonSchemaElement;
-import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 import dev.langchain4j.service.tool.DefaultToolExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -87,7 +79,7 @@ public final class AnnotatedToolScanner {
             ToolSpecification specification = ToolSpecification.builder()
                     .name(name)
                     .description(descriptor.description())
-                    .parameters(toJsonSchema(params))
+                    .parameters(ParamSchemaRenderer.toJsonSchema(params))
                     .build();
 
             // 复用 LangChain4j 的参数反序列化：arguments(JSON) → 方法参数
@@ -283,67 +275,4 @@ public final class AnnotatedToolScanner {
     // 参数结构（含 DTO 递归展开、深度与循环防护、形参/字段两种注解载体）统一由 ParamSchemaResolver 提供，
     // 与工具实例 SDK 共用同一份实现：避免同一段工具代码在两侧得到不同的 schema。
 
-    /**
-     * 由参数描述生成 JSON Schema
-     */
-    private static JsonObjectSchema toJsonSchema(List<ToolDescriptor.Param> params) {
-        JsonObjectSchema.Builder builder = JsonObjectSchema.builder();
-        List<String> required = new ArrayList<>();
-
-        for (ToolDescriptor.Param param : params) {
-            builder.addProperty(param.name(), toSchemaElement(param));
-            if (param.required()) {
-                required.add(param.name());
-            }
-        }
-
-        if (!required.isEmpty()) {
-            builder.required(required.toArray(new String[0]));
-        }
-        return builder.build();
-    }
-
-    private static JsonSchemaElement toSchemaElement(ToolDescriptor.Param param) {
-        String description = param.description();
-        return switch (param.type()) {
-            case "integer" -> JsonIntegerSchema.builder().description(description).build();
-            case "number" -> JsonNumberSchema.builder().description(description).build();
-            case "boolean" -> JsonBooleanSchema.builder().description(description).build();
-            // DTO / record：把子字段递归展开成嵌套 object，模型才知道该构造什么
-            case "object" -> objectSchema(param);
-            case "enum" -> JsonEnumSchema.builder()
-                    .description(description)
-                    .enumValues(param.allowValues())
-                    .build();
-            case "array" -> {
-                // 数组元素结构：本地工具与远端工具必须用同一套口径展开，否则同样是 List<DTO>，
-                // 本地给模型看"数组套字符串"、远端给"数组套对象"，同一段工具代码两种形态不一致
-                JsonSchemaElement item = param.items().isEmpty()
-                        ? JsonStringSchema.builder().build()
-                        : toSchemaElement(param.items().get(0));
-                yield JsonArraySchema.builder().description(description).items(item).build();
-            }
-            default -> JsonStringSchema.builder().description(description).build();
-        };
-    }
-
-    /**
-     * 嵌套对象：子字段递归展开；没有子字段时给一个"空对象"而不是退化成字符串：
-     * 退化成字符串会让模型产出字符串，反序列化到 DTO 必然失败。
-     */
-    private static JsonSchemaElement objectSchema(ToolDescriptor.Param param) {
-        JsonObjectSchema.Builder builder = JsonObjectSchema.builder()
-                .description(param.description());
-        List<String> required = new ArrayList<>();
-        for (ToolDescriptor.Param child : param.properties()) {
-            builder.addProperty(child.name(), toSchemaElement(child));
-            if (child.required()) {
-                required.add(child.name());
-            }
-        }
-        if (!required.isEmpty()) {
-            builder.required(required.toArray(new String[0]));
-        }
-        return builder.build();
-    }
 }

@@ -149,6 +149,46 @@ public class ToolRegistry {
         return true;
     }
 
+    // ==================== 运行期改本地工具的文字 ================
+
+    /**
+     * 替换一个本地 Bean 工具的文字元数据：工具说明 + 参数说明。
+     *
+     * <p>只准改本地工具。远程实例与 MCP 工具的说明由上游声明，心跳一来就是全量覆盖，
+     * 平台插手只会得到「改完生效、下次心跳又变回去」；而且 manifest 未变时还走 digest
+     * 快路径，连覆盖动作都不触发，表现成时灵时不灵。管控台对它们只读。</p>
+     *
+     * <p>descriptor 与 specification 必须一起换：前者是管控台显示的元数据，后者是真正
+     * 发给模型的规格，只换一个就是「页面改了、模型没变」。executor / endpoints / 副本地址
+     * 一律沿用旧条目 —— 文案改动不该动路由与执行链。</p>
+     *
+     * @return 已替换返回 {@code true}；工具不存在或不是本地工具返回 {@code false}
+     *         （调用方据此区分 404 与 400）
+     */
+    public boolean replaceLocalText(String name, ToolDescriptor descriptor,
+                                    ToolSpecification specification) {
+        if (name == null || name.isBlank() || descriptor == null || specification == null) {
+            return false;
+        }
+        if (!name.equals(descriptor.name()) || !name.equals(specification.name())) {
+            throw new IllegalArgumentException("替换工具文案时工具名必须一致：" + name);
+        }
+        boolean[] replaced = {false};
+        tools.computeIfPresent(name, (key, old) -> {
+            if (!hasLocalReplica(old)) {
+                return old;
+            }
+            replaced[0] = true;
+            return new Registered(descriptor, specification, old.executor(), old.endpoints());
+        });
+        if (!replaced[0]) {
+            log.warn("[工具注册] {} 不存在或不是本地 Bean 工具，文字覆盖未应用", name);
+            return false;
+        }
+        log.info("[工具注册] {} 的工具说明 / 参数说明已按管控台覆盖替换", name);
+        return true;
+    }
+
     // ==================== 来源二：远程整包注册（运行期） ====================
 
     /**

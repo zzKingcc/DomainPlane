@@ -9,7 +9,6 @@ import com.zzkingcc.domainplane.common.exception.BaseException;
 import com.zzkingcc.domainplane.runtime.domain.DomainRegistry;
 import com.zzkingcc.domainplane.server.knowledge.KnowledgeBaseService;
 import com.zzkingcc.domainplane.server.model.CustomParamsGate;
-import com.zzkingcc.domainplane.server.model.ModelAdapterRegistry;
 import com.zzkingcc.domainplane.server.model.ModelCapabilityProbe;
 import com.zzkingcc.domainplane.server.model.ModelMetadataReader;
 import com.zzkingcc.domainplane.server.model.ModelProfile;
@@ -82,6 +81,11 @@ public class AdminModelProfileController {
             ModelProfile.EP_ASR, ModelProfile.MOD_TEXT,
             ModelProfile.EP_VIDEO, ModelProfile.MOD_VIDEO);
 
+    /** 反查基线表时的固定输出顺序：Map.of 的迭代顺序不稳定，不能拿它当 endpoints 的顺序 */
+    private static final List<String> BASELINE_FAMILIES = List.of(
+            ModelProfile.EP_CHAT, ModelProfile.EP_EMBEDDING, ModelProfile.EP_RERANK,
+            ModelProfile.EP_IMAGES, ModelProfile.EP_TTS, ModelProfile.EP_ASR, ModelProfile.EP_VIDEO);
+
     private final ModelProfileRegistry registry;
     private final ModelProfileStore store;
     private final LlmModelHolder holder;
@@ -89,8 +93,6 @@ public class AdminModelProfileController {
     private final ModelMetadataReader metadataReader;
     /** 能力探测器：元数据读不出类型时，用手动「探测」实测端点族与模态（花少量 token） */
     private final ModelCapabilityProbe capabilityProbe;
-    /** 服务商适配注册表：保存时复核 params，列表视图下发适配摘要 */
-    private final ModelAdapterRegistry adapterRegistry;
     /** 域注册表：绑定只能指向已登记的域（否则绑定会变成永远不生效的孤儿） */
     private final DomainRegistry domainRegistry;
     /** 知识库：换向量模型时用它保留原文重灌，或按用户选择清空 */
@@ -100,7 +102,6 @@ public class AdminModelProfileController {
                                        ModelProfileStore store,
                                        LlmModelHolder holder,
                                        ModelMetadataReader metadataReader,
-                                       ModelAdapterRegistry adapterRegistry,
                                        ModelCapabilityProbe capabilityProbe,
                                        DomainRegistry domainRegistry,
                                        KnowledgeBaseService knowledgeBaseService) {
@@ -108,7 +109,6 @@ public class AdminModelProfileController {
         this.store = store;
         this.holder = holder;
         this.metadataReader = metadataReader;
-        this.adapterRegistry = adapterRegistry;
         this.capabilityProbe = capabilityProbe;
         this.domainRegistry = domainRegistry;
         this.knowledgeBaseService = knowledgeBaseService;
@@ -146,16 +146,21 @@ public class AdminModelProfileController {
      *
      * <p>{@code apiKey} 必填：管控台只回填脱敏后的 Key，所以编辑时也必须重新填写。</p>
      *
-     * <p><b>保存只是登记一份连接凭据</b>：端点族由用户在表单里勾选并随请求体提交，
-     * 服务端不再读服务商清单、不再探测、不再测量或校验向量维度 —— 整条路径零上游请求。
-     * 识别能力是弹窗上一个用户主动点的按钮（{@link #suggest(ProfileBody)}），不在保存里；
-     * 能不能真的调通由运行期的请求负责，声明错了会拿到明确的 404 / 400，
-     * 而不是在配置期造出一个「未声明类型」的第三种状态。</p>
+     * <p><b>保存只是登记一份连接凭据</b>：添加弹窗只让用户手选输入 / 输出模态，
+     * 原样落盘、零上游请求 —— 不读服务商清单、不探测、不测量或校验向量维度。
+     * 唯一会花 token 的入口是档案卡片上用户主动点的「探测」（{@link #detect(String)}），
+     * 它二次确认后把实测结论覆盖回手选的模态。</p>
      *
-     * <p>唯一保留的复核是 {@link #checkAdapterTuning}：它管的是"参数能不能到达请求体"，
+     * <p>端点族是手选模态的<b>本地反查</b>（{@link #familiesFromModalities}）：
+     * 用户声明 text→text 就是对话、text→embedding 就是向量，逆用已有的模态基线表，
+     * 与"读服务商清单猜类型"是两回事。只有请求体<b>不带</b> {@code endpoints} 时才反查，
+     * 显式传了（含空数组）表示调用方自己负责端点族，老契约不变。
+     * 一个模态都不选 → 反查结果为空 → 档案照存，但标「不可用」，绑不了域也进不了向量槽。</p>
+     *
+     * <p>唯一保留的复核是 {@link #checkCustomParams}：它管的是"参数能不能到达请求体"，
      * 属于本机契约，与服务商能力无关。</p>
      *
-     * <p><b>唯一被拒的保存</b>：把<b>当前向量档案</b>的向量身份（地址 / 模型名 / 维度）改掉。
+     * <p><b>唯一被拒的保存</b>：把<b>当前向量档案</b>的向量身份（地址 / 模型名）改掉。
      * 本接口没有重灌确认，放过去就是索引静默错配 —— 检索照常返回结果，只是全是噪声。
      * 换模型应当新建档案再走向量槽位切换（{@link #selectEmbeddingModel}），那里有确认。
      * 换 Key / 改协议不受影响：它们不改变向量，不需要重灌。</p>
@@ -171,16 +176,23 @@ public class AdminModelProfileController {
         String alias = body.getAlias().trim();
         String apiKey = body.getApiKey().trim();
 
-        ModelProfile profile = new ModelProfile(alias, body.getEndpoints(), body.getInput(), body.getOutput(),
+        List<String> input = body.getInput() == null ? List.of() : body.getInput();
+        List<String> output = body.getOutput() == null ? List.of() : body.getOutput();
+        /* 弹窗不提交 endpoints（字段缺省）→ 按手选模态本地反查端点族。
+           显式传了就原样采用：脚本 / 集成方仍可自己声明端点族。 */
+        List<String> endpoints = body.getEndpoints() == null
+                ? familiesFromModalities(input, output) : body.getEndpoints();
+
+        ModelProfile profile = new ModelProfile(alias, endpoints, input, output,
                 body.getBaseUrl(), apiKey, body.getModelName(),
                 body.getTemperature(), body.getMaxTokens(),
                 body.getContextWindow(),
                 body.getThinking(), body.getReturnThinking(),
-                body.getDimensions(), body.getFallbacks(), body.getParams(), body.getProtocol());
+                body.getFallbacks(), body.getParams(), body.getProtocol());
 
-        String adapterError = checkAdapterTuning(profile);
-        if (adapterError != null) {
-            throw new BaseException(ErrorCode.INVALID_PARAMETER, adapterError);
+        String paramError = checkCustomParams(profile);
+        if (paramError != null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, paramError);
         }
 
         /* 声明了能力却没填模态时补一组基线值（纯本地映射，零上游请求）。
@@ -191,7 +203,7 @@ public class AdminModelProfileController {
 
         /* 覆盖的是当前启用的向量档案吗？写盘后必须重装配，否则内存里仍是旧实例。 */
         boolean wasEmbedding = alias.equals(registry.embeddingAlias());
-        /* 当前向量档案不允许从"保存"这条路改掉向量身份（地址 / 模型名 / 维度）。
+        /* 当前向量档案不允许从"保存"这条路改掉向量身份（地址 / 模型名）。
            本接口没有重灌确认，改完就是静默错配：查询用新模型算向量、库里还是旧模型的，
            检索照常返回结果，只是全是噪声 —— 这种错比维度不符难发现得多，因为它不报错。
            fail-closed，把用户送到带确认的切换入口（新建档案 → 向量槽位切换）。 */
@@ -199,7 +211,7 @@ public class AdminModelProfileController {
             ModelProfile before = registry.profile(alias).orElse(null);
             if (before != null && !VectorIdentity.same(before, profile)) {
                 throw new BaseException(ErrorCode.INVALID_PARAMETER,
-                        "「" + alias + "」是当前向量模型，直接改服务商地址 / 模型名 / 维度会让索引里的向量失配"
+                        "「" + alias + "」是当前向量模型，直接改服务商地址 / 模型名会让索引里的向量失配"
                                 + "（旧向量还能被查出来，但结果不准，而且不会报错）。"
                                 + "要换模型请新建一份档案，再到「模型设置」页的向量槽位切换 —— "
                                 + "那里会带你确认保留原文重灌还是清空知识库。");
@@ -211,7 +223,7 @@ public class AdminModelProfileController {
         }
         if (wasEmbedding) {
             /* 落盘已经成功：重装配失败不能把这次保存报成失败，否则用户会重复提交。
-               连接信息 / Key 的改动就此立即生效。维度或模型名真的换了，
+               连接信息 / Key 的改动就此立即生效。模型名真的换了，
                应当走「切换向量模型」入口（那里带重灌确认），不是这里。 */
             try {
                 holder.refreshEmbedding();
@@ -227,10 +239,12 @@ public class AdminModelProfileController {
      * 用户勾了能力但没填模态时，按族补一组基线值。
      *
      * <p>端点族与模态是两件事：族决定"怎么调它"，模态决定"能吃什么"。
-     * 表单只让用户勾族，若不同时补模态，{@code ModelProfileRegistry#validateForFamily}
-     * 会以「输入 / 输出模态未知」拒绝绑域 —— 用户看到的是"保存成功"，
-     * 直到去域空间页才撞墙。补齐是纯本地映射，不读服务商清单、不发请求，
-     * 也不是在猜能力：它只是端点规范自带的最低描述。</p>
+     * <b>新弹窗不会走到这里</b>：它只提交手选模态（端点族由反查得到），传进来的模态原样落盘。
+     * 这条补齐只服务显式声明了 {@code endpoints} 却没填模态的脚本 / 集成方 ——
+     * 不补的话 {@code ModelProfileRegistry#validateForFamily} 会以「输入 / 输出模态未知」
+     * 拒绝绑域，而调用方看到的是"保存成功"，直到去域空间页才撞墙。
+     * 补齐是纯本地映射，不读服务商清单、不发请求，也不是在猜能力：
+     * 它只是端点规范自带的最低描述。</p>
      *
      * <p>显式传了模态的请求原样采用（脚本 / 集成方常手填更准的模态，如 image+text 输入）；
      * 只有一侧为空时补那一侧，另一侧保持用户填的值。</p>
@@ -256,15 +270,41 @@ public class AdminModelProfileController {
     }
 
     /**
-     * 按需识别端点族与模态，供添加弹窗的「识别」按钮预勾用途。
+     * 手选模态 → 端点族：{@link #BASELINE_INPUT} / {@link #BASELINE_OUTPUT} 的逆查。
      *
-     * <p><b>不在保存路径上</b>：只有用户主动点才会调。两级取数 ——
-     * ① 本地适配文件按模型名命中就直接用，一次上游请求都不发；
-     * ② 没命中才读服务商 {@code GET /models} 清单（零 token，不跑推理）。
-     * 结果只是给表单一个初值，用户可以改，保存以用户提交为准。</p>
+     * <p>纯本地映射、零上游请求，不是"识别"：它只是把用户已经声明的"能吃什么 / 产出什么"
+     * 翻译成平台内部"按哪个端点族调它"。基线表里 chat 是 text→text、embedding 是
+     * text→embedding、asr 是 audio→text …… 反过来命中哪几条就声明哪几个族。</p>
+     *
+     * <p>一个都没命中（什么都没选，或只选了 file 这类没有对应端点的模态）就返回空，
+     * 档案落成「不可用」，等卡片上的「探测」来补齐。刻意要求输入侧与输出侧<b>同时</b>命中
+     * 基线：只勾了一侧的档案连"产出什么"都没说清，替它补一个 chat 就是又一次猜类型。
+     * 完整的多模态声明（如 text+image→text）照样命中 chat，不影响"可看图"那条信息。</p>
+     */
+    private static List<String> familiesFromModalities(List<String> input, List<String> output) {
+        if (input.isEmpty() && output.isEmpty()) {
+            return List.of();
+        }
+        List<String> families = new ArrayList<>();
+        for (String family : BASELINE_FAMILIES) {
+            String in = BASELINE_INPUT.get(family);
+            String out = BASELINE_OUTPUT.get(family);
+            if (in != null && out != null && input.contains(in) && output.contains(out)) {
+                families.add(family);
+            }
+        }
+        return List.copyOf(families);
+    }
+
+    /**
+     * 按需识别端点族与模态（只读，不落盘）。
+     *
+     * <p><b>添加弹窗已不再调用它</b>：弹窗改成用户手选输入 / 输出模态，保存原样落盘。
+     * 本接口保留给脚本 / 集成方按模型名取一份声明。取数只有一级：
+     * 读服务商 {@code GET /models} 清单（零 token，不跑推理），没有本地适配捷径。</p>
      *
      * <p>清单不给类型（标准 OpenAI / DeepSeek 官方都是这种形态）时如实返回空数组 +
-     * {@code note}，由用户自己勾，绝不猜一个 chat 出来。</p>
+     * {@code note}，绝不猜一个 chat 出来。</p>
      */
     @PostMapping("/model-profiles/suggest")
     public Map<String, Object> suggest(@RequestBody(required = false) ProfileBody body) {
@@ -273,17 +313,6 @@ public class AdminModelProfileController {
         }
         String modelName = body.getModelName().trim();
         Map<String, Object> out = result("suggested", modelName);
-
-        ModelAdapterRegistry.Declaration declared =
-                adapterRegistry.declaration(body.getBaseUrl(), modelName).orElse(null);
-        if (declared != null && !declared.endpoints().isEmpty()) {
-            out.put("endpoints", declared.endpoints());
-            out.put("input", declared.input());
-            out.put("output", declared.output());
-            out.put("source", "adapter");
-            out.put("note", "取自本地适配声明");
-            return out;
-        }
 
         ModelMetadataReader.MetadataResult meta =
                 readMetadata(body.getBaseUrl(), body.getApiKey(), modelName);
@@ -307,10 +336,9 @@ public class AdminModelProfileController {
      *   • 调优是高频微调动作。走老接口会连 `endpoints` 一起提交 —— 那是"建档案"的语义，
      *       为了改一个温度让用户重填整个表单（含明文 Key）既麻烦又多余。
      *
-     * <b>门禁是"能不能当对话模型用"（{@link ModelProfile#mayBeChat()}）或向量档案，不再看适配。</b>
-     * 对话族的 schema 下架后，命中与未命中已经没有区别 —— 每张对话卡片都有标准字段与 JSON 框，
-     * 接口若还按 {@code byModelName()} 拦，最标准的 OpenAI / DeepSeek 档案反而改不了温度。
-     * 生图 / 语音 / 重排 / 视频仍然拒绝：那些族没有注入点，收了也只是存下来不生效。
+     * <b>门禁是"能不能当对话模型用"（{@link ModelProfile#mayBeChat()}）或向量档案。</b>
+     * 适配层整套下架后每张对话卡片都有标准字段与 JSON 框；生图 / 语音 / 重排 / 视频
+     * 仍然拒绝 —— 那些族没有注入点，收了也只是存下来不生效。
      */
     @PutMapping("/model-profiles/tuning")
     public Map<String, Object> updateTuning(@RequestBody(required = false) TuningBody body) {
@@ -328,30 +356,21 @@ public class AdminModelProfileController {
         }
 
         /* 只换调优字段：其余字段原样带走（见 ModelProfile#withTuning）。
-           向量卡片绿框改的就是 dimensions，一并带上，它同样走专用字段，不进 params */
+           温度 / 单次最大输出 / 自定义参数，三项全量替换 */
         ModelProfile updated = existing.withTuning(
-                body.getTemperature(), body.getMaxTokens(), body.getDimensions(), body.getParams());
+                body.getTemperature(), body.getMaxTokens(), body.getParams());
 
-        String adapterError = checkAdapterTuning(updated);
-        if (adapterError != null) {
-            throw new BaseException(ErrorCode.INVALID_PARAMETER, adapterError);
-        }
-        /* 维度变了要探测模型是否真接纳它（向量卡片改维度的最后一道关，与新建档案同一套判据）；
-           端点族不重识别：它不属于"调优"，本接口也改不动。 */
-        String dimError = validateDimension(existing, updated);
-        if (dimError != null) {
-            throw new BaseException(ErrorCode.INVALID_PARAMETER, dimError);
+        String paramError = checkCustomParams(updated);
+        if (paramError != null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, paramError);
         }
         String failure = registry.save(updated);
         if (failure != null) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, failure);
         }
         Map<String, Object> out = result("tuned", alias);
-        /* 这里不需要"索引维度对不上"的提醒：validateDimension 已经把维度钉在模型原生维度上，
-           能通过保存的只有 null ↔ 原生值 这一种变化，而两者按实测得到的是同一个维度 ——
-           索引不会失配。真正会改掉索引维度的是换模型，那条路走 selectEmbeddingModel，带重灌确认。 */
         out.put("message", "已保存 " + alias + " 的调优参数");
-        /* 回带新视图：卡片拿它就地重画绿框与「已适配」摘要，不必为一次调优重拉整张列表 */
+        /* 回带新视图：卡片拿它就地重画参数控件，不必为一次调优重拉整张列表 */
         out.put("profile", profileView(updated));
         return out;
     }
@@ -360,8 +379,8 @@ public class AdminModelProfileController {
      * 只改「是否回写思考内容」（模型卡片头部那颗开关的保存口）。
      *
      * 与 {@link #updateTuning} 并列的第二条卡片级保存路径，分工是产品口径：
-     * 调优参数命中适配才可改，本开关对所有档案一视同仁：思考是对话流的概念，
-     * 与"这家服务商有没有登记调优 schema"无关。连接信息同样不可改
+     * 调优参数只有可注入的档案才改得动，本开关对所有档案一视同仁：思考是对话流的概念，
+     * 与"这家服务商的参数面长什么样"无关。连接信息同样不可改
      * （{@link ModelProfile#withReturnThinking()} 复制时原样带走），拨开关的人
      * 根本没有改它们的字段。
      *
@@ -401,9 +420,9 @@ public class AdminModelProfileController {
      * <ul>
      *   <li>它不属于"调优"：上下文长度是平台自己消费的一个上限，不是发给服务商的参数
      *       （OpenAI 兼容端点没有这个入参）。塞进 {@code params} 会让它被当成"要发给上游的键"，
-     *       而 {@code params} 还要过适配 schema 的关，那套 schema 里没有、也不该有这一项。</li>
+     *       而 {@code params} 是要原样进请求体的，那里没有、也不该有这一项。</li>
      *   <li>{@link #updateTuning} 也搭不上：那个接口是<b>全量替换</b>语义（temperature / max_tokens /
-     *       dimensions / params 一起落），从卡片上单改一个上下文长度却要把另外四项原样重发一遍，
+     *       params 一起落），从卡片上单改一个上下文长度却要把另外几项原样重发一遍，
      *       漏带任何一个都会被清空。而上下文长度本身又不属于"要发给上游的参数"，
      *       混进同一个报文只会让两件事互相牵制。故本接口对<b>任何</b>可用档案开放，不设门禁。</li>
      * </ul>
@@ -451,22 +470,24 @@ public class AdminModelProfileController {
      *
      * <p>这是"用户声明、我透传"那条路线的落点：厂商的参数面一直在变，而我们既没有足够的人
      * 逐个实测，也没有办法保证写进去的 min / max / step 是对的 —— 与其给出一堆"看起来配了、
-     * 实际没验证过"的声明，不如把参数面交回给用户。<b>未命中适配的档案恰恰最需要这条路</b>，
-     * 而现在 30 个模型里 29 个走它。</p>
+     * 实际没验证过"的声明，不如把参数面交回给用户。平台只守住不能交出去的那部分
+     * （见 {@link CustomParamsGate}）。</p>
      *
      * <p>与 {@link #updateTuning} 并列而非合并：那个接口是<b>全量替换</b>（温度、单次最大输出、
-     * 向量维度、params 四项一起写），卡片上标准字段改动即存时需要带上另外三项防止被清空；
-     * 本接口<b>只</b>写 {@code params}，其余字段原样带走，正好服务"只改 JSON 框"这一个动作。
-     * 两者都改 {@code params}，但一个要求调用方把别的字段也搬一遍，一个不需要 ——
-     * 合并就得在接口内部再判一次"这次到底是哪种改动"，而那个判据前后端各存一份就会漂移。</p>
+     * params 三项一起写），改一项就得把另外两项搬一遍；本接口只服务"改 JSON 框"这一个动作，
+     * 不用搬。管控台上 {@code updateTuning} 已经<b>没有入口</b>（卡片上的温度 / 最大输出控件已删，
+     * 这两个参数改为写在 JSON 里），它只留给脚本，所以两条路不会同时被 UI 触发。</p>
      *
      * <p>收**文本**而不是收 map：文本框里填的是 JSON，用户写错一个逗号时 Jackson 的
      * 反序列化错误发生在参数绑定阶段，拿不到原始文本，也就没法回一句"第几行多了个逗号"。
      * 收文本再自己解析，解析错误才能带上位置信息 —— 而"看不出哪里错了"正是这类
      * 自助配置最容易劝退人的地方。</p>
      *
-     * <p>连接信息 / 标准字段 / 端点族一律原样带走（{@link ModelProfile#withParams}），
-     * 客户端根本没有改它们的字段，而不是"前端不发、后端信任"。空白 = 清除。</p>
+     * <p>连接信息 / 端点族 / 其它字段一律原样带走；唯一会被顺带清掉的是<b>同一参数的遗留老字段</b>
+     * —— JSON 里写了 {@code temperature} 就清档案上的 {@code temperature}，写了 {@code max_tokens}
+     * 就清 {@code maxTokens}。卡片上的温度 / 最大输出控件已删，JSON 是它们唯一的入口，
+     * 不清老字段就会出现"同一个值走 builder 和自定义参数两条路、生效的是哪条看不见"。
+     * 空白 = 清除。</p>
      */
     @PutMapping("/model-profiles/custom-params")
     public Map<String, Object> updateCustomParams(@RequestBody(required = false) CustomParamsBody body) {
@@ -477,11 +498,18 @@ public class AdminModelProfileController {
         ModelProfile existing = registry.profile(alias)
                 .orElseThrow(() -> new BaseException(ErrorCode.INVALID_PARAMETER, "档案不存在：" + alias));
 
-        ModelProfile updated = existing.withParams(parseCustomParams(body.getParamsJson()));
+        Map<String, Object> params = parseCustomParams(body.getParamsJson());
+        /* 温度 / 单次最大输出现在只能从 JSON 框进来（卡片控件已删）。档案上万一还留着老字段
+           （旧版卡片写入的），同一个值会同时走 builder setter 与自定义参数两条路 ——
+           这里把老字段清掉，让「以 JSON 为准」成为唯一语义，而不是一个用户看不见的优先级。 */
+        ModelProfile updated = existing.withTuning(
+                params.containsKey("temperature") ? null : existing.temperature(),
+                params.containsKey("max_tokens") ? null : existing.maxTokens(),
+                params);
 
-        String adapterError = checkAdapterTuning(updated);
-        if (adapterError != null) {
-            throw new BaseException(ErrorCode.INVALID_PARAMETER, adapterError);
+        String paramError = checkCustomParams(updated);
+        if (paramError != null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, paramError);
         }
         String failure = registry.save(updated);
         if (failure != null) {
@@ -613,12 +641,13 @@ public class AdminModelProfileController {
     }
 
     /**
-     * 读服务商清单，只为「识别」按钮提供预勾建议。
+     * 读服务商清单，只服务 {@link #suggest(ProfileBody)} 这条只读接口。
      *
-     * <p><b>已从保存路径上撤下</b>：保存不再依赖它，用户不点「识别」就一次都不会调。
+     * <p><b>已从保存路径上撤下</b>：保存不再依赖它；添加弹窗也已改成手选模态，
+     * 不再有「识别用途」按钮。只有脚本 / 集成方主动调 suggest 才会走到这里。
      * {@code GET /models} 不计费、不跑推理；但清单只是服务商的声明，
      * 标准 OpenAI 规范形态只有 id / object / owned_by，读不到类型时如实返回空，
-     * 由用户自己勾用途，绝不猜一个 chat 出来。</p>
+     * 绝不猜一个 chat 出来。</p>
      *
      * <p>读失败（连不上 / 鉴权被拒 / 响应不是 JSON）会把原因回给用户 ——
      * 那是用户能改的错（地址、Key），而且只影响"要不要预勾"，不影响保存。</p>
@@ -644,159 +673,18 @@ public class AdminModelProfileController {
         }
     }
 
-    /** 维度的展示文案：未声明时说"按模型默认"，别把 null 直接拼进字符串 */
-    private static String dimOf(ModelProfile profile) {
-        return profile.dimensions() == null ? "按模型默认" : String.valueOf(profile.dimensions());
-    }
-
     /**
-     * 保存前的最后一道关：调优值该怎么复核。
+     * 保存前的最后一道关：自定义参数能不能原样到达请求体。
      *
-     * <p>判据不是"有没有命中适配"，而是<b>该档案对应族还有没有 schema</b>：</p>
-     * <ul>
-     *   <li>有 → 全部调优值过 schema（未知键 / 类型 / 越界一律拒绝，文案带合法键）。
-     *       当前只剩向量的 {@code dimensions} 走这条；</li>
-     *   <li>没有 → 走**用户自助填参**的四道闸门（{@link CustomParamsGate}）。
-     *       对话族全体（含命中 deepseek-flash 的档案）走这条。直接调 API 的请求也在这里被挡住。</li>
-     * </ul>
-     *
-     * <p>对话族下架 schema 后，这条分支从"30 个模型里 29 个"变成"全部对话模型"——
-     * 它是常态而非异常。服务的路线是"用户声明、我透传"：厂商参数面一直在变，而我们既没有
-     * 足够的人逐个实测，也没有办法保证写进去的 min / max / step 是对的，与其给出一堆
-     * "看起来配了、实际没验证过"的声明，不如把参数面交回给用户，平台只守住不能交出去的
-     * 那部分（模型名 / 地址 / 协议 / 凭证 / 与标准字段重名的键）。</p>
+     * <p>参数面完全由用户自己声明（"用户声明、我透传"）：厂商参数一直在变，
+     * 平台既没有人逐个实测，也没法保证写进去的 min / max 是对的，与其给出一堆
+     * "看起来配了、实际没验证过"的声明，不如只守住不能交出去的那部分
+     * （模型名 / 地址 / 协议 / 凭证 / 与标准字段重名的键）。</p>
      *
      * @return {@code null} = 通过；否则为可直接展示给用户的拒绝原因
      */
-    private String checkAdapterTuning(ModelProfile profile) {
-        ModelAdapterRegistry.MatchResult matched =
-                adapterRegistry.match(profile.baseUrl(), profile.modelName());
-        if (matched.byModelName() && !matched.tuningParams(profile).isEmpty()) {
-            return adapterRegistry.validateParams(matched, tuningValues(matched, profile));
-        }
+    private String checkCustomParams(ModelProfile profile) {
         return CustomParamsGate.validate(profile.params());
-    }
-
-    /**
-     * 把档案上的调优值摊平成一个 key→value map（私有参数 + 标准参数），交给 schema 统一复核。
-     *
-     * 标准参数（温度 / 单次最大输出）落在 {@link ModelProfile} 的老字段里，不在 {@code params} map 里；
-     * 不摊平就漏过 min / max 校验 —— 前端 number 控件上的 min / max 只是填表便利，
-     * 直接调 API 一样能提交越界值，把关必须在这里。
-     */
-    private static Map<String, Object> tuningValues(ModelAdapterRegistry.MatchResult matched,
-                                                    ModelProfile profile) {
-        Map<String, Object> values = new LinkedHashMap<>(profile.params());
-        /* 全部族的 std 参数都摊平进来：chat 族是温度 / 单次最大输出，embedding 族是向量维度：
-           漏掉任一族的 std 参数，它的 min / max 就没人把关，直接调 API 能塞越界值 */
-        for (ModelAdapterRegistry.ParamSpec spec : matched.allParams()) {
-            if (!spec.std()) {
-                continue;
-            }
-            Object value = stdValueOf(spec, profile);
-            if (value != null) {
-                values.put(spec.key(), value);
-            }
-        }
-        return values;
-    }
-
-    /**
-     * 标准参数（std=true）在档案上的落点：按 wire 取老字段（见 ModelAdapterRegistry.STD_WIRES）。
-     *
-     * 刻意写成 if 而不是三元表达式：`maxTokens()` 是 {@code Integer}、`temperature()` 是 {@code Double}，
-     * 两者放进同一个三元里会被 Java 做**二元数值提升**（先各自解箱再取公共类型 {@code double}），
-     * 于是"值未设置（null）"直接 NPE，而"未设置"恰恰是常态（用户只填了一个参数）。
-     */
-    private static Object stdValueOf(ModelAdapterRegistry.ParamSpec spec, ModelProfile profile) {
-        if ("max_tokens".equals(spec.wire())) {
-            return profile.maxTokens();
-        }
-        if ("dimensions".equals(spec.wire())) {
-            return profile.dimensions();
-        }
-        return profile.temperature();
-    }
-
-    /**
-     * 校验「向量维度」：只能是该模型的<b>原生维度</b>。
-     *
-     * <p>维度是<b>本机索引契约</b>，不会作为 {@code dimensions} 请求参数下发
-     * （固定维度模型如 bge-m3 直接拒绝该参数，下发等于"填对维度反而灌库失败"）。
-     * 既然不下发，声明值就只能等于模型实际产出的长度——填别的值，索引会按填的值建，
-     * 而写入的向量是另一个长度，整个域的灌库与检索都会失败。所以这里用实测的原生维度
-     * 做唯一判据：不一致直接拒绝，把"该填多少"写进报错。</p>
-     *
-     * <p>只在维度被显式声明、且相对原档案有变化时才探测：避免对"沿用模型默认（null）"或
-     * 未变动的值反复发请求。</p>
-     *
-     * <p>探测没跑完一律不算通过：服务商不可达、鉴权失败、地址写错时拿不到原生维度，
-     * 存下去等于把一个没人验证过的长度写进索引契约。</p>
-     *
-     * @param existing  改之前的档案（未变动则跳过探测）；新建档案传 {@code null}
-     * @param candidate 改之后的档案
-     * @return 不通过的原因；{@code null} 表示通过
-     */
-    private String validateDimension(ModelProfile existing, ModelProfile candidate) {
-        if (candidate.dimensions() == null) {
-            return null;
-        }
-        if (!candidate.isEmbedding()) {
-            return "只有向量模型（endpoints 含 embedding）才能设置 dimensions，当前模型是："
-                    + (candidate.isChat() ? "对话" : "未声明") + " 类型";
-        }
-        if (existing != null && java.util.Objects.equals(candidate.dimensions(), existing.dimensions())) {
-            return null; // 维度没变，跳过探测
-        }
-        Integer want = candidate.dimensions();
-        Integer nativeDim;
-        try {
-            nativeDim = measureNativeDimensionOrThrow(candidate);
-        } catch (Exception e) {
-            String detail = LlmFailureDescriber.describe(e);
-            log.warn("[模型档案] 向量维度 {} 无法确认（探测失败），拒绝保存: {}", want, detail);
-            return "向量维度 " + want + " 无法确认：" + detail
-                    + "。请先确认该向量模型可连通（地址 / Key / 模型名），再保存维度。";
-        }
-        if (!nativeDim.equals(want)) {
-            return "向量维度 " + want + " 不被支持：维度只用于本机建索引、不随请求下发，"
-                    + "只能是该模型的原生维度 " + nativeDim + " 维（留空则由服务端按原生维度回填）。";
-        }
-        return null;
-    }
-
-    /**
-     * 实测模型原生维度，失败时抛异常（由调用方转成提示文案）。
-     *
-     * <p>与 {@link #measureNativeDimension} 的区别：那个是"尽力而为"的回填，
-     * 失败就返回 {@code null}；这里是"校验必须拿到值"，失败必须让用户知道原因。</p>
-     */
-    private Integer measureNativeDimensionOrThrow(ModelProfile candidate) {
-        LlmSettings probe = new LlmSettings();
-        probe.setEmbeddingBaseUrl(candidate.baseUrl());
-        probe.setEmbeddingApiKey(candidate.apiKey());
-        probe.setEmbeddingModelName(candidate.modelName());
-        return holder.testEmbeddingConnection(probe).actualDimension();
-    }
-
-    /**
-     * 不带 {@code dimensions} 参数发一次极短请求，取模型原生向量维度。
-     *
-     * <p>这是<b>尽力而为</b>的回填（维度留空时用），失败返回 {@code null} 而不抛：
-     * 探测不成就保留 null、语义回落到"按模型默认"，不因为一次可选回填失败就拒绝整次保存。
-     * 需要"必须拿到值"的场景用 {@link #measureNativeDimensionOrThrow}。</p>
-     */
-    private Integer measureNativeDimension(ModelProfile candidate) {
-        LlmSettings probe = new LlmSettings();
-        probe.setEmbeddingBaseUrl(candidate.baseUrl());
-        probe.setEmbeddingApiKey(candidate.apiKey());
-        probe.setEmbeddingModelName(candidate.modelName());
-        try {
-            return holder.testEmbeddingConnection(probe).actualDimension();
-        } catch (Exception e) {
-            log.info("[模型档案] 测量原生维度失败，跳过与原生维度的比对: {}", e.getMessage());
-            return null;
-        }
     }
 
     /**
@@ -825,6 +713,56 @@ public class AdminModelProfileController {
         out.put("message", deleted.wasEmbedding()
                 ? "已删除档案 " + alias + "（它正是当前向量模型），向量配置一并取消：知识库检索与灌库已停用"
                 : "已删除档案 " + alias);
+        return out;
+    }
+
+    /**
+     * 手动移除端点族 —— 纠正误标的唯一显式入口。
+     *
+     * <p>为什么需要它：探测失败只记「未确认」，从不写「不支持」；历史错标（旧版本按模态反查、
+     * 或清单语义被误读）就永远清不掉。自动撤销风险太大（一次 400 就把能力删了），
+     * 所以把「我认为这条不该在」交给用户明说。</p>
+     *
+     * <p>清理范围刻意克制：只清该族的**专属产出**（embedding / score），
+     * 其余模态一律不动 —— text / image / audio 在多个族之间共用（chat 也能吃音频、出图片），
+     * 顺手清掉只会制造新的误判。要改模态走卡片上的模态选择。</p>
+     *
+     * <p>当前向量槽档案不许移除 embedding：会让 embeddingAlias 指向一份用不了的档案，
+     * 而本接口没有重灌确认。换向量身份必须走槽位切换那条带确认的路。</p>
+     */
+    @PutMapping("/model-profiles/families/remove")
+    public Map<String, Object> removeFamilies(@RequestBody(required = false) FamiliesBody body) {
+        if (body == null || body.getAlias() == null || body.getAlias().isBlank()) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "别名不能为空");
+        }
+        String alias = body.getAlias().trim();
+        ModelProfile existing = registry.profile(alias)
+                .orElseThrow(() -> new BaseException(ErrorCode.INVALID_PARAMETER, "档案不存在：" + alias));
+        if (body.getFamilies() == null || body.getFamilies().isEmpty()) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, "要移除的端点族不能为空");
+        }
+        for (String family : body.getFamilies()) {
+            if (!ModelProfile.ALL_FAMILIES.contains(family)) {
+                throw new BaseException(ErrorCode.INVALID_PARAMETER, "未知的端点族：" + family);
+            }
+        }
+        if (body.getFamilies().contains(ModelProfile.EP_EMBEDDING)
+                && alias.equals(registry.embeddingAlias())) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER,
+                    "「" + alias + "」是当前向量模型，不能直接移除向量能力："
+                            + "请先到「模型设置」页把向量槽切到别的档案（那里会带你确认重建还是清空知识库）");
+        }
+
+        ModelProfile updated = existing.withoutFamilies(body.getFamilies());
+        String failure = registry.save(updated);
+        if (failure != null) {
+            throw new BaseException(ErrorCode.INVALID_PARAMETER, failure);
+        }
+        Map<String, Object> out = result("families-removed", alias);
+        out.put("removed", body.getFamilies());
+        out.put("profile", profileView(updated));
+        out.put("message", "已移除 " + alias + " 的 " + body.getFamilies()
+                + " 能力；要恢复请重新手选模态或再探测一次");
         return out;
     }
 
@@ -861,17 +799,36 @@ public class AdminModelProfileController {
     }
 
     /**
-     * 手动探测一个档案的端点族与输入 / 输出模态，并把「实测确认到的」并回档案。
+     * 探测结论的写回方式。
      *
-     * 用途：元数据读不出类型（标准 OpenAI 规范的服务商，如 OpenAI / DeepSeek 官方）的档案
-     * 停在「未识别」，绑不了域。点一次「探测」，用一组最小请求把类型与模态实测出来，档案即可绑定。
+     * <p>默认「只补不删」是这次改动的核心：探测本身是**可能失败**的诊断动作（超时、样本被拒、
+     * 服务商路由不全），拿一份"这次没确认到"的结论去覆盖用户手选值，等于让一次抖动删掉能力。
+     * 覆盖仍然保留，但必须由用户显式选择 ——「我就是要以实测为准」是另一件事，不该是默认。</p>
+     */
+    public enum ProbeWriteMode {
+        /** 只把确认到的能力并进来；旧声明一律保留（默认） */
+        CONFIRMED_ONLY,
+        /** 整体覆盖：端点族与输入 / 输出模态以实测为准，没确认到的一并清掉 */
+        OVERRIDE
+    }
+
+    /**
+     * 手动探测一个档案的端点族与输入 / 输出模态。
      *
-     * **写回是并集（只增不减）**：探测只确认「支持什么」，失败的探针只说明「这次没确认到」，
-     * 不等于「不支持」（网络抖动 / 样本格式被挑剔都会失败）。用 {@link ModelProfile#withConfirmed}
-     * 把新确认的并进去，旧声明一律保留，绝不因一次探测失败抹掉用户手填的模态。
+     * 用途：添加时手选的模态是"先按我说的用"；想按服务商实测的来，就点一次「探测」，
+     * 用一组最小请求把端点族与模态实测出来（花少量 token，前端已二次确认）。
+     * 一个模态都没选而落成「不可用」的档案，也是靠这个按钮补齐。
+     *
+     * <p><b>默认只补不删</b>（{@code mode=confirmed}）：确认到的并进档案，没确认到的不动 ——
+     * 探测失败的原因太多（超时、样本被拒、路由不全），不能拿它当"这个模态不行了"的证据。
+     * 想把实测当作唯一真相，显式传 {@code mode=override}，见 {@link ProbeWriteMode}。</p>
+     *
+     * <p><b>整次一条都没确认到时一律不动</b>：网络抖动 / Key 写错留下的是满屏 UNCONFIRMED，
+     * 那不是"这个模型什么都不会"。</p>
      */
     @PostMapping("/model-profiles/detect")
-    public Map<String, Object> detect(@RequestParam("alias") String alias) {
+    public Map<String, Object> detect(@RequestParam("alias") String alias,
+                                      @RequestParam(value = "mode", defaultValue = "confirmed") String mode) {
         ModelProfile profile = registry.profile(alias)
                 .orElseThrow(() -> new BaseException(ErrorCode.INVALID_PARAMETER, "档案不存在：" + alias));
 
@@ -882,7 +839,9 @@ public class AdminModelProfileController {
             throw new BaseException(ErrorCode.LLM_UNAVAILABLE, "探测失败：" + LlmFailureDescriber.describe(e));
         }
 
-        ModelProfile updated = profile.withConfirmed(probe.endpoints(), probe.input(), probe.output());
+        ProbeWriteMode writeMode = "override".equalsIgnoreCase(mode)
+                ? ProbeWriteMode.OVERRIDE : ProbeWriteMode.CONFIRMED_ONLY;
+        ModelProfile updated = applyProbe(alias, profile, probe, writeMode);
         String failure = registry.save(updated);
         if (failure != null) {
             throw new BaseException(ErrorCode.INVALID_PARAMETER, failure);
@@ -890,11 +849,44 @@ public class AdminModelProfileController {
         Map<String, Object> out = result("detected", alias);
         out.put("note", probe.note());
         out.put("perModality", probe.perModality());
+        /* 逐探针诊断：状态码 / 归类 / 脱敏后的回执摘要 / 尝试次数。
+           页面据此说清「为什么没确认到」，不必再翻服务端日志 */
+        out.put("diagnostics", probe.diagnostics());
+        /* 实际用了哪种写回：页面据此提示"这次是覆盖了还是只补了" */
+        out.put("writeMode", writeMode == ProbeWriteMode.OVERRIDE ? "override" : "confirmed");
         out.put("identified", updated.identified());
         out.put("bindable", updated.domainBindable());
         /* 回带新视图：卡片拿它就地重画模态两行与「绑定到域」入口 */
         out.put("profile", profileView(updated));
         return out;
+    }
+
+    /**
+     * 把一次探测的结论写回档案。
+     *
+     * <p><b>只补不删（默认 {@link ProbeWriteMode#CONFIRMED_ONLY}）：</b>确认到的并集进来，
+     * 明确「端点或类型不存在」的才撤掉（{@link ModelProfile#withoutFamilies}）。
+     * 400 / 5xx / 超时 / 网络抖动是「没确认到」，既不补也不撤，旧声明原样保留。</p>
+     *
+     * <p><b>整体覆盖（{@link ProbeWriteMode#OVERRIDE}，用户显式选择）：</b>只要确认到至少一个
+     * 端点族，就用实测结论整体替换（{@link ModelProfile#withProbeResult}）——端点族与
+     * 输入 / 输出模态一起换，没确认到的一并清掉。整次一条都没确认到时仍然不动。</p>
+     *
+     * <p>当前向量槽档案一概不参与覆盖与撤销：把它改成不再声明 embedding，会让
+     * embeddingAlias 指向一份用不了的档案，而本接口没有重灌确认 —— 换向量身份必须走
+     * 槽位切换那条带确认的路。</p>
+     */
+    private ModelProfile applyProbe(String alias, ModelProfile profile,
+                                    ModelCapabilityProbe.ProbeResult probe, ProbeWriteMode mode) {
+        boolean isEmbeddingAlias = alias.equals(registry.embeddingAlias());
+        if (mode == ProbeWriteMode.OVERRIDE && !isEmbeddingAlias && !probe.endpoints().isEmpty()) {
+            return profile.withProbeResult(probe.endpoints(), probe.input(), probe.output());
+        }
+        ModelProfile updated = profile.withConfirmed(probe.endpoints(), probe.input(), probe.output());
+        if (!isEmbeddingAlias) {
+            updated = updated.withoutFamilies(probe.unsupportedFamilies());
+        }
+        return updated;
     }
 
     /**
@@ -922,7 +914,8 @@ public class AdminModelProfileController {
                     item.put("success", false);
                     item.put("note", "未确认到任何端点族 —— " + probe.note());
                 } else {
-                    ModelProfile updated = profile.withConfirmed(probe.endpoints(), probe.input(), probe.output());
+                    ModelProfile updated = applyProbe(profile.alias(), profile, probe,
+                            ProbeWriteMode.CONFIRMED_ONLY);
                     String failure = registry.save(updated);
                     if (failure != null) {
                         item.put("success", false);
@@ -1000,7 +993,7 @@ public class AdminModelProfileController {
      *   • {@code purge} —— 丢弃旧内容：删掉全部知识库索引，之后自行重新上传。
      *
      *
-     * <p>触发条件是<b>向量身份变了</b>（见 {@link VectorIdentity}：服务商地址 / 模型名 / 维度
+     * <p>触发条件是<b>向量身份变了</b>（见 {@link VectorIdentity}：服务商地址 / 模型名
      * 任一变化），既不是"别名变了"，也不是只看维度。两个不同模型即使维度相同，
      * 向量空间也完全不一样，旧向量检索出来是噪声，而这种错配不会报错，只会让检索质量
      * 静默下降，比维度不符更难发现。</p>
@@ -1026,7 +1019,7 @@ public class AdminModelProfileController {
         /* 两个变化必须分开算，它们驱动的动作不同：
 
            • aliasChanged 只管"档案换了一个" —— 影响文案与重新装配；
-           • vectorChanged 才决定"动不动索引"。判据是向量身份（地址 / 模型名 / 维度），
+           • vectorChanged 才决定"动不动索引"。判据是向量身份（地址 / 模型名），
              不是别名：别名只是配置句柄，删了重建同一个模型会拿到新别名（前端派生别名
              遇重名会加 -2 后缀），拿它判等就会把一次"完全没换模型"的操作判成换模型，
              逼用户全量重灌一遍 —— 白花时间与 embed 费用，还把索引短暂推进半成品状态。
@@ -1063,9 +1056,7 @@ public class AdminModelProfileController {
                 ask.put("requiresConfirmation", true);
                 ask.put("previousAlias", previousAlias);
                 ask.put("previousModelName", previous == null ? null : previous.modelName());
-                ask.put("previousDimensions", previous == null ? null : previous.dimensions());
                 ask.put("nextModelName", selected == null ? null : selected.modelName());
-                ask.put("nextDimensions", selected == null ? null : selected.dimensions());
                 ask.put("affectedIndices", affectedIndices);
                 ask.put("documentCount", countIndexedDocuments());
                 ask.put("message", describeSwitchImpact(previous, selected, affectedIndices));
@@ -1106,11 +1097,10 @@ public class AdminModelProfileController {
         out.put("embeddingSource", holder.embeddingSource());
         out.put("embeddingConfigured", holder.isEmbeddingConfigured());
         out.put("modelName", selected == null ? null : selected.modelName());
-        out.put("dimensions", selected == null ? null : selected.dimensions());
         out.put("reindexed", reindexed);
         out.put("removedIndices", purged);
         /* 换了档案、但向量被原样复用。前端据此确认"没漏掉重灌"，不必自己去比对
-           地址 / 模型名 / 维度（那等于把判据复制到前端，迟早漂移）。 */
+           地址 / 模型名（那等于把判据复制到前端，迟早漂移）。 */
         out.put("vectorsReused", aliasChanged && !vectorChanged && hasVectors);
         out.put("message", describeResult(aliasChanged, vectorChanged, previous, selected, mode, hasVectors));
         out.put("settingsFile", store.filePath());
@@ -1214,7 +1204,7 @@ public class AdminModelProfileController {
             if (!aliasChanged) {
                 return "向量模型没有变化";
             }
-            return "已切换到 " + newName + "：它与原档案是同一个向量模型（地址 / 模型名 / 维度一致），"
+            return "已切换到 " + newName + "：它与原档案是同一个向量模型（地址 / 模型名一致），"
                     + "索引里的向量可以直接复用，不需要重灌";
         }
         if (!hadContent) {
@@ -1245,39 +1235,23 @@ public class AdminModelProfileController {
         /* 两个思考开关原样下发（null = 未声明） */
         item.put("thinking", profile.thinking());
         item.put("returnThinking", profile.returnThinking());
-        item.put("dimensions", profile.dimensions());
         item.put("usable", profile.isUsable());
         item.put("fallbacks", profile.fallbacks());
         item.put("params", profile.params());
         /* 协议与可选项一并下发：卡片上的下拉照着渲染，前端不另存一份"有哪些协议"。 */
         item.put("protocol", profile.protocol());
         item.put("protocols", List.of(ModelProfile.PROTOCOL_OPENAI, ModelProfile.PROTOCOL_ANTHROPIC));
-        /* 适配摘要：命中适配就下发 id / label 与当前生效的调优值（供卡片渲染绿色工具框）。
-           
-           **只给向量档案下发**。对话族的 schema 已经下架（参数面改成"标准字段 + 用户自填 JSON"），
-           对话卡片上不该再出现绿框，也就不该再有「已适配」这个徽标 —— 一个没有任何行为差异的
-           徽标只会让人以为"这家服务商有特殊待遇"。适配文件对对话档案仍然有用，但那个用处
-           （{@code declaration()}：不发上游就能定端点族 / 模态）发生在保存时，不在卡片上。 */
-        ModelAdapterRegistry.MatchResult matched =
-                adapterRegistry.match(profile.baseUrl(), profile.modelName());
-        if (profile.isEmbedding()) {
-            /* 两个条件都要满足才下发：① 按**模型名**命中（host 兜底只说明"这家服务商登记过"，
-               把同 host 下 id 字典序最小的那条适配摆到任意未登记模型上就是张冠李戴）；
-               ② embedding 族**真有参数** —— 如 api.deepseek.com 上的 deepseek-embedding
-               该族为空，自然不给摘要、卡片上也就没有绿框。 */
-            if (matched.byModelName() && !matched.embeddingParams().isEmpty()) {
-                item.put("adapter", adapterSummary(matched, profile));
-            }
-        }
         /* 自定义参数（用户自助填参）的卡片入口：判据与保存复核同一个来源 ——
-           该族有 schema（当前只有向量的 dimensions）→ 走绿框，不给文本框（两条路都改 params，
-           同时给就是两个入口改一个字段，用户不知道哪个生效）；
-           其余（全部对话档案）→ 给文本框 + 上限与提示，前端照着渲染，不自己另存一份判据。 */
-        item.put("customParams", customParamsView(profile, matched));
+           能当对话模型用的档案给文本框 + 上限与提示，前端照着渲染，不自己另存一份判据。 */
+        item.put("customParams", customParamsView(profile));
         item.put("usedByDomains", registry.domainsUsing(profile.alias()));
         /* 能不能绑到域上：服务端算好下发，前端只读，避免前端二次实现谓词再漂移
            （旧实现 models.html 自己的 isChatProfile() 就是 mirrors 了 mayBeChat()，口径一变就前后端打架）。 */
         item.put("identified", profile.identified());
+        /* 添加时一个模态都没选 → 端点族与模态全空：卡片仍保留，但标「不可用」，
+           绑不了域、进不了向量槽，直到用户点「探测」或重建档案。判据放服务端，前端只读。 */
+        item.put("declared", profile.identified()
+                || !profile.input().isEmpty() || !profile.output().isEmpty());
         /* 主模型桶的判据单独留一份：卡片上"能否作为主模型"是一句独立的话，
            与"能否作为某个能力"不是同一件事。 */
         item.put("bindable", profile.domainBindable());
@@ -1316,40 +1290,6 @@ public class AdminModelProfileController {
     }
 
     /**
-     * 适配摘要：id / label / docUrl + 参数 schema + 当前有值的调优项。
-     *
-     * 下发 schema（{@code params}）而不是只下发若干「键 = 值」的文字，是因为卡片右侧要放一个
-     * **可编辑**的调优框：控件类型（枚举 / 布尔 / 数值及 min / max / step）只能从 schema 得到。
-     * 现在只剩向量档案会走到这里（{@code dimensions} 一个数值控件），对话档案的 schema 已下架。
-     *
-     * 下发的参数按**档案类型**取族（见 {@link ModelAdapterRegistry.MatchResult#tuningParams}）：
-     * 向量档案给 embedding 族的 dimensions，对话档案给 chat 族：卡片绿框渲染的就是这一份。
-     *
-     * {@code items} 只列当前有值的项（std 参数从老字段取，私有参数从 params 取），供前端回填。
-     */
-    private Map<String, Object> adapterSummary(ModelAdapterRegistry.MatchResult matched, ModelProfile profile) {
-        List<ModelAdapterRegistry.ParamSpec> specs = matched.tuningParams(profile);
-        Map<String, Object> ad = new LinkedHashMap<>();
-        ad.put("id", matched.adapter().id());
-        ad.put("label", matched.adapter().label());
-        ad.put("docUrl", matched.adapter().docUrl());
-        ad.put("params", specs);
-        List<Map<String, Object>> items = new ArrayList<>();
-        for (ModelAdapterRegistry.ParamSpec spec : specs) {
-            Object value = spec.std() ? stdValueOf(spec, profile) : profile.params().get(spec.key());
-            if (value != null) {
-                Map<String, Object> it = new LinkedHashMap<>();
-                it.put("key", spec.key());
-                it.put("label", spec.label());
-                it.put("value", value);
-                items.add(it);
-            }
-        }
-        ad.put("items", items);
-        return ad;
-    }
-
-    /**
      * 卡片上「自定义参数（JSON）」文本框的视图数据。
      *
      * <p>把上限与提示一并下发，而不是让前端各写一份常量：闸门改一个数，卡片上的提示
@@ -1359,17 +1299,9 @@ public class AdminModelProfileController {
      * （{@link ModelProfile#mayBeChat()}）：前端原先自己拼 {@code chat || 无 endpoints}，
      * 用的是 {@code bindable}（= {@code domainBindable()}，比 {@code mayBeChat()} 严），
      * 于是"声明了 chat 但模态未填"的半识别档案一个框都没有。</p>
-     *
-     * @param schemaDriven 该档案对应族仍然**真有 schema** 时走绿框、文本框不出现（两个入口改同一个
-     *                     字段时，用户无从判断哪个生效 —— 所以只留一条）。对话族的 schema 已下架，
-     *                     因此对话档案恒为 {@code false}；当前只有向量的 {@code dimensions}
-     *                     还让它为真
      */
-    private Map<String, Object> customParamsView(ModelProfile profile,
-                                                 ModelAdapterRegistry.MatchResult matched) {
+    private Map<String, Object> customParamsView(ModelProfile profile) {
         Map<String, Object> view = new LinkedHashMap<>();
-        view.put("schemaDriven", profile.isEmbedding() && matched.byModelName()
-                && !matched.embeddingParams().isEmpty());
         view.put("applies", profile.mayBeChat());
         view.put("paramsJson", toPrettyJson(profile.params()));
         Map<String, Object> limits = new LinkedHashMap<>();
@@ -1416,10 +1348,12 @@ public class AdminModelProfileController {
     public static class ProfileBody {
         private String alias;
         /**
-         * 端点族（用户声明的能力，可多选）。
+         * 端点族（可多选）。
          *
-         * <p>管控台弹窗里的「用途」勾选框提交到这里，服务端原样采用、不再自动识别。
-         * 留空 = 未声明，档案仍会保存（{@code mayBeChat()} 把它当可对话用），
+         * <p><b>管控台弹窗不再提交这个字段</b>：它只提交手选的 {@code input} / {@code output}，
+         * 字段缺省（{@code null}）时由 {@link #familiesFromModalities} 本地反查端点族。
+         * 显式传了（含空数组）则原样采用 —— 脚本 / 集成方仍可自己声明能力。
+         * 空数组 = 未声明，档案仍会保存（{@code mayBeChat()} 把它当可对话用），
          * 但绑域时会被 {@code validateForFamily} 要求先识别或补声明。</p>
          */
         private List<String> endpoints;
@@ -1447,14 +1381,11 @@ public class AdminModelProfileController {
         private Boolean thinking;
         /** 是否把思考内容回传给平台（null = 不声明） */
         private Boolean returnThinking;
-        /** 向量维度（仅 embedding 用） */
-        private Integer dimensions;
         private List<String> fallbacks;
         /**
          * 自定义参数（如 {@code reasoning_effort}、{@code enable_thinking}）。
          *
-         * 对话档案一律由用户自助填写、原样透传（过 {@link CustomParamsGate} 的四道闸门）；
-         * 向量档案在该族仍有 schema 时按 schema 复核（当前只有 {@code dimensions}）。
+         * 一律由用户自助填写、原样透传（过 {@link CustomParamsGate} 的四道闸门）。
          * 键名必须是**服务商文档里的线上字段名**，平台不再做任何翻译。
          */
         private Map<String, Object> params;
@@ -1483,10 +1414,10 @@ public class AdminModelProfileController {
      * {@code input} / {@code output} 字段：连接信息与端点族 / 模态不是"调优"，
      * 本接口从既有档案原样带过，客户端无从改动。
      *
-     * {@code dimensions} 是**例外**：它是向量卡片绿框唯一可改的项，走专用字段（不进 params）。
+     * {@code dimensions} 不在其中：向量维度已改为按模型原生维度实测，没有可配项。
      *
      * 四个字段都是**全量替换**语义：{@code null} / 空 map = 清除该项（回到服务商默认），
-     * 不是"不修改"。卡片上把温度 / 维度清空再保存，就该真的不再发它们：
+     * 不是"不修改"。卡片上把温度清空再保存，就该真的不再发它：
      * 若按"null = 不动"处理，用户会发现清不掉。
      */
     /**
@@ -1503,16 +1434,13 @@ public class AdminModelProfileController {
     }
 
     @Data
-    public static class TuningBody {
-        private String alias;
-        /** 私有调优参数（key → 值）；命中适配时按 schema 复核 */
+    public static class TuningBody {        private String alias;
+        /** 私有调优参数（key → 值）；保存前由 CustomParamsGate 复核 */
         private Map<String, Object> params;
         /** 温度（std 参数）；null = 清除 */
         private Double temperature;
         /** 单次最大输出 token（std 参数）；null = 清除 */
         private Integer maxTokens;
-        /** 向量维度（embedding 族 std 参数）；null = 清除（回到"按模型默认"） */
-        private Integer dimensions;
     }
 
     /**
@@ -1534,8 +1462,8 @@ public class AdminModelProfileController {
     /**
      * 只改「上下文窗口」的请求体（卡片上那个独立输入框的保存口）。
      *
-     * <p>与 {@link ReturnThinkingBody} 一样刻意单薄：这不是调优参数、不进 {@code params}、
-     * 也不受适配 schema 管，所以它既不能塞进 {@link TuningBody}（那个接口有适配门禁），
+     * <p>与 {@link ReturnThinkingBody} 一样刻意单薄：这不是调优参数、不进 {@code params}，
+     * 所以它既不能塞进 {@link TuningBody}（那个接口是四项全量替换），
      * 也不该被前端顺手放进别的保存动作里，一次动作只改一件事，保存失败时才说得清是哪件没成。</p>
      *
      * <p>{@code contextWindow} 为 {@code null} = 清除（回到"未声明"），
@@ -1560,6 +1488,18 @@ public class AdminModelProfileController {
     public static class BindBody {
         private List<String> aliases;
         private Map<String, List<String>> capabilities;
+    }
+
+    /**
+     * 手动移除端点族的请求体。
+     *
+     * @param alias    目标档案
+     * @param families 要移除的族（取值见 {@link ModelProfile#ALL_FAMILIES}）；不支持"全部清空"以外的批量语义
+     */
+    @Data
+    public static class FamiliesBody {
+        private String alias;
+        private List<String> families;
     }
 
     /**

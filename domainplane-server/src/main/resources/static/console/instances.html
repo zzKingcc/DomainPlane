@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>熔断工具调用 · DomainPlane 管控台</title>
+    <title>工具调用 / 熔断 · DomainPlane 管控台</title>
     <link rel="stylesheet" href="assets/console.css">
     <style>
         .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
@@ -20,6 +20,51 @@
         .tools-cell { max-width: 340px; }
         .tools-cell .tag { margin: 0 4px 4px 0; }
         .muted { color: var(--muted); }
+
+        /* ---------- 工具目录：与实例表同页，但 DOM 完全独立 ----------
+           轮询只重绘实例表。两块若共用一次 innerHTML，编辑到一半的说明会被 10 秒刷新清空。 */
+        .tool-dir-card { margin-bottom: 18px; }
+        .tool-filters input.form-control,
+        .tool-filters select.form-control {
+            width: auto; height: auto; min-height: 30px; padding: 5px 9px;
+            font-size: 12.5px; line-height: 18px;
+        }
+        .tool-filters select.form-control { min-width: 120px; }
+        .tool-filters input.form-control { flex: 1 1 220px; max-width: 320px; }
+        .tool-table td { vertical-align: top; }
+        .tool-table .tool-name { font-weight: 600; font-size: 12.5px; }
+        .tool-table .tool-desc {
+            max-width: 400px; color: var(--muted); font-size: 12.5px; line-height: 1.55;
+            overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+            -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        }
+        .kind-tag { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 11.5px; }
+        .kind-local { background: #e6f1fb; color: #185fa5; }
+        .kind-remote { background: #f1efe8; color: #5f5e5a; }
+        .kind-mcp { background: #eeedfe; color: #534ab7; }
+        .tool-detail-row > td {
+            background: var(--tblr-bg-surface-secondary, #f7f8fa); padding: 14px 18px;
+        }
+        .tool-detail { max-width: 920px; }
+        .tool-detail-head { font-size: 12.5px; font-weight: 600; margin: 14px 0 6px; }
+        .tool-detail-head:first-child { margin-top: 0; }
+        .tool-desc-input, .tool-detail .param-row input {
+            font-size: 12.5px; line-height: 1.6; background: #fff;
+        }
+        .tool-desc-input { resize: vertical; min-height: 66px; }
+        .tool-detail .param-row input { width: 100%; }
+        .baseline-line {
+            font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.5;
+            word-break: break-word;
+        }
+        .param-row { padding: 7px 0; border-bottom: 1px dashed var(--border); }
+        .param-label { font-size: 12px; margin-bottom: 4px; }
+        .param-label code { background: #f1f5f9; border-radius: 3px; padding: 1px 5px; }
+        .tool-detail-foot { display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+        .tool-detail-status { flex: 1 1 200px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+        .tool-detail-status.ok { color: var(--green); }
+        .tool-detail-status.err { color: var(--red); }
+        .drift-tag { margin-left: 8px; font-size: 11.5px; color: #a32d2d; }
     </style>
 </head>
 <body>
@@ -29,7 +74,7 @@
     <main class="main">
         <div class="page-header">
             <div class="page-head">
-                <h2>熔断工具调用</h2>
+                <h2>工具调用 / 熔断</h2>
             </div>
         </div>
         <div class="page-body dp-instances">
@@ -95,6 +140,45 @@
                 </div>
             </div>
 
+            <!-- 工具目录：内置可改说明、远程 / MCP 只读。展开区与实例表分属不同 tbody，
+                 轮询不会碰它。 -->
+            <div class="dp-card tool-dir-card">
+                <div class="card-head">
+                    <h2>工具目录</h2>
+                    <div class="spacer"></div>
+                    <span class="card-note" id="toolSummary"></span>
+                </div>
+
+                <div class="toolbar tool-filters">
+                    <select id="toolKind" class="form-control">
+                        <option value="">全部来源</option>
+                        <option value="LOCAL">内置</option>
+                        <option value="REMOTE">远程实例</option>
+                        <option value="MCP">MCP</option>
+                    </select>
+                    <input id="toolSearch" class="form-control" placeholder="搜索工具名 / 说明">
+                    <button class="btn btn-sm btn-outline-secondary" id="toolRefreshBtn" type="button">重新读取</button>
+                    <span class="card-note" id="toolState"></span>
+                </div>
+
+                <div class="table-wrap" id="toolTableWrap">
+                    <table class="table tool-table">
+                        <thead>
+                        <tr>
+                            <th>工具</th>
+                            <th>来源</th>
+                            <th>说明</th>
+                            <th>参数</th>
+                            <th>域</th>
+                            <th>副本</th>
+                            <th>操作</th>
+                        </tr>
+                        </thead>
+                        <tbody id="toolBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
             <div class="dp-card">
                 <div class="card-head">
                     <h2>实例清单</h2>
@@ -139,6 +223,6 @@
 </div>
 
 <script src="assets/console.js"></script>
-<script src="assets/page-instances.js"></script>
+<script src="assets/page-instances.js?v=1"></script>
 </body>
 </html>

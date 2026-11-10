@@ -1,5 +1,5 @@
 (() => {
-  // src/pages/mcp.js
+  // domainplane-server/frontend/src/pages/mcp.js
   (function() {
     var esc = Console.escapeHtml;
     var PROTOCOL = "2026-07-28 \u65E0\u72B6\u6001 / 2025-03-26 \u4F1A\u8BDD";

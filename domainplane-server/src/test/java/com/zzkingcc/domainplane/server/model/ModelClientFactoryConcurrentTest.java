@@ -34,7 +34,7 @@ class ModelClientFactoryConcurrentTest {
         return new ModelProfile(
                 alias, List.of(ModelProfile.EP_CHAT), List.of("text"), List.of("text"),
                 "https://example.test/v1", apiKey, "test-model",
-                null, null, null, null, null, List.of(), Map.of());
+                null, null, null, null, List.of(), Map.of());
     }
 
     @Test

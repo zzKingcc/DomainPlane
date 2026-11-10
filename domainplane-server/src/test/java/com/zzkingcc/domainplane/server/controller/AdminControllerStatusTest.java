@@ -92,7 +92,7 @@ class AdminControllerStatusTest {
     /** 探测结论、保存是否失败、连通是否失败，全部可控 */
     static final class StubHolder extends LlmModelHolder {
         LlmModelHolder.EmbeddingProbe probe =
-                new LlmModelHolder.EmbeddingProbe(1536, null, true);
+                new LlmModelHolder.EmbeddingProbe(1536);
         RuntimeException applyFailure;
         RuntimeException chatFailure;
 
@@ -152,30 +152,10 @@ class AdminControllerStatusTest {
     }
 
     @Test
-    @DisplayName("声明的维度上游不兑现：400，并带回声明值与实测值")
-    void declaredDimensionMismatchIsRejectedWith400() {
-        StubHolder holder = new StubHolder();
-        holder.probe = new LlmModelHolder.EmbeddingProbe(1024, 2048, false);
-
-        ResponseEntity<Map<String, Object>> resp =
-                controller(holder, new StubKnowledgeBase(), new StubProfileRegistry())
-                        .saveSettings(embeddingChangedIncoming(), false);
-
-        assertEquals(HttpStatus.BAD_REQUEST, resp.getStatusCode());
-        Map<String, Object> body = resp.getBody();
-        assertNotNull(body);
-        assertEquals(Boolean.FALSE, body.get("success"), "声明不被兑现时必须拒绝保存");
-        assertEquals(2048, body.get("declaredDimension"));
-        assertEquals(1024, body.get("newDimension"));
-        assertTrue(String.valueOf(body.get("error")).contains("声明"),
-                "要说清是声明与实测不符，实际：" + body.get("error"));
-    }
-
-    @Test
     @DisplayName("维度变了但用户没确认重建：409，带 requiresRebuild")
     void dimensionChangeWithoutConfirmationIs409() {
         StubHolder holder = new StubHolder();
-        holder.probe = new LlmModelHolder.EmbeddingProbe(1536, null, true);
+        holder.probe = new LlmModelHolder.EmbeddingProbe(1536);
         StubKnowledgeBase kb = new StubKnowledgeBase();
         kb.dims = 768;
 
@@ -248,18 +228,19 @@ class AdminControllerStatusTest {
     }
 
     @Test
-    @DisplayName("连通性测试：向量维度声明与实测不符 → 400")
-    void embeddingMismatchInProbeIs400() {
+    @DisplayName("连通性测试：向量模型连通正常 → 200，带回实测维度")
+    void embeddingProbeReturnsActualDimension() {
         StubHolder holder = new StubHolder();
-        holder.probe = new LlmModelHolder.EmbeddingProbe(1024, 2048, false);
+        holder.probe = new LlmModelHolder.EmbeddingProbe(1024);
 
         ResponseEntity<Map<String, Object>> resp =
                 controller(holder, new StubKnowledgeBase(), new StubProfileRegistry())
                         .testSettings(embeddingChangedIncoming(), "embedding");
 
-        assertEquals(HttpStatus.BAD_REQUEST, resp.getStatusCode());
+        assertEquals(HttpStatus.OK, resp.getStatusCode());
         assertNotNull(resp.getBody());
-        assertEquals(Boolean.FALSE, resp.getBody().get("success"));
+        assertEquals(Boolean.TRUE, resp.getBody().get("success"));
+        assertEquals(1024, resp.getBody().get("dimension"));
         assertEquals("embedding", resp.getBody().get("type"));
     }
 }

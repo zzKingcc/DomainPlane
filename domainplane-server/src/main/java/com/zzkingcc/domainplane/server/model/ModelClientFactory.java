@@ -39,8 +39,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *     {@code customParameters}（langchain4j 1.18.1 起支持，与标准字段并列合并进请求体），
  *     原样下发，不做键名翻译。
  *
- * 本类不再依赖 {@link ModelAdapterRegistry}：对话族的适配 schema 下架后，"按 schema 翻译
- * key→wire / 补 default / 校验 enabledWhen"那条分支已经没有任何可达输入。
+ * 适配层整套删除后，这里不再有任何键名翻译 / 默认值注入分支：
+ * 用户填的键就是发给服务商的键。
  *
  * @author zzkingcc
  */
@@ -192,9 +192,7 @@ public class ModelClientFactory {
      * 与标准参数同路并列：langchain4j 把 customParameters 与 temperature 等字段
      * 合并进同一个 ChatCompletionRequest，服务商看到的是一个完整请求体。
      *
-     * 补缺规则：适配 schema 声明了 {@code default} 而用户没填的键，在此填上，
-     * "没填"对用户是不发送，对适配是"按适配登记的默认走"，两者在 default 存在时重合。
-     * 未命中适配、或对话族没有 schema 的档案**原样下发** —— 那是用户自助填参的主路径，
+     * 不做补缺、不做翻译：用户没填的键就是不发送。参数完全由用户自助填写，
      * 保存时由 {@link CustomParamsGate} 把关，到这里已是"准许下发"的值。
      */
     private void applyCustomParameters(java.util.function.Consumer<Map<String, Object>> setter,
@@ -208,10 +206,8 @@ public class ModelClientFactory {
     /**
      * 档案 params → 请求体字段：原样下发。
      *
-     * <p>对话族的 schema 已经下架，这里曾经有的"按 schema 翻译 key→wire、补 default、
-     * 校验 enabledWhen"那条分支随之删除 —— 它只在 chat 族有参数时才会走到，
-     * 而现在 chat 族的参数表是空的，那条分支连一个可达输入都找不到。
-     * 档案里存的键就是线上字段名（存量档案由 {@code ModelProfileStore} 读盘时归一，
+     * <p>适配层整套删除后，这里不再有 key→wire 翻译、补 default、校验 enabledWhen
+     * 之类的分支：档案里存的键就是线上字段名（存量档案由 {@code ModelProfileStore} 读盘时归一，
      * 见 {@link ChatParamMigration}）。</p>
      *
      * <p>标准参数（{@code temperature} / {@code max_tokens}）**不走这里**：它们的值在

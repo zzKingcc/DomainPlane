@@ -70,7 +70,7 @@ public class ModelProfileStore {
                否则 reasoningEffort 会被原样发给上游、被静默忽略（见 ChatParamMigration）。 */
             if (settings.normalizeChatParams()) {
                 log.info("[模型档案] 已把存量对话档案的 params 键归一为线上字段名"
-                        + "（如 reasoning_effort / top_p），适配 schema 下架后不再有注入前的翻译步骤");
+                        + "（如 reasoning_effort / top_p），现在不再有注入前的翻译步骤");
                 mutated = true;
             }
             if (mutated) {

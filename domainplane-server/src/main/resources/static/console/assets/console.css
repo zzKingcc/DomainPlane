@@ -241,7 +241,7 @@ a.mention:hover,
    （.page-head .actions / .btn-row / .card-foot 都已 flex-wrap: wrap）。
    这与 .tag / .count-badge / .mbadge / .dirty 已有的 nowrap 是同一条规矩。 */
 /* V2：带 .btn 的按钮交给 Tabler 接管，下面这组只兜住尚未改造的元素型按钮
-   （modal-close / combo-btn / tune-bar-seg 这类结构型按钮仍走这套）。
+   （modal-close / combo-btn 这类结构型按钮仍走这套）。
 
    业务按钮现在**一律走 Tabler 的 outline 变体**：
    btn-outline-primary（主操作）/ btn-outline-secondary（次要、取消、关闭）/
@@ -255,7 +255,7 @@ a.mention:hover,
    比任何单类选择器（如 .combo-btn / .modal-close 的 (0,1,0)）都高，
    于是结构型按钮自己的样式会被这条底座压掉 —— 实测后果：
    「×」关闭键和下拉箭头都被染成主色蓝块、箭头的 svg 被 8px 16px 的 padding 挤成 0 宽、
-   .tune-bar-seg 分段控件和 .chip 也全成了蓝按钮。
+   .chip 之类的结构型按钮也全成了蓝按钮。
    :where(button) 把元素本身那一点权重抹掉（整条只剩 :not(.btn) 的类权重 (0,1,0)），
    结构型按钮的类规则就能按「谁写在后面谁生效」正常覆盖底座。 */
 :where(button):not(.btn) {
@@ -270,7 +270,7 @@ a.mention:hover,
     white-space: nowrap;
 }
 /* 只有「没类的朴素按钮」才用整体变淡来表达 hover；
-   带类的结构型按钮（chip / tune-bar-seg / combo-btn / modal-close）自己管 hover 反馈，
+   带类的结构型按钮（chip / combo-btn / modal-close）自己管 hover 反馈，
    再叠一层 opacity 只会让它们变脏。 */
 :where(button):not(.btn):not([class]):hover { opacity: .9; }
 :where(button):not(.btn):disabled { opacity: .5; cursor: not-allowed; }
@@ -459,28 +459,7 @@ input:disabled { background: #f8fafc; color: var(--muted); }
 /* 模型卡片内的信息行（键值对） */
 .model-meta { display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.6; }
 .model-meta .k { display: inline-block; min-width: 92px; color: var(--muted); }
-/* 「上下文长度」这一行：标签、输入框、单位并到一行，整体收小。
-   原来标签占 92px、输入框 120px，信息列只有 220px 宽 —— 放不下就折行，
-   标签在上一行、输入框掉到下一行，看着像两张不相干的东西。
-
-   ⚠️ 选择器要写三层（.model-meta .ctx-row .model-ctx = 0,3,0）：
-   全局那条 `input:not([type=checkbox]):not([type=radio])` 是 (0,2,1)，
-   它的 width:100% / font-size:13px / padding 会压过两层的写法，
-   输入框就又撑满整行（这正是它折行的原因）。 */
-.model-meta .ctx-row { display: flex; align-items: center; gap: 6px; }
-.model-meta .ctx-row .k { flex: 0 0 auto; }
-.model-meta .ctx-row .model-ctx {
-    flex: 0 0 80px;
-    width: 80px; height: 26px; padding: 2px 8px;
-    font-size: 12px; line-height: 20px; text-align: right;
-    border-radius: 4px;
-}
-/* 这个尺寸下数字框的上下微调箭头太挤，藏掉（值仍然可以直接改） */
-.model-meta .ctx-row .model-ctx::-webkit-outer-spin-button,
-.model-meta .ctx-row .model-ctx::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.model-meta .ctx-row .model-ctx { -moz-appearance: textfield; appearance: textfield; }
-.model-meta .ctx-row .ctx-unit { margin-left: 0; color: var(--muted); font-size: 12px; }
-/* 连接协议下拉：与上下文长度输入框同一套紧凑尺寸，两个就地项摆在一起才不打架 */
+/* 连接协议下拉：与卡片里其它就地控件同一套紧凑尺寸 */
 .model-meta .proto-select {
     width: auto; min-width: 116px; height: 26px; padding: 2px 6px;
     font-size: 12px; line-height: 20px; border-radius: 4px;
@@ -622,6 +601,14 @@ tbody tr:hover { background: #fcfcfd; }
     background: var(--tblr-secondary-lt);
     font-family: ui-monospace, Consolas, monospace; margin: 0 4px 4px 0;
 }
+/* 端点族标签兼「移除能力」入口：按钮化但不改变 .tag 的视觉，只在悬停时提示可删 */
+.tag.tag-drop {
+    border: 0; cursor: pointer; font: inherit; gap: 4px;
+    font-size: .75rem; font-weight: 500; line-height: 1;
+}
+.tag.tag-drop .tag-x { opacity: .45; font-size: .85rem; }
+.tag.tag-drop:hover { color: var(--red); }
+.tag.tag-drop:hover .tag-x { opacity: 1; }
 .perm-none { color: var(--muted); }
 
 /* 可点选的声明 chip：与 .tag 同一套视觉，但「未选 / 已选」必须一眼分得开，
@@ -728,6 +715,39 @@ tbody tr:hover { background: #fcfcfd; }
 .dp-confirm .modal-content { animation: dp-modal-drop .18s ease-out; }
 .dp-confirm .modal-body { white-space: pre-wrap; line-height: 1.7; color: var(--text); }
 .dp-confirm .modal-footer { gap: 8px; }
+/* 结构化正文自己管换行，撤销 confirm 的 pre-wrap 继承 */
+.dp-confirm .modal-body.dp-confirm-html { white-space: normal; line-height: 1.5; }
+
+/* ===== 探测结果：支持 / 未通过 两区 =====
+   失败项固定三列：名称 · HTTP 状态码 · 短原因。不放服务商回执、不放尝试次数。 */
+.probe-result { display: flex; flex-direction: column; gap: 14px; }
+.probe-sec-head {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 600; margin-bottom: 7px;
+}
+.probe-sec-head.ok { color: var(--green); }
+.probe-sec-head.no { color: var(--red); }
+.probe-count {
+    font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 9px;
+    background: #f1f5f9; color: var(--muted);
+}
+.probe-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.probe-chip {
+    font-size: 12px; padding: 2px 8px; border-radius: 5px;
+    background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0;
+}
+.probe-rows { display: flex; flex-direction: column; gap: 2px; }
+.probe-row {
+    display: flex; align-items: baseline; gap: 10px;
+    font-size: 12.5px; padding: 3px 0;
+}
+.probe-name { flex: 0 0 96px; color: var(--text); }
+.probe-code {
+    flex: 0 0 70px; color: var(--muted);
+    font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
+}
+.probe-desc { color: var(--muted); }
+.probe-empty { font-size: 12.5px; color: var(--muted); }
 
 /* ---------- 看文档：切片预览弹层 ----------
    比确认框宽（切片正文是段落，窄了折得很碎），高度锁在视口内自己滚：
@@ -825,42 +845,6 @@ tbody tr:hover { background: #fcfcfd; }
     .modal-panel { padding: 16px 16px 14px; }
 }
 
-/* ===== 服务商适配调优框 —— 绿色工具框（console/models.html）=====
-   出现条件：模态里「服务商地址 + API Key + 模型名」三项填全且命中适配；卡片上只要命中适配。
-   视觉刻意与页面其它面板拉开：绿边框 + 半透明绿底（透明绿，不遮卡片本色），
-   一眼认出"这是这家服务商专属的可调参数"，而不是又一个普通表单区。
-   [hidden] 显式压 display：本文件里 .modal-mask 已经踩过"display:flex 压住 hidden 属性"的坑。 */
-.tune-box {
-    border: 1px solid var(--green);
-    border-radius: 8px;
-    background: rgba(22, 163, 74, .07);
-    padding: 8px 12px;
-    margin-bottom: 14px;
-    /* 一框横排多个参数：窄列自动折行，参数多也不至于拉成一长条 */
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
-    gap: 8px 14px;
-    align-items: start;
-}
-.tune-box[hidden] { display: none; }
-.tune-status { font-size: 12px; }
-.tune-status.ok { color: var(--green); }
-.tune-status.err { color: var(--red); }
-/* 「更新」按钮：无改动 → disabled（全局 button:disabled 就是灰的），有改动才亮起来。
-   它挂在卡片头部（删除左侧），不再是绿框里单独的一行。
-   尺寸不再单独定 —— 跟页面上其它小动作一样是 btn-sm btn-outline-primary。 */
-/* 参数行：网格里的一格，比通用 .field 更紧凑，框内是密集参数区，不是主表单。
-   label 只指「参数名」那一层，故用 > 限定直接子元素：bool 的开关本身也是 label，
-   不限定的话会被这条规则染上参数名的字号与下距，开关就浮起来了。 */
-.tune-field { margin-bottom: 0; }
-.tune-field > label { margin-bottom: 3px; font-size: 12px; }
-/* 分档进度条要横排 4–5 档，窄列会把档名截断，让它独占一整行 */
-.tune-field-wide { grid-column: 1 / -1; }
-/* 绿框里的输入控件比页面其它表单再小一档：框内是密集参数区，不是主表单 */
-.tune-box input:not([type="checkbox"]):not([type="radio"]), .tune-box select {
-    padding: 5px 8px;
-    font-size: 12px;
-}
 /* ---------- bool 参数的开关（滑块）----------
    原生复选框藏起来但留在 DOM 与 Tab 序里：键盘仍可聚焦、可空格切换，
    :checked / :disabled 靠相邻兄弟选择器把状态画到轨道上，不改任何 JS。 */
@@ -904,109 +888,6 @@ tbody tr:hover { background: #fcfcfd; }
    只渲染在可调用单元（叶子域）卡片上，装配节点不能作为入口，开关无意义。 */
 .echo-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; }
 .echo-switch-label { color: var(--muted); white-space: nowrap; }
-/* 中文参数名后的英文（wire = 实际发给服务商的字段名）：弱化、等宽，
-   与中文名同一行，但字号与颜色都压下去，不与中文标题抢视线 */
-.tune-en {
-    margin-left: 5px;
-    font-size: 11px;
-    font-weight: 400;
-    color: #94a3b8;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-}
-/* 多行参数（停止序列）：补上全局只给 input / select 的边框与内边距，
-   否则吃浏览器默认样式，文字贴着边框，且与本页其它输入框不一致。 */
-.tune-field textarea {
-    width: 100%;
-    min-height: 34px;
-    padding: 5px 8px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    resize: vertical;
-    color: var(--text);
-    background: #fff;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 12px;
-    line-height: 1.5;
-}
-.tune-field textarea:focus { outline: 2px solid var(--primary-dim); border-color: var(--primary); }
-.tune-field textarea:disabled { background: #f8fafc; color: var(--muted); }
-/* ---------- 分档进度条（display:"bar" 的有序枚举，如「思考强度」）----------
-   一排等宽档位 = 把"有哪几档、现在在哪一档"一次摊平。左侧档位算已点亮（浅绿），
-   当前档实绿加重，档位说明另起一行，档位名短（none/low/high）、说明长（含"默认 X"），
-   挤在同一行必然被截断，分两行才都读得全。轨道底色让它读起来是"一条条"，不是一个下拉框。 */
-.tune-bar { display: flex; flex-direction: column; gap: 4px; }
-.tune-bar-track { display: flex; gap: 4px; padding: 3px; background: #f1f5f9; border-radius: 8px; }
-.tune-bar-seg {
-    flex: 1 1 0;
-    min-width: 0;
-    padding: 4px 3px;
-    font-size: 11px;
-    line-height: 1.2;
-    font-family: inherit;
-    color: var(--slate);
-    background: #fff;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.tune-bar-seg:hover:not(:disabled) { border-color: var(--green); color: var(--green); }
-.tune-bar-seg.on { background: #ecfdf5; border-color: var(--green); color: var(--green); }
-.tune-bar-seg.active { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
-.tune-bar-seg:disabled {
-    cursor: not-allowed;
-    opacity: .45;
-    background: #fff;
-    border-color: var(--border);
-    color: var(--muted);
-}
-.tune-bar-cap { font-size: 11px; color: var(--muted); min-height: 14px; }
-.tune-bar-cap[hidden] { display: none; }
-/* 卡片右侧的绿框：占住 meta 右侧的空白区，就地改值，不必重开弹窗 */
-.card-tune { flex: 1 1 340px; min-width: 0; margin-bottom: 0; }
-/* ---------- 「自定义参数（JSON）」文本框 ----------
-   与绿框（.tune-box）是两条不同的路：绿框由适配 schema 驱动，只在按模型名命中适配的
-   档案上出现；这个框走"用户声明、我透传"，只在**未命中**的档案上出现。
-   两者互斥（服务端同一份判据下发 customParams.schemaDriven），所以视觉上刻意不同：
-   绿框 = 平台替你登记过，虚线框 = 参数由你自己声明，平台不管它是什么意思。
-   用虚线而不是另一套彩色边框：颜色已经分工了（绿=适配、红=危险），
-   再引一种颜色只会让"这个框是什么"更难懂。 */
-.cp-box {
-    flex: 1 1 340px;
-    min-width: 0;
-    margin-bottom: 0;
-    border: 1px dashed var(--slate);
-    border-radius: 8px;
-    background: rgba(148, 163, 184, .06);
-    padding: 8px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-.cp-box > label { font-size: 12px; color: var(--muted); }
-.cp-box textarea {
-    width: 100%;
-    min-height: 92px;
-    padding: 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    resize: vertical;
-    color: var(--text);
-    background: #fff;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 12px;
-    line-height: 1.5;
-}
-.cp-box textarea:focus { outline: 2px solid var(--primary-dim); border-color: var(--primary); }
-.cp-box textarea:disabled { background: #f8fafc; color: var(--muted); }
-/* 上限与提示：只写"能填什么、上限多少"，不解释 JSON 是什么 —— 会填这个框的人不需要，
-   不会填的人看了也学不会。上限数字由服务端下发，前端不另存一份常量。 */
-.cp-hint { font-size: 11px; color: var(--muted); line-height: 1.6; }
-.cp-foot { display: flex; align-items: center; gap: 8px; }
-.cp-foot .spacer { flex: 1 1 auto; }
-
 /* ===== 概览统计卡（overview）=====
    四张关键指标一行排开，规格来自后台设计规范：横向「图标容器 + 数字 + 标签」。
    图标底色吃各指标语义色（primary / purple / success / pink）的 10% 混合底，
@@ -2132,24 +2013,30 @@ pre.preview .mark { color: #93c5fd; }
 
 
 /* ---------- 卡片：自定义参数（JSON）文本框 ----------
-   未命中内置适配的档案走这条：适配 schema 编不出控件，只能手填键值对。
-   刻意用中性色而不是绿框：绿色在本页专指「命中适配、schema 驱动」，
-   两种入口长得一样会让人以为这里填的也是适配参数。 */
+   参数面完全由用户自己声明、平台原样透传。卡片上不再有温度 / 最大输出控件，
+   这里是唯一的参数入口，所以做成一块完整的输入区：标题行（标签 + 极简后缀）、
+   输入框、底部状态与保存按钮，三段都有明确边界，不靠灰色底跟卡片抢层次。 */
 .dp-params {
-    border: 1px solid var(--border); border-radius: 8px;
-    background: var(--tblr-bg-surface-secondary, #f7f8fa);
-    padding: 8px 12px; margin-bottom: 14px;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--card);
+    padding: 10px 12px; margin-bottom: 14px;
     /* 与 .model-meta 并排；参数框比键值列更宽，窄屏自动折到下一行 */
-    flex: 1 1 320px; min-width: 0;
-    display: flex; flex-direction: column; gap: 6px;
+    flex: 1 1 340px; min-width: 0;
+    display: flex; flex-direction: column; gap: 8px;
 }
 .dp-params-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .dp-params-head .k { font-size: 12px; font-weight: 600; color: var(--text); }
-.dp-params-hint { font-size: 12px; color: var(--muted); line-height: 1.6; }
-/* 输入框落在浅灰底上，底色要回到白卡，否则两者混成一片（白底 + 灰底边界只剩 1px 边框） */
+/* 后缀只留一句最必要的（格式 + 留空语义），详细规则交给服务端的报错文案 */
+.dp-params-sub { font-size: 11px; color: var(--muted); }
 .dp-params-json {
-    font-size: 12px; line-height: 1.6; min-height: 62px; resize: vertical;
-    background: var(--card); color: var(--text);
+    font-size: 12px; line-height: 1.65; min-height: 84px; resize: vertical;
+    padding: 8px 10px; border-radius: 6px;
+    background: #f8fafc; color: var(--text);
+    border: 1px solid var(--border);
+}
+.dp-params-json:focus {
+    background: var(--card); border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(32, 107, 196, .1); outline: none;
 }
 .dp-params-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 /* 保存失败的提示是后端原文（含 JSON 解析的行列号），比一句「参数非法」有用得多，

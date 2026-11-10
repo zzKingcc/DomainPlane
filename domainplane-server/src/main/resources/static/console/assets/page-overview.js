@@ -1,5 +1,5 @@
 (() => {
-  // src/pages/overview.js
+  // domainplane-server/frontend/src/pages/overview.js
   (function() {
     var esc = Console.escapeHtml;
     function setText(id, v) {

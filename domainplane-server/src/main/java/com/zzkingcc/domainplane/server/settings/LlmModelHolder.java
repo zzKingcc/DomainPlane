@@ -66,7 +66,7 @@ public class LlmModelHolder {
     /** 实际生效的向量模型描述（档案别名或 "yaml"），仅供日志与排障 */
     private volatile String embeddingSource;
     /**
-     * 实测向量维度缓存（只在没声明维度时用）。
+     * 实测向量维度缓存（维度没有手工配置项，一律取模型原生维度）。
      *
      * <p>为什么不能拿 {@code EmbeddingModel.dimension()}：OpenAI 兼容客户端的
      * {@code dimension()} 是<b>构造参数</b>（没设就是 1536），不是上游真实返回长度；
@@ -105,8 +105,7 @@ public class LlmModelHolder {
         reload();
     }
 
-    /** 当前生效的向量模型来源：档案别名 / {@code yaml} / {@code null}（未配置） */
-    public String embeddingSource() {
+    /** 当前生效的向量模型来源：档案别名 / {@code yaml} / {@code null}（未配置） */    public String embeddingSource() {
         return embeddingSource;
     }
 
@@ -157,41 +156,22 @@ public class LlmModelHolder {
     }
 
     /**
-     * 当前应当用于 ES 索引的向量维度。
+     * 当前应当用于 ES 索引的向量维度 —— 一律取模型原生维度（实测）。
      *
-     * 取自实际生效的那个向量模型：选中档案时用档案声明的维度（可为空 → 回落实测），
-     * 用 yaml 兜底时同理。维度是索引 mapping 的不可变参数，两条来源不能各说各话。
+     * <p>维度不是配置项：它由模型决定，手工填一个别的值只会让索引与向量对不上。
+     * 这里嵌一条短文本数长度，是唯一可信的判据；结果缓存到下次重建模型。</p>
      *
      * @throws NotConfiguredException 向量模型未配置
+     * @throws IllegalStateException  实测失败（上游不可达/鉴权失败），由调用方转述
      */
     public int effectiveEmbeddingDimension() {
-        Integer declared = declaredEmbeddingDimension();
-        if (declared != null) {
-            return declared;
-        }
         return measureEmbeddingDimension();
-    }
-
-    /**
-     * 管控台/部署配置里<b>声明</b>的维度；没声明返回 {@code null}。
-     *
-     * <p>与 {@link #effectiveEmbeddingDimension()} 的区别：这里不做实测。
-     * "声明了多少"与"上游实际给多少"是两件事，调用方（维度校验、索引契约提示）
-     * 需要分开知道。</p>
-     */
-    public Integer declaredEmbeddingDimension() {
-        ModelProfile selected = selectedEmbeddingProfile();
-        if (selected != null) {
-            return selected.dimensions();
-        }
-        LlmSettings s = settings;
-        return s == null ? null : s.getEmbeddingDimensions();
     }
 
     /**
      * 实测向量维度（缓存）。
      *
-     * <p>没声明维度时才走到这里：嵌一条短文本、数它的长度。这是唯一可信的判据——
+     * <p>嵌一条短文本、数它的长度。这是唯一可信的判据——
      * 客户端构造参数里的"维度"是请求参数，不是上游真实返回长度。</p>
      *
      * @throws NotConfiguredException 向量模型未配置
@@ -210,7 +190,7 @@ public class LlmModelHolder {
         try {
             int dims = m.embed("dimension-probe").content().dimension();
             measuredEmbeddingDimension = dims;
-            log.info("[模型设置] 实测向量维度={}（未声明维度，索引按实测值创建）", dims);
+            log.info("[模型设置] 实测向量维度={}（按模型原生维度，索引按此创建）", dims);
             return dims;
         } catch (RuntimeException e) {
             throw new IllegalStateException("向量模型未声明维度，且实测失败（无法确定索引维度）："
@@ -299,8 +279,6 @@ public class LlmModelHolder {
         merged.setEmbeddingBaseUrl(pick(fromUi.getEmbeddingBaseUrl(), yEmb.getBaseUrl()));
         merged.setEmbeddingApiKey(pick(fromUi.getEmbeddingApiKey(), yEmb.getApiKey()));
         merged.setEmbeddingModelName(pick(fromUi.getEmbeddingModelName(), yEmb.getModelName()));
-        merged.setEmbeddingDimensions(fromUi.getEmbeddingDimensions() != null
-                ? fromUi.getEmbeddingDimensions() : yEmb.getDimensions());
         merged.setEmbeddingCapabilities(copy(fromUi.getEmbeddingCapabilities()));
         return merged;
     }
@@ -381,10 +359,9 @@ public class LlmModelHolder {
             this.embeddingModel = builder.build();
             this.embeddingSource = usable.alias();
             this.measuredEmbeddingDimension = null;
-            log.info("[模型设置] 已生效：向量模型来自档案 {}（model={}，baseUrl={}，索引维度={}）"
-                            + "—— 维度只用于本机建索引，不随请求下发；全域共享，不参与域绑定",
-                    usable.alias(), usable.modelName(), usable.baseUrl(),
-                    usable.dimensions() == null ? "(未声明，按实测)" : usable.dimensions() + "（声明）");
+            log.info("[模型设置] 已生效：向量模型来自档案 {}（model={}，baseUrl={}）"
+                            + "—— 索引维度按该模型原生维度实测；全域共享，不参与域绑定",
+                    usable.alias(), usable.modelName(), usable.baseUrl());
             return;
         }
 
@@ -399,9 +376,8 @@ public class LlmModelHolder {
             this.embeddingModel = embBuilder.build();
             this.embeddingSource = "yaml";
             this.measuredEmbeddingDimension = null;
-            log.info("[模型设置] 向量模型未选用档案，回落到部署配置 baseUrl={} model={} 索引维度={}",
-                    s.effectiveEmbeddingBaseUrl(), s.getEmbeddingModelName(),
-                    s.getEmbeddingDimensions() == null ? "(未声明，按实测)" : s.getEmbeddingDimensions() + "（声明）");
+            log.info("[模型设置] 向量模型未选用档案，回落到部署配置 baseUrl={} model={}",
+                    s.effectiveEmbeddingBaseUrl(), s.getEmbeddingModelName());
         } else {
             this.embeddingModel = null;
             this.embeddingSource = null;
@@ -580,9 +556,7 @@ public class LlmModelHolder {
 
         @Override
         public EmbeddingResponse doEmbed(EmbeddingRequest request) {
-            EmbeddingResponse response = target().doEmbed(request);
-            response.embeddings().forEach(this::checkDimension);
-            return response;
+            return target().doEmbed(request);
         }
 
         @Override
@@ -604,46 +578,17 @@ public class LlmModelHolder {
         // 而是各自有独立实现，因此必须显式委派，否则会返回默认/空值
         @Override
         public Response<Embedding> embed(String text) {
-            Response<Embedding> response = target().embed(text);
-            checkDimension(response.content());
-            return response;
+            return target().embed(text);
         }
 
         @Override
         public Response<Embedding> embed(TextSegment textSegment) {
-            Response<Embedding> response = target().embed(textSegment);
-            checkDimension(response.content());
-            return response;
+            return target().embed(textSegment);
         }
 
         @Override
         public Response<List<Embedding>> embedAll(List<TextSegment> textSegments) {
-            Response<List<Embedding>> response = target().embedAll(textSegments);
-            response.content().forEach(this::checkDimension);
-            return response;
-        }
-
-        /**
-         * 声明了维度就核对上游真实返回长度。
-         *
-         * <p>维度只用于本机建索引、不随请求下发，所以"声明"与"上游实际"可能不一致。
-         * 不核对的话，症状会散落在底层：Qdrant 回 "expected dim: 1024, got 768"、
-         * ES 的 script_score 维度不符，用户只看到一句"知识库暂时不可用"。
-         * 在这里拦下，能直接说清是哪一边填错了、该改成多少。</p>
-         */
-        private void checkDimension(Embedding embedding) {
-            Integer declared = holder.declaredEmbeddingDimension();
-            if (declared == null || embedding == null) {
-                return;
-            }
-            int actual = embedding.dimension();
-            if (actual != declared) {
-                throw new IllegalStateException(
-                        "向量模型「" + String.valueOf(holder.embeddingSource()) + "」实际返回 " + actual
-                                + " 维，而本机配置的维度是 " + declared + " 维：索引是按 " + declared
-                                + " 维建的，写入与检索都会被存储拒绝。请到管控台「模型设置」页把该向量模型的"
-                                + "「向量维度」改成 " + actual + " 后重试（已入库的域需重建索引）。");
-            }
+            return target().embedAll(textSegments);
         }
     }
 
@@ -685,15 +630,14 @@ public class LlmModelHolder {
     }
 
     /**
-     * 用"候选设置"探测向量模型连通性，并对照维度的声明与实测。
+     * 用"候选设置"探测向量模型连通性，并取该模型的<b>原生</b>维度。
      *
      * <p>探测请求<b>不</b>带 {@code dimensions} 参数：维度是本机索引契约，不是上游请求参数，
      * 而且部分服务商直接拒绝该参数（SiliconFlow 的 bge-m3 会回 20015
-     * "The parameter is invalid"）。所以这里测的是"该模型的<b>原生</b>维度是多少"，
-     * 再与用户声明的维度对照。</p>
+     * "The parameter is invalid"）。所以这里测的就是"这个模型实际产出多少维"。</p>
      *
-     * @return 实测维度与声明维度的对照结果，由调用方决定如何呈现
-     * @throws IllegalStateException 必填项缺失、维度非法，或上游连接/鉴权失败
+     * @return 实测维度，由调用方决定如何呈现
+     * @throws IllegalStateException 必填项缺失，或上游连接/鉴权失败
      */
     public EmbeddingProbe testEmbeddingConnection(LlmSettings candidate) {
         String baseUrl = hasText(candidate.getEmbeddingBaseUrl())
@@ -706,52 +650,23 @@ public class LlmModelHolder {
             throw new IllegalStateException("请先填写向量模型的地址、API Key 与模型名");
         }
 
-        Integer declared = candidate.getEmbeddingDimensions();
-        if (declared != null && declared <= 0) {
-            throw new IllegalStateException("向量维度需为正整数");
-        }
-
         EmbeddingModel probe = OpenAiEmbeddingModel.builder()
                 .baseUrl(baseUrl)
                 .apiKey(apiKey)
                 .modelName(modelName)
                 .build();
 
-        log.info("[模型设置] 向量连通性测试: baseUrl={} model={} 声明维度={}（不下发 dimensions）",
-                baseUrl, modelName, declared);
+        log.info("[模型设置] 向量连通性测试: baseUrl={} model={}（不下发 dimensions）", baseUrl, modelName);
         Response<Embedding> resp = probe.embed("连通性测试");
-        int actualDimension = resp.content().dimension();
-        boolean success = declared == null || declared == actualDimension;
-        return new EmbeddingProbe(actualDimension, declared, success);
+        return new EmbeddingProbe(resp.content().dimension());
     }
 
     /**
      * 向量连通性测试结果。
      *
-     * @param actualDimension   上游实际返回的向量长度（唯一可信判据）
-     * @param declaredDimension 用户声明的维度；未声明（留空）为 {@code null}
+     * @param actualDimension 上游实际返回的向量长度（唯一可信判据）
      */
-    public record EmbeddingProbe(
-            int actualDimension,
-            Integer declaredDimension,
-            boolean success) {
-
-        /**
-         * 声明了维度、但上游实际返回的长度不是它。
-         *
-         * <p>注意：不是"上游忽略了参数"——维度压根没作为参数下发，
-         * 这里比的是"用户填的"与"该模型原生维度"，不一致就要改填原生维度。</p>
-         */
-        public boolean mismatched() {
-            return !success && declaredDimension != null && declaredDimension != actualDimension;
-        }
-
-        /**
-         * 建议用户使用的维度。
-         */
-        public int suggestedDimension() {
-            return actualDimension;
-        }
+    public record EmbeddingProbe(int actualDimension) {
     }
 
     /** 候选 Key 为空时回落到已保存的 Key（管控台不回填明文，避免用户被要求重填） */

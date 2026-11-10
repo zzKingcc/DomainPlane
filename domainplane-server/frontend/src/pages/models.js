@@ -7,8 +7,9 @@
    一张统一档案表 + 一个槽位区：
      · 用途分配 —— 全局单选的向量槽，下拉列出所有声明了 embedding 的档案
      · 全部档案 —— 一张表列完，能力看端点族小签，占用看槽位与「已启用」徽标
-   添加模型时由用户勾选用途并随请求体提交，保存零上游请求、不猜类型；
-   「识别用途」是弹窗上用户主动点的按钮，结果只用来预勾。
+   添加时只由用户手选输入 / 输出模态，保存原样落盘、零上游请求、不猜类型；
+   端点族由服务端按这组模态做本地反查得到，一个都不选就留空（卡片不可用）。
+   卡片上的「探测」是唯一花 token 的入口，二次确认后实测结果覆盖手选模态。
    域 → 对话 / 能力族的绑定在「域空间」页操作。 */
 Console.renderSidebar('models');
 
@@ -18,10 +19,12 @@ Console.renderSidebar('models');
        又因 loadSettings 的 catch 只打 console.debug 而被静默吞掉，表现为整段渲染不出来。 */
     var EMBEDDING = { alias: null };   /* 当前启用的向量档案别名；null = 一个都没启用 */
     var SETTINGS = null;               /* /admin/settings：对话 / 向量 两组部署配置（yaml 兜底） */
-    /* 弹窗「用途」当前勾选的端点族。空数组 = 未声明，允许保存（档案标「未声明类型」）。 */
-    var PICKED_ENDPOINTS = [];
+    /* 添加弹窗里手选的模态。两组都空 = 一个都没选，照常保存但卡片不可用。 */
+    var PICKED_INPUT = [];
+    var PICKED_OUTPUT = [];
 
-    var EP_FAMILIES = ['chat', 'embedding', 'rerank', 'images', 'tts', 'asr', 'video'];
+    var INPUT_MODS = ['text', 'image', 'audio', 'video', 'file'];
+    var OUTPUT_MODS = ['text', 'image', 'audio', 'video', 'file', 'embedding', 'score'];
     var EP_LABEL = { chat: '对话', embedding: '向量', rerank: '重排', images: '生图',
                      tts: '语音合成', asr: '语音识别', video: '视频' };
     var MOD_LABEL = { text: '文本', image: '图片', audio: '音频', video: '视频',
@@ -93,9 +96,19 @@ Console.renderSidebar('models');
     /* 卡片头部：端点族 + 布尔能力。
        输入 / 输出模态改由 meta 那两行完整列出，头部标签位有限，多模态模型
        （如输入 text+image、输出 text+image）在头部容易被挤掉或看着像"只有文本"，
-       而"能吃什么 / 产出什么"恰恰是挑模型时最该看的信息。 */
+       而"能吃什么 / 产出什么"恰恰是挑模型时最该看的信息。
+
+       端点族标签做成可点的「移除」入口：探测从不写「不支持」，历史误标就永远清不掉；
+       自动撤销风险太大（一次 400 就把能力删了），所以让用户明说一次。 */
     function cardTags(p) {
-        return tagList(p.endpoints, EP_LABEL);
+        return (p.endpoints || []).map(function (k) {
+            return '<button type="button" class="tag public tag-drop" title="移除「'
+                + Console.escapeHtml(EP_LABEL[k] || k) + '」这个能力"'
+                + ' data-drop-family="' + Console.escapeHtml(k) + '"'
+                + ' data-drop-alias="' + Console.escapeHtml(p.alias) + '">'
+                + Console.escapeHtml(EP_LABEL[k] || k)
+                + '<span class="tag-x">×</span></button>';
+        }).join('');
     }
 
     /* 同名模型（两家服务商各配一份）自动编号：别名 = 模型名[-N]，卡片上显示 #N */
@@ -182,26 +195,10 @@ Console.renderSidebar('models');
             + '</label>';
     }
 
-    /* 卡片上的「上下文长度」输入框（对话档案的信息行里）。
-       落 ModelProfile#contextWindow：用户按服务商文档手填，平台不做识别，
-       服务商清单（GET /models）也不提供，探测更探不出来。
-       它就是装配预算的封顶值（服务端 ContextBudget：min(配置预算, 该值 - 输出预留 - 边际)），
-       且只用来**收紧**，填大了不构成"还能再塞"的保证。
-       留空 = 未声明 → 装配预算按配置值，与该字段引入前完全一致。
-       它是"平台自己消费的上限"而不是发给服务商的参数，所以单列一行、不塞进下面的
-       自定义参数框（塞进 params 会被当成要发给上游的键）。 */
-    function ctxCell(p) {
-        var v = p.contextWindow == null ? '' : String(p.contextWindow);
-        return '<input type="number" class="mono model-ctx form-control" data-ctx="'
-            + Console.escapeHtml(p.alias) + '" min="1" step="1"'
-            + ' value="' + Console.escapeHtml(v) + '" placeholder="未声明">'
-            + '<span class="ctx-unit">token</span>';
-    }
     /* 一张统一档案卡片：所有档案同一套骨架，差异只是「声明了哪些用途」与「占没占槽位」。
-       向量档案多出三样 —— 向量维度行、绿框（dimensions 调优）与「启用」按钮；
-       对话档案多出上下文长度、思考回写开关与标准 / 自定义参数框。
+       向量档案多出「启用」按钮；对话档案多出思考回写开关与自定义参数框。
        两张卡片合成一张后不需要再去重：档案只出现一次，槽位状态用徽标表达。 */
-    function modelCard(p, prefix) {
+    function modelCard(p) {
         var active = p.alias === EMBEDDING.alias;
         var chat = isChatProfile(p);
         var isEmb = isEmbeddingProfile(p);
@@ -214,15 +211,6 @@ Console.renderSidebar('models');
         var enableBtn = (isEmb && !active)
             ? '<button class="btn btn-sm btn-outline-primary" data-enable="' + Console.escapeHtml(p.alias) + '"'
                 + (p.usable ? '' : ' disabled') + '>启用</button>'
-            : '';
-        /* 绿框只剩向量维度这一个消费者：p.adapter 仅对「按模型名命中且 embedding 族有参数」
-           的档案下发，所以对话卡片天然不会长出第二套调优框。 */
-        var adapterBadge = p.adapter ? '<span class="mbadge">已适配</span>' : '';
-        var hasTune = !!(p.adapter && (p.adapter.params || []).length);
-        var tuneBox = hasTune ? adapterTuneBox(p, prefix) : '';
-        var tuneCtl = hasTune
-            ? '<span class="tune-status"></span>'
-              + '<button type="button" class="btn btn-sm btn-outline-primary tune-save" disabled>更新</button>'
             : '';
         /* 类型未声明要显眼：这种档案绑不了域、也当不了向量模型。
            以前"空端点族"被默认补成 chat，于是它看着像对话模型却永远调不通。 */
@@ -243,7 +231,6 @@ Console.renderSidebar('models');
         }
         /* 思考回写开关只出现在对话档案上（思考是对话流的概念）。 */
         var thinkCtl = chat ? thinkSwitch(p) : '';
-        var stdTune = tuneable ? stdTuneBox(p) : '';
         var paramsBox = tuneable ? customParamsBox(p) : '';
 
         return '<section class="dp-card model-card' + (isEmb ? ' emb' : '') + '">'
@@ -255,11 +242,12 @@ Console.renderSidebar('models');
             +   visionBadge(p)
             +   cardTags(p)
             +   (active ? '<span class="mbadge ok">已启用</span>' : '')
-            +   (p.usable ? '' : '<span class="mbadge off">不可用</span>')
-            +   adapterBadge
+            /* declared=false：添加时一个模态都没选，端点族与模态全空。卡片照存，
+               但绑不了域也进不了向量槽 —— 明确标「不可用」，等用户点「探测」。
+               p.declared 由服务端下发；老视图没这个字段时按已声明处理。 */
+            +   ((p.usable && p.declared !== false) ? '' : '<span class="mbadge off">不可用</span>')
             +   '<span class="spacer"></span>'
             +   thinkCtl
-            +   tuneCtl
             +   enableBtn
             +   '<button class="btn btn-sm btn-outline-secondary" data-probe="'
             +       Console.escapeHtml(p.alias) + '">探测</button>'
@@ -270,18 +258,13 @@ Console.renderSidebar('models');
             + '<div class="model-meta">'
             +   '<div><span class="k">输入模态</span>' + modalityCell(p, p.input) + '</div>'
             +   '<div><span class="k">输出模态</span>' + modalityCell(p, p.output) + '</div>'
-            +   (isEmb ? kv('向量维度', p.dimensions == null
-                    ? '<span class="perm-none">按模型默认</span>' : p.dimensions + '') : '')
             +   kv('服务商地址', '<span class="mono">'
                     + Console.escapeHtml(p.baseUrl || '-') + '</span>')
             +   (p.apiKeyMasked
                     ? kv('API Key', '<span class="mono">' + Console.escapeHtml(p.apiKeyMasked) + '</span>')
                     : '')
             +   '<div><span class="k">被哪些域使用</span>' + used + '</div>'
-            +   (chat ? '<div class="ctx-row"><span class="k">上下文长度</span>' + ctxCell(p) + '</div>' : '')
             + '</div>'
-            +   tuneBox
-            +   stdTune
             +   paramsBox
             + '</div>'
             + '</section>';
@@ -389,10 +372,8 @@ Console.renderSidebar('models');
                 + '对话模型要绑到域才能被调用（在「域空间」页操作）。</div>'
                 + '</div>';
         } else {
-            /* 绿框控件 id 前缀：每张卡片一个，统一表后只此一套序号，不会互相撞 */
-            var tuneSeq = 0;
             box.innerHTML = PROFILES.map(function (p) {
-                return modelCard(p, 'tb' + (tuneSeq++));
+                return modelCard(p);
             }).join('');
         }
 
@@ -408,27 +389,20 @@ Console.renderSidebar('models');
         box.querySelectorAll('button[data-probe]').forEach(function (b) {
             b.addEventListener('click', function () { probeProfile(b.getAttribute('data-probe'), b); });
         });
+        /* 端点族标签上的「×」：手动移除一个误标的能力（探测不会自动撤，见 dropFamily 注释）。 */
+        box.querySelectorAll('button[data-drop-family]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                dropFamily(b.getAttribute('data-drop-alias'), b.getAttribute('data-drop-family'));
+            });
+        });
         /* 思考回写开关：拨动即存（PUT /admin/model-profiles/return-thinking）。 */
         box.querySelectorAll('input[data-think]').forEach(function (input) {
             input.addEventListener('change', function () {
                 saveReturnThinking(input.getAttribute('data-think'), input.checked, input);
             });
         });
-        /* 上下文长度输入框：改动（失焦或回车）即存（PUT /admin/model-profiles/context-window）。
-           data-saved 记着服务端当前值，保存失败时用它把输入框恢复回去。 */
-        box.querySelectorAll('input[data-ctx]').forEach(function (input) {
-            input.setAttribute('data-saved', input.value || '');
-            input.addEventListener('change', function () {
-                saveContextWindow(input.getAttribute('data-ctx'), input);
-            });
-        });
-        /* 标准字段（温度 / 单次最大输出）：改动即存（PUT /admin/model-profiles/tuning）。 */
-        box.querySelectorAll('.std-tune').forEach(bindStdTune);
         /* 自定义参数文本框：改动才让「保存参数」变可点。 */
         box.querySelectorAll('.dp-params').forEach(bindParamsBox);
-        /* 向量维度绿框：改动检测 → 更新按钮 → PUT /tuning。
-           现在与对话卡片同在一张表里，绑定统一放这里（原向量段另有一份）。 */
-        box.querySelectorAll('.dp-card.model-card').forEach(bindTuneBox);
 
         pfEl('modelCount').textContent = PROFILES.length + ' 个';
     }
@@ -564,10 +538,10 @@ Console.renderSidebar('models');
     }
 
     function resetForm() {
-        ['pfBaseUrl', 'pfApiKey', 'pfModelName', 'pfPreset', 'pfTemperature', 'pfMaxTokens', 'pfParamsJson']
+        ['pfBaseUrl', 'pfApiKey', 'pfModelName', 'pfPreset', 'pfParamsJson']
             .forEach(function (id) { pfEl(id).value = ''; });
-        /* 用途回到"一个都没勾"，连带把对话调优分组收起来 */
-        setPickedEndpoints([]);
+        /* 模态回到"一个都没选"，连带把调优分组收起来 */
+        setPickedModalities([], []);
 
         var box = pfEl('profileResult');
         box.textContent = '';
@@ -576,79 +550,49 @@ Console.renderSidebar('models');
         var readBox = pfEl('readResult');
         readBox.textContent = '';
         readBox.style.color = '';
-        var suggestBox = pfEl('pfSuggestResult');
-        suggestBox.textContent = '';
-        suggestBox.style.color = '';
     }
 
 
 
-    /* ---------- 用途：用户声明的能力 ----------
-       勾选结果就是 save 请求体里的 endpoints，服务端原样采用、不自动识别。
+    /* ---------- 输入 / 输出模态：用户手选，保存原样提交 ----------
+       勾选状态只存两份（PICKED_INPUT / PICKED_OUTPUT），DOM 上的 .on 由它们渲染出来。
        chip 用 button 而不是 <label>：.field label 是 block 级样式（权重高于 .chip），
        套上去会把 chip 撑成整行；button.chip 是 CSS 里预留的结构型按钮。
-       勾选状态只存一份（PICKED_ENDPOINTS），DOM 上的 .on 由它渲染出来，
-       识别预勾与用户手点走同一个 setPickedEndpoints。 */
-    function renderEndpointChips() {
-        pfEl('pfEndpoints').innerHTML = EP_FAMILIES.map(function (f) {
+       弹窗不再有「识别用途」：添加这一步零上游请求、零 token，
+       识别统一留给建好之后卡片上的「探测」。 */
+    /* 两棵树（src 与 static HTML）可能不同步：容器 / 分组缺节点时静默跳过，
+       别让首屏渲染整段抛 TypeError —— 缺的都是可后补的结构，不是要补小字。 */
+    function renderModalityChips(containerId, mods, picked) {
+        var box = pfEl(containerId);
+        if (!box) { return; }
+        box.innerHTML = mods.map(function (m) {
             return '<button type="button" class="chip'
-                + (PICKED_ENDPOINTS.indexOf(f) >= 0 ? ' on' : '') + '"'
-                + ' data-ep="' + Console.escapeHtml(f) + '">'
-                + Console.escapeHtml(EP_LABEL[f] || f) + '</button>';
+                + (picked.indexOf(m) >= 0 ? ' on' : '') + '"'
+                + ' data-mod="' + Console.escapeHtml(m) + '">'
+                + Console.escapeHtml(MOD_LABEL[m] || m) + '</button>';
         }).join('');
     }
-    function setPickedEndpoints(list) {
-        /* 只认白名单里的族：识别结果 / 旧数据里混进来的未知键不该被提交 */
-        PICKED_ENDPOINTS = (list || []).filter(function (f) {
-            return EP_FAMILIES.indexOf(f) >= 0;
-        });
-        renderEndpointChips();
-        /* 调优字段只服务对话用途：没勾 chat 时收起来，也避免把温度发给生图档案 */
-        pfEl('pfChatTune').hidden = PICKED_ENDPOINTS.indexOf('chat') < 0;
+    function renderModalityGroups() {
+        renderModalityChips('pfInputMods', INPUT_MODS, PICKED_INPUT);
+        renderModalityChips('pfOutputMods', OUTPUT_MODS, PICKED_OUTPUT);
+        /* 参数分组只服务"产出文本"的模型：没勾文本输出时收起来，
+           向量 / 生图档案的 params 根本到不了请求体，给了框才是骗人。 */
+        var tune = pfEl('pfChatTune');
+        if (tune) { tune.hidden = PICKED_OUTPUT.indexOf('text') < 0; }
     }
-    function toggleEndpoint(f) {
-        var i = PICKED_ENDPOINTS.indexOf(f);
-        var next = PICKED_ENDPOINTS.slice();
-        if (i >= 0) { next.splice(i, 1); } else { next.push(f); }
-        setPickedEndpoints(next);
+    function setPickedModalities(input, output) {
+        /* 只认白名单：旧数据 / 手改请求体混进来的未知键不该落到 models.json */
+        PICKED_INPUT = (input || []).filter(function (m) { return INPUT_MODS.indexOf(m) >= 0; });
+        PICKED_OUTPUT = (output || []).filter(function (m) { return OUTPUT_MODS.indexOf(m) >= 0; });
+        renderModalityGroups();
     }
-
-    /* 「识别用途」：用户主动点才发请求，结果只用来预勾，不参与保存。
-       服务端先查本地适配文件（零请求），未命中才读服务商 GET /models（零 token）。
-       清单不给类型（标准 OpenAI / DeepSeek 官方都是这种形态）时如实返回空数组 + note，
-       界面把 note 原样摆出来，由用户自己勾 —— 绝不猜一个 chat 出来。 */
-    function suggestEndpoints() {
-        var modelName = pfEl('pfModelName').value.trim();
-        var out = pfEl('pfSuggestResult');
-        if (!modelName) {
-            out.textContent = '请先填写模型名';
-            out.style.color = 'var(--red)';
-            return;
-        }
-        var btn = pfEl('pfSuggestBtn');
-        btn.disabled = true;
-        btn.classList.add('btn-loading');
-        out.textContent = '识别中…';
-        out.style.color = '';
-        Console.api.post('/admin/model-profiles/suggest', {
-            baseUrl: pfEl('pfBaseUrl').value.trim() || null,
-            apiKey: pfEl('pfApiKey').value || null,
-            modelName: modelName
-        }).then(function (r) {
-            var eps = (r && r.endpoints) || [];
-            setPickedEndpoints(eps);
-            var note = Console.sanitizeError((r && r.note) || '');
-            out.textContent = eps.length
-                ? '已按识别结果预勾，可自行修改' + (note ? '（' + note + '）' : '')
-                : (note || '清单没有声明用途，请自己勾选');
-            out.style.color = '';
-        }).catch(function (e) {
-            out.textContent = '识别失败：' + Console.sanitizeError(e.message);
-            out.style.color = 'var(--red)';
-        }).then(function () {
-            btn.disabled = false;
-            btn.classList.remove('btn-loading');
-        });
+    function toggleModality(side, m) {
+        var cur = side === 'in' ? PICKED_INPUT : PICKED_OUTPUT;
+        var next = cur.slice();
+        var i = next.indexOf(m);
+        if (i >= 0) { next.splice(i, 1); } else { next.push(m); }
+        if (side === 'in') { setPickedModalities(next, PICKED_OUTPUT); }
+        else { setPickedModalities(PICKED_INPUT, next); }
     }
 
     /* ---------- 模型名下拉：从服务商拉候选（POST /admin/models） ---------- */
@@ -784,9 +728,9 @@ Console.renderSidebar('models');
         el.style.color = ok ? '' : 'var(--red)';
     }
 
-    /* 添加：用途由用户在弹窗里勾选，端点族随请求体提交，保存零上游请求。
-       档案建好之后的改动都不走这个弹窗：调优走卡片上的框与「更新」，
-       思考回写走卡片头部的开关（thinkSwitch）。 */
+    /* 添加：只由用户在弹窗里手选输入 / 输出模态，随请求体原样提交，保存零上游请求。
+       档案建好之后的改动都不走这个弹窗：实测识别走卡片上的「探测」（带二次确认，覆盖模态），
+       调优走卡片上的框与「更新」，思考回写走卡片头部的开关（thinkSwitch）。 */
     function openAdd() {
         resetForm();
         openModal('添加模型');
@@ -814,525 +758,21 @@ Console.renderSidebar('models');
         box.textContent = message || '';
     }
 
-    /* ---------- 调优框（只剩向量卡片在用） ----------
-       对话族的适配 schema 已经下架，对话卡片改成「标准字段（温度 / 单次最大输出）+ 自定义参数
-       JSON 框」；那个"边填表边问 schema"的试匹配接口（POST /admin/model-adapters/match）
-       也随对话 schema 一起删了。剩下的唯一消费者是向量卡片上那个改 dimensions 的绿框 ——
-       它是一个真正的 number 控件，比让用户手写 {"dimensions": 1024} 更不容易填错，
-       而 dimensions 又是本机索引契约、写错要重灌。
-       下面这套渲染（renderParamRow / collectTuning / tuningByKey）就为它留着。 */
-
-    /* 条件参数此刻能不能填 —— 与后端 ModelAdapterRegistry#enabled 同一套语义。
-       规则完全来自 schema 的 enabledWhen（依赖谁 / 取哪些值 / 未填怎么算），前端只做判定与
-       呈现，不复刻任何厂商规则：控件灰不灰与后端收不收，用的是同一份数据。 */
-    function tuneParamEnabled(spec, values) {
-        var w = spec.enabledWhen;
-        if (!w) { return true; }
-        var v = values ? values[w.key] : undefined;
-        if (v === undefined || v === null || v === '') {
-            v = w.missing === undefined ? undefined : w.missing;
-        }
-        if (v === undefined || v === null) { return false; }
-        var want = String(v);
-        return (w.values || []).some(function (x) { return String(x) === want; });
-    }
-
-    /* 一框里全部控件的当前值（按适配 key）。与 collectTuning 的差别：这里原样读控件，
-       空值不入 map、复选框只记勾上的，它是条件判定的输入，不是待保存的报文。 */
-    function tuneValuesNow(prefix, specs) {
-        var out = {};
-        (specs || []).forEach(function (spec, i) {
-            var el = pfEl(prefix + '-' + i);
-            if (!el) { return; }
-            if (spec.type === 'bool') {
-                if (el.checked) { out[spec.key] = true; }
-                return;
-            }
-            var v = (el.value || '').trim();
-            if (v !== '') { out[spec.key] = v; }
-        });
-        return out;
-    }
-
-    /* 依赖值一变，同框里所有条件参数的可用性跟着重算：能填的解锁，不能填的置灰并**清空**。
-       清空是刻意的，留着旧值就出现"界面上有、实际发不出去"，正是这次要消灭的误导：
-       界面上看到的，永远等于保存后会生效的。
-       判定用一份快照：条件禁止链式依赖（后端加载期就拒），所以被依赖的参数自己不可能是
-       条件参数、不会被这一轮清空，快照在整个循环里都有效。 */
-    function syncTuneEnabled(prefix, specs) {
-        var values = tuneValuesNow(prefix, specs);
-        (specs || []).forEach(function (spec, i) {
-            if (!spec.enabledWhen) { return; }
-            var el = pfEl(prefix + '-' + i);
-            if (!el) { return; }
-            var on = tuneParamEnabled(spec, values);
-            if (!on) {
-                if (spec.type === 'bool') { el.checked = false; } else { el.value = ''; }
-            }
-            el.disabled = !on;
-            /* 进度条把"启停"落在隐藏 input 上，可视分段得跟着刷，否则控件灰了、条还亮着 */
-            var bar = el.closest ? el.closest('.tune-bar') : null;
-            if (bar) { refreshBar(bar); }
-        });
-    }
-
-    /* 控件空态该显示什么：适配文件写明了 default 就显示「默认 X」，没写明才回落到「服务商默认」。
-       初始接入（模态）与卡片回填都会先把 default 当成控件当前值填进去（见 specDefaults），
-       所以这句话只在用户把值清空后才看得到；default 缺失时它是唯一的信息。 */
-    function tuneDefaultText(spec) {
-        return spec && spec.default != null ? ('默认 ' + spec.default) : '服务商默认';
-    }
-
-    /* schema 里登记的官方默认值 → 一份「key = 值」的初始值表。
-       初始接入时控件直接落在这个值上（不是只写一行空态提示），用户看一眼就知道不填会按什么走。
-       条件参数也照填：真正生效与否由 tuneParamEnabled 那道门判定，不成立时 renderParamRow 会把
-       它清空，界面上看到的仍然等于保存后会生效的。 */
-    function specDefaults(specs) {
-        var out = {};
-        (specs || []).forEach(function (spec) {
-            if (spec && spec.default != null && spec.default !== '') { out[spec.key] = spec.default; }
-        });
-        return out;
-    }
-
-    /* ---------- 分档进度条（schema 里 display:"bar" 的有序枚举） ----------
-       值依旧由**隐藏 input** 承载，id 与其它控件同构，collectTuning / tuningByKey /
-       tuneSignature / tuneValuesNow / syncTuneEnabled 全部零改动复用：进度条只是"往同一个槽里
-       写值的又一种控件"，在数据上与下拉框没有区别。于是"界面上看到的 = 保存后生效的"这条
-       不变式不必为它再证一遍。
-       为何是进度条：思考强度这类参数是**有序档位**（none→low→high→max），下拉框把顺序藏进
-       展开列表里，用户得点开才知道有几档、自己在哪一档；分段条把档位与当前位置一次摊平。 */
-    function renderBar(id, spec, value, on) {
-        var opts = spec.options || [];
-        var cur = value == null ? '' : String(value);
-        var active = -1;
-        for (var i = 0; i < opts.length; i++) {
-            if (cur !== '' && String(opts[i].value) === cur) { active = i; }
-        }
-        var segs = opts.map(function (o, i) {
-            var cls = 'tune-bar-seg';
-            if (on && i <= active) { cls += ' on'; }
-            if (on && i === active) { cls += ' active'; }
-            return '<button type="button" class="' + cls + ' btn btn-outline-primary"' + (on ? '' : ' disabled')
-                + ' data-bar-val="' + Console.escapeHtml(o.value) + '"'
-                + ' title="' + Console.escapeHtml(o.label || o.value) + '">'
-                + Console.escapeHtml(o.value) + '</button>';
-        }).join('');
-        /* 首屏就按当前值把"点亮到哪一档"写进 class，不靠 JS 补一次，否则整框刚出现时会闪一下未选中态 */
-        var capText = !on ? '' : (active >= 0 ? (opts[active].label || cur)
-                : (cur === '' ? tuneDefaultText(spec) : cur));
-        /* 默认值文本落到 data 属性上：refreshBar 只拿到 bar 元素、拿不到 spec，
-           靠它才能把"未选时显示默认 X"这条规则带到后续刷新里。 */
-        var defAttr = spec.default == null ? ''
-            : ' data-bar-def="' + Console.escapeHtml(String(spec.default)) + '"';
-        return '<div class="tune-bar"' + defAttr + '>'
-            + '<input type="hidden" id="' + id + '" value="' + Console.escapeHtml(cur) + '"'
-            + (on ? '' : ' disabled') + '>'
-            + '<div class="tune-bar-track">' + segs + '</div>'
-            + '<div class="tune-bar-cap"' + (on ? '' : ' hidden') + '>'
-            + Console.escapeHtml(capText) + '</div>'
-            + '</div>';
-    }
-
-    /* 进度条可视状态**全部**由隐藏 input 推导：哪一档被选中、它左侧档位算"已点亮"、置灰整条锁死。
-       控件不存第二份状态，避免"条上显示的和实际要发的不一致"。 */
-    function refreshBar(bar) {
-        if (!bar || !bar.querySelector) { return; }
-        var hid = bar.querySelector('input[type="hidden"]');
-        if (!hid) { return; }
-        var val = hid.value || '';
-        var off = !!hid.disabled;
-        var segs = Array.prototype.slice.call(bar.querySelectorAll('.tune-bar-seg'));
-        var active = -1;
-        for (var i = 0; i < segs.length; i++) {
-            if (val !== '' && segs[i].getAttribute('data-bar-val') === val) { active = i; }
-        }
-        for (var j = 0; j < segs.length; j++) {
-            segs[j].disabled = off;
-            if (segs[j].classList) {
-                segs[j].classList.toggle('on', !off && j <= active);
-                segs[j].classList.toggle('active', !off && j === active);
-            }
-        }
-        var cap = bar.querySelector('.tune-bar-cap');
-        if (cap) {
-            if (off) { cap.textContent = ''; cap.hidden = true; }
-            else {
-                /* 未选时的文案回到 schema 的 default（renderBar 已把它写在 data-bar-def 上） */
-                var def = bar.getAttribute ? bar.getAttribute('data-bar-def') : null;
-                cap.hidden = false;
-                cap.textContent = active >= 0 ? (segs[active].getAttribute('title') || val)
-                        : (val === '' ? (def ? '默认 ' + def : '服务商默认') : val);
-            }
-        }
-    }
-
-    /* 点一档 → 写进隐藏 input，再广播 change 让外层重算条件启停与"有没有改动"。
-       再点**同一档** = 取消 → 回到未选态（说明回落到 schema 默认），与下拉里选回空项等价；
-       否则进度条一旦选过就再也清不掉。 */
-    function barPick(bar, val) {
-        if (!bar || !bar.querySelector) { return; }
-        var hid = bar.querySelector('input[type="hidden"]');
-        if (!hid || hid.disabled) { return; }
-        hid.value = (hid.value === val) ? '' : val;
-        refreshBar(bar);
-        hid.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-
-    /* 一个调优控件。prefix + 序号拼出控件 id：向量卡片每框一个前缀（'eb<N>'），
-       于是同页多个绿框的控件 id 互不干扰（collectTuning 靠同一套 id 回读）。
-       value 非空时回填：卡片上回填档案当前值（schema 登记的默认值见 specDefaults）。
-       values 是全框当前值，只服务于条件判定（见 tuneParamEnabled）。
-       条件不成立时控件直接 disabled 并清空读数，宁可不给填，也不给"填了不生效"的错觉。
-       display:"bar" 的枚举改渲染分档进度条（见 renderBar），其余按 type 走默认控件。 */
-    function renderParamRow(prefix, spec, i, value, values) {
-        var id = prefix + '-' + i;
-        var on = tuneParamEnabled(spec, values);
-        /* 条件不成立的控件不承载任何值：界面上看到的必须等于保存后会生效的 */
-        if (!on) { value = null; }
-        var v = value == null ? '' : (Array.isArray(value) ? value.join('\n') : String(value));
-        var dis = on ? '' : ' disabled';
-        /* 空态文案：schema 写了 default 就显示「默认 X」，没写才「服务商默认」 */
-        var ph = Console.escapeHtml(tuneDefaultText(spec));
-        var control = '';
-        if (spec.type === 'bool') {
-            /* 开关样式：原生复选框在密集参数区里只有一个小方块，容易被当成可忽略的装饰。
-               真正的 input 仍留在 DOM 里（id / checked / disabled 全不变），只是视觉上藏起来，
-               回读（collectTuning / tuneValuesNow）与条件判定（syncTuneEnabled）一字未改。
-               点击热区交给外层 label：点轨道也能切换，不必瞄准那个小方块。 */
-            control = '<label class="tune-switch">'
-                + '<input type="checkbox" id="' + id + '"'
-                + ((value === true || v === 'true') ? ' checked' : '') + dis + '>'
-                + '<span class="tune-switch-track"><span class="tune-switch-knob"></span></span>'
-                + '</label>';
-        } else if (spec.type === 'enum' && spec.display === 'bar') {
-            control = renderBar(id, spec, value, on);
-        } else if (spec.type === 'enum') {
-            control = '<select class="form-select" id="' + id + '"' + dis + '><option value="">' + ph + '</option>'
-                + (spec.options || []).map(function (o) {
-                    return '<option value="' + Console.escapeHtml(o.value) + '"'
-                        + (v === o.value ? ' selected' : '') + '>'
-                        + Console.escapeHtml(o.label || o.value) + '</option>';
-                  }).join('') + '</select>';
-        } else if (spec.type === 'number' || spec.type === 'int') {
-            control = '<input type="number" class="mono form-control" id="' + id + '"'
-                + (v === '' ? '' : ' value="' + Console.escapeHtml(v) + '"')
-                + (spec.min != null ? ' min="' + spec.min + '"' : '')
-                + (spec.max != null ? ' max="' + spec.max + '"' : '')
-                + (spec.step != null ? ' step="' + spec.step + '"' : '')
-                + dis + ' placeholder="' + ph + '">';
-        } else if (spec.type === 'stringList') {
-            /* 一行一条：min / max 在这类参数上是**条数**区间，不能当 input 的数值属性使 */
-            control = '<textarea class="mono form-control" id="' + id + '" rows="2"' + dis
-                + ' placeholder="' + ph + '">' + (v === '' ? '' : Console.escapeHtml(v)) + '</textarea>';
-        } else {
-            control = '<input type="text" class="mono form-control" id="' + id + '"'
-                + (v === '' ? '' : ' value="' + Console.escapeHtml(v) + '"')
-                + dis + ' placeholder="' + ph + '">';
-        }
-        /* 中文名后挂上英文（wire = 实际发给服务商的字段名），填表时能直接对上官方文档，
-           不写"（温度）"这类括号注解：英文本身就是最好的注解。
-           分档进度条要横排 4–5 档，窄列会把档名截断，故让它独占一行（见 .tune-field-wide）。 */
-        return '<div class="field tune-field' + (spec.display === 'bar' ? ' tune-field-wide' : '') + '">'
-            + '<label>' + Console.escapeHtml(spec.label)
-            + (spec.wire ? ' <span class="tune-en">' + Console.escapeHtml(spec.wire) + '</span>' : '')
-            + '</label>'
-            + control
-            + '</div>';
-    }
-
-    /* 收集一框的调优值：std 参数（wire=temperature/max_tokens）落报文同名字段，
-       私有参数进 params。空值不收，"不发送"= 服务商默认，不注入平台自造值。
-       置灰的条件参数一律不收（它们的值在 syncTuneEnabled 里已被清空，这里再挡一道）。
-       注意"清空已有值"不靠这里表达：那要靠整份替换语义，见 saveTuning。 */
-    function collectTuning(prefix, specs) {
-        var out = { params: {}, temperature: null, maxTokens: null, dimensions: null };
-        (specs || []).forEach(function (spec, i) {
-            var el = pfEl(prefix + '-' + i);
-            if (!el || el.disabled) { return; }
-            if (spec.type === 'bool') {
-                if (el.checked) { out.params[spec.key] = true; }
-                return;
-            }
-            if (spec.type === 'stringList') {
-                var lines = (el.value || '').split('\n')
-                    .map(function (s) { return s.trim(); })
-                    .filter(function (s) { return s !== ''; });
-                if (lines.length) { out.params[spec.key] = lines; }
-                return;
-            }
-            var v = (el.value || '').trim();
-            if (v === '') { return; }
-            if (spec.type === 'number' || spec.type === 'int') {
-                var n = Number(v);
-                if (isNaN(n)) { return; }
-                if (spec.std) {
-                    if (spec.wire === 'temperature') { out.temperature = n; }
-                    else if (spec.wire === 'max_tokens') { out.maxTokens = Math.round(n); }
-                    else if (spec.wire === 'dimensions') { out.dimensions = Math.round(n); }
-                } else {
-                    out.params[spec.key] = n;
-                }
-            } else if (spec.std) {
-                /* std 的 string/enum 形态暂无适配登记，留口不实现 */
-            } else {
-                out.params[spec.key] = v;
-            }
-        });
-        return out;
-    }
-
-    /* 把收集结果按 spec.key 摊平：标准参数在服务端落的是 ModelProfile 老字段，
-       摊平后才有统一形状与「档案里的当前值」逐项对比。 */
-    function tuningByKey(prefix, specs) {
-        var t = collectTuning(prefix, specs);
-        var out = {};
-        (specs || []).forEach(function (spec) {
-            if (!spec.std) {
-                if (t.params[spec.key] != null) { out[spec.key] = t.params[spec.key]; }
-                return;
-            }
-            var v = spec.wire === 'max_tokens' ? t.maxTokens
-                  : spec.wire === 'dimensions' ? t.dimensions
-                  : t.temperature;
-            if (v != null) { out[spec.key] = v; }
-        });
-        return out;
-    }
-    /* 档案里「当前有值」的调优项（后端下发的 adapter.items）→ key 映射 */
-    function itemsByKey(items) {
-        var out = {};
-        (items || []).forEach(function (it) { out[it.key] = it.value; });
-        return out;
-    }
-    /* 「有没有改动」的判据：按 schema 规范化成字符串再比。
-       数值统一 Number 再字符串化，服务端把 1.0 序列化成 "1.0"，控件回读是 "1"，
-       直接比字符串会永远判成"改过了"，更新按钮就一直亮着。 */
-    function tuneSignature(byKey, specs) {
-        return (specs || []).map(function (spec) {
-            var v = byKey[spec.key];
-            if (v == null || v === '') { return spec.key + '='; }
-            if (spec.type === 'number' || spec.type === 'int') {
-                var n = Number(v);
-                return spec.key + '=' + (isNaN(n) ? String(v) : String(n));
-            }
-            if (spec.type === 'bool') { return spec.key + '=' + (v === true || v === 'true' ? 't' : 'f'); }
-            if (spec.type === 'stringList') {
-                /* 数组编成一条：服务端下发的是数组，前端回读的是同一批字符串 */
-                return spec.key + '=' + (Object.prototype.toString.call(v) === '[object Array]'
-                    ? v.join('\u0001') : String(v));
-            }
-            return spec.key + '=' + String(v);
-        }).join('|');
-    }
-
-    /* 卡片右侧的绿色调优框：显示当前配置的参数，可就地重新输入。
-       「更新」按钮与保存状态在卡片头部（删除左侧），初始不可点（灰），
-       任一控件与已保存值不同即变可点，见 renderProfiles 的 tuneCtl。 */
-    function adapterTuneBox(p, prefix) {
-        var ad = p.adapter;
-        var specs = ad.params || [];
-        var saved = itemsByKey(ad.items);
-        /* 框里的当前值 = 已保存值，缺的补上适配登记的官方默认值，
-           于是"没动过任何控件"时框里显示的就是这份档案实际会生效的配置 */
-        var cur = specDefaults(specs);
-        Object.keys(saved).forEach(function (k) { cur[k] = saved[k]; });
-        return '<div class="tune-box card-tune" data-tune-alias="' + Console.escapeHtml(p.alias) + '"'
-            + ' data-tune-prefix="' + Console.escapeHtml(prefix) + '">'
-            + specs.map(function (spec, i) {
-                return renderParamRow(prefix, spec, i, cur[spec.key], cur);
-              }).join('')
-            + '</div>';
-    }
-
-    /* 绑定一张卡片：基准 = 渲染时框里**实际显示**的值（已保存值 + 缺位补的官方默认值）；
-       有改动 → 按钮可点；点更新 → PUT 保存。
-       参数控件在 .tune-box 里，「更新」按钮 / 状态在卡片头部，两处同属本卡片，
-       故按卡片绑定、各自 querySelector 找件，不把查找范围锁在调优框那一棵子树上。
-       保存成功不重拉整张列表，卡片上没有别处显示调优值（只读 chip 行已撤），
-       就地更新基准即可；重拉反而会把刚写上的「已保存」提示一起冲掉。 */
-    function bindTuneBox(card) {
-        var box = card.querySelector('.tune-box[data-tune-prefix]');
-        if (!box) { return; }
-        var prefix = box.getAttribute('data-tune-prefix');
-        var alias = box.getAttribute('data-tune-alias');
-        var profile = findProfile(alias);
-        var specs = profile && profile.adapter ? (profile.adapter.params || []) : [];
-        if (!prefix || !specs.length) { return; }
-        var btn = card.querySelector('.tune-save');
-        var status = card.querySelector('.tune-status');
-        var current = function () { return tuneSignature(tuningByKey(prefix, specs), specs); };
-        var base = current();
-        var sync = function () {
-            /* 先按依赖值定各条件参数的启停（可能清空被禁的项），再判有没有改动，
-               顺序反了会把"刚刚被清掉"当成一次改动漏掉 */
-            syncTuneEnabled(prefix, specs);
-            if (btn) { btn.disabled = current() === base; }
-        };
-        ['input', 'change'].forEach(function (ev) { card.addEventListener(ev, sync); });
-        if (btn) {
-            btn.addEventListener('click', function () {
-                btn.disabled = true;
-                btn.classList.add('btn-loading');
-                if (status) { status.textContent = ''; status.className = 'tune-status'; }
-                saveTuning(alias, prefix, specs, function (ok, msg) {
-                    if (status) {
-                        status.textContent = msg;
-                        status.className = 'tune-status ' + (ok ? 'ok' : 'err');
-                    }
-                    if (ok) { base = current(); }
-                    /* 失败保持可点，让用户改完再试；成功则回到"无改动"的灰态 */
-                    btn.disabled = ok;
-                    btn.classList.remove('btn-loading');
-                });
-            });
-        }
-        sync();
-    }
-
-    /* 保存一框的调优参数。
-       只发调优各项（温度 / 单次最大输出 / 私有参数 / 向量维度）：连接信息
-       （服务商地址 / Key / 模型名）不可改，接口本身也不收这几个字段，
-       卡片上只有 Key 的脱敏值，没有重填明文的理由。
-       各项都是**整份替换**语义：清空即清除（回到服务商默认），故 null / {} 也如实发出；
-       若按"空 = 不动"处理，用户会发现温度 / 维度清不掉。 */
-    function saveTuning(alias, prefix, specs, onDone) {
-        var t = collectTuning(prefix, specs);
-        var payload = { alias: alias, params: t.params,
-                        temperature: t.temperature, maxTokens: t.maxTokens };
-        /* 维度只由向量卡片编辑：这份 schema 里有 dimensions 项时才带上（可能为 null = 清空回"按模型默认"）。
-           对话卡片的 schema 是 chat 族、没有 dimensions，那种情况回带档案既有维度，避免"改温度顺手
-           把维度抹掉"（双类型档案的对话侧就是这么被误伤的）。 */
-        var hasDim = (specs || []).some(function (s) { return s.wire === 'dimensions'; });
-        if (hasDim) {
-            payload.dimensions = t.dimensions;
-        } else {
-            var pf = findProfile(alias);
-            if (pf && pf.dimensions != null) { payload.dimensions = pf.dimensions; }
-        }
-        Console.api.put('/admin/model-profiles/tuning', payload)
-            .then(function (r) {
-                if (onDone) { onDone(true, (r && r.message) || '已保存'); }
-            })
-            .catch(function (e) { if (onDone) { onDone(false, Console.sanitizeError(e.message)); } });
-    }
-
-    /* ---------- 卡片：标准字段（温度 / 单次最大输出） ----------
-       不来自任何 schema：值落在 ModelProfile 的老字段上，注入走 builder 的 setter。
-       适配 schema 下架后这两个控件必须由前端自己画，否则对话档案一个温度都改不了 ——
-       自定义参数那条路明确拒收 temperature / max_tokens（会与 setter 发两遍）。
-       交互与上下文长度一致：改动即存，一个字段一个动作。 */
-    function stdTuneBox(p) {
-        var tmp = p.temperature == null ? '' : String(p.temperature);
-        var mtx = p.maxTokens == null ? '' : String(p.maxTokens);
-        return '<div class="std-tune" data-std-alias="' + Console.escapeHtml(p.alias) + '">'
-            + '<div class="ctx-row"><span class="k">温度</span>'
-            +   '<input type="number" class="mono model-temp form-control" min="0" max="2" step="0.1"'
-            +     ' data-saved="' + Console.escapeHtml(tmp) + '" value="' + Console.escapeHtml(tmp) + '"'
-            +     ' placeholder="服务商默认"></div>'
-            + '<div class="ctx-row"><span class="k">单次最大输出</span>'
-            +   '<input type="number" class="mono model-maxtok form-control" min="1" step="1"'
-            +     ' data-saved="' + Console.escapeHtml(mtx) + '" value="' + Console.escapeHtml(mtx) + '"'
-            +     ' placeholder="不限"><span class="ctx-unit">token</span></div>'
-            + '</div>';
-    }
-
-    function bindStdTune(boxEl) {
-        var alias = boxEl.getAttribute('data-std-alias');
-        var temp = boxEl.querySelector('.model-temp');
-        var maxTok = boxEl.querySelector('.model-maxtok');
-        if (!alias || !temp || !maxTok) { return; }
-        [temp, maxTok].forEach(function (input) {
-            input.addEventListener('change', function () { saveStdTune(alias, temp, maxTok); });
-        });
-    }
-
-    /* 保存温度 / 单次最大输出。
-       报文必须带 params 与 dimensions：/tuning 是**全量替换**，漏带就等于把自定义参数
-       与向量维度一起清空（这是最容易在改温度时顺手弄丢数据的一处）。 */
-    function saveStdTune(alias, tempInput, maxTokInput) {
-        var temperature = null;
-        var rawTemp = (tempInput.value || '').trim();
-        if (rawTemp !== '') {
-            temperature = Number(rawTemp);
-            if (!isFinite(temperature) || temperature < 0 || temperature > 2) {
-                Console.toast('温度取值 0–2；留空表示用服务商默认', { type: 'warning' });
-                tempInput.value = tempInput.getAttribute('data-saved') || '';
-                return;
-            }
-        }
-        var maxTokens = null;
-        var rawMax = (maxTokInput.value || '').trim();
-        if (rawMax !== '') {
-            maxTokens = Number(rawMax);
-            if (!isFinite(maxTokens) || Math.floor(maxTokens) !== maxTokens || maxTokens <= 0) {
-                Console.toast('单次最大输出必须是正整数；留空表示不限制', { type: 'warning' });
-                maxTokInput.value = maxTokInput.getAttribute('data-saved') || '';
-                return;
-            }
-        }
-        var p = findProfile(alias);
-        var payload = {
-            alias: alias,
-            params: (p && p.params) || {},
-            temperature: temperature,
-            maxTokens: maxTokens,
-            dimensions: p ? p.dimensions : null
-        };
-        tempInput.disabled = true;
-        maxTokInput.disabled = true;
-        Console.api.put('/admin/model-profiles/tuning', payload)
-            .then(function () {
-                if (p) { p.temperature = temperature; p.maxTokens = maxTokens; }
-                tempInput.setAttribute('data-saved', tempInput.value || '');
-                maxTokInput.setAttribute('data-saved', maxTokInput.value || '');
-            })
-            .catch(function (e) {
-                tempInput.value = tempInput.getAttribute('data-saved') || '';
-                maxTokInput.value = maxTokInput.getAttribute('data-saved') || '';
-                Console.toast('保存失败：' + Console.sanitizeError(e.message), { type: 'error' });
-            })
-            .then(function () {
-                tempInput.disabled = false;
-                maxTokInput.disabled = false;
-            });
-    }
-
     /* ---------- 卡片：自定义参数（JSON）文本框 ----------
-       对话档案一律有这一块（含命中适配的；对话族的适配 schema 已下架）。
-       字段与上限由服务端下发（customParams），前端不另存一份常量：
-       闸门改一个数，卡片上的提示必须跟着变，两处各写一份必然漂移
-       （漂移的样子是"提示说 32 个键，后端在 30 个键就拒了"）。
+       对话档案一律有这一块（参数面完全由用户自助填，没有适配层）。
+       温度、最大输出这类标准参数也在这里写，卡片上不再单独摆控件 ——
+       一个入口比"控件 + 文本框"两处更不容易出现"改了一处、生效的是另一处"。
        收 JSON 文本而不是键值行，是因为服务端接口收的就是文本 —— 一个逗号写错时
        解析错误能带上行列号，比"参数不合法"这种话有用得多。 */
     function customParamsBox(p) {
         var cp = p.customParams || {};
-        var lim = cp.limits || {};
-        var stdList = cp.stdKeys || [];
-        var hint = 'JSON 对象，键名用服务商文档里的字段名；键值原样拼进请求体。'
-            + '留空 = 一个都不发送。';
-        if (lim.maxKeys) {
-            hint += '上限 ' + lim.maxKeys + ' 个键、' + (lim.maxBytes || 0) + ' 字节。';
-        }
-        if (stdList.length) {
-            /* 标准键由服务端下发（当前三个：温度 / 单次最大输出 / 向量维度），
-                数量随闸门变，这里不写死。挑用户最可能想填的那几个显示，其余用数量收口；
-                按字母序截前几个会得到 dimensions / max_tokens / temperature —— 那是字典序，
-                不是用户关心的顺序。 */
-            var prefer = ['temperature', 'max_tokens', 'dimensions'];
-            var shownList = prefer.filter(function (k) { return stdList.indexOf(k) >= 0; });
-            if (!shownList.length) { shownList = stdList; }
-            var shown = shownList.slice(0, 4).join(' / ');
-            hint += '标准参数（' + shown + (stdList.length > shownList.slice(0, 4).length
-                ? ' 等 ' + stdList.length + ' 个' : '') + '）另有控件，别写在这里。';
-        }
         return '<div class="dp-params" data-params-alias="' + Console.escapeHtml(p.alias) + '">'
             + '<div class="dp-params-head">'
             +   '<span class="k">自定义参数</span>'
-            +   '<span class="dp-params-hint">' + Console.escapeHtml(hint) + '</span>'
+            +   '<span class="dp-params-sub">JSON · 留空即不发送</span>'
             + '</div>'
             + '<textarea class="mono form-control dp-params-json" rows="3" spellcheck="false"'
-            +   ' placeholder=\'{"enable_thinking": false}\'>'
+            +   ' placeholder=\'{"temperature": 0.7, "enable_thinking": false}\'>'
             +   Console.escapeHtml(cp.paramsJson || '')
             + '</textarea>'
             + '<div class="dp-params-foot">'
@@ -1398,44 +838,11 @@ Console.renderSidebar('models');
             .then(function () { input.disabled = false; });
     }
 
-    /* 卡片「上下文长度」输入框的保存口：只改 contextWindow 一个字段，其余（连接信息 /
-       调优值 / 端点族 / 模态）由服务端复制时原样带走（ModelProfile#withContextWindow）。
-       改动即存，与思考开关同一口径：一个字段一个动作，不为它攒一批改动。
-       留空 = 清除声明（回到"未声明"，装配预算按配置值），与调优框的全量替换语义一致。
-       前端只挡"不是正整数"这一种，那是类型问题，放任它提交会让服务端把预算算成负数。
-       "填得对不对"不在这里判：那个数只影响填它的人，不做范围校验。 */
-    function saveContextWindow(alias, input) {
-        var raw = (input.value || '').trim();
-        var prev = input.getAttribute('data-saved') || '';
-        var value = null;
-        if (raw !== '') {
-            value = Number(raw);
-            if (!isFinite(value) || value <= 0 || Math.floor(value) !== value) {
-                Console.toast('上下文长度必须是正整数（单位 token）；留空表示未声明', { type: 'warning' });
-                input.value = prev;
-                return;
-            }
-        }
-        input.disabled = true;
-        Console.api.put('/admin/model-profiles/context-window', { alias: alias, contextWindow: value })
-            .then(function () {
-                /* 就地更新本地档案：重拉整张列表会把它处的状态一起冲掉 */
-                var p = findProfile(alias);
-                if (p) { p.contextWindow = value; }
-                input.setAttribute('data-saved', value == null ? '' : String(value));
-                input.value = value == null ? '' : String(value);
-            })
-            .catch(function (e) {
-                input.value = prev;
-                Console.toast('保存失败：' + Console.sanitizeError(e.message), { type: 'error' });
-            })
-            .then(function () { input.disabled = false; });
-    }
-
     /* ---------- 保存 ----------
        只有一条保存路径：POST /admin/model-profiles（只添加新档案）。
-       endpoints 是用户在弹窗里勾的用途，原样提交；服务端纯格式校验 + 写盘，
-       零上游请求、不读清单、不测维度，模态由服务端按族补一组本地基线。
+       只提交用户手选的 input / output，不带 endpoints —— 服务端按这组模态本地反查端点族，
+       整条路径零上游请求、零 token、不读清单、不测维度。
+       一个都不选也照存（卡片标「不可用」），不会自动跑去探测。
        已存档案的改动不走这里：调优走 PUT /model-profiles/tuning，
        思考回写走 PUT /model-profiles/return-thinking。 */
     function save() {
@@ -1447,9 +854,10 @@ Console.renderSidebar('models');
         var alias = deriveAlias(modelName);
         var body = {
             alias: alias,
-            /* 用户声明的能力。空数组是允许的（未声明类型），不是错误；
-               识别结果只影响勾选，不在这里补第二份"更权威"的判定。 */
-            endpoints: PICKED_ENDPOINTS.slice(),
+            /* 手选模态原样提交；不传 endpoints，让服务端按模态反查端点族。
+               两组都空是允许的：档案落盘，卡片标「不可用」，等用户点「探测」。 */
+            input: PICKED_INPUT.slice(),
+            output: PICKED_OUTPUT.slice(),
             baseUrl: pfEl('pfBaseUrl').value.trim(),
             apiKey: pfEl('pfApiKey').value,
             modelName: modelName,
@@ -1457,32 +865,13 @@ Console.renderSidebar('models');
                （见 thinkSwitch / saveReturnThinking） */
             returnThinking: false
         };
-        /* 调优字段只在勾了 chat 时可填（分组也会跟着收起）。取消勾选后输入框里可能还留着
-           上一次的值，这里按当前勾选重新判一次，别把温度发给生图 / 向量档案。 */
-        var chatPicked = PICKED_ENDPOINTS.indexOf('chat') >= 0;
+        /* 自定义参数只在输出勾了「文本」时可填（分组也会跟着收起）：向量 / 生图 / 重排档案的
+           params 根本到不了请求体，提交上去只会在服务端被拒。 */
+        var chatPicked = PICKED_OUTPUT.indexOf('text') >= 0;
         if (chatPicked) {
-            /* 标准字段：留空 = 不发送（温度用服务商默认、单次最大输出不限制）。
-               取值范围与卡片上的控件同一口径，服务端不再按 schema 复核（对话族没有 schema 了）。 */
-            var rawTemp = (pfEl('pfTemperature').value || '').trim();
-            if (rawTemp !== '') {
-                var temp = Number(rawTemp);
-                if (!isFinite(temp) || temp < 0 || temp > 2) {
-                    showResult(false, '温度取值 0–2；留空表示用服务商默认');
-                    return;
-                }
-                body.temperature = temp;
-            }
-            var rawMax = (pfEl('pfMaxTokens').value || '').trim();
-            if (rawMax !== '') {
-                var maxTok = Number(rawMax);
-                if (!isFinite(maxTok) || Math.floor(maxTok) !== maxTok || maxTok <= 0) {
-                    showResult(false, '单次最大输出必须是正整数；留空表示不限制');
-                    return;
-                }
-                body.maxTokens = maxTok;
-            }
             /* 自定义参数：JSON 在**这里**解析，写错当场说清是哪一位，别留给服务端只回一句
-               "JSON 格式错误"。顶层必须是对象 —— 数组与标量都不是"一组参数"。 */
+               "JSON 格式错误"。顶层必须是对象 —— 数组与标量都不是"一组参数"。
+               温度 / 最大输出也走这里（卡片与弹窗上的同名控件都已删）。 */
             var rawParams = (pfEl('pfParamsJson').value || '').trim();
             if (rawParams !== '') {
                 var parsed;
@@ -1500,8 +889,7 @@ Console.renderSidebar('models');
                 body.params = parsed;
             }
         }
-        /* 向量维度不在新建时填：装配时由 LlmModelHolder 实测；要手改走卡片上的绿框。
-           input / output 也不传：声明了用途却没填模态时，服务端按族补一组本地基线。 */
+        /* 向量维度不在新建时填：一律由模型决定，装配与建索引时按实测值取。 */
         var btn = pfEl('saveProfileBtn');
         btn.disabled = true;
         btn.classList.add('btn-loading');
@@ -1519,6 +907,28 @@ Console.renderSidebar('models');
 
     /* 删除向量档案就是删档案本身（与对话档案同一条路径）；
        唯一差别是要提示「当前向量模型会被取消」，那段在下面。 */
+    /* 手动移除一个端点族（纠正误标）。
+       探测从不写「不支持」（一次 400 不能当"确定没有"），历史错标就只能由用户明说；
+       自动撤销风险太大，所以这里做成显式动作 + 二次确认。 */
+    async function dropFamily(alias, family) {
+        var label = EP_LABEL[family] || family;
+        var ok = await Console.confirm('把「' + alias + '」的「' + label + '」能力移除？\n\n'
+            + '· 只动这个能力，其它端点族与连接信息（地址 / Key / 模型名）不变\n'
+            + '· 恢复方式：重新手选模态，或再点一次「探测」\n'
+            + '· 如果这个能力正被某个域绑定，那个域会立刻变成「无可调用」',
+            { title: '移除能力', okText: '移除', danger: true });
+        if (!ok) { return; }
+        Console.api.put('/admin/model-profiles/families/remove',
+                { alias: alias, families: [family] })
+            .then(function (r) {
+                Console.toast((r && r.message) || '已移除', { type: 'success', wide: true });
+                return loadProfiles();
+            })
+            .catch(function (e) {
+                Console.toast(Console.sanitizeError(e.message), { type: 'error' });
+            });
+    }
+
     async function deleteProfile(alias) {
         /* 一张表查一次就够。合桶之前纯向量档案不在 PROFILES 里，只查 PROFILES 会让
            「它正是当前向量模型」的警告消失，用户删掉正在用的向量模型却只看到普通确认。 */
@@ -1552,21 +962,84 @@ Console.renderSidebar('models');
             .catch(function (e) { Console.toast('删除失败：' + e.message, { type: 'error' }); });
     }
 
-    /* 探测一个档案：POST /admin/model-profiles/detect，服务端用一组最小请求实测端点族与模态，
-       并集写回后返回新视图。实测失败（网络 / Key）由服务端回可读原因，这里只负责触发与刷新。
+    /* ---------- 探测结果 ----------
+       一个弹框、两个区：支持 / 不支持·未确认。
+       失败项只给「名称 · HTTP 状态码 · 短原因」——服务商回执原文、尝试次数、
+       端点族原始清单、协议长说明都不进弹框（要追细节去服务端日志）。
+       后端 note / diagnostics 原样保留给批量探测与日志，这里只收敛展示。 */
+    var PROBE_SHORT = {
+        AUTH: '鉴权失败',
+        RATE_LIMIT: '被限流',
+        UPSTREAM: '上游错误',
+        TIMEOUT: '超时',
+        NETWORK: '连不上',
+        CONFIG: '地址或模型名有误',
+        REQUEST_FORMAT: '请求格式不符',
+        RESPONSE_SHAPE: '响应格式不符',
+        PROTOCOL: '需 WebSocket',
+        UNSUPPORTED: '端点不存在',
+        NOT_EXECUTED: '未执行',
+        OK: '正常'
+    };
 
-       先二次确认：这是本页唯一会真花钱的按钮（保存零请求，「识别用途」只读清单、零 token）。
-       开销按探针逐条说清，免得用户以为"探测"是个纯本地动作。 */
+    function probeHttp(d) {
+        var c = d && d.statusCode;
+        /* -2 超时 / -1 连不上 / null 未执行都不是 HTTP 响应，只给占位，不伪造状态码 */
+        return (typeof c === 'number' && c > 0) ? 'HTTP ' + c : '—';
+    }
+
+    function probeResultHtml(r) {
+        var diags = (r && r.diagnostics) || {};
+        if (!Object.keys(diags).length) {
+            return '<div class="probe-empty">未返回探测明细</div>';
+        }
+        var ok = [], bad = [];
+        Object.keys(diags).forEach(function (k) {
+            var d = diags[k] || {};
+            var name = Console.escapeHtml(d.label || k);
+            if (d.state === 'CONFIRMED') {
+                ok.push('<span class="probe-chip">' + name + '</span>');
+                return;
+            }
+            bad.push('<div class="probe-row">'
+                + '<span class="probe-name">' + name + '</span>'
+                + '<span class="probe-code">' + probeHttp(d) + '</span>'
+                + '<span class="probe-desc">' + Console.escapeHtml(PROBE_SHORT[d.category] || '未确认') + '</span>'
+                + '</div>');
+        });
+        return '<div class="probe-result">'
+            + '<div><div class="probe-sec-head ok">支持 <span class="probe-count">' + ok.length + '</span></div>'
+            + (ok.length ? '<div class="probe-chips">' + ok.join('') + '</div>'
+                : '<div class="probe-empty">无</div>')
+            + '</div>'
+            + '<div><div class="probe-sec-head no">不支持 / 未确认 <span class="probe-count">' + bad.length + '</span></div>'
+            + (bad.length ? '<div class="probe-rows">' + bad.join('') + '</div>'
+                : '<div class="probe-empty">无</div>')
+            + '</div>'
+            + '</div>';
+    }
+
+    /* 探测一个档案：POST /admin/model-profiles/detect，服务端用一组最小请求实测端点族与模态。
+
+       两次确认都是必须的：
+       ① 费用 —— 添加和保存全程零请求，这个按钮是全页唯一会真花钱的入口（生图会真出一张图）；
+       ② 写回方式 —— 默认只补不删；想把实测当唯一真相要单独选，因为探测失败的原因太多
+          （超时、样本被拒、路由不全），拿"这次没确认到"去删能力是错的。 */
     async function probeProfile(alias, btn) {
         var ok = await Console.confirm('探测「' + alias + '」？\n\n'
-            + '会发一组最小请求实测它的端点族与模态，可能消耗少量额度：\n'
-            + '· 对话：max_tokens=1（约 1 个 token）\n'
+            + '这是本页唯一会花 token 的操作：会发一组最小请求实测它的端点族与模态。\n'
+            + '· 对话：16 个 token（请求体形态不被接受时自动换一种再试）\n'
             + '· 向量 / 重排：提交一条短文本\n'
             + '· 语音识别 / 语音合成：按极短音频计费\n'
             + '· 生图：若该服务商有生图端点，会真实生成一张默认尺寸的图\n\n'
-            + '实测确认到的会并回档案（只增不减）。继续？',
+            + '整次一条都没探测到（网络问题等）则保留原设置。继续？',
             { title: '探测模型端点与模态', okText: '开始探测', danger: false });
         if (!ok) { return; }
+
+        var override = await Console.confirm('这次实测结果怎么用？\n\n'
+            + '· 「只补不删」：把确认到的能力并进档案，没确认到的旧声明保持不动\n'
+            + '· 「覆盖写回」：以实测为准，没确认到的端点族与模态会被清掉',
+            { title: '写回方式', okText: '覆盖写回', cancelText: '只补不删', danger: false });
 
         if (btn) {
             btn.disabled = true;
@@ -1575,23 +1048,19 @@ Console.renderSidebar('models');
             btn.textContent = '探测中…';
         }
         /* P2：A 类，POST 无 body */
-        Console.api.post('/admin/model-profiles/detect?alias=' + encodeURIComponent(alias), null)
+        Console.api.post('/admin/model-profiles/detect?alias=' + encodeURIComponent(alias)
+                + '&mode=' + (override ? 'override' : 'confirmed'), null)
             .then(function (r) {
                 return loadProfiles().then(function () {
-                    /* 服务端的 note 现在就是结论清单（支持 / 不支持 / 未确认三行），
-                       原样显示即可 —— 早先那句「探测完成，但有些项没能确认」的前缀
-                       与清单里的「未确认」重复，去掉；有缺口时靠类型（黄/绿）区分。 */
-                    if (r && r.note) {
-                        /* perModality 是逐探针的三态结论：有非 CONFIRMED 的就算有缺口 */
-                        var gap = !!(r.perModality && Object.keys(r.perModality).some(function (k) {
-                            return r.perModality[k] !== 'CONFIRMED';
-                        }));
-                        Console.toast(r.note, {
-                            type: gap ? 'warning' : 'success',
-                            title: '探测完成',
-                            wide: true
-                        });
-                    }
+                    /* 只弹一个框：两区（支持 / 不支持·未确认）+ 失败项的状态码与短原因。
+                       写回方式放标题，不再叠一条长 toast；诊断回执原文一律不进弹框。 */
+                    Console.confirm(probeResultHtml(r), {
+                        title: '探测结果 · ' + (r && r.writeMode === 'override' ? '已覆盖写回' : '只补不删'),
+                        okText: '知道了',
+                        hideCancel: true,
+                        html: true,
+                        danger: false
+                    });
                 });
             })
             .catch(function (e) {
@@ -1756,16 +1225,6 @@ Console.renderSidebar('models');
         if (btn) { deleteConnection(btn.getAttribute('data-cn-del')); }
     });
 
-    /* 分档进度条的点击：委托到 document 一次覆盖全部。
-       现在只剩向量卡片的「向量维度」用得上这套渲染，但委托写法照样成立，
-       且 loadProfiles 每次重画的是 innerHTML，逐框绑定会随重画失效。 */
-    document.addEventListener('click', function (e) {
-        var seg = e.target && e.target.closest ? e.target.closest('.tune-bar-seg') : null;
-        if (!seg) { return; }
-        var bar = seg.closest('.tune-bar');
-        if (bar) { barPick(bar, seg.getAttribute('data-bar-val')); }
-    });
-
     /* 向量槽下拉：选中即切换（含「未启用」= 取消配置）。
        失败 / 二次确认被撤销时由 applyEmbedding 重拉列表复位下拉。 */
     pfEl('embeddingSlot').addEventListener('change', function () {
@@ -1773,14 +1232,20 @@ Console.renderSidebar('models');
         applyEmbedding(v || null);
     });
 
-    /* 用途 chips 用委托：renderEndpointChips 每次重画 innerHTML，逐颗绑定会随重画失效 */
-    pfEl('pfEndpoints').addEventListener('click', function (e) {
-        var chip = e.target && e.target.closest ? e.target.closest('[data-ep]') : null;
-        if (chip) { toggleEndpoint(chip.getAttribute('data-ep')); }
+    /* 模态 chips 用委托：renderModalityGroups 每次重画 innerHTML，逐颗绑定会随重画失效。
+       两个容器各管一组，点到的 chip 只改自己那一侧。 */
+    ['pfInputMods', 'pfOutputMods'].forEach(function (id) {
+        var box = pfEl(id);
+        if (!box) { return; }
+        box.addEventListener('click', function (e) {
+            var chip = e.target && e.target.closest ? e.target.closest('[data-mod]') : null;
+            if (chip) {
+                toggleModality(id === 'pfInputMods' ? 'in' : 'out', chip.getAttribute('data-mod'));
+            }
+        });
     });
-    pfEl('pfSuggestBtn').addEventListener('click', suggestEndpoints);
-    /* 首屏先把用途 chips 与对话调优分组的初始状态画出来（弹窗还没打开也要是确定的） */
-    setPickedEndpoints([]);
+    /* 首屏先把两组模态 chips 与调优分组的初始状态画出来（弹窗还没打开也要是确定的） */
+    setPickedModalities([], []);
 
     pfEl('addModelBtn').addEventListener('click', openAdd);
     pfEl('saveProfileBtn').addEventListener('click', save);

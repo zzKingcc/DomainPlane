@@ -193,7 +193,6 @@ public class AdminController {
         body.put("embeddingApiKeyMasked", current.getMaskedEmbeddingApiKey());
         body.put("embeddingModelName", embProfile != null
                 ? embProfile.modelName() : current.getEmbeddingModelName());
-        body.put("embeddingDimensions", current.getEmbeddingDimensions());
         body.put("embeddingCapabilities", current.getEmbeddingCapabilities());
         body.put("chatConfigured", modelHolder.isConfigured() || modelProfileRegistry.hasChatModel());
         body.put("embeddingConfigured", modelHolder.isEmbeddingConfigured());
@@ -221,13 +220,6 @@ public class AdminController {
         fillBlankKeysFromCurrent(settings);
 
         DimCheck dim = checkEmbeddingDimension(settings);
-        if (dim.verdict() == DimVerdict.DECLARED_MISMATCH) {
-            // 声明了一个模型不支持的维度：保存下去必然灌库失败，直接拒绝（不受重建开关影响）
-            Map<String, Object> fail = failBody(dim.message());
-            fail.put("declaredDimension", dim.declaredDims());
-            fail.put("newDimension", dim.newDims());
-            return status(HttpStatus.BAD_REQUEST, fail);
-        }
         if (dim.verdict() == DimVerdict.NEEDS_REBUILD && !rebuildIndex) {
             // 维度变了但用户还没确认重建 → 本次保存不生效，配置保持原样
             Map<String, Object> fail = failBody(dim.message());
@@ -309,7 +301,6 @@ public class AdminController {
                 next.setEmbeddingBaseUrl(current.getEmbeddingBaseUrl());
                 next.setEmbeddingApiKey(current.getEmbeddingApiKey());
                 next.setEmbeddingModelName(current.getEmbeddingModelName());
-                next.setEmbeddingDimensions(current.getEmbeddingDimensions());
                 next.setEmbeddingCapabilities(current.getEmbeddingCapabilities());
             }
         }
@@ -367,8 +358,6 @@ public class AdminController {
         OK,
         /** 维度与现有索引不符，必须重建索引后才能保存 */
         NEEDS_REBUILD,
-        /** 声明的维度与实测不符（该模型不支持这个维度） */
-        DECLARED_MISMATCH,
         /** 连不上/填不全，无法实测；放行保存并提示 */
         UNKNOWN
     }
@@ -377,11 +366,9 @@ public class AdminController {
      * @param verdict    结论
      * @param indexDims  现有索引维度（无索引为 null）
      * @param newDims    实测的新维度（未实测为 null）
-     * @param declaredDims 用户声明的维度（未声明为 null）
      * @param message    给用户看的说明（OK/UNKNOWN 时为附加提示，可为 null）
      */
-    private record DimCheck(DimVerdict verdict, Integer indexDims, Integer newDims,
-                            Integer declaredDims, String message) {
+    private record DimCheck(DimVerdict verdict, Integer indexDims, Integer newDims, String message) {
         /** 附加到成功消息后的短提示 */
         String note() {
             return verdict == DimVerdict.UNKNOWN ? message : null;
@@ -394,7 +381,7 @@ public class AdminController {
     private DimCheck checkEmbeddingDimension(LlmSettings incoming) {
         Integer indexDims = null;
         if (!embeddingChanged(incoming, modelHolder.currentSettings())) {
-            return new DimCheck(DimVerdict.OK, null, null, null, null);
+            return new DimCheck(DimVerdict.OK, null, null, null);
         }
         // 读不到索引维度（ES 未配置/不可达/索引不存在）不阻断保存：退化为不做预检。
         // 否则用户会被卡在"必须先配好 ES 才能改模型"的死循环里，无法自救。
@@ -412,25 +399,18 @@ public class AdminController {
             // 未填全 / Key 无效 / 网络不通时仍须放行保存：否则用户连改 Key 自救都做不到。
             String reason = LlmFailureDescriber.describe(e);
             log.warn("[管控] 保存前无法实测向量维度，跳过预检并放行: {}", reason);
-            return new DimCheck(DimVerdict.UNKNOWN, indexDims, null, null,
+            return new DimCheck(DimVerdict.UNKNOWN, indexDims, null,
                     "未能实测向量维度（" + reason + "），已按原样保存；若索引维度与模型不符，灌库前请先重建索引");
         }
 
         int newDims = probe.actualDimension();
-        if (probe.mismatched()) {
-            return new DimCheck(DimVerdict.DECLARED_MISMATCH, indexDims, newDims, probe.declaredDimension(),
-                    "向量维度与模型不符：声明 " + probe.declaredDimension() + " 维，该模型实际返回 " + newDims
-                            + " 维。维度只用于本机建索引、不会作为请求参数下发（各家服务商对自定义维度的"
-                            + "支持也不一致），所以声明值不会被兑现，按它建索引会让灌库被存储拒绝。"
-                            + "请把维度改填该模型的原生维度 " + newDims + "。");
-        }
         if (indexDims == null) {
-            return new DimCheck(DimVerdict.OK, null, newDims, probe.declaredDimension(), null);
+            return new DimCheck(DimVerdict.OK, null, newDims, null);
         }
         if (indexDims == newDims) {
-            return new DimCheck(DimVerdict.OK, indexDims, newDims, probe.declaredDimension(), null);
+            return new DimCheck(DimVerdict.OK, indexDims, newDims, null);
         }
-        return new DimCheck(DimVerdict.NEEDS_REBUILD, indexDims, newDims, probe.declaredDimension(),
+        return new DimCheck(DimVerdict.NEEDS_REBUILD, indexDims, newDims,
                 "向量维度将由 " + indexDims + " 变为 " + newDims + "，与已建好的知识库索引不一致。"
                         + "ES 索引的向量维度是 mapping 参数，建好后无法修改，必须先重建索引；"
                         + "否则写入会被 ES 以维度不符拒绝，检索同样报错，且不会自愈。");
@@ -445,8 +425,7 @@ public class AdminController {
         }
         return !Objects.equals(in.getEmbeddingBaseUrl(), cur.getEmbeddingBaseUrl())
                 || !Objects.equals(in.getEmbeddingApiKey(), cur.getEmbeddingApiKey())
-                || !Objects.equals(in.getEmbeddingModelName(), cur.getEmbeddingModelName())
-                || !Objects.equals(in.getEmbeddingDimensions(), cur.getEmbeddingDimensions());
+                || !Objects.equals(in.getEmbeddingModelName(), cur.getEmbeddingModelName());
     }
 
     /**
@@ -486,34 +465,20 @@ public class AdminController {
     }
 
     /**
-     * 向量测试的完整裁决：连通性 + 维度契约 + 索引一致性
+     * 向量测试的完整裁决：连通性 + 实测维度 + 索引一致性
      *
-     * @return 对应的 HTTP 状态：维度声明与模型不符属入参问题（400），其余按成功处理
+     * @return 恒为成功状态：维度由模型决定，没有"声明值与模型不符"这种入参问题
      */
     private HttpStatus testEmbedding(LlmSettings candidate, Map<String, Object> result) {
         LlmModelHolder.EmbeddingProbe probe = modelHolder.testEmbeddingConnection(candidate);
         int actual = probe.actualDimension();
-        Integer declared = probe.declaredDimension();
         Integer indexDims = knowledgeBaseService.currentVectorDims();
 
         result.put("type", "embedding");
         result.put("dimension", actual);
-        result.put("declaredDimension", declared);
         result.put("indexDimension", indexDims);
 
-        if (probe.mismatched()) {
-            String detail = "该模型的原生维度是 " + actual + " 维，与声明的 " + declared + " 维不符";
-            log.warn("[管控] 向量维度校验未通过：{}", detail);
-            result.put("success", false);
-            result.put("message", "已连通，但" + detail + "。维度只用于本机建索引、不随请求下发，"
-                    + "所以请把「向量维度」填成 " + actual + "（模型原生维度）。");
-            result.put("error", detail);
-            return HttpStatus.BAD_REQUEST;
-        }
-
-        String dimNote = declared != null
-                ? "维度 " + actual + " 维已确认（与声明一致）"
-                : "该模型默认维度 " + actual + " 维（未指定维度，ES 索引将按实测值创建）";
+        String dimNote = "该模型原生维度 " + actual + " 维（ES 索引按实测值创建）";
         String idxNote;
         if (indexDims == null) {
             idxNote = "；当前尚无知识库索引，下次启动或手动重建时按该维度创建";

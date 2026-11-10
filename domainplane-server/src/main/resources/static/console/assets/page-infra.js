@@ -20,7 +20,7 @@
     });
   };
 
-  // src/pages/infra.js
+  // domainplane-server/frontend/src/pages/infra.js
   (function() {
     var REDIS_FIELDS = [
       ["redisHost", "host", "s"],

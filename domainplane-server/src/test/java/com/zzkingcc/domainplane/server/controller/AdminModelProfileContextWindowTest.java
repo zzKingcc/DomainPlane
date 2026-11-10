@@ -3,7 +3,6 @@ package com.zzkingcc.domainplane.server.controller;
 import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.common.exception.BaseException;
 import com.zzkingcc.domainplane.server.env.StorageLocations;
-import com.zzkingcc.domainplane.server.model.ModelAdapterRegistry;
 import com.zzkingcc.domainplane.server.model.ModelCapabilityProbe;
 import com.zzkingcc.domainplane.server.model.ModelProfile;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
@@ -12,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
-import org.springframework.core.io.DefaultResourceLoader;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -27,8 +25,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * 口径（与前端卡片上那个输入框一一对应）：
  *   • 只动 contextWindow 一个字段，其余（连接信息 / 调优值 / 端点族 / 模态 / 降级链）原样带走；
  *   • 不要求重填 API Key；
- *   • <b>不要求命中适配</b>：这是它与 PUT /model-profiles/tuning 的分界线：
- *     标准 OpenAI / DeepSeek 这类最常见的档案不命中适配，从那条路根本改不到；
+ *   • <b>不要求任何额外登记</b>：这是它与 PUT /model-profiles/tuning 的分界线：
+ *     标准 OpenAI / DeepSeek 这类最常见的档案不该为了改一个数字重传整份调优表单；
  *   • 除"正整数"外不做取值校验：不做范围校验是刻意的（填得对不对是用户的事），
  *     但非正数要拦：那是类型问题，流进装配预算会把预算算成负数；
  *   • 传 null = 清除声明（回到"未声明"，装配预算按配置值）。
@@ -56,11 +54,10 @@ class AdminModelProfileContextWindowTest {
         ModelProfileRegistry registry = new ModelProfileRegistry(store);
         lastRegistry = registry;
         return new AdminModelProfileController(registry, store,
-                null, null, new ModelAdapterRegistry(new DefaultResourceLoader()),
-                new ModelCapabilityProbe(), null, null);
+                null, null, new ModelCapabilityProbe(), null, null);
     }
 
-    /** 先建一份对话档案（端点族显式声明，绕过元数据读取；未命中适配，params 为空） */
+    /** 先建一份对话档案（端点族显式声明，绕过元数据读取；params 为空） */
     private void seed(AdminModelProfileController c) {
         AdminModelProfileController.ProfileBody b = new AdminModelProfileController.ProfileBody();
         b.setAlias("p");
@@ -104,15 +101,15 @@ class AdminModelProfileContextWindowTest {
     }
 
     @Test
-    void 不要求命中适配() {
-        /* 本用例的档案刻意未命中任何适配文件（some-model @ api.example.com）：
-           若本接口照搬 tuning 的 byModelName() 门禁，这里就会抛"不支持参数调优" */
+    void 不要求任何额外登记() {
+        /* 本用例用的是最普通的一份档案（some-model @ api.example.com）：
+           若本接口照搬 tuning 的可注入门禁，这里就会被挡住 */
         AdminModelProfileController c = controller();
         seed(c);
 
         c.updateContextWindow(body("p", 8_192));
         assertEquals(8_192, lastRegistry.profile("p").orElseThrow(AssertionError::new).contextWindow(),
-                "上下文长度对任何可用档案都应可改，不设适配门禁");
+                "上下文长度对任何可用档案都应可改，不设额外门禁");
     }
 
     @Test

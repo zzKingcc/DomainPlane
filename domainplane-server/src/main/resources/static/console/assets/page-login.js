@@ -1,5 +1,5 @@
 (() => {
-  // src/pages/login.js
+  // domainplane-server/frontend/src/pages/login.js
   (function() {
     var mode = "login";
     var resultEl = document.getElementById("result");

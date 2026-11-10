@@ -20,14 +20,16 @@
     });
   };
 
-  // src/pages/models.js
+  // domainplane-server/frontend/src/pages/models.js
   (function() {
     Console.renderSidebar("models");
     var PROFILES = [];
     var EMBEDDING = { alias: null };
     var SETTINGS = null;
-    var PICKED_ENDPOINTS = [];
-    var EP_FAMILIES = ["chat", "embedding", "rerank", "images", "tts", "asr", "video"];
+    var PICKED_INPUT = [];
+    var PICKED_OUTPUT = [];
+    var INPUT_MODS = ["text", "image", "audio", "video", "file"];
+    var OUTPUT_MODS = ["text", "image", "audio", "video", "file", "embedding", "score"];
     var EP_LABEL = {
       chat: "\u5BF9\u8BDD",
       embedding: "\u5411\u91CF",
@@ -98,7 +100,9 @@
       }).join("");
     }
     function cardTags(p) {
-      return tagList(p.endpoints, EP_LABEL);
+      return (p.endpoints || []).map(function(k) {
+        return '<button type="button" class="tag public tag-drop" title="\u79FB\u9664\u300C' + Console.escapeHtml(EP_LABEL[k] || k) + '\u300D\u8FD9\u4E2A\u80FD\u529B" data-drop-family="' + Console.escapeHtml(k) + '" data-drop-alias="' + Console.escapeHtml(p.alias) + '">' + Console.escapeHtml(EP_LABEL[k] || k) + '<span class="tag-x">\xD7</span></button>';
+      }).join("");
     }
     function aliasBase(modelName) {
       return (modelName || "").trim().replace(/\s+/g, "-") || "model";
@@ -149,20 +153,12 @@
     function thinkSwitch(p) {
       return '<label class="think-switch"><span class="tune-switch"><input type="checkbox" data-think="' + Console.escapeHtml(p.alias) + '"' + (p.returnThinking === true ? " checked" : "") + '><span class="tune-switch-track"><span class="tune-switch-knob"></span></span></span><span class="think-switch-label">\u662F\u5426\u56DE\u5199\u601D\u8003\u5185\u5BB9</span></label>';
     }
-    function ctxCell(p) {
-      var v = p.contextWindow == null ? "" : String(p.contextWindow);
-      return '<input type="number" class="mono model-ctx form-control" data-ctx="' + Console.escapeHtml(p.alias) + '" min="1" step="1" value="' + Console.escapeHtml(v) + '" placeholder="\u672A\u58F0\u660E"><span class="ctx-unit">token</span>';
-    }
-    function modelCard(p, prefix) {
+    function modelCard(p) {
       var active = p.alias === EMBEDDING.alias;
       var chat = isChatProfile(p);
       var isEmb = isEmbeddingProfile(p);
       var tuneable = !!(p.customParams && p.customParams.applies);
       var enableBtn = isEmb && !active ? '<button class="btn btn-sm btn-outline-primary" data-enable="' + Console.escapeHtml(p.alias) + '"' + (p.usable ? "" : " disabled") + ">\u542F\u7528</button>" : "";
-      var adapterBadge = p.adapter ? '<span class="mbadge">\u5DF2\u9002\u914D</span>' : "";
-      var hasTune = !!(p.adapter && (p.adapter.params || []).length);
-      var tuneBox = hasTune ? adapterTuneBox(p, prefix) : "";
-      var tuneCtl = hasTune ? '<span class="tune-status"></span><button type="button" class="btn btn-sm btn-outline-primary tune-save" disabled>\u66F4\u65B0</button>' : "";
       var noType = !(p.endpoints || []).length ? '<span class="mbadge off">\u672A\u58F0\u660E\u7C7B\u578B</span>' : "";
       var used;
       if ((p.usedByDomains || []).length) {
@@ -175,9 +171,8 @@
         used = '<span class="perm-none">\u4E0D\u53C2\u4E0E\u57DF\u7ED1\u5B9A</span>';
       }
       var thinkCtl = chat ? thinkSwitch(p) : "";
-      var stdTune = tuneable ? stdTuneBox(p) : "";
       var paramsBox = tuneable ? customParamsBox(p) : "";
-      return '<section class="dp-card model-card' + (isEmb ? " emb" : "") + '"><header class="card-head"><span class="model-dot"></span><h2>' + modelTitle(p.modelName || p.alias) + "</h2>" + dupBadge(p) + noType + visionBadge(p) + cardTags(p) + (active ? '<span class="mbadge ok">\u5DF2\u542F\u7528</span>' : "") + (p.usable ? "" : '<span class="mbadge off">\u4E0D\u53EF\u7528</span>') + adapterBadge + '<span class="spacer"></span>' + thinkCtl + tuneCtl + enableBtn + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">\u63A2\u6D4B</button><button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">\u5220\u9664</button></header><div class="dp-card-body"><div class="model-meta"><div><span class="k">\u8F93\u5165\u6A21\u6001</span>' + modalityCell(p, p.input) + '</div><div><span class="k">\u8F93\u51FA\u6A21\u6001</span>' + modalityCell(p, p.output) + "</div>" + (isEmb ? kv("\u5411\u91CF\u7EF4\u5EA6", p.dimensions == null ? '<span class="perm-none">\u6309\u6A21\u578B\u9ED8\u8BA4</span>' : p.dimensions + "") : "") + kv("\u670D\u52A1\u5546\u5730\u5740", '<span class="mono">' + Console.escapeHtml(p.baseUrl || "-") + "</span>") + (p.apiKeyMasked ? kv("API Key", '<span class="mono">' + Console.escapeHtml(p.apiKeyMasked) + "</span>") : "") + '<div><span class="k">\u88AB\u54EA\u4E9B\u57DF\u4F7F\u7528</span>' + used + "</div>" + (chat ? '<div class="ctx-row"><span class="k">\u4E0A\u4E0B\u6587\u957F\u5EA6</span>' + ctxCell(p) + "</div>" : "") + "</div>" + tuneBox + stdTune + paramsBox + "</div></section>";
+      return '<section class="dp-card model-card' + (isEmb ? " emb" : "") + '"><header class="card-head"><span class="model-dot"></span><h2>' + modelTitle(p.modelName || p.alias) + "</h2>" + dupBadge(p) + noType + visionBadge(p) + cardTags(p) + (active ? '<span class="mbadge ok">\u5DF2\u542F\u7528</span>' : "") + (p.usable && p.declared !== false ? "" : '<span class="mbadge off">\u4E0D\u53EF\u7528</span>') + '<span class="spacer"></span>' + thinkCtl + enableBtn + '<button class="btn btn-sm btn-outline-secondary" data-probe="' + Console.escapeHtml(p.alias) + '">\u63A2\u6D4B</button><button class="btn btn-sm btn-outline-danger" data-del="' + Console.escapeHtml(p.alias) + '">\u5220\u9664</button></header><div class="dp-card-body"><div class="model-meta"><div><span class="k">\u8F93\u5165\u6A21\u6001</span>' + modalityCell(p, p.input) + '</div><div><span class="k">\u8F93\u51FA\u6A21\u6001</span>' + modalityCell(p, p.output) + "</div>" + kv("\u670D\u52A1\u5546\u5730\u5740", '<span class="mono">' + Console.escapeHtml(p.baseUrl || "-") + "</span>") + (p.apiKeyMasked ? kv("API Key", '<span class="mono">' + Console.escapeHtml(p.apiKeyMasked) + "</span>") : "") + '<div><span class="k">\u88AB\u54EA\u4E9B\u57DF\u4F7F\u7528</span>' + used + "</div></div>" + paramsBox + "</div></section>";
     }
     function renderSlots() {
       var sel = pfEl("embeddingSlot");
@@ -248,9 +243,8 @@
       if (!PROFILES.length) {
         box.innerHTML = '<div class="empty-box"><div class="empty-title">\u8FD8\u6CA1\u6709\u914D\u7F6E\u4EFB\u4F55\u6A21\u578B</div><div class="empty-sub">\u70B9\u53F3\u4E0A\u89D2\u300C\u6DFB\u52A0\u6A21\u578B\u300D\u767B\u8BB0\u4E00\u4E2A\u8FDE\u63A5\u5E76\u52FE\u9009\u7528\u9014\uFF1B\u5BF9\u8BDD\u6A21\u578B\u8981\u7ED1\u5230\u57DF\u624D\u80FD\u88AB\u8C03\u7528\uFF08\u5728\u300C\u57DF\u7A7A\u95F4\u300D\u9875\u64CD\u4F5C\uFF09\u3002</div></div>';
       } else {
-        var tuneSeq = 0;
         box.innerHTML = PROFILES.map(function(p) {
-          return modelCard(p, "tb" + tuneSeq++);
+          return modelCard(p);
         }).join("");
       }
       box.querySelectorAll("button[data-del]").forEach(function(b) {
@@ -268,20 +262,17 @@
           probeProfile(b.getAttribute("data-probe"), b);
         });
       });
+      box.querySelectorAll("button[data-drop-family]").forEach(function(b) {
+        b.addEventListener("click", function() {
+          dropFamily(b.getAttribute("data-drop-alias"), b.getAttribute("data-drop-family"));
+        });
+      });
       box.querySelectorAll("input[data-think]").forEach(function(input) {
         input.addEventListener("change", function() {
           saveReturnThinking(input.getAttribute("data-think"), input.checked, input);
         });
       });
-      box.querySelectorAll("input[data-ctx]").forEach(function(input) {
-        input.setAttribute("data-saved", input.value || "");
-        input.addEventListener("change", function() {
-          saveContextWindow(input.getAttribute("data-ctx"), input);
-        });
-      });
-      box.querySelectorAll(".std-tune").forEach(bindStdTune);
       box.querySelectorAll(".dp-params").forEach(bindParamsBox);
-      box.querySelectorAll(".dp-card.model-card").forEach(bindTuneBox);
       pfEl("modelCount").textContent = PROFILES.length + " \u4E2A";
     }
     function openModal(title) {
@@ -405,10 +396,10 @@
       readSay(true, msg);
     }
     function resetForm() {
-      ["pfBaseUrl", "pfApiKey", "pfModelName", "pfPreset", "pfTemperature", "pfMaxTokens", "pfParamsJson"].forEach(function(id) {
+      ["pfBaseUrl", "pfApiKey", "pfModelName", "pfPreset", "pfParamsJson"].forEach(function(id) {
         pfEl(id).value = "";
       });
-      setPickedEndpoints([]);
+      setPickedModalities([], []);
       var box = pfEl("profileResult");
       box.textContent = "";
       box.className = "result";
@@ -416,62 +407,47 @@
       var readBox = pfEl("readResult");
       readBox.textContent = "";
       readBox.style.color = "";
-      var suggestBox = pfEl("pfSuggestResult");
-      suggestBox.textContent = "";
-      suggestBox.style.color = "";
     }
-    function renderEndpointChips() {
-      pfEl("pfEndpoints").innerHTML = EP_FAMILIES.map(function(f) {
-        return '<button type="button" class="chip' + (PICKED_ENDPOINTS.indexOf(f) >= 0 ? " on" : "") + '" data-ep="' + Console.escapeHtml(f) + '">' + Console.escapeHtml(EP_LABEL[f] || f) + "</button>";
+    function renderModalityChips(containerId, mods, picked) {
+      var box = pfEl(containerId);
+      if (!box) {
+        return;
+      }
+      box.innerHTML = mods.map(function(m) {
+        return '<button type="button" class="chip' + (picked.indexOf(m) >= 0 ? " on" : "") + '" data-mod="' + Console.escapeHtml(m) + '">' + Console.escapeHtml(MOD_LABEL[m] || m) + "</button>";
       }).join("");
     }
-    function setPickedEndpoints(list) {
-      PICKED_ENDPOINTS = (list || []).filter(function(f) {
-        return EP_FAMILIES.indexOf(f) >= 0;
-      });
-      renderEndpointChips();
-      pfEl("pfChatTune").hidden = PICKED_ENDPOINTS.indexOf("chat") < 0;
+    function renderModalityGroups() {
+      renderModalityChips("pfInputMods", INPUT_MODS, PICKED_INPUT);
+      renderModalityChips("pfOutputMods", OUTPUT_MODS, PICKED_OUTPUT);
+      var tune = pfEl("pfChatTune");
+      if (tune) {
+        tune.hidden = PICKED_OUTPUT.indexOf("text") < 0;
+      }
     }
-    function toggleEndpoint(f) {
-      var i = PICKED_ENDPOINTS.indexOf(f);
-      var next = PICKED_ENDPOINTS.slice();
+    function setPickedModalities(input, output) {
+      PICKED_INPUT = (input || []).filter(function(m) {
+        return INPUT_MODS.indexOf(m) >= 0;
+      });
+      PICKED_OUTPUT = (output || []).filter(function(m) {
+        return OUTPUT_MODS.indexOf(m) >= 0;
+      });
+      renderModalityGroups();
+    }
+    function toggleModality(side, m) {
+      var cur = side === "in" ? PICKED_INPUT : PICKED_OUTPUT;
+      var next = cur.slice();
+      var i = next.indexOf(m);
       if (i >= 0) {
         next.splice(i, 1);
       } else {
-        next.push(f);
+        next.push(m);
       }
-      setPickedEndpoints(next);
-    }
-    function suggestEndpoints() {
-      var modelName = pfEl("pfModelName").value.trim();
-      var out = pfEl("pfSuggestResult");
-      if (!modelName) {
-        out.textContent = "\u8BF7\u5148\u586B\u5199\u6A21\u578B\u540D";
-        out.style.color = "var(--red)";
-        return;
+      if (side === "in") {
+        setPickedModalities(next, PICKED_OUTPUT);
+      } else {
+        setPickedModalities(PICKED_INPUT, next);
       }
-      var btn = pfEl("pfSuggestBtn");
-      btn.disabled = true;
-      btn.classList.add("btn-loading");
-      out.textContent = "\u8BC6\u522B\u4E2D\u2026";
-      out.style.color = "";
-      Console.api.post("/admin/model-profiles/suggest", {
-        baseUrl: pfEl("pfBaseUrl").value.trim() || null,
-        apiKey: pfEl("pfApiKey").value || null,
-        modelName
-      }).then(function(r) {
-        var eps = r && r.endpoints || [];
-        setPickedEndpoints(eps);
-        var note = Console.sanitizeError(r && r.note || "");
-        out.textContent = eps.length ? "\u5DF2\u6309\u8BC6\u522B\u7ED3\u679C\u9884\u52FE\uFF0C\u53EF\u81EA\u884C\u4FEE\u6539" + (note ? "\uFF08" + note + "\uFF09" : "") : note || "\u6E05\u5355\u6CA1\u6709\u58F0\u660E\u7528\u9014\uFF0C\u8BF7\u81EA\u5DF1\u52FE\u9009";
-        out.style.color = "";
-      }).catch(function(e) {
-        out.textContent = "\u8BC6\u522B\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message);
-        out.style.color = "var(--red)";
-      }).then(function() {
-        btn.disabled = false;
-        btn.classList.remove("btn-loading");
-      });
     }
     var combo = { items: [], visible: [], loading: false, active: -1 };
     function comboMenu() {
@@ -621,448 +597,9 @@
       box.className = message ? "result show " + (ok ? "ok" : "err") : "result";
       box.textContent = message || "";
     }
-    function tuneParamEnabled(spec, values) {
-      var w = spec.enabledWhen;
-      if (!w) {
-        return true;
-      }
-      var v = values ? values[w.key] : void 0;
-      if (v === void 0 || v === null || v === "") {
-        v = w.missing === void 0 ? void 0 : w.missing;
-      }
-      if (v === void 0 || v === null) {
-        return false;
-      }
-      var want = String(v);
-      return (w.values || []).some(function(x) {
-        return String(x) === want;
-      });
-    }
-    function tuneValuesNow(prefix, specs) {
-      var out = {};
-      (specs || []).forEach(function(spec, i) {
-        var el = pfEl(prefix + "-" + i);
-        if (!el) {
-          return;
-        }
-        if (spec.type === "bool") {
-          if (el.checked) {
-            out[spec.key] = true;
-          }
-          return;
-        }
-        var v = (el.value || "").trim();
-        if (v !== "") {
-          out[spec.key] = v;
-        }
-      });
-      return out;
-    }
-    function syncTuneEnabled(prefix, specs) {
-      var values = tuneValuesNow(prefix, specs);
-      (specs || []).forEach(function(spec, i) {
-        if (!spec.enabledWhen) {
-          return;
-        }
-        var el = pfEl(prefix + "-" + i);
-        if (!el) {
-          return;
-        }
-        var on = tuneParamEnabled(spec, values);
-        if (!on) {
-          if (spec.type === "bool") {
-            el.checked = false;
-          } else {
-            el.value = "";
-          }
-        }
-        el.disabled = !on;
-        var bar = el.closest ? el.closest(".tune-bar") : null;
-        if (bar) {
-          refreshBar(bar);
-        }
-      });
-    }
-    function tuneDefaultText(spec) {
-      return spec && spec.default != null ? "\u9ED8\u8BA4 " + spec.default : "\u670D\u52A1\u5546\u9ED8\u8BA4";
-    }
-    function specDefaults(specs) {
-      var out = {};
-      (specs || []).forEach(function(spec) {
-        if (spec && spec.default != null && spec.default !== "") {
-          out[spec.key] = spec.default;
-        }
-      });
-      return out;
-    }
-    function renderBar(id, spec, value, on) {
-      var opts = spec.options || [];
-      var cur = value == null ? "" : String(value);
-      var active = -1;
-      for (var i = 0; i < opts.length; i++) {
-        if (cur !== "" && String(opts[i].value) === cur) {
-          active = i;
-        }
-      }
-      var segs = opts.map(function(o, i2) {
-        var cls = "tune-bar-seg";
-        if (on && i2 <= active) {
-          cls += " on";
-        }
-        if (on && i2 === active) {
-          cls += " active";
-        }
-        return '<button type="button" class="' + cls + ' btn btn-outline-primary"' + (on ? "" : " disabled") + ' data-bar-val="' + Console.escapeHtml(o.value) + '" title="' + Console.escapeHtml(o.label || o.value) + '">' + Console.escapeHtml(o.value) + "</button>";
-      }).join("");
-      var capText = !on ? "" : active >= 0 ? opts[active].label || cur : cur === "" ? tuneDefaultText(spec) : cur;
-      var defAttr = spec.default == null ? "" : ' data-bar-def="' + Console.escapeHtml(String(spec.default)) + '"';
-      return '<div class="tune-bar"' + defAttr + '><input type="hidden" id="' + id + '" value="' + Console.escapeHtml(cur) + '"' + (on ? "" : " disabled") + '><div class="tune-bar-track">' + segs + '</div><div class="tune-bar-cap"' + (on ? "" : " hidden") + ">" + Console.escapeHtml(capText) + "</div></div>";
-    }
-    function refreshBar(bar) {
-      if (!bar || !bar.querySelector) {
-        return;
-      }
-      var hid = bar.querySelector('input[type="hidden"]');
-      if (!hid) {
-        return;
-      }
-      var val2 = hid.value || "";
-      var off = !!hid.disabled;
-      var segs = Array.prototype.slice.call(bar.querySelectorAll(".tune-bar-seg"));
-      var active = -1;
-      for (var i = 0; i < segs.length; i++) {
-        if (val2 !== "" && segs[i].getAttribute("data-bar-val") === val2) {
-          active = i;
-        }
-      }
-      for (var j = 0; j < segs.length; j++) {
-        segs[j].disabled = off;
-        if (segs[j].classList) {
-          segs[j].classList.toggle("on", !off && j <= active);
-          segs[j].classList.toggle("active", !off && j === active);
-        }
-      }
-      var cap = bar.querySelector(".tune-bar-cap");
-      if (cap) {
-        if (off) {
-          cap.textContent = "";
-          cap.hidden = true;
-        } else {
-          var def = bar.getAttribute ? bar.getAttribute("data-bar-def") : null;
-          cap.hidden = false;
-          cap.textContent = active >= 0 ? segs[active].getAttribute("title") || val2 : val2 === "" ? def ? "\u9ED8\u8BA4 " + def : "\u670D\u52A1\u5546\u9ED8\u8BA4" : val2;
-        }
-      }
-    }
-    function barPick(bar, val2) {
-      if (!bar || !bar.querySelector) {
-        return;
-      }
-      var hid = bar.querySelector('input[type="hidden"]');
-      if (!hid || hid.disabled) {
-        return;
-      }
-      hid.value = hid.value === val2 ? "" : val2;
-      refreshBar(bar);
-      hid.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-    function renderParamRow(prefix, spec, i, value, values) {
-      var id = prefix + "-" + i;
-      var on = tuneParamEnabled(spec, values);
-      if (!on) {
-        value = null;
-      }
-      var v = value == null ? "" : Array.isArray(value) ? value.join("\n") : String(value);
-      var dis = on ? "" : " disabled";
-      var ph = Console.escapeHtml(tuneDefaultText(spec));
-      var control = "";
-      if (spec.type === "bool") {
-        control = '<label class="tune-switch"><input type="checkbox" id="' + id + '"' + (value === true || v === "true" ? " checked" : "") + dis + '><span class="tune-switch-track"><span class="tune-switch-knob"></span></span></label>';
-      } else if (spec.type === "enum" && spec.display === "bar") {
-        control = renderBar(id, spec, value, on);
-      } else if (spec.type === "enum") {
-        control = '<select class="form-select" id="' + id + '"' + dis + '><option value="">' + ph + "</option>" + (spec.options || []).map(function(o) {
-          return '<option value="' + Console.escapeHtml(o.value) + '"' + (v === o.value ? " selected" : "") + ">" + Console.escapeHtml(o.label || o.value) + "</option>";
-        }).join("") + "</select>";
-      } else if (spec.type === "number" || spec.type === "int") {
-        control = '<input type="number" class="mono form-control" id="' + id + '"' + (v === "" ? "" : ' value="' + Console.escapeHtml(v) + '"') + (spec.min != null ? ' min="' + spec.min + '"' : "") + (spec.max != null ? ' max="' + spec.max + '"' : "") + (spec.step != null ? ' step="' + spec.step + '"' : "") + dis + ' placeholder="' + ph + '">';
-      } else if (spec.type === "stringList") {
-        control = '<textarea class="mono form-control" id="' + id + '" rows="2"' + dis + ' placeholder="' + ph + '">' + (v === "" ? "" : Console.escapeHtml(v)) + "</textarea>";
-      } else {
-        control = '<input type="text" class="mono form-control" id="' + id + '"' + (v === "" ? "" : ' value="' + Console.escapeHtml(v) + '"') + dis + ' placeholder="' + ph + '">';
-      }
-      return '<div class="field tune-field' + (spec.display === "bar" ? " tune-field-wide" : "") + '"><label>' + Console.escapeHtml(spec.label) + (spec.wire ? ' <span class="tune-en">' + Console.escapeHtml(spec.wire) + "</span>" : "") + "</label>" + control + "</div>";
-    }
-    function collectTuning(prefix, specs) {
-      var out = { params: {}, temperature: null, maxTokens: null, dimensions: null };
-      (specs || []).forEach(function(spec, i) {
-        var el = pfEl(prefix + "-" + i);
-        if (!el || el.disabled) {
-          return;
-        }
-        if (spec.type === "bool") {
-          if (el.checked) {
-            out.params[spec.key] = true;
-          }
-          return;
-        }
-        if (spec.type === "stringList") {
-          var lines = (el.value || "").split("\n").map(function(s) {
-            return s.trim();
-          }).filter(function(s) {
-            return s !== "";
-          });
-          if (lines.length) {
-            out.params[spec.key] = lines;
-          }
-          return;
-        }
-        var v = (el.value || "").trim();
-        if (v === "") {
-          return;
-        }
-        if (spec.type === "number" || spec.type === "int") {
-          var n = Number(v);
-          if (isNaN(n)) {
-            return;
-          }
-          if (spec.std) {
-            if (spec.wire === "temperature") {
-              out.temperature = n;
-            } else if (spec.wire === "max_tokens") {
-              out.maxTokens = Math.round(n);
-            } else if (spec.wire === "dimensions") {
-              out.dimensions = Math.round(n);
-            }
-          } else {
-            out.params[spec.key] = n;
-          }
-        } else if (spec.std) {
-        } else {
-          out.params[spec.key] = v;
-        }
-      });
-      return out;
-    }
-    function tuningByKey(prefix, specs) {
-      var t = collectTuning(prefix, specs);
-      var out = {};
-      (specs || []).forEach(function(spec) {
-        if (!spec.std) {
-          if (t.params[spec.key] != null) {
-            out[spec.key] = t.params[spec.key];
-          }
-          return;
-        }
-        var v = spec.wire === "max_tokens" ? t.maxTokens : spec.wire === "dimensions" ? t.dimensions : t.temperature;
-        if (v != null) {
-          out[spec.key] = v;
-        }
-      });
-      return out;
-    }
-    function itemsByKey(items) {
-      var out = {};
-      (items || []).forEach(function(it) {
-        out[it.key] = it.value;
-      });
-      return out;
-    }
-    function tuneSignature(byKey, specs) {
-      return (specs || []).map(function(spec) {
-        var v = byKey[spec.key];
-        if (v == null || v === "") {
-          return spec.key + "=";
-        }
-        if (spec.type === "number" || spec.type === "int") {
-          var n = Number(v);
-          return spec.key + "=" + (isNaN(n) ? String(v) : String(n));
-        }
-        if (spec.type === "bool") {
-          return spec.key + "=" + (v === true || v === "true" ? "t" : "f");
-        }
-        if (spec.type === "stringList") {
-          return spec.key + "=" + (Object.prototype.toString.call(v) === "[object Array]" ? v.join("") : String(v));
-        }
-        return spec.key + "=" + String(v);
-      }).join("|");
-    }
-    function adapterTuneBox(p, prefix) {
-      var ad = p.adapter;
-      var specs = ad.params || [];
-      var saved = itemsByKey(ad.items);
-      var cur = specDefaults(specs);
-      Object.keys(saved).forEach(function(k) {
-        cur[k] = saved[k];
-      });
-      return '<div class="tune-box card-tune" data-tune-alias="' + Console.escapeHtml(p.alias) + '" data-tune-prefix="' + Console.escapeHtml(prefix) + '">' + specs.map(function(spec, i) {
-        return renderParamRow(prefix, spec, i, cur[spec.key], cur);
-      }).join("") + "</div>";
-    }
-    function bindTuneBox(card) {
-      var box = card.querySelector(".tune-box[data-tune-prefix]");
-      if (!box) {
-        return;
-      }
-      var prefix = box.getAttribute("data-tune-prefix");
-      var alias = box.getAttribute("data-tune-alias");
-      var profile = findProfile(alias);
-      var specs = profile && profile.adapter ? profile.adapter.params || [] : [];
-      if (!prefix || !specs.length) {
-        return;
-      }
-      var btn = card.querySelector(".tune-save");
-      var status = card.querySelector(".tune-status");
-      var current = function() {
-        return tuneSignature(tuningByKey(prefix, specs), specs);
-      };
-      var base = current();
-      var sync = function() {
-        syncTuneEnabled(prefix, specs);
-        if (btn) {
-          btn.disabled = current() === base;
-        }
-      };
-      ["input", "change"].forEach(function(ev) {
-        card.addEventListener(ev, sync);
-      });
-      if (btn) {
-        btn.addEventListener("click", function() {
-          btn.disabled = true;
-          btn.classList.add("btn-loading");
-          if (status) {
-            status.textContent = "";
-            status.className = "tune-status";
-          }
-          saveTuning(alias, prefix, specs, function(ok, msg) {
-            if (status) {
-              status.textContent = msg;
-              status.className = "tune-status " + (ok ? "ok" : "err");
-            }
-            if (ok) {
-              base = current();
-            }
-            btn.disabled = ok;
-            btn.classList.remove("btn-loading");
-          });
-        });
-      }
-      sync();
-    }
-    function saveTuning(alias, prefix, specs, onDone) {
-      var t = collectTuning(prefix, specs);
-      var payload = {
-        alias,
-        params: t.params,
-        temperature: t.temperature,
-        maxTokens: t.maxTokens
-      };
-      var hasDim = (specs || []).some(function(s) {
-        return s.wire === "dimensions";
-      });
-      if (hasDim) {
-        payload.dimensions = t.dimensions;
-      } else {
-        var pf = findProfile(alias);
-        if (pf && pf.dimensions != null) {
-          payload.dimensions = pf.dimensions;
-        }
-      }
-      Console.api.put("/admin/model-profiles/tuning", payload).then(function(r) {
-        if (onDone) {
-          onDone(true, r && r.message || "\u5DF2\u4FDD\u5B58");
-        }
-      }).catch(function(e) {
-        if (onDone) {
-          onDone(false, Console.sanitizeError(e.message));
-        }
-      });
-    }
-    function stdTuneBox(p) {
-      var tmp = p.temperature == null ? "" : String(p.temperature);
-      var mtx = p.maxTokens == null ? "" : String(p.maxTokens);
-      return '<div class="std-tune" data-std-alias="' + Console.escapeHtml(p.alias) + '"><div class="ctx-row"><span class="k">\u6E29\u5EA6</span><input type="number" class="mono model-temp form-control" min="0" max="2" step="0.1" data-saved="' + Console.escapeHtml(tmp) + '" value="' + Console.escapeHtml(tmp) + '" placeholder="\u670D\u52A1\u5546\u9ED8\u8BA4"></div><div class="ctx-row"><span class="k">\u5355\u6B21\u6700\u5927\u8F93\u51FA</span><input type="number" class="mono model-maxtok form-control" min="1" step="1" data-saved="' + Console.escapeHtml(mtx) + '" value="' + Console.escapeHtml(mtx) + '" placeholder="\u4E0D\u9650"><span class="ctx-unit">token</span></div></div>';
-    }
-    function bindStdTune(boxEl) {
-      var alias = boxEl.getAttribute("data-std-alias");
-      var temp = boxEl.querySelector(".model-temp");
-      var maxTok = boxEl.querySelector(".model-maxtok");
-      if (!alias || !temp || !maxTok) {
-        return;
-      }
-      [temp, maxTok].forEach(function(input) {
-        input.addEventListener("change", function() {
-          saveStdTune(alias, temp, maxTok);
-        });
-      });
-    }
-    function saveStdTune(alias, tempInput, maxTokInput) {
-      var temperature = null;
-      var rawTemp = (tempInput.value || "").trim();
-      if (rawTemp !== "") {
-        temperature = Number(rawTemp);
-        if (!isFinite(temperature) || temperature < 0 || temperature > 2) {
-          Console.toast("\u6E29\u5EA6\u53D6\u503C 0\u20132\uFF1B\u7559\u7A7A\u8868\u793A\u7528\u670D\u52A1\u5546\u9ED8\u8BA4", { type: "warning" });
-          tempInput.value = tempInput.getAttribute("data-saved") || "";
-          return;
-        }
-      }
-      var maxTokens = null;
-      var rawMax = (maxTokInput.value || "").trim();
-      if (rawMax !== "") {
-        maxTokens = Number(rawMax);
-        if (!isFinite(maxTokens) || Math.floor(maxTokens) !== maxTokens || maxTokens <= 0) {
-          Console.toast("\u5355\u6B21\u6700\u5927\u8F93\u51FA\u5FC5\u987B\u662F\u6B63\u6574\u6570\uFF1B\u7559\u7A7A\u8868\u793A\u4E0D\u9650\u5236", { type: "warning" });
-          maxTokInput.value = maxTokInput.getAttribute("data-saved") || "";
-          return;
-        }
-      }
-      var p = findProfile(alias);
-      var payload = {
-        alias,
-        params: p && p.params || {},
-        temperature,
-        maxTokens,
-        dimensions: p ? p.dimensions : null
-      };
-      tempInput.disabled = true;
-      maxTokInput.disabled = true;
-      Console.api.put("/admin/model-profiles/tuning", payload).then(function() {
-        if (p) {
-          p.temperature = temperature;
-          p.maxTokens = maxTokens;
-        }
-        tempInput.setAttribute("data-saved", tempInput.value || "");
-        maxTokInput.setAttribute("data-saved", maxTokInput.value || "");
-      }).catch(function(e) {
-        tempInput.value = tempInput.getAttribute("data-saved") || "";
-        maxTokInput.value = maxTokInput.getAttribute("data-saved") || "";
-        Console.toast("\u4FDD\u5B58\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message), { type: "error" });
-      }).then(function() {
-        tempInput.disabled = false;
-        maxTokInput.disabled = false;
-      });
-    }
     function customParamsBox(p) {
       var cp = p.customParams || {};
-      var lim = cp.limits || {};
-      var stdList = cp.stdKeys || [];
-      var hint = "JSON \u5BF9\u8C61\uFF0C\u952E\u540D\u7528\u670D\u52A1\u5546\u6587\u6863\u91CC\u7684\u5B57\u6BB5\u540D\uFF1B\u952E\u503C\u539F\u6837\u62FC\u8FDB\u8BF7\u6C42\u4F53\u3002\u7559\u7A7A = \u4E00\u4E2A\u90FD\u4E0D\u53D1\u9001\u3002";
-      if (lim.maxKeys) {
-        hint += "\u4E0A\u9650 " + lim.maxKeys + " \u4E2A\u952E\u3001" + (lim.maxBytes || 0) + " \u5B57\u8282\u3002";
-      }
-      if (stdList.length) {
-        var prefer = ["temperature", "max_tokens", "dimensions"];
-        var shownList = prefer.filter(function(k) {
-          return stdList.indexOf(k) >= 0;
-        });
-        if (!shownList.length) {
-          shownList = stdList;
-        }
-        var shown = shownList.slice(0, 4).join(" / ");
-        hint += "\u6807\u51C6\u53C2\u6570\uFF08" + shown + (stdList.length > shownList.slice(0, 4).length ? " \u7B49 " + stdList.length + " \u4E2A" : "") + "\uFF09\u53E6\u6709\u63A7\u4EF6\uFF0C\u522B\u5199\u5728\u8FD9\u91CC\u3002";
-      }
-      return '<div class="dp-params" data-params-alias="' + Console.escapeHtml(p.alias) + '"><div class="dp-params-head"><span class="k">\u81EA\u5B9A\u4E49\u53C2\u6570</span><span class="dp-params-hint">' + Console.escapeHtml(hint) + `</span></div><textarea class="mono form-control dp-params-json" rows="3" spellcheck="false" placeholder='{"enable_thinking": false}'>` + Console.escapeHtml(cp.paramsJson || "") + '</textarea><div class="dp-params-foot"><span class="dp-params-status"></span><button type="button" class="btn btn-sm btn-outline-primary dp-params-save" disabled>\u4FDD\u5B58\u53C2\u6570</button></div></div>';
+      return '<div class="dp-params" data-params-alias="' + Console.escapeHtml(p.alias) + `"><div class="dp-params-head"><span class="k">\u81EA\u5B9A\u4E49\u53C2\u6570</span><span class="dp-params-sub">JSON \xB7 \u7559\u7A7A\u5373\u4E0D\u53D1\u9001</span></div><textarea class="mono form-control dp-params-json" rows="3" spellcheck="false" placeholder='{"temperature": 0.7, "enable_thinking": false}'>` + Console.escapeHtml(cp.paramsJson || "") + '</textarea><div class="dp-params-foot"><span class="dp-params-status"></span><button type="button" class="btn btn-sm btn-outline-primary dp-params-save" disabled>\u4FDD\u5B58\u53C2\u6570</button></div></div>';
     }
     function bindParamsBox(boxEl) {
       var alias = boxEl.getAttribute("data-params-alias");
@@ -1112,33 +649,6 @@
         input.disabled = false;
       });
     }
-    function saveContextWindow(alias, input) {
-      var raw = (input.value || "").trim();
-      var prev = input.getAttribute("data-saved") || "";
-      var value = null;
-      if (raw !== "") {
-        value = Number(raw);
-        if (!isFinite(value) || value <= 0 || Math.floor(value) !== value) {
-          Console.toast("\u4E0A\u4E0B\u6587\u957F\u5EA6\u5FC5\u987B\u662F\u6B63\u6574\u6570\uFF08\u5355\u4F4D token\uFF09\uFF1B\u7559\u7A7A\u8868\u793A\u672A\u58F0\u660E", { type: "warning" });
-          input.value = prev;
-          return;
-        }
-      }
-      input.disabled = true;
-      Console.api.put("/admin/model-profiles/context-window", { alias, contextWindow: value }).then(function() {
-        var p = findProfile(alias);
-        if (p) {
-          p.contextWindow = value;
-        }
-        input.setAttribute("data-saved", value == null ? "" : String(value));
-        input.value = value == null ? "" : String(value);
-      }).catch(function(e) {
-        input.value = prev;
-        Console.toast("\u4FDD\u5B58\u5931\u8D25\uFF1A" + Console.sanitizeError(e.message), { type: "error" });
-      }).then(function() {
-        input.disabled = false;
-      });
-    }
     function save() {
       if (!val("pfApiKey")) {
         showResult(false, "\u8BF7\u586B\u5199 API Key");
@@ -1152,9 +662,10 @@
       var alias = deriveAlias(modelName);
       var body = {
         alias,
-        /* 用户声明的能力。空数组是允许的（未声明类型），不是错误；
-           识别结果只影响勾选，不在这里补第二份"更权威"的判定。 */
-        endpoints: PICKED_ENDPOINTS.slice(),
+        /* 手选模态原样提交；不传 endpoints，让服务端按模态反查端点族。
+           两组都空是允许的：档案落盘，卡片标「不可用」，等用户点「探测」。 */
+        input: PICKED_INPUT.slice(),
+        output: PICKED_OUTPUT.slice(),
         baseUrl: pfEl("pfBaseUrl").value.trim(),
         apiKey: pfEl("pfApiKey").value,
         modelName,
@@ -1162,26 +673,8 @@
            （见 thinkSwitch / saveReturnThinking） */
         returnThinking: false
       };
-      var chatPicked = PICKED_ENDPOINTS.indexOf("chat") >= 0;
+      var chatPicked = PICKED_OUTPUT.indexOf("text") >= 0;
       if (chatPicked) {
-        var rawTemp = (pfEl("pfTemperature").value || "").trim();
-        if (rawTemp !== "") {
-          var temp = Number(rawTemp);
-          if (!isFinite(temp) || temp < 0 || temp > 2) {
-            showResult(false, "\u6E29\u5EA6\u53D6\u503C 0\u20132\uFF1B\u7559\u7A7A\u8868\u793A\u7528\u670D\u52A1\u5546\u9ED8\u8BA4");
-            return;
-          }
-          body.temperature = temp;
-        }
-        var rawMax = (pfEl("pfMaxTokens").value || "").trim();
-        if (rawMax !== "") {
-          var maxTok = Number(rawMax);
-          if (!isFinite(maxTok) || Math.floor(maxTok) !== maxTok || maxTok <= 0) {
-            showResult(false, "\u5355\u6B21\u6700\u5927\u8F93\u51FA\u5FC5\u987B\u662F\u6B63\u6574\u6570\uFF1B\u7559\u7A7A\u8868\u793A\u4E0D\u9650\u5236");
-            return;
-          }
-          body.maxTokens = maxTok;
-        }
         var rawParams = (pfEl("pfParamsJson").value || "").trim();
         if (rawParams !== "") {
           var parsed;
@@ -1209,6 +702,27 @@
       }).then(function() {
         btn.disabled = false;
         btn.classList.remove("btn-loading");
+      });
+    }
+    function dropFamily(alias, family) {
+      return __async(this, null, function* () {
+        var label = EP_LABEL[family] || family;
+        var ok = yield Console.confirm(
+          "\u628A\u300C" + alias + "\u300D\u7684\u300C" + label + "\u300D\u80FD\u529B\u79FB\u9664\uFF1F\n\n\xB7 \u53EA\u52A8\u8FD9\u4E2A\u80FD\u529B\uFF0C\u5176\u5B83\u7AEF\u70B9\u65CF\u4E0E\u8FDE\u63A5\u4FE1\u606F\uFF08\u5730\u5740 / Key / \u6A21\u578B\u540D\uFF09\u4E0D\u53D8\n\xB7 \u6062\u590D\u65B9\u5F0F\uFF1A\u91CD\u65B0\u624B\u9009\u6A21\u6001\uFF0C\u6216\u518D\u70B9\u4E00\u6B21\u300C\u63A2\u6D4B\u300D\n\xB7 \u5982\u679C\u8FD9\u4E2A\u80FD\u529B\u6B63\u88AB\u67D0\u4E2A\u57DF\u7ED1\u5B9A\uFF0C\u90A3\u4E2A\u57DF\u4F1A\u7ACB\u523B\u53D8\u6210\u300C\u65E0\u53EF\u8C03\u7528\u300D",
+          { title: "\u79FB\u9664\u80FD\u529B", okText: "\u79FB\u9664", danger: true }
+        );
+        if (!ok) {
+          return;
+        }
+        Console.api.put(
+          "/admin/model-profiles/families/remove",
+          { alias, families: [family] }
+        ).then(function(r) {
+          Console.toast(r && r.message || "\u5DF2\u79FB\u9664", { type: "success", wide: true });
+          return loadProfiles();
+        }).catch(function(e) {
+          Console.toast(Console.sanitizeError(e.message), { type: "error" });
+        });
       });
     }
     function deleteProfile(alias) {
@@ -1241,33 +755,69 @@
         });
       });
     }
+    var PROBE_SHORT = {
+      AUTH: "\u9274\u6743\u5931\u8D25",
+      RATE_LIMIT: "\u88AB\u9650\u6D41",
+      UPSTREAM: "\u4E0A\u6E38\u9519\u8BEF",
+      TIMEOUT: "\u8D85\u65F6",
+      NETWORK: "\u8FDE\u4E0D\u4E0A",
+      CONFIG: "\u5730\u5740\u6216\u6A21\u578B\u540D\u6709\u8BEF",
+      REQUEST_FORMAT: "\u8BF7\u6C42\u683C\u5F0F\u4E0D\u7B26",
+      RESPONSE_SHAPE: "\u54CD\u5E94\u683C\u5F0F\u4E0D\u7B26",
+      PROTOCOL: "\u9700 WebSocket",
+      UNSUPPORTED: "\u7AEF\u70B9\u4E0D\u5B58\u5728",
+      NOT_EXECUTED: "\u672A\u6267\u884C",
+      OK: "\u6B63\u5E38"
+    };
+    function probeHttp(d) {
+      var c = d && d.statusCode;
+      return typeof c === "number" && c > 0 ? "HTTP " + c : "\u2014";
+    }
+    function probeResultHtml(r) {
+      var diags = r && r.diagnostics || {};
+      if (!Object.keys(diags).length) {
+        return '<div class="probe-empty">\u672A\u8FD4\u56DE\u63A2\u6D4B\u660E\u7EC6</div>';
+      }
+      var ok = [], bad = [];
+      Object.keys(diags).forEach(function(k) {
+        var d = diags[k] || {};
+        var name = Console.escapeHtml(d.label || k);
+        if (d.state === "CONFIRMED") {
+          ok.push('<span class="probe-chip">' + name + "</span>");
+          return;
+        }
+        bad.push('<div class="probe-row"><span class="probe-name">' + name + '</span><span class="probe-code">' + probeHttp(d) + '</span><span class="probe-desc">' + Console.escapeHtml(PROBE_SHORT[d.category] || "\u672A\u786E\u8BA4") + "</span></div>");
+      });
+      return '<div class="probe-result"><div><div class="probe-sec-head ok">\u652F\u6301 <span class="probe-count">' + ok.length + "</span></div>" + (ok.length ? '<div class="probe-chips">' + ok.join("") + "</div>" : '<div class="probe-empty">\u65E0</div>') + '</div><div><div class="probe-sec-head no">\u4E0D\u652F\u6301 / \u672A\u786E\u8BA4 <span class="probe-count">' + bad.length + "</span></div>" + (bad.length ? '<div class="probe-rows">' + bad.join("") + "</div>" : '<div class="probe-empty">\u65E0</div>') + "</div></div>";
+    }
     function probeProfile(alias, btn) {
       return __async(this, null, function* () {
         var ok = yield Console.confirm(
-          "\u63A2\u6D4B\u300C" + alias + "\u300D\uFF1F\n\n\u4F1A\u53D1\u4E00\u7EC4\u6700\u5C0F\u8BF7\u6C42\u5B9E\u6D4B\u5B83\u7684\u7AEF\u70B9\u65CF\u4E0E\u6A21\u6001\uFF0C\u53EF\u80FD\u6D88\u8017\u5C11\u91CF\u989D\u5EA6\uFF1A\n\xB7 \u5BF9\u8BDD\uFF1Amax_tokens=1\uFF08\u7EA6 1 \u4E2A token\uFF09\n\xB7 \u5411\u91CF / \u91CD\u6392\uFF1A\u63D0\u4EA4\u4E00\u6761\u77ED\u6587\u672C\n\xB7 \u8BED\u97F3\u8BC6\u522B / \u8BED\u97F3\u5408\u6210\uFF1A\u6309\u6781\u77ED\u97F3\u9891\u8BA1\u8D39\n\xB7 \u751F\u56FE\uFF1A\u82E5\u8BE5\u670D\u52A1\u5546\u6709\u751F\u56FE\u7AEF\u70B9\uFF0C\u4F1A\u771F\u5B9E\u751F\u6210\u4E00\u5F20\u9ED8\u8BA4\u5C3A\u5BF8\u7684\u56FE\n\n\u5B9E\u6D4B\u786E\u8BA4\u5230\u7684\u4F1A\u5E76\u56DE\u6863\u6848\uFF08\u53EA\u589E\u4E0D\u51CF\uFF09\u3002\u7EE7\u7EED\uFF1F",
+          "\u63A2\u6D4B\u300C" + alias + "\u300D\uFF1F\n\n\u8FD9\u662F\u672C\u9875\u552F\u4E00\u4F1A\u82B1 token \u7684\u64CD\u4F5C\uFF1A\u4F1A\u53D1\u4E00\u7EC4\u6700\u5C0F\u8BF7\u6C42\u5B9E\u6D4B\u5B83\u7684\u7AEF\u70B9\u65CF\u4E0E\u6A21\u6001\u3002\n\xB7 \u5BF9\u8BDD\uFF1A16 \u4E2A token\uFF08\u8BF7\u6C42\u4F53\u5F62\u6001\u4E0D\u88AB\u63A5\u53D7\u65F6\u81EA\u52A8\u6362\u4E00\u79CD\u518D\u8BD5\uFF09\n\xB7 \u5411\u91CF / \u91CD\u6392\uFF1A\u63D0\u4EA4\u4E00\u6761\u77ED\u6587\u672C\n\xB7 \u8BED\u97F3\u8BC6\u522B / \u8BED\u97F3\u5408\u6210\uFF1A\u6309\u6781\u77ED\u97F3\u9891\u8BA1\u8D39\n\xB7 \u751F\u56FE\uFF1A\u82E5\u8BE5\u670D\u52A1\u5546\u6709\u751F\u56FE\u7AEF\u70B9\uFF0C\u4F1A\u771F\u5B9E\u751F\u6210\u4E00\u5F20\u9ED8\u8BA4\u5C3A\u5BF8\u7684\u56FE\n\n\u6574\u6B21\u4E00\u6761\u90FD\u6CA1\u63A2\u6D4B\u5230\uFF08\u7F51\u7EDC\u95EE\u9898\u7B49\uFF09\u5219\u4FDD\u7559\u539F\u8BBE\u7F6E\u3002\u7EE7\u7EED\uFF1F",
           { title: "\u63A2\u6D4B\u6A21\u578B\u7AEF\u70B9\u4E0E\u6A21\u6001", okText: "\u5F00\u59CB\u63A2\u6D4B", danger: false }
         );
         if (!ok) {
           return;
         }
+        var override = yield Console.confirm(
+          "\u8FD9\u6B21\u5B9E\u6D4B\u7ED3\u679C\u600E\u4E48\u7528\uFF1F\n\n\xB7 \u300C\u53EA\u8865\u4E0D\u5220\u300D\uFF1A\u628A\u786E\u8BA4\u5230\u7684\u80FD\u529B\u5E76\u8FDB\u6863\u6848\uFF0C\u6CA1\u786E\u8BA4\u5230\u7684\u65E7\u58F0\u660E\u4FDD\u6301\u4E0D\u52A8\n\xB7 \u300C\u8986\u76D6\u5199\u56DE\u300D\uFF1A\u4EE5\u5B9E\u6D4B\u4E3A\u51C6\uFF0C\u6CA1\u786E\u8BA4\u5230\u7684\u7AEF\u70B9\u65CF\u4E0E\u6A21\u6001\u4F1A\u88AB\u6E05\u6389",
+          { title: "\u5199\u56DE\u65B9\u5F0F", okText: "\u8986\u76D6\u5199\u56DE", cancelText: "\u53EA\u8865\u4E0D\u5220", danger: false }
+        );
         if (btn) {
           btn.disabled = true;
           btn.classList.add("btn-loading");
           btn.setAttribute("data-orig-label", btn.textContent);
           btn.textContent = "\u63A2\u6D4B\u4E2D\u2026";
         }
-        Console.api.post("/admin/model-profiles/detect?alias=" + encodeURIComponent(alias), null).then(function(r) {
+        Console.api.post("/admin/model-profiles/detect?alias=" + encodeURIComponent(alias) + "&mode=" + (override ? "override" : "confirmed"), null).then(function(r) {
           return loadProfiles().then(function() {
-            if (r && r.note) {
-              var gap = !!(r.perModality && Object.keys(r.perModality).some(function(k) {
-                return r.perModality[k] !== "CONFIRMED";
-              }));
-              Console.toast(r.note, {
-                type: gap ? "warning" : "success",
-                title: "\u63A2\u6D4B\u5B8C\u6210",
-                wide: true
-              });
-            }
+            Console.confirm(probeResultHtml(r), {
+              title: "\u63A2\u6D4B\u7ED3\u679C \xB7 " + (r && r.writeMode === "override" ? "\u5DF2\u8986\u76D6\u5199\u56DE" : "\u53EA\u8865\u4E0D\u5220"),
+              okText: "\u77E5\u9053\u4E86",
+              hideCancel: true,
+              html: true,
+              danger: false
+            });
           });
         }).catch(function(e) {
           if (btn) {
@@ -1422,28 +972,23 @@
         deleteConnection(btn.getAttribute("data-cn-del"));
       }
     });
-    document.addEventListener("click", function(e) {
-      var seg = e.target && e.target.closest ? e.target.closest(".tune-bar-seg") : null;
-      if (!seg) {
-        return;
-      }
-      var bar = seg.closest(".tune-bar");
-      if (bar) {
-        barPick(bar, seg.getAttribute("data-bar-val"));
-      }
-    });
     pfEl("embeddingSlot").addEventListener("change", function() {
       var v = pfEl("embeddingSlot").value;
       applyEmbedding(v || null);
     });
-    pfEl("pfEndpoints").addEventListener("click", function(e) {
-      var chip = e.target && e.target.closest ? e.target.closest("[data-ep]") : null;
-      if (chip) {
-        toggleEndpoint(chip.getAttribute("data-ep"));
+    ["pfInputMods", "pfOutputMods"].forEach(function(id) {
+      var box = pfEl(id);
+      if (!box) {
+        return;
       }
+      box.addEventListener("click", function(e) {
+        var chip = e.target && e.target.closest ? e.target.closest("[data-mod]") : null;
+        if (chip) {
+          toggleModality(id === "pfInputMods" ? "in" : "out", chip.getAttribute("data-mod"));
+        }
+      });
     });
-    pfEl("pfSuggestBtn").addEventListener("click", suggestEndpoints);
-    setPickedEndpoints([]);
+    setPickedModalities([], []);
     pfEl("addModelBtn").addEventListener("click", openAdd);
     pfEl("saveProfileBtn").addEventListener("click", save);
     pfEl("resetProfileFormBtn").addEventListener("click", resetForm);

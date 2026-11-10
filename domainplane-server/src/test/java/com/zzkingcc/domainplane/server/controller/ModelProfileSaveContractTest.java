@@ -5,7 +5,6 @@ import com.zzkingcc.domainplane.server.config.AiProperties;
 import com.zzkingcc.domainplane.server.config.RagProperties;
 import com.zzkingcc.domainplane.server.env.StorageLocations;
 import com.zzkingcc.domainplane.server.knowledge.KnowledgeBaseService;
-import com.zzkingcc.domainplane.server.model.ModelAdapterRegistry;
 import com.zzkingcc.domainplane.server.model.ModelCapabilityProbe;
 import com.zzkingcc.domainplane.server.model.ModelMetadataReader;
 import com.zzkingcc.domainplane.server.model.ModelProfile;
@@ -19,7 +18,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
-import org.springframework.core.io.DefaultResourceLoader;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -87,7 +85,6 @@ class ModelProfileSaveContractTest {
                 ? new LlmModelHolder(new AiProperties(), new LlmSettingsStore(storage), registry)
                 : null;
         return new AdminModelProfileController(registry, store, holder, metadataReader,
-                new ModelAdapterRegistry(new DefaultResourceLoader()),
                 new ModelCapabilityProbe(), null, knowledgeBase);
     }
 
@@ -123,14 +120,12 @@ class ModelProfileSaveContractTest {
     }
 
     @Test
-    @DisplayName("勾了 embedding 也不再测量维度：维度留空由装配期实测，保存不拒绝")
+    @DisplayName("勾了 embedding 即保存成功：维度不再是配置项，装配期按模型实测")
     void embeddingSaveDoesNotMeasureDimension() {
         AdminModelProfileController c = controller(null);
 
         c.save(body("vec", List.of(ModelProfile.EP_EMBEDDING)));
 
-        assertEquals(null, saved("vec").dimensions(),
-                "保存路径不再回填原生维度；空维度由 LlmModelHolder 装配时实测");
         assertNull(lastRegistry.setEmbeddingAlias("vec"), "声明了 embedding 就能进向量槽位");
     }
 
@@ -195,24 +190,6 @@ class ModelProfileSaveContractTest {
     }
 
     // ==================== 按需识别 ====================
-
-    @Test
-    @DisplayName("识别按钮命中本地适配时零上游请求：结果只用来预勾，不参与保存")
-    void suggestUsesLocalDeclarationWithoutUpstream() {
-        AdminModelProfileController c = controller(null);
-        AdminModelProfileController.ProfileBody b = body("bge", null);
-        b.setBaseUrl("https://api.siliconflow.cn/v1");
-        b.setModelName("BAAI/bge-m3");
-
-        Map<String, Object> out = c.suggest(b);
-
-        assertEquals("adapter", out.get("source"));
-        assertEquals(List.of(ModelProfile.EP_EMBEDDING), out.get("endpoints"));
-        assertEquals(List.of(ModelProfile.MOD_TEXT), out.get("input"));
-        assertEquals(List.of(ModelProfile.MOD_EMBEDDING), out.get("output"));
-        assertFalse(lastRegistry.allProfiles().stream().anyMatch(p -> p.alias().equals("bge")),
-                "suggest 是只读建议，不该顺手写一份档案");
-    }
 
     // ==================== 列表契约 ====================
 
@@ -288,14 +265,12 @@ class ModelProfileSaveContractTest {
         };
     }
 
-    private static AdminModelProfileController.ProfileBody vecBody(String alias, String modelName,
-                                                                   Integer dimensions) {
+    private static AdminModelProfileController.ProfileBody vecBody(String alias, String modelName) {
         AdminModelProfileController.ProfileBody b = new AdminModelProfileController.ProfileBody();
         b.setAlias(alias);
         b.setApiKey("sk-test");
         b.setBaseUrl(VEC_URL);
         b.setModelName(modelName);
-        b.setDimensions(dimensions);
         b.setEndpoints(List.of(ModelProfile.EP_EMBEDDING));
         return b;
     }
@@ -311,11 +286,11 @@ class ModelProfileSaveContractTest {
     @DisplayName("删了重建同一个模型（别名被加 -2 后缀）：不弹确认、不重灌，向量原样复用")
     void sameModelUnderANewAliasReusesVectors() {
         AdminModelProfileController c = build(null, contentKb(), true);
-        c.save(vecBody("bge", "BAAI/bge-m3", 1024));
+        c.save(vecBody("bge", "BAAI/bge-m3"));
         assertNull(lastRegistry.setEmbeddingAlias("bge"));
         /* 前端 deriveAlias 遇重名会加 -2：删掉 bge 再添加同一个模型，拿到的就是 bge-2。
            旧判据（比别名）在这里会把一次零变更的操作判成换模型，逼用户全库重灌。 */
-        c.save(vecBody("bge-2", "BAAI/bge-m3", 1024));
+        c.save(vecBody("bge-2", "BAAI/bge-m3"));
 
         Map<String, Object> out = c.selectEmbeddingModel(embeddingRequest("bge-2", null));
 
@@ -334,9 +309,9 @@ class ModelProfileSaveContractTest {
     @DisplayName("换了模型名（维度相同）仍要二次确认：判据收窄不能把真保护一起放掉")
     void differentModelStillRequiresConfirmation() {
         AdminModelProfileController c = build(null, contentKb(), false);
-        c.save(vecBody("bge", "BAAI/bge-m3", 1024));
+        c.save(vecBody("bge", "BAAI/bge-m3"));
         assertNull(lastRegistry.setEmbeddingAlias("bge"));
-        c.save(vecBody("bce", "netease-youdao/bce-embedding-base_v1", 1024));
+        c.save(vecBody("bce", "netease-youdao/bce-embedding-base_v1"));
 
         Map<String, Object> ask = c.selectEmbeddingModel(embeddingRequest("bce", null));
 
@@ -349,11 +324,11 @@ class ModelProfileSaveContractTest {
     @DisplayName("当前向量档案不能从「保存」改掉模型名：这条路没有重灌确认，只能拒")
     void editingVectorIdentityThroughSaveIsRejected() {
         AdminModelProfileController c = controller(null);
-        c.save(vecBody("vec", "BAAI/bge-m3", 1024));
+        c.save(vecBody("vec", "BAAI/bge-m3"));
         assertNull(lastRegistry.setEmbeddingAlias("vec"));
 
         BaseException e = assertThrows(BaseException.class,
-                () -> c.save(vecBody("vec", "netease-youdao/bce-embedding-base_v1", 1024)));
+                () -> c.save(vecBody("vec", "netease-youdao/bce-embedding-base_v1")));
 
         assertTrue(e.getMessage().contains("新建一份档案"),
                 "拒绝的同时必须给出正确路径，否则用户只会觉得这条路被封死了：" + e.getMessage());
@@ -365,10 +340,10 @@ class ModelProfileSaveContractTest {
     @DisplayName("换一把 Key 不改变向量：当前向量档案照常保存，不该被那道门禁拦住")
     void rotatingApiKeyOnCurrentVectorProfileIsAllowed() {
         AdminModelProfileController c = controller(null);
-        c.save(vecBody("vec", "BAAI/bge-m3", 1024));
+        c.save(vecBody("vec", "BAAI/bge-m3"));
         assertNull(lastRegistry.setEmbeddingAlias("vec"));
 
-        AdminModelProfileController.ProfileBody rotated = vecBody("vec", "BAAI/bge-m3", 1024);
+        AdminModelProfileController.ProfileBody rotated = vecBody("vec", "BAAI/bge-m3");
         rotated.setApiKey("sk-rotated");
         c.save(rotated);
 
@@ -382,14 +357,14 @@ class ModelProfileSaveContractTest {
     @DisplayName("删掉向量档案再建一份同样的模型选上：不弹确认（删档案不动索引，身份被记着）")
     void deleteThenRecreateSameModelDoesNotAskAgain() {
         AdminModelProfileController c = build(null, contentKb(), true);
-        c.save(vecBody("bge", "BAAI/bge-m3", 1024));
+        c.save(vecBody("bge", "BAAI/bge-m3"));
         assertNull(lastRegistry.setEmbeddingAlias("bge"));
         /* 正常由 selectEmbeddingModel 的成功路径写入；这里直接预置，把用例聚焦在"删除之后" */
         lastRegistry.markEmbeddingIdentity(VectorIdentity.of(lastRegistry.profile("bge").orElseThrow()));
 
         assertTrue(lastRegistry.delete("bge").deleted(), "删档案会级联清空槽位 —— 这是身份的用武之地");
         assertNull(lastRegistry.embeddingAlias());
-        c.save(vecBody("bge-2", "BAAI/bge-m3", 1024));
+        c.save(vecBody("bge-2", "BAAI/bge-m3"));
 
         Map<String, Object> out = c.selectEmbeddingModel(embeddingRequest("bge-2", null));
 
@@ -402,12 +377,12 @@ class ModelProfileSaveContractTest {
     @DisplayName("删了重建但换成了别的模型：仍然弹确认 —— 记录不能把真变更一起吞掉")
     void deleteThenRecreateDifferentModelStillAsks() {
         AdminModelProfileController c = build(null, contentKb(), false);
-        c.save(vecBody("bge", "BAAI/bge-m3", 1024));
+        c.save(vecBody("bge", "BAAI/bge-m3"));
         assertNull(lastRegistry.setEmbeddingAlias("bge"));
         lastRegistry.markEmbeddingIdentity(VectorIdentity.of(lastRegistry.profile("bge").orElseThrow()));
 
         assertTrue(lastRegistry.delete("bge").deleted());
-        c.save(vecBody("bce", "netease-youdao/bce-embedding-base_v1", 1024));
+        c.save(vecBody("bce", "netease-youdao/bce-embedding-base_v1"));
 
         Map<String, Object> ask = c.selectEmbeddingModel(embeddingRequest("bce", null));
 
@@ -419,13 +394,13 @@ class ModelProfileSaveContractTest {
     @DisplayName("向量身份要写进 models.json：copyOf 漏字段会让它每次保存都凭空消失")
     void embeddingIdentitySurvivesPersistAndReload() {
         AdminModelProfileController c = controller(null);
-        c.save(vecBody("vec", "BAAI/bge-m3", 1024));
+        c.save(vecBody("vec", "BAAI/bge-m3"));
         assertNull(lastRegistry.setEmbeddingAlias("vec"));
         lastRegistry.markEmbeddingIdentity(VectorIdentity.of(lastRegistry.profile("vec").orElseThrow()));
 
         /* 再存一份别的档案：走的是 copyOf → 漏拷就会把 identity 抹成 null */
-        c.save(vecBody("other", "BAAI/bge-m3", 1024));
-        assertEquals(Integer.valueOf(1024), lastRegistry.embeddingIdentity().dimensions());
+        c.save(vecBody("other", "BAAI/bge-m3"));
+        assertEquals("BAAI/bge-m3", lastRegistry.embeddingIdentity().modelName());
 
         /* 换一个 registry 从同一份文件读回来：验证 record 能被 Jackson 反序列化 */
         ModelProfileRegistry reloaded = new ModelProfileRegistry(lastStore);
@@ -438,7 +413,7 @@ class ModelProfileSaveContractTest {
     @DisplayName("重复点选当前档案不补记身份：老配置的库可能是别的模型算的，别一次误点就抹平疑问")
     void reselectingSameAliasDoesNotRecordIdentity() {
         AdminModelProfileController c = build(null, null, true);
-        c.save(vecBody("vec", "BAAI/bge-m3", 1024));
+        c.save(vecBody("vec", "BAAI/bge-m3"));
         /* 直接写槽位 = 模拟老配置：有选中的档案，但没有 embeddingIdentity 这段记录 */
         assertNull(lastRegistry.setEmbeddingAlias("vec"));
         assertNull(lastRegistry.embeddingIdentity());

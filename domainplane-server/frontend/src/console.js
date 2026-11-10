@@ -214,7 +214,7 @@ import { createFeedback } from './core/feedback.js';
             + '<path d="M8 9h8M8 12.5h5"/>',
         /* 域：三层堆叠 = 域的叠加空间（域是平行的命名空间，用"叠"而不是"箱"） */
         domains: '<path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 12l10 5 10-5"/><path d="M2 17l10 5 10-5"/>',
-        /* 熔断工具调用：心跳线，实例还在不在跳，决定它的工具是否还能被调用 */
+        /* 工具调用 / 熔断：心跳线，实例还在不在跳，决定它的工具是否还能被调用 */
         instances: '<path d="M2 12h4l3-7 4 14 3-7h6"/>',
         /* 会话档案：按会话 ID 查档（轮号分页 + 单轮内容 / 步骤 / 情况，全页只读） */
         sessions: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/>',
@@ -227,7 +227,7 @@ import { createFeedback } from './core/feedback.js';
        概览（每次先看状态）
        → 底座：模型 / 存储 / MCP 连接（不配这三样，后面全白跑）
        → 领域：域空间 / 提示词 / 知识库（提示词与知识都挂在域上）
-       → 运行：熔断工具调用（看实例，是观测不是配置）
+       → 运行：工具调用 / 熔断（工具目录改内置文案，实例表只读）
        → 账号
 
        底座内部也有顺序：模型最先（没模型后面全废），存储次之，
@@ -242,7 +242,7 @@ import { createFeedback } from './core/feedback.js';
         { key: 'domains', label: '域空间', href: 'domains.html', icon: 'domains' },
         { key: 'prompts', label: '提示词设定', href: 'prompts.html', icon: 'prompts' },
         { key: 'knowledge', label: '知识库', href: 'knowledge.html', icon: 'knowledge' },
-        { key: 'instances', label: '熔断工具调用', href: 'instances.html', icon: 'instances' },
+        { key: 'instances', label: '工具调用 / 熔断', href: 'instances.html', icon: 'instances' },
         { key: 'sessions', label: '会话档案', href: 'sessions.html', icon: 'sessions' },
         { key: 'account', label: '账号', href: 'account.html', icon: 'account' }
     ];

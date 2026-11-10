@@ -1,5 +1,5 @@
 (() => {
-  // src/pages/sessions.js
+  // domainplane-server/frontend/src/pages/sessions.js
   (function() {
     var esc = Console.escapeHtml;
     var PAGE_SIZE = 20;

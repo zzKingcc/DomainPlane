@@ -2,7 +2,6 @@ package com.zzkingcc.domainplane.server.config;
 
 import com.zzkingcc.domainplane.runtime.model.ModelResolver;
 import com.zzkingcc.domainplane.server.model.DefaultModelResolver;
-import com.zzkingcc.domainplane.server.model.ModelAdapterRegistry;
 import com.zzkingcc.domainplane.server.model.ModelClientFactory;
 import com.zzkingcc.domainplane.server.model.ModelEndpointClient;
 import com.zzkingcc.domainplane.server.model.ModelMetadataReader;
@@ -11,7 +10,6 @@ import com.zzkingcc.domainplane.server.model.ModelProfileStore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.io.ResourceLoader;
 
 /**
  * 模型档案装配：档案注册表 → 客户端工厂 → 解析器。
@@ -31,15 +29,6 @@ public class ModelProfileConfiguration {
     @ConditionalOnMissingBean
     public ModelProfileRegistry modelProfileRegistry(ModelProfileStore store) {
         return new ModelProfileRegistry(store);
-    }
-
-    /**
-     * 服务商适配注册表：{@code classpath:adapters/*.json} 的加载与匹配权威。
-     */
-    @Bean
-    @ConditionalOnMissingBean
-    public ModelAdapterRegistry modelAdapterRegistry(ResourceLoader resourceLoader) {
-        return new ModelAdapterRegistry(resourceLoader);
     }
 
     /**

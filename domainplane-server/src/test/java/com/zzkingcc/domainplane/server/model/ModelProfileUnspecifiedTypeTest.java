@@ -46,7 +46,7 @@ class ModelProfileUnspecifiedTypeTest {
     private static ModelProfile unspecified(String alias, String modelName) {
         return new ModelProfile(alias, List.of(), List.of(), List.of(),
                 "https://api.deepseek.com/v1", "sk-test", modelName,
-                null, null, null, null, null, List.of(), Map.of());
+                null, null, null, null, List.of(), Map.of());
     }
 
     /** 探测补齐了类型与模态的对话档案（探测路径产出的形态） */
@@ -54,14 +54,14 @@ class ModelProfileUnspecifiedTypeTest {
         return new ModelProfile(alias, List.of(ModelProfile.EP_CHAT),
                 List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_TEXT),
                 "https://api.deepseek.com/v1", "sk-test", modelName,
-                null, null, null, null, null, List.of(), Map.of());
+                null, null, null, null, List.of(), Map.of());
     }
 
     private static ModelProfile declaredEmbedding(String alias, String modelName) {
         return new ModelProfile(alias, List.of(ModelProfile.EP_EMBEDDING),
                 List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_EMBEDDING),
                 "https://api.deepseek.com/v1", "sk-test", modelName,
-                null, null, null, null, null, List.of(), Map.of());
+                null, null, null, null, List.of(), Map.of());
     }
 
     // ==================== 判据本身 ====================
@@ -82,7 +82,7 @@ class ModelProfileUnspecifiedTypeTest {
         ModelProfile image = new ModelProfile("i", List.of(ModelProfile.EP_IMAGES),
                 List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_IMAGE),
                 "https://api.example.com/v1", "sk-test", "flux",
-                null, null, null, null, null, List.of(), Map.of());
+                null, null, null, null, List.of(), Map.of());
 
         assertFalse(image.mayBeChat(), "已确认是生图档案，不该再当对话模型用");
         assertFalse(declaredEmbedding("v", "bge-m3").mayBeChat(), "已确认是向量档案，同样不该");
@@ -94,7 +94,7 @@ class ModelProfileUnspecifiedTypeTest {
                 List.of(ModelProfile.EP_CHAT, ModelProfile.EP_EMBEDDING),
                 List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_TEXT),
                 "https://api.example.com/v1", "sk-test", "dual",
-                null, null, null, null, null, List.of(), Map.of());
+                null, null, null, null, List.of(), Map.of());
 
         assertTrue(dual.mayBeChat());
         assertTrue(dual.domainBindable(), "含 chat 且模态齐备 → 可绑域");
@@ -112,7 +112,7 @@ class ModelProfileUnspecifiedTypeTest {
         /* endpoints 显式声明 [chat]，但 input/output 留空（API 直连可达）：类型名义上已识别，
            输入输出模态仍未知，这正是用户抱怨的那半句话（「输入输出模态无法确定…最好禁止绑定」）。 */
         ModelProfile p = new ModelProfile("p", List.of(ModelProfile.EP_CHAT), List.of(), List.of(),
-                "https://x/v1", "k", "m", null, null, null, null, null, List.of(), Map.of());
+                "https://x/v1", "k", "m", null, null, null, null, List.of(), Map.of());
 
         assertTrue(p.identified(), "类型已知");
         assertFalse(p.domainBindable(), "模态未知不能绑域：只查端点族不够");
@@ -216,7 +216,7 @@ class ModelProfileUnspecifiedTypeTest {
            并集写回必须保留 image：用整体替换会把已有声明抹掉，这正是要防的回归。 */
         ModelProfile base = new ModelProfile("p", List.of(ModelProfile.EP_CHAT),
                 List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE), List.of(ModelProfile.MOD_TEXT),
-                "https://x/v1", "k", "m", null, null, null, null, null, List.of(), Map.of());
+                "https://x/v1", "k", "m", null, null, null, null, List.of(), Map.of());
 
         ModelProfile merged = base.withConfirmed(List.of(ModelProfile.EP_CHAT),
                 List.of(ModelProfile.MOD_TEXT), List.of(ModelProfile.MOD_TEXT));

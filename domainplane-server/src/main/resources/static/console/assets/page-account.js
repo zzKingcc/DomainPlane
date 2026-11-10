@@ -1,5 +1,5 @@
 (() => {
-  // src/pages/account.js
+  // domainplane-server/frontend/src/pages/account.js
   (function() {
     var esc = Console.escapeHtml;
     function pad(n) {

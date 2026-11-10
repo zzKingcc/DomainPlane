@@ -2,7 +2,6 @@ package com.zzkingcc.domainplane.server.controller;
 
 import com.zzkingcc.domainplane.common.exception.BaseException;
 import com.zzkingcc.domainplane.server.env.StorageLocations;
-import com.zzkingcc.domainplane.server.model.ModelAdapterRegistry;
 import com.zzkingcc.domainplane.server.model.ModelCapabilityProbe;
 import com.zzkingcc.domainplane.server.model.ModelProfile;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
@@ -12,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
-import org.springframework.core.io.DefaultResourceLoader;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -57,8 +55,7 @@ class ProtocolEndpointTest {
         ModelProfileRegistry registry = new ModelProfileRegistry(store);
         lastRegistry = registry;
         return new AdminModelProfileController(registry, store,
-                null, null, new ModelAdapterRegistry(new DefaultResourceLoader()),
-                new ModelCapabilityProbe(), null, null);
+                null, null, new ModelCapabilityProbe(), null, null);
     }
 
     private void seed(AdminModelProfileController c) {
@@ -250,9 +247,9 @@ class ProtocolEndpointTest {
     @DisplayName("null 与 openai 不许算出两个指纹：否则同一份配置缓存出两份等价客户端")
     void blankAndOpenAiShareOneFingerprint() {
         ModelProfile blank = new ModelProfile("a", List.of(), List.of(), List.of(),
-                "https://x/v1", "k", "m", null, null, null, null, null, null, List.of(), Map.of(), null);
+                "https://x/v1", "k", "m", null, null, null, null, null, List.of(), Map.of(), null);
         ModelProfile explicit = new ModelProfile("a", List.of(), List.of(), List.of(),
-                "https://x/v1", "k", "m", null, null, null, null, null, null, List.of(), Map.of(),
+                "https://x/v1", "k", "m", null, null, null, null, null, List.of(), Map.of(),
                 ModelProfile.PROTOCOL_OPENAI);
         assertEquals(blank.protocol(), explicit.protocol());
         assertEquals(blank.fingerprint(), explicit.fingerprint());

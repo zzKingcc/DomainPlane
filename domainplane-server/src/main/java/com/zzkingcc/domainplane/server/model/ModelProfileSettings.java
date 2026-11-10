@@ -399,12 +399,10 @@ public class ModelProfileSettings {
         private Boolean thinking;
         /** 是否把思考内容回传给平台（null = 不声明） */
         private Boolean returnThinking;
-        /** 向量维度（仅 embedding 用） */
-        private Integer dimensions;
         /** 降级链（暂只存不生效） */
         private java.util.List<String> fallbacks = new java.util.ArrayList<>();
         /**
-         * 服务商适配的私有调优参数（如 {@code enable_thinking}）。
+         * 用户自助填写的私有参数（如 {@code enable_thinking}），原样进请求体。
          *
          * 老文件没有这一字段 → 反序列化为 null → {@link ModelProfile} 归一为空 map，行为零变化。
          */
@@ -420,7 +418,7 @@ public class ModelProfileSettings {
 
         public ModelProfile toProfile(String alias) {
             return new ModelProfile(alias, endpoints, input, output, baseUrl, apiKey,
-                    modelName, temperature, maxTokens, contextWindow, thinking, returnThinking, dimensions,
+                    modelName, temperature, maxTokens, contextWindow, thinking, returnThinking,
                     fallbacks, params, protocol);
         }
 
@@ -437,7 +435,6 @@ public class ModelProfileSettings {
             data.setContextWindow(profile.contextWindow());
             data.setThinking(profile.thinking());
             data.setReturnThinking(profile.returnThinking());
-            data.setDimensions(profile.dimensions());
             data.setFallbacks(new java.util.ArrayList<>(profile.fallbacks()));
             /* 空 map 写 null：不在 models.json 里留 params:{} 噪声 */
             data.setParams(profile.params().isEmpty() ? null : new LinkedHashMap<>(profile.params()));

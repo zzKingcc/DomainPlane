@@ -2,7 +2,6 @@ package com.zzkingcc.domainplane.server.controller;
 
 import com.zzkingcc.domainplane.common.exception.BaseException;
 import com.zzkingcc.domainplane.server.env.StorageLocations;
-import com.zzkingcc.domainplane.server.model.ModelAdapterRegistry;
 import com.zzkingcc.domainplane.server.model.ModelCapabilityProbe;
 import com.zzkingcc.domainplane.server.model.ModelProfile;
 import com.zzkingcc.domainplane.server.model.ModelProfileRegistry;
@@ -12,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
-import org.springframework.core.io.DefaultResourceLoader;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -26,12 +24,12 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>钉三件事：</p>
  * <ol>
- *   <li><b>未命中适配也能存</b> —— 这是整条路线的兑现点。旧口径下控制器在保存时拒绝非空
+ *   <li><b>所有对话档案都能存</b> —— 这是整条路线的兑现点。旧口径下控制器在保存时拒绝非空
  *       params，通道（{@code effectiveParams} 原样下发）造好了却走不通；
  *       现在 30 个模型里 29 个靠这条路活着。</li>
- *   <li><b>标准键冲突即拒，且文案指向标准字段</b> —— 与其让两条路静默发两遍，
- *       不如在保存时把话说清楚。文案里必须出现"标准"字样，否则用户只会以为这个键不能用，
- *       不会知道该去哪填。</li>
+ *   <li><b>只剩 dimensions 是标准键冲突</b> —— 温度 / 单次最大输出已改为"只从 JSON 框进来"，
+ *       卡片上那两个控件删除后继续拒等于把参数变成哪条路都填不了；维度仍拒，
+ *       因为它与本地索引维度绑定，透传出去会静默失配。</li>
  *   <li><b>坏 JSON 的提示带位置</b> —— 收文本而不是收 map 的全部理由就在这里：
  *       让 Spring 绑成 map 的话，解析错误发生在参数绑定阶段，原始文本已经拿不到了，
  *       用户只能对着一坨文本自己找那个多余的逗号。</li>
@@ -59,11 +57,10 @@ class CustomParamsEndpointTest {
         ModelProfileRegistry registry = new ModelProfileRegistry(store);
         lastRegistry = registry;
         return new AdminModelProfileController(registry, store,
-                null, null, new ModelAdapterRegistry(new DefaultResourceLoader()),
-                new ModelCapabilityProbe(), null, null);
+                null, null, new ModelCapabilityProbe(), null, null);
     }
 
-    /** 建一份未命中适配的对话档案（端点族显式声明，绕过元数据读取） */
+    /** 建一份普通对话档案（端点族显式声明，绕过元数据读取） */
     private void seed(AdminModelProfileController c) {
         AdminModelProfileController.ProfileBody b = new AdminModelProfileController.ProfileBody();
         b.setAlias("p");
@@ -84,7 +81,7 @@ class CustomParamsEndpointTest {
     // ==================== 存得下 ====================
 
     @Test
-    @DisplayName("未命中适配的档案也能存自定义参数 —— 这条路以前是堵死的")
+    @DisplayName("对话档案能存自定义参数 —— 这条路以前是堵死的")
     void unmatchedProfileCanStoreParams() {
         AdminModelProfileController c = controller();
         seed(c);
@@ -163,15 +160,14 @@ class CustomParamsEndpointTest {
      * 「端点族没声明」那一档不在本测试里造：判据本身由
      * {@code ModelProfileUnspecifiedTypeTest} 钉住（未声明 → {@code mayBeChat()} 为真），
      * 而 {@code applies} 只是它的转发，不该各算一套。
-     * 保存不再自动识别后，未声明是用户主动留空的结果，不是识别失败。
      *
-     * <p>{@code schemaDriven} 与 {@code applies} 是两件事：前者问"这一族还有没有 schema 编控件"，
-     * 后者问"该不该出 JSON 框"。对话族已无 schema，若这里为真，框会被判成"另有入口"而藏起来，
-     * 结果是一张卡片上一个参数入口都没有。</p>
+     * <p>适配层整套删除后，卡片可见性只剩 {@code applies} 一个判据。旧视图里那个
+     * {@code schemaDriven} 曾用来把 JSON 框藏起来（"这一族另有绿框"），绿框没了它也就
+     * 没有存在意义 —— 留着只会让前端以为还有一个隐藏入口。</p>
      */
     @Test
-    @DisplayName("schemaDriven 只剩向量族：对话档案永远是 false，别被适配挡掉框")
-    void schemaDrivenOnlyForEmbedding() {
+    @DisplayName("适配下架后不再下发 schemaDriven，卡片只看 applies")
+    void noSchemaDrivenFlagAnyMore() {
         AdminModelProfileController c = controller();
         seedWith(c, "chat", List.of(ModelProfile.EP_CHAT));
 
@@ -179,8 +175,9 @@ class CustomParamsEndpointTest {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> profiles = (List<Map<String, Object>>) out.get("profiles");
 
-        assertEquals(Boolean.FALSE, customParams(profiles, "chat").get("schemaDriven"),
-                "对话族已无 schema；这里为真会把 JSON 框藏起来，等于没地方填");
+        assertFalse(customParams(profiles, "chat").containsKey("schemaDriven"),
+                "绿框下架后不该再有把 JSON 框藏起来的判据");
+        assertEquals(Boolean.TRUE, customParams(profiles, "chat").get("applies"));
     }
 
     @SuppressWarnings("unchecked")
@@ -206,19 +203,45 @@ class CustomParamsEndpointTest {
     // ==================== 标准键冲突 ====================
 
     @Test
-    @DisplayName("填 temperature / max_tokens / dimensions 被拒，且文案指向标准字段")
-    void stdKeyConflictRejectedWithGuidance() {
+    @DisplayName("只剩 dimensions 被拒；temperature / max_tokens 改由 JSON 框承载，必须放行")
+    void stdKeyConflictOnlyDimensions() {
         AdminModelProfileController c = controller();
         seed(c);
 
-        for (String key : List.of("temperature", "max_tokens", "dimensions")) {
-            String json = "{\"" + key + "\": 1}";
-            BaseException e = assertThrows(BaseException.class, () -> save(c, json),
-                    "标准键「" + key + "」必须被拒");
-            assertTrue(e.getMessage().contains(key), "文案要点出是哪个键：" + e.getMessage());
-            assertTrue(e.getMessage().contains("标准"),
-                    "文案必须指向标准字段，否则用户不知道该去哪填：" + e.getMessage());
-        }
+        BaseException e = assertThrows(BaseException.class, () -> save(c, "{\"dimensions\": 1024}"),
+                "向量维度不通过私有参数下发：与本地索引会静默失配");
+        assertTrue(e.getMessage().contains("dimensions"), "文案要点出是哪个键：" + e.getMessage());
+        assertTrue(e.getMessage().contains("标准"), "文案必须指向标准参数语义：" + e.getMessage());
+
+        assertDoesNotThrow(() -> save(c, "{\"temperature\": 0.5, \"max_tokens\": 512}"),
+                "卡片上的温度 / 最大输出控件删了，JSON 是它们唯一的入口");
+        ModelProfile saved = lastRegistry.profile("p").orElseThrow();
+        assertEquals(0.5, saved.params().get("temperature"));
+        assertEquals(512, saved.params().get("max_tokens"));
+    }
+
+    @Test
+    @DisplayName("JSON 里写 temperature 时清掉档案上的老字段：同一个值只走一条路")
+    void temperatureInJsonClearsLegacyField() {
+        AdminModelProfileController c = controller();
+        AdminModelProfileController.ProfileBody b = new AdminModelProfileController.ProfileBody();
+        b.setAlias("p");
+        b.setApiKey("sk-test");
+        b.setBaseUrl("https://api.example.com/v1");
+        b.setModelName("some-unregistered-model");
+        b.setEndpoints(List.of(ModelProfile.EP_CHAT));
+        b.setTemperature(1.2);
+        b.setMaxTokens(2048);
+        c.save(b);
+
+        save(c, "{\"temperature\": 0.3}");
+
+        ModelProfile after = lastRegistry.profile("p").orElseThrow();
+        assertNull(after.temperature(),
+                "老字段必须清掉，否则 builder setter 与自定义参数会各发一遍 temperature");
+        assertEquals(0.3, after.params().get("temperature"));
+        assertEquals(2048, after.maxTokens(),
+                "JSON 里没写 max_tokens，档案上的那份保持原样");
     }
 
     /**

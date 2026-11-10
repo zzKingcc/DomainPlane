@@ -85,7 +85,7 @@ class ModelCapabilityToolBinderTest {
     private static ModelProfile profile(String alias, List<String> endpoints, List<String> input) {
         return new ModelProfile(alias, endpoints, input, List.of("text"),
                 "https://api.example.com", "sk-test", "m-" + alias,
-                null, null, null, null, null, null, List.of(), null, null);
+                null, null, null, null, null, List.of(), null, null);
     }
 
     /** 模拟管控台那一步：建档 + 绑域（落盘会触发 onChange → 重算可用域） */

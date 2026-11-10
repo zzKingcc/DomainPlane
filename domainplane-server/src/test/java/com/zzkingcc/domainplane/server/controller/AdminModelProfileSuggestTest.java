@@ -6,7 +6,6 @@ import com.zzkingcc.domainplane.api.code.ErrorCode;
 import com.zzkingcc.domainplane.common.exception.BaseException;
 import com.zzkingcc.domainplane.server.config.AiProperties;
 import com.zzkingcc.domainplane.server.env.StorageLocations;
-import com.zzkingcc.domainplane.server.model.ModelAdapterRegistry;
 import com.zzkingcc.domainplane.server.model.ModelCapabilityProbe;
 import com.zzkingcc.domainplane.server.model.ModelMetadataReader;
 import com.zzkingcc.domainplane.server.model.ModelProfile;
@@ -21,7 +20,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
-import org.springframework.core.io.DefaultResourceLoader;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -79,6 +77,8 @@ class AdminModelProfileSuggestTest {
     private String listBody = PLAIN_LIST;
     private int listStatus = 200;
     private Map<String, String> subTypeLists = Map.of();
+    /** 服务端实际发出的清单请求 URI：用来证明"一次 sub_type 都不问" */
+    private final List<String> modelRequestUris = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     @BeforeEach
     void start() throws IOException {
@@ -97,6 +97,7 @@ class AdminModelProfileSuggestTest {
 
     private void handleModels(HttpExchange ex) throws IOException {
         drain(ex);
+        modelRequestUris.add(ex.getRequestURI().toString());
         String query = ex.getRequestURI().getQuery();
         String subType = query != null && query.startsWith("sub_type=")
                 ? query.substring("sub_type=".length()) : null;
@@ -156,7 +157,6 @@ class AdminModelProfileSuggestTest {
         LlmModelHolder holder = new LlmModelHolder(new AiProperties(), new StubStore());
         out[0] = new AdminModelProfileController(registry, store, holder,
                 new ModelMetadataReader(),
-                new ModelAdapterRegistry(new DefaultResourceLoader()),
                 new ModelCapabilityProbe(), null, null);
         return registry;
     }
@@ -191,22 +191,21 @@ class AdminModelProfileSuggestTest {
     }
 
     @Test
-    void 过滤式清单靠子类型反推端点族并填基线模态() {
+    void 服务商支持子类型过滤也不采信_只认清单里的能力字段() {
         listBody = SUB_TYPE_FULL_LIST;
         subTypeLists = SUB_TYPE_LISTS;
         AdminModelProfileController[] holder = new AdminModelProfileController[1];
         registry(holder);
 
-        Map<String, Object> embedding = holder[0].suggest(body("e", "m-embed"));
-        assertEquals(List.of(ModelProfile.EP_EMBEDDING), embedding.get("endpoints"),
-                "只出现在 embedding 子类型清单里 → 建议向量端点");
-        assertEquals(List.of(ModelProfile.MOD_TEXT), embedding.get("input"));
-        assertEquals(List.of(ModelProfile.MOD_EMBEDDING), embedding.get("output"));
+        Map<String, Object> out = holder[0].suggest(body("e", "m-embed"));
 
-        Map<String, Object> rerank = holder[0].suggest(body("r", "m-rerank"));
-        assertEquals(List.of(ModelProfile.EP_RERANK), rerank.get("endpoints"));
-        assertEquals(List.of(ModelProfile.MOD_SCORE), rerank.get("output"),
-                "重排产出相关性分数 —— 这一格空着会让用途看着像没识别出来");
+        assertEquals(List.of(), out.get("endpoints"),
+                "sub_type 是服务商私有语义，不再用来反推端点族 —— 它只有一家认，"
+                        + "而且「忽略参数回全量清单」会被误读成命中所有子类型");
+        assertEquals(List.of(), out.get("input"));
+        assertEquals(List.of(), out.get("output"));
+        assertFalse(modelRequestUris.stream().anyMatch(uri -> uri.contains("sub_type=")),
+                "一次 sub_type 请求都不该发，实际请求：" + modelRequestUris);
     }
 
     @Test
@@ -225,20 +224,6 @@ class AdminModelProfileSuggestTest {
     }
 
     @Test
-    void 过滤生效但模型不属于任何已知子类型时如实说清而不是当成标准规范() {
-        listBody = SUB_TYPE_FULL_LIST;
-        subTypeLists = SUB_TYPE_LISTS;
-        AdminModelProfileController[] holder = new AdminModelProfileController[1];
-        registry(holder);
-
-        String note = String.valueOf(holder[0].suggest(body("p", "m-new")).get("note"));
-
-        assertTrue(note.contains("已知子类型"),
-                "要说清是「服务商加了新区分类」，而不是误报成「清单是标准 OpenAI 规范」，实际：" + note);
-        assertFalse(note.contains("标准 OpenAI 规范"), "两件事不能混成一句");
-    }
-
-    @Test
     void 清单里没有该模型时返回原因() {
         listBody = PLAIN_LIST;
         AdminModelProfileController[] holder = new AdminModelProfileController[1];
@@ -251,19 +236,16 @@ class AdminModelProfileSuggestTest {
     }
 
     @Test
-    void 适配文件登记过的模型直接取声明不发任何上游请求() {
-        /* 让清单接口直接 500：适配文件命中就不该去读元数据 */
+    void 清单挂了识别必须如实报错_不再有本地捷径() {
         listStatus = 500;
         AdminModelProfileController[] holder = new AdminModelProfileController[1];
         registry(holder);
 
-        Map<String, Object> out = holder[0].suggest(body("p", "deepseek-flash"));
-
-        assertEquals("adapter", out.get("source"));
-        assertEquals(List.of(ModelProfile.EP_CHAT), out.get("endpoints"),
-                "适配文件登记了 chat 族 ⇒ 端点族就是 chat，不必问服务商");
-        assertEquals(List.of(ModelProfile.MOD_TEXT, ModelProfile.MOD_IMAGE), out.get("input"));
-        assertEquals(List.of(ModelProfile.MOD_TEXT), out.get("output"));
+        BaseException e = assertThrows(BaseException.class,
+                () -> holder[0].suggest(body("p", "deepseek-flash")));
+        assertEquals(ErrorCode.INVALID_PARAMETER, e.getErrorCode());
+        assertTrue(e.getMessage().contains("无法读取"),
+                "适配声明下架后识别只剩服务商清单一条路，清单挂了必须报错，实际：" + e.getMessage());
     }
 
     @Test
